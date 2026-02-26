@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Arcana PDF Viewer</title>
+  <link rel="stylesheet" href="viewer.css">
+</head>
+<body>
+  <!-- Toolbar -->
+  <div id="toolbar">
+    <div class="toolbar-left">
+      <span id="paper-title" class="toolbar-title">Loading…</span>
+    </div>
+    <div class="toolbar-center">
+      <button id="prev-page" class="tb-btn" title="Previous page">‹</button>
+      <span class="page-info">
+        <input id="page-input" type="number" min="1" value="1">
+        <span>/ <span id="page-count">-</span></span>
+      </span>
+      <button id="next-page" class="tb-btn" title="Next page">›</button>
+      <span class="toolbar-sep"></span>
+      <button id="zoom-out" class="tb-btn" title="Zoom out">−</button>
+      <span id="zoom-level">100%</span>
+      <button id="zoom-in" class="tb-btn" title="Zoom in">+</button>
+    </div>
+    <div class="toolbar-right">
+      <div class="mode-toggle">
+        <button id="mode-text" class="mode-btn active" title="Text selection mode">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7V4h16v3"/><path d="M9 20h6"/><path d="M12 4v16"/></svg>
+        </button>
+        <button id="mode-area" class="mode-btn" title="Area screenshot mode">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" stroke-dasharray="4 2"/><circle cx="18" cy="18" r="3" fill="currentColor" stroke="none"/></svg>
+        </button>
+      </div>
+      <span class="toolbar-sep"></span>
+      <a id="open-original" class="tb-btn" title="Open original PDF" target="_blank" rel="noopener">Original</a>
+      <button id="toggle-sidebar" class="tb-btn" title="Toggle annotations sidebar">☰</button>
+    </div>
+  </div>
+
+  <!-- Main layout -->
+  <div id="main">
+    <!-- PDF viewer area -->
+    <div id="viewer-container"></div>
+
+    <!-- Annotations sidebar -->
+    <div id="sidebar" class="hidden">
+      <div class="sidebar-header">
+        <h3>Annotations</h3>
+        <span id="annotation-count">0</span>
+      </div>
+      <div id="annotation-list"></div>
+    </div>
+  </div>
+
+  <!-- Floating selection toolbar (hidden by default) -->
+  <div id="selection-toolbar" class="hidden">
+    <button id="btn-highlight" title="Highlight selection">Highlight</button>
+    <button id="btn-highlight-note" title="Highlight with note">+ Note</button>
+    <div class="color-dots">
+      <span class="color-dot active" data-color="yellow"></span>
+      <span class="color-dot" data-color="green"></span>
+      <span class="color-dot" data-color="blue"></span>
+      <span class="color-dot" data-color="pink"></span>
+    </div>
+    <span class="toolbar-sep-v"></span>
+    <button id="btn-explain" class="llm-btn" title="Explain selection">Explain</button>
+    <button id="btn-chat" class="llm-btn" title="Chat about selection">Chat</button>
+  </div>
+
+  <!-- Note input popover (hidden by default) -->
+  <div id="note-popover" class="hidden">
+    <textarea id="note-input" placeholder="Add a note…" rows="3"></textarea>
+    <div class="note-actions">
+      <button id="note-cancel" class="note-btn">Cancel</button>
+      <button id="note-save" class="note-btn note-btn-primary">Save</button>
+    </div>
+  </div>
+
+  <!-- Screenshot popover (shown after area selection) -->
+  <div id="screenshot-popover" class="hidden">
+    <img id="screenshot-preview" alt="Screenshot preview">
+    <textarea id="screenshot-note" placeholder="Add a note (optional)…" rows="2"></textarea>
+    <div class="note-actions">
+      <button id="screenshot-cancel" class="note-btn">Cancel</button>
+      <button id="screenshot-explain" class="note-btn llm-btn">Explain</button>
+      <button id="screenshot-chat" class="note-btn llm-btn">Chat</button>
+      <button id="screenshot-save" class="note-btn note-btn-primary">Save Screenshot</button>
+    </div>
+  </div>
+
+  <!-- Annotation popover (shown when clicking a highlight) -->
+  <div id="annotation-popover" class="hidden">
+    <div id="popover-text" class="popover-text"></div>
+    <div id="popover-note" class="popover-note"></div>
+    <div class="popover-actions">
+      <div class="color-dots">
+        <span class="color-dot" data-color="yellow"></span>
+        <span class="color-dot" data-color="green"></span>
+        <span class="color-dot" data-color="blue"></span>
+        <span class="color-dot" data-color="pink"></span>
+      </div>
+      <button id="popover-explain" class="popover-btn llm-btn">Explain</button>
+      <button id="popover-chat" class="popover-btn llm-btn">Chat</button>
+      <button id="popover-edit" class="popover-btn">Edit</button>
+      <button id="popover-delete" class="popover-btn popover-btn-danger">Delete</button>
+    </div>
+  </div>
+
+  <!-- LLM Panel (fixed, right side) -->
+  <div id="llm-panel" class="hidden">
+    <div class="llm-panel-header">
+      <span id="llm-panel-title">Explanation</span>
+      <button id="llm-panel-close" title="Close">&times;</button>
+    </div>
+    <div id="llm-context" class="llm-context"></div>
+    <div id="llm-response" class="llm-response"></div>
+    <div id="llm-input-area" class="llm-input-area hidden">
+      <textarea id="llm-input" placeholder="Ask about this…" rows="2"></textarea>
+      <button id="llm-send" class="note-btn note-btn-primary" title="Send">Send</button>
+    </div>
+    <div id="llm-actions" class="llm-actions hidden">
+      <a id="llm-open-arcana" class="llm-link" target="_blank" rel="noopener">Continue in Arcana ↗</a>
+      <button id="llm-save-notebook" class="note-btn">Save to Notebook</button>
+    </div>
+  </div>
+
+  <!-- Toast notification -->
+  <div id="toast" class="hidden"></div>
+
+  <script type="module" src="viewer.js"></script>
+</body>
+</html>

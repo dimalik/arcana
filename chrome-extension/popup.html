@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="header">
+    <h1>Arcana</h1>
+    <div class="status" id="status">
+      <span class="dot" id="status-dot"></span>
+      <span id="status-text">Checking…</span>
+    </div>
+  </div>
+
+  <div id="import-section" class="section">
+    <!-- Dynamically populated based on current tab -->
+  </div>
+
+  <div id="result" class="result hidden"></div>
+
+  <details class="section">
+    <summary>Recent Imports</summary>
+    <div id="history" class="history">
+      <p class="muted">No imports yet</p>
+    </div>
+  </details>
+
+  <details class="section">
+    <summary>Settings</summary>
+    <div class="settings">
+      <label for="base-url">Arcana URL</label>
+      <div class="input-row">
+        <input type="text" id="base-url" placeholder="http://localhost:3000">
+        <button id="save-url" class="btn btn-sm">Save</button>
+      </div>
+      <label class="toggle-row" style="margin-top:10px">
+        <input type="checkbox" id="pdf-auto-open" checked>
+        <span>Auto-open Arcana PDFs in viewer</span>
+      </label>
+    </div>
+  </details>
+
+  <script src="popup.js"></script>
+</body>
+</html>
