@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/prisma";
-import { generateLLMResponse, truncateText } from "./provider";
-import { buildPrompt, cleanJsonResponse } from "./prompts";
+import { generateLLMResponse, truncateText, MAX_PAPER_CHARS } from "./provider";
+import { buildPrompt, buildDistillPrompt, cleanJsonResponse } from "./prompts";
 import type { LLMProvider } from "./models";
 import type { ProxyConfig } from "./proxy-settings";
 import { getProxyConfig } from "./proxy-settings";
@@ -9,74 +9,9 @@ import { findBestMatch } from "@/lib/references/match";
 import { matchCitationToReference } from "@/lib/references/match-citation";
 import { resolveAndAssignTags, getExistingTagNames } from "@/lib/tags/auto-tag";
 
-const STEP_TIMEOUT_MS = 3 * 60 * 1000; // 3 minutes per step
-const MAX_RETRIES = 3;
-const RETRY_BASE_DELAY_MS = 5_000; // 5s, 10s, 20s
 
-/**
- * Check if an error is retryable (upstream 5xx, rate limit, network).
- */
-function isRetryable(err: unknown): boolean {
-  if (!err || typeof err !== "object") return false;
-  const e = err as Record<string, unknown>;
-  // AI SDK sets isRetryable on API call errors
-  if (e.isRetryable === true) return true;
-  // Retry on 5xx or 429
-  const status = (e.statusCode ?? e.status) as number | undefined;
-  if (status && (status >= 500 || status === 429)) return true;
-  // Network errors
-  const code = (e.code ?? "") as string;
-  if (["ECONNRESET", "ETIMEDOUT", "ECONNREFUSED", "UND_ERR_CONNECT_TIMEOUT"].includes(code)) return true;
-  return false;
-}
 
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-/**
- * Wrap a promise with a timeout. Rejects with a TimeoutError if exceeded.
- */
-function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(`Timeout: ${label} exceeded ${ms}ms`)), ms);
-    promise.then(
-      (val) => { clearTimeout(timer); resolve(val); },
-      (err) => { clearTimeout(timer); reject(err); },
-    );
-  });
-}
-
-/**
- * Retry a function with exponential backoff on retryable errors.
- * Respects an optional AbortSignal — won't retry if cancelled.
- */
-async function withRetry<T>(
-  fn: () => Promise<T>,
-  label: string,
-  signal?: AbortSignal,
-): Promise<T> {
-  let lastError: unknown;
-  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-    try {
-      return await fn();
-    } catch (err) {
-      lastError = err;
-      if (signal?.aborted) throw err;
-      if (attempt < MAX_RETRIES && isRetryable(err)) {
-        const backoff = RETRY_BASE_DELAY_MS * Math.pow(2, attempt);
-        console.warn(`[auto-process] ${label} failed (attempt ${attempt + 1}/${MAX_RETRIES + 1}), retrying in ${backoff}ms:`, (err as Error).message || err);
-        await delay(backoff);
-        if (signal?.aborted) throw err;
-        continue;
-      }
-      throw err;
-    }
-  }
-  throw lastError;
-}
-
-type ProcessingStep = "extracting_text" | "metadata" | "summarize" | "categorize" | "linking" | "references" | "contexts";
+type ProcessingStep = "extracting_text" | "metadata" | "summarize" | "categorize" | "linking" | "contradictions" | "references" | "contexts" | "distill";
 
 /**
  * Update the current processing step and timestamp in the DB.
@@ -116,7 +51,8 @@ export async function getDefaultModel(): Promise<{ provider: LLMProvider; modelI
   // Fall back to env-based detection
   if (process.env.LLM_PROXY_URL && process.env.LLM_PROXY_HEADER_VALUE) {
     const proxyConfig = await getProxyConfig();
-    return { provider: "proxy", modelId: proxyConfig.modelId || "openai_direct_gpt52_flex", proxyConfig };
+    const firstModel = proxyConfig.modelId.split(",").map(s => s.trim()).filter(Boolean)[0] || "gpt-4o";
+    return { provider: "proxy", modelId: firstModel, proxyConfig };
   }
   if (process.env.OPENAI_API_KEY) {
     return { provider: "openai", modelId: "gpt-4o-mini" };
@@ -180,6 +116,101 @@ export async function runTextExtraction(paperId: string): Promise<void> {
 }
 
 /**
+ * Summarize a paper using chunked map-reduce when the text exceeds
+ * MAX_PAPER_CHARS. This sends the ENTIRE paper to the model in
+ * overlapping segments, then synthesizes the results.
+ *
+ * Map: extract detailed notes from each chunk (methods, results, equations, tables).
+ * Reduce: synthesize all notes into the final structured review.
+ */
+async function chunkedSummarize(params: {
+  fullText: string;
+  provider: LLMProvider;
+  modelId: string;
+  proxyConfig?: ProxyConfig;
+  signal?: AbortSignal;
+}): Promise<string> {
+  const { fullText, provider, modelId, proxyConfig, signal } = params;
+  const chunkSize = MAX_PAPER_CHARS;
+  const overlap = 2000;
+
+  // Small enough for a single call — use the normal path
+  if (fullText.length <= chunkSize) {
+    const { system, prompt } = buildPrompt("summarize", fullText);
+    return generateLLMResponse({ provider, modelId, system, prompt, proxyConfig });
+  }
+
+  // Split into overlapping chunks
+  const chunks: string[] = [];
+  for (let start = 0; start < fullText.length; start += chunkSize - overlap) {
+    chunks.push(fullText.slice(start, Math.min(start + chunkSize, fullText.length)));
+    if (start + chunkSize >= fullText.length) break;
+  }
+
+  console.log(`[auto-process] Chunked summarize: ${fullText.length} chars → ${chunks.length} chunks of ~${chunkSize} chars`);
+
+  // Map phase: extract structured notes from each chunk
+  const MAP_SYSTEM = `You are a research paper analyst. Extract ALL important information from this section of a research paper. Include:
+- Key claims, findings, and contributions
+- Methodology details (models, algorithms, datasets, hyperparameters)
+- Mathematical formulations (reproduce key equations in LaTeX with $..$ or $$..$$)
+- Experimental results with specific numbers (accuracy, F1, speedup, p-values, etc.)
+- Tables of results (reproduce in markdown)
+- Ablation study findings
+- Limitations and future work mentioned
+
+Be thorough and specific — include every number, model name, and dataset name you find. Do not summarize or editorialize, just extract the information.`;
+
+  const chunkNotes: string[] = [];
+  for (let i = 0; i < chunks.length; i++) {
+    if (signal?.aborted) throw new Error("Cancelled");
+
+    console.log(`[auto-process] Processing chunk ${i + 1}/${chunks.length} (${chunks[i].length} chars)`);
+    const notes = await generateLLMResponse({
+      provider, modelId,
+      system: MAP_SYSTEM,
+      prompt: `This is section ${i + 1} of ${chunks.length} from the paper:\n\n${chunks[i]}`,
+      maxTokens: 1500,
+      proxyConfig,
+    });
+    chunkNotes.push(`## Section ${i + 1} of ${chunks.length}\n\n${notes}`);
+  }
+
+  // Reduce phase: if combined notes are too large, condense in batches first
+  let combined = chunkNotes.join("\n\n---\n\n");
+
+  if (combined.length > chunkSize) {
+    console.log(`[auto-process] Notes too large (${combined.length} chars), condensing in batches first`);
+    const condensed: string[] = [];
+    for (let i = 0; i < chunkNotes.length; i += 3) {
+      if (signal?.aborted) throw new Error("Cancelled");
+      const batch = chunkNotes.slice(i, i + 3).join("\n\n---\n\n");
+      const summary = await generateLLMResponse({
+        provider, modelId,
+        system: "You are a research paper analyst. Condense these extracted notes into a shorter but complete summary. Keep ALL specific numbers, equations, model names, dataset names, and key findings. Remove redundancy but preserve detail.",
+        prompt: batch,
+        maxTokens: 1500,
+        proxyConfig,
+      });
+      condensed.push(summary);
+    }
+    combined = condensed.join("\n\n---\n\n");
+    console.log(`[auto-process] Condensed to ${combined.length} chars`);
+  }
+
+  // Final synthesis
+  console.log(`[auto-process] Synthesizing final summary from ${combined.length} chars of notes`);
+  const { system } = buildPrompt("summarize", "");
+
+  return generateLLMResponse({
+    provider, modelId,
+    system,
+    prompt: `Below are detailed notes extracted from all sections of a research paper. Using these notes, produce your full structured review.\n\n${combined}`,
+    proxyConfig,
+  });
+}
+
+/**
  * Run the full auto-processing pipeline for a paper:
  * 1. Extract metadata (skip for ArXiv papers that already have metadata)
  * 2. Summarize
@@ -189,7 +220,7 @@ export async function runTextExtraction(paperId: string): Promise<void> {
  * 6. Extract citation contexts
  *
  * Each step updates processingStep + processingStartedAt for progress tracking.
- * Each LLM call has a 3-minute timeout — on timeout, logs error and continues.
+ * Each LLM call has a timeout — on timeout, logs error and continues.
  */
 export async function runAutoProcessPipeline(opts: {
   paperId: string;
@@ -234,6 +265,7 @@ export async function runAutoProcessPipeline(opts: {
   }
 
   const truncated = truncateText(text, modelId, proxyConfig);
+  console.log(`[auto-process] Paper ${paperId}: text=${text.length}chars → truncated=${truncated.length}chars, model=${modelId}`);
 
   // Step 1: Extract metadata
   if (!skipExtract) {
@@ -242,10 +274,7 @@ export async function runAutoProcessPipeline(opts: {
       await setStep(paperId, "metadata");
       console.log("[auto-process] Extracting metadata for", paperId);
       const { system, prompt } = buildPrompt("extract", truncated);
-      const result = await withRetry(
-        () => withTimeout(generateLLMResponse({ provider, modelId, system, prompt, maxTokens: 2000, proxyConfig }), STEP_TIMEOUT_MS, "metadata extraction"),
-        "metadata extraction", signal,
-      );
+      const result = await generateLLMResponse({ provider, modelId, system, prompt, maxTokens: 2000, proxyConfig });
 
       await prisma.promptResult.create({
         data: {
@@ -281,20 +310,22 @@ export async function runAutoProcessPipeline(opts: {
         // JSON parse failed — raw result still saved
       }
     } catch (e) {
-      console.error("[auto-process] Extract failed:", e);
+      console.error("[auto-process] Extract failed for", paperId, ":", e instanceof Error ? e.message : e);
     }
   }
 
-  // Step 2: Summarize
+  // Step 2: Summarize (uses chunked map-reduce for long papers)
   try {
     checkCancelled();
     await setStep(paperId, "summarize");
     console.log("[auto-process] Summarizing", paperId);
-    const { system, prompt } = buildPrompt("summarize", truncated);
-    const result = await withRetry(
-      () => withTimeout(generateLLMResponse({ provider, modelId, system, prompt, maxTokens: 2000, proxyConfig }), STEP_TIMEOUT_MS, "summarize"),
-      "summarize", signal,
-    );
+    const result = await chunkedSummarize({
+      fullText: text,
+      provider,
+      modelId,
+      proxyConfig,
+      signal,
+    });
 
     await prisma.promptResult.create({
       data: {
@@ -312,7 +343,7 @@ export async function runAutoProcessPipeline(opts: {
       data: { summary: result },
     });
   } catch (e) {
-    console.error("[auto-process] Summarize failed:", e);
+    console.error("[auto-process] Summarize failed for", paperId, ":", e instanceof Error ? e.message : e);
   }
 
   // Step 3: Categorize + auto-tag (with duplicate prevention)
@@ -322,10 +353,7 @@ export async function runAutoProcessPipeline(opts: {
     console.log("[auto-process] Categorizing", paperId);
     const existingTags = await getExistingTagNames();
     const { system, prompt } = buildPrompt("categorize", truncated, undefined, { existingTags });
-    const result = await withRetry(
-      () => withTimeout(generateLLMResponse({ provider, modelId, system, prompt, maxTokens: 1000, proxyConfig }), STEP_TIMEOUT_MS, "categorize"),
-      "categorize", signal,
-    );
+    const result = await generateLLMResponse({ provider, modelId, system, prompt, maxTokens: 1000, proxyConfig });
 
     await prisma.promptResult.create({
       data: {
@@ -348,7 +376,7 @@ export async function runAutoProcessPipeline(opts: {
       // JSON parse failed
     }
   } catch (e) {
-    console.error("[auto-process] Categorize failed:", e);
+    console.error("[auto-process] Categorize failed for", paperId, ":", e instanceof Error ? e.message : e);
   }
 
   // Step 4: Link related papers
@@ -406,10 +434,7 @@ export async function runAutoProcessPipeline(opts: {
       const linkPrompt = `NEW PAPER:\n${newPaperInfo}\n\n---\n\nEXISTING PAPERS IN LIBRARY:\n${existingList}`;
 
       const { system } = buildPrompt("linkPapers", "");
-      const result = await withRetry(
-        () => withTimeout(generateLLMResponse({ provider, modelId, system, prompt: linkPrompt, maxTokens: 2000, proxyConfig }), STEP_TIMEOUT_MS, "link papers"),
-        "link papers", signal,
-      );
+      const result = await generateLLMResponse({ provider, modelId, system, prompt: linkPrompt, maxTokens: 2000, proxyConfig });
 
       try {
         const cleaned = cleanJsonResponse(result);
@@ -454,7 +479,69 @@ export async function runAutoProcessPipeline(opts: {
     console.error("[auto-process] Link related papers failed:", e);
   }
 
-  // Step 5: Extract references
+  // Step 5: Detect contradictions with related papers
+  try {
+    const relations = await prisma.paperRelation.findMany({
+      where: { sourcePaperId: paperId, relationType: { not: "cites" } },
+      orderBy: { confidence: "desc" },
+      take: 10,
+      select: { targetPaperId: true },
+    });
+
+    if (relations.length > 0) {
+      checkCancelled();
+      await setStep(paperId, "contradictions");
+      console.log("[auto-process] Detecting contradictions for", paperId);
+
+      const relatedPaperIds = relations.map((r) => r.targetPaperId);
+      const relatedPapers = await prisma.paper.findMany({
+        where: { id: { in: relatedPaperIds } },
+        select: { id: true, title: true, abstract: true, summary: true, keyFindings: true },
+      });
+
+      // Re-fetch paper for latest summary/keyFindings
+      const updatedPaper = await prisma.paper.findUnique({
+        where: { id: paperId },
+        select: { title: true, abstract: true, summary: true, keyFindings: true },
+      });
+
+      const newPaperInfo = [
+        `Title: ${updatedPaper?.title || paper.title}`,
+        updatedPaper?.abstract ? `Abstract: ${updatedPaper.abstract}` : "",
+        updatedPaper?.summary ? `Summary: ${updatedPaper.summary.slice(0, 1000)}` : "",
+        updatedPaper?.keyFindings ? `Key Findings: ${updatedPaper.keyFindings}` : "",
+      ].filter(Boolean).join("\n");
+
+      const relatedList = relatedPapers.map((p) => {
+        const parts = [`id: ${p.id}`, `title: ${p.title}`];
+        if (p.abstract) parts.push(`abstract: ${p.abstract.slice(0, 300)}`);
+        if (p.summary) parts.push(`summary: ${p.summary.slice(0, 300)}`);
+        if (p.keyFindings) parts.push(`keyFindings: ${p.keyFindings}`);
+        return parts.join(" | ");
+      }).join("\n");
+
+      const contradictionPrompt = `NEW PAPER:\n${newPaperInfo}\n\n---\n\nRELATED PAPERS:\n${relatedList}`;
+      const { system } = buildPrompt("detectContradictions", "");
+      const result = await generateLLMResponse({ provider, modelId, system, prompt: contradictionPrompt, maxTokens: 3000, proxyConfig });
+
+      await prisma.promptResult.create({
+        data: {
+          paperId,
+          promptType: "detectContradictions",
+          prompt: "Auto-detect contradictions",
+          result,
+          provider,
+          model: modelId,
+        },
+      });
+
+      console.log("[auto-process] Contradiction detection completed for", paperId);
+    }
+  } catch (e) {
+    console.error("[auto-process] Contradiction detection failed:", e);
+  }
+
+  // Step 6: Extract references
   if (paper.fullText) {
     try {
       checkCancelled();
@@ -463,10 +550,7 @@ export async function runAutoProcessPipeline(opts: {
       const refText = getTextForReferenceExtraction(paper.fullText);
       const { system } = buildPrompt("extractReferences", "");
       const refPrompt = `Here is the reference/bibliography section of the paper:\n\n${refText}`;
-      const refResult = await withRetry(
-        () => withTimeout(generateLLMResponse({ provider, modelId, system, prompt: refPrompt, maxTokens: 8000, proxyConfig }), STEP_TIMEOUT_MS, "extract references"),
-        "extract references", signal,
-      );
+      const refResult = await generateLLMResponse({ provider, modelId, system, prompt: refPrompt, maxTokens: 8000, proxyConfig });
 
       await prisma.promptResult.create({
         data: {
@@ -572,10 +656,7 @@ export async function runAutoProcessPipeline(opts: {
           console.log("[auto-process] Extracting citation contexts for", paperId);
           const { system } = buildPrompt("extractCitationContexts", "");
           const ctxPrompt = `Here is the body text of the paper:\n\n${bodyText}`;
-          const ctxResult = await withRetry(
-            () => withTimeout(generateLLMResponse({ provider, modelId, system, prompt: ctxPrompt, maxTokens: 4000, proxyConfig }), STEP_TIMEOUT_MS, "extract citation contexts"),
-            "extract citation contexts", signal,
-          );
+          const ctxResult = await generateLLMResponse({ provider, modelId, system, prompt: ctxPrompt, maxTokens: 4000, proxyConfig });
 
           try {
             const cleaned = cleanJsonResponse(ctxResult);
@@ -624,6 +705,84 @@ export async function runAutoProcessPipeline(opts: {
     } catch (e) {
       console.error("[auto-process] Extract citation contexts failed:", e);
     }
+  }
+
+  // Step: Distill insights for Mind Palace
+  try {
+    checkCancelled();
+    await setStep(paperId, "distill");
+    console.log("[auto-process] Distilling insights for", paperId);
+
+    const existingRooms = await prisma.mindPalaceRoom.findMany({
+      select: { name: true },
+    });
+    const roomNames = existingRooms.map((r) => r.name);
+
+    const { system: distillSystem, prompt: distillPrompt } = buildDistillPrompt(truncated, roomNames);
+    const distillResult = await generateLLMResponse({
+      provider, modelId,
+      system: distillSystem,
+      prompt: distillPrompt,
+      maxTokens: 4000,
+      proxyConfig,
+    });
+
+    await prisma.promptResult.create({
+      data: {
+        paperId,
+        promptType: "distill",
+        prompt: "Auto-distill insights",
+        result: distillResult,
+        provider,
+        model: modelId,
+      },
+    });
+
+    try {
+      const cleaned = cleanJsonResponse(distillResult);
+      const parsed = JSON.parse(cleaned) as {
+        insights: Array<{
+          learning: string;
+          significance: string;
+          applications?: string;
+          roomSuggestion: string;
+        }>;
+      };
+
+      if (Array.isArray(parsed.insights)) {
+        let created = 0;
+        for (const insight of parsed.insights.slice(0, 10)) {
+          if (!insight.learning || !insight.significance) continue;
+
+          const roomName = insight.roomSuggestion || "General";
+          let room = await prisma.mindPalaceRoom.findUnique({
+            where: { name: roomName },
+          });
+          if (!room) {
+            room = await prisma.mindPalaceRoom.create({
+              data: { name: roomName, isAutoGenerated: true },
+            });
+          }
+
+          await prisma.insight.create({
+            data: {
+              roomId: room.id,
+              paperId,
+              learning: insight.learning,
+              significance: insight.significance,
+              applications: insight.applications || null,
+              isAutoGenerated: true,
+            },
+          });
+          created++;
+        }
+        console.log(`[auto-process] Created ${created} insights for`, paperId);
+      }
+    } catch {
+      // JSON parse failed — raw result still saved
+    }
+  } catch (e) {
+    console.error("[auto-process] Distill insights failed:", e);
   }
 
   // Mark completed — clear step tracking

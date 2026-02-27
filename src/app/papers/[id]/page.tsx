@@ -26,7 +26,6 @@ import {
   FileText,
   Network,
   Link2,
-  BookOpen,
   FlaskConical,
   BarChart3,
   ClipboardCheck,
@@ -34,7 +33,9 @@ import {
   Loader2,
   Pencil,
   X,
-  Bookmark,
+  Heart,
+  Flame,
+  Brain,
   ArrowLeft,
   Info,
   Lightbulb,
@@ -44,15 +45,20 @@ import {
   ExternalLink,
   Tags as TagsIcon,
   XCircle,
+  Clock,
+  Sparkles,
+  Upload,
 } from "lucide-react";
 import { toast } from "sonner";
 import { TagPicker } from "@/components/tags/tag-picker";
 import { MarkdownRenderer } from "@/components/ui/markdown-renderer";
 import { ConceptMindmap } from "@/components/concepts/concept-mindmap";
-import { RelatedPapers } from "@/components/relations/related-papers";
-import { PaperReferences } from "@/components/references/paper-references";
+import { PaperConnections } from "@/components/connections/paper-connections";
 import { PaperChat } from "@/components/chat/paper-chat";
 import { SelectionHighlighter } from "@/components/chat/selection-highlighter";
+import { AnalysisHistory } from "@/components/history/analysis-history";
+import { CrossPaperInsights } from "@/components/analysis/cross-paper-insights";
+import { parseSummarySections } from "@/lib/papers/parse-sections";
 
 interface Tag {
   id: string;
@@ -89,8 +95,8 @@ interface Paper {
   processingStatus: string;
   processingStep: string | null;
   processingStartedAt: string | null;
-  isBookmarked: boolean;
-  readingStatus: string;
+  isLiked: boolean;
+  engagementScore: number;
   createdAt: string;
   updatedAt: string;
   tags: { tag: Tag }[];
@@ -103,8 +109,10 @@ const STEP_LABELS: Record<string, string> = {
   summarize: "Summarizing...",
   categorize: "Categorizing...",
   linking: "Finding related papers...",
+  contradictions: "Detecting contradictions...",
   references: "Extracting references...",
   contexts: "Analyzing citations...",
+  distill: "Distilling insights...",
 };
 
 const STATUS_LABELS: Record<string, string> = {
@@ -141,47 +149,18 @@ type ViewTab =
   | "review"
   | "methodology"
   | "results"
-  | "concepts"
-  | "relations"
-  | "references";
+  | "connections"
+  | "analyze"
+  | "concepts";
 
 const viewTabs: { value: ViewTab; icon: typeof ClipboardCheck; label: string }[] = [
   { value: "review", icon: ClipboardCheck, label: "Review" },
   { value: "methodology", icon: FlaskConical, label: "Methodology" },
   { value: "results", icon: BarChart3, label: "Results" },
+  { value: "connections", icon: Link2, label: "Connections" },
+  { value: "analyze", icon: Sparkles, label: "Analyze" },
   { value: "concepts", icon: Network, label: "Concepts" },
-  { value: "relations", icon: Link2, label: "Related" },
-  { value: "references", icon: BookOpen, label: "References" },
 ];
-
-function parseSummarySections(summary: string): {
-  overview: string;
-  methodology: string;
-  results: string;
-} {
-  const parts = summary.split(/\n---\n/);
-
-  if (parts.length >= 3) {
-    return {
-      overview: parts[0].trim(),
-      methodology: parts[1].trim(),
-      results: parts.slice(2).join("\n---\n").trim(),
-    };
-  }
-
-  const methMatch = summary.match(/\n(?=## Methodology\b)/);
-  const resMatch = summary.match(/\n(?=## Results\b)/);
-
-  if (methMatch && resMatch && methMatch.index! < resMatch.index!) {
-    return {
-      overview: summary.slice(0, methMatch.index!).trim(),
-      methodology: summary.slice(methMatch.index!, resMatch.index!).trim(),
-      results: summary.slice(resMatch.index!).trim(),
-    };
-  }
-
-  return { overview: summary, methodology: "", results: "" };
-}
 
 export default function PaperDetailPage() {
   const router = useRouter();
@@ -194,7 +173,10 @@ export default function PaperDetailPage() {
   const [saving, setSaving] = useState(false);
   const [reprocessing, setReprocessing] = useState(false);
   const [editing, setEditing] = useState(false);
+  const [distilling, setDistilling] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [activeView, setActiveView] = useState<ViewTab>("review");
+  const [relatedPaperMap, setRelatedPaperMap] = useState<Record<string, string>>({});
   const [editForm, setEditForm] = useState({
     title: "",
     abstract: "",
@@ -281,6 +263,25 @@ export default function PaperDetailPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [paper?.processingStatus, id]);
 
+  // Fetch related paper titles for clickable links in Analyze tab
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch(`/api/papers/${id}/relations`);
+        if (res.ok) {
+          const rels: { relatedPaper: { id: string; title: string } }[] = await res.json();
+          const map: Record<string, string> = {};
+          for (const r of rels) {
+            map[r.relatedPaper.id] = r.relatedPaper.title;
+          }
+          setRelatedPaperMap(map);
+        }
+      } catch {
+        // ignore
+      }
+    })();
+  }, [id]);
+
   const processingStatus = paper?.processingStatus;
   useEffect(() => {
     if (
@@ -346,13 +347,41 @@ export default function PaperDetailPage() {
     }
   };
 
-  const handleBookmarkToggle = async () => {
-    const res = await fetch(`/api/papers/${id}/bookmark`, { method: "PATCH" });
+  const handleLikeToggle = async () => {
+    const res = await fetch(`/api/papers/${id}/like`, { method: "PATCH" });
     if (res.ok && paper) {
-      const { isBookmarked } = await res.json();
-      setPaper({ ...paper, isBookmarked });
+      const { isLiked } = await res.json();
+      setPaper({ ...paper, isLiked });
     }
   };
+
+  const handleDistill = async () => {
+    setDistilling(true);
+    try {
+      const res = await fetch(`/api/papers/${id}/distill`, { method: "POST" });
+      if (res.ok) {
+        const data = await res.json();
+        toast.success(`${data.created} insights extracted`);
+      } else {
+        const data = await res.json();
+        toast.error(data.error || "Failed to distill insights");
+      }
+    } catch {
+      toast.error("Failed to distill insights");
+    } finally {
+      setDistilling(false);
+    }
+  };
+
+  // Track view engagement once on load
+  useEffect(() => {
+    fetch(`/api/papers/${id}/engage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ event: "view" }),
+    }).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id]);
 
   if (loading) {
     return (
@@ -586,23 +615,37 @@ export default function PaperDetailPage() {
 
           {/* Action icons */}
           <div className="flex items-center gap-0.5">
+            {(() => {
+              const heat = paper.engagementScore <= 0 ? 0 : paper.engagementScore < 2 ? 1 : paper.engagementScore < 5 ? 2 : paper.engagementScore < 12 ? 3 : 4;
+              const heatColors = ["", "text-blue-400", "text-yellow-500", "text-orange-500", "text-red-500"];
+              return heat > 0 ? (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span className="inline-flex h-9 w-9 items-center justify-center">
+                      <Flame className={`h-4 w-4 ${heatColors[heat]}`} />
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent>Engagement: {paper.engagementScore.toFixed(1)}</TooltipContent>
+                </Tooltip>
+              ) : null;
+            })()}
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
-                  onClick={handleBookmarkToggle}
+                  onClick={handleLikeToggle}
                   className="inline-flex h-9 w-9 items-center justify-center rounded-md hover:bg-accent"
                 >
-                  <Bookmark
+                  <Heart
                     className={`h-4 w-4 ${
-                      paper.isBookmarked
-                        ? "fill-blue-500 text-blue-500"
+                      paper.isLiked
+                        ? "fill-red-500 text-red-500"
                         : "text-muted-foreground"
                     }`}
                   />
                 </button>
               </TooltipTrigger>
               <TooltipContent>
-                {paper.isBookmarked ? "Remove bookmark" : "Bookmark"}
+                {paper.isLiked ? "Unlike" : "Like"}
               </TooltipContent>
             </Tooltip>
 
@@ -639,6 +682,37 @@ export default function PaperDetailPage() {
               <TooltipContent>
                 {reprocessing ? "Processing..." : "Reprocess"}
               </TooltipContent>
+            </Tooltip>
+
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  onClick={handleDistill}
+                  disabled={distilling}
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-md hover:bg-accent disabled:opacity-50"
+                >
+                  {distilling ? (
+                    <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                  ) : (
+                    <Brain className="h-4 w-4 text-muted-foreground" />
+                  )}
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>
+                {distilling ? "Distilling..." : "Distill insights"}
+              </TooltipContent>
+            </Tooltip>
+
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  onClick={() => setHistoryOpen(true)}
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-md hover:bg-accent"
+                >
+                  <Clock className="h-4 w-4 text-muted-foreground" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>Analysis history</TooltipContent>
             </Tooltip>
 
             <Tooltip>
@@ -740,6 +814,56 @@ export default function PaperDetailPage() {
             {paper.processingStatus === "FAILED" && (
               <Badge variant="destructive">Failed</Badge>
             )}
+          </div>
+        )}
+
+        {/* ── Missing PDF banner ── */}
+        {!paper.filePath && (paper.processingStatus === "COMPLETED" || paper.processingStatus === "PENDING") && (
+          <div className="flex items-center gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 dark:border-amber-800 dark:bg-amber-950/30">
+            <FileText className="h-5 w-5 shrink-0 text-amber-600" />
+            <div className="flex-1">
+              <p className="text-sm font-medium text-amber-800 dark:text-amber-200">
+                No PDF attached
+              </p>
+              <p className="text-xs text-amber-600 dark:text-amber-400">
+                {paper.abstract
+                  ? "Summaries were generated from the abstract only. Attach a PDF for full analysis."
+                  : "Attach a PDF to enable text extraction and analysis."}
+              </p>
+            </div>
+            <label className="cursor-pointer">
+              <input
+                type="file"
+                accept=".pdf,application/pdf"
+                className="hidden"
+                onChange={async (e) => {
+                  const file = e.target.files?.[0];
+                  if (!file) return;
+                  const formData = new FormData();
+                  formData.append("file", file);
+                  try {
+                    const res = await fetch(`/api/papers/${id}/file`, {
+                      method: "POST",
+                      body: formData,
+                    });
+                    if (res.ok) {
+                      toast.success("PDF attached — processing started");
+                      fetchPaper();
+                    } else {
+                      const data = await res.json();
+                      toast.error(data.error || "Failed to attach PDF");
+                    }
+                  } catch {
+                    toast.error("Failed to upload PDF");
+                  }
+                  e.target.value = "";
+                }}
+              />
+              <span className="inline-flex items-center gap-1.5 rounded-md bg-amber-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-amber-700">
+                <Upload className="h-3.5 w-3.5" />
+                Attach PDF
+              </span>
+            </label>
           </div>
         )}
 
@@ -903,20 +1027,28 @@ export default function PaperDetailPage() {
             </>
           )}
 
+          {activeView === "connections" && (
+            <PaperConnections
+              paperId={paper.id}
+              paperTitle={paper.title}
+            />
+          )}
+
+          {activeView === "analyze" && (
+            <CrossPaperInsights
+              paperId={paper.id}
+              promptResults={paper.promptResults}
+              onUpdate={fetchPaper}
+              relatedPapers={relatedPaperMap}
+            />
+          )}
+
           {activeView === "concepts" && (
             <ConceptMindmap
               paperId={paper.id}
               paperTitle={paper.title}
               hasText={!!(paper.fullText || paper.abstract)}
             />
-          )}
-
-          {activeView === "relations" && (
-            <RelatedPapers paperId={paper.id} />
-          )}
-
-          {activeView === "references" && (
-            <PaperReferences paperId={paper.id} />
           )}
         </div>
 
@@ -926,6 +1058,14 @@ export default function PaperDetailPage() {
           paperId={paper.id}
           hasText={!!(paper.fullText || paper.abstract)}
           initialConversationId={initialConversationId}
+        />
+
+        <AnalysisHistory
+          paperId={paper.id}
+          promptResults={paper.promptResults}
+          open={historyOpen}
+          onOpenChange={setHistoryOpen}
+          onRestore={fetchPaper}
         />
       </div>
     </TooltipProvider>

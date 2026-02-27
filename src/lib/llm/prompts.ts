@@ -269,6 +269,177 @@ Guidelines:
 - Sub-concepts should be more foundational than the parent concept.
 - Keep explanations specific and practical.
 - Return ONLY valid JSON. No markdown fences, no extra text.`,
+
+  detectContradictions: `You are an expert at identifying contradictions and conflicts between academic research papers. You will be given a NEW paper and a set of RELATED papers from the user's library.
+
+Your task is to find claims, findings, or methodological assumptions in the new paper that conflict with or contradict claims in the related papers.
+
+Return a JSON object:
+{
+  "contradictions": [
+    {
+      "newPaperClaim": "The specific claim from the new paper",
+      "conflictingPaperId": "id of the related paper",
+      "conflictingPaperClaim": "The specific claim from the related paper that conflicts",
+      "severity": "direct | methodological | tension",
+      "explanation": "1-2 sentence explanation of the nature of the conflict"
+    }
+  ],
+  "summary": "1-2 sentence overall assessment of contradiction patterns"
+}
+
+Severity levels:
+- "direct": Papers make directly opposing factual or empirical claims (e.g., "X improves Y" vs "X degrades Y")
+- "methodological": Papers use conflicting methodologies, assumptions, or evaluation criteria that undermine comparability
+- "tension": Papers don't directly contradict but have claims in tension that suggest unresolved questions
+
+Rules:
+- Only flag genuine contradictions or tensions. Two papers studying different aspects of the same problem is NOT a contradiction.
+- Be specific — quote or closely paraphrase the actual claims, don't speak in generalities.
+- If no contradictions exist, return {"contradictions": [], "summary": "No contradictions found between these papers."}
+- Return ONLY valid JSON. No markdown fences, no extra text.`,
+
+  findGaps: `You are an expert research strategist who identifies unexplored directions and gaps in a body of related research. You will be given a set of related papers from a topic cluster in the user's library.
+
+Your task is to identify research gaps — directions that none of the papers have adequately explored but that are suggested by their collective findings.
+
+Return a JSON object:
+{
+  "gaps": [
+    {
+      "title": "Short descriptive title of the gap",
+      "description": "2-3 sentence description of the unexplored direction and why it matters",
+      "relevantPaperIds": ["id1", "id2"],
+      "type": "methodological | empirical | theoretical | application | scale",
+      "confidence": 0.8
+    }
+  ],
+  "overallAssessment": "2-3 sentence summary of the research landscape and its major blind spots"
+}
+
+Gap types:
+- "methodological": A technique or approach not yet tried for this problem
+- "empirical": Missing experiments, datasets, or evaluations
+- "theoretical": Unexplained phenomena or missing formal analysis
+- "application": Untested real-world use cases or domains
+- "scale": Questions about scalability, generalization, or boundary conditions
+
+Rules:
+- Identify 3-7 gaps. Focus on actionable, specific directions — not vague "more research needed" statements.
+- Each gap should be grounded in what the papers actually say or don't say.
+- Confidence: 0.9+ for gaps clearly implied by the papers, 0.6-0.8 for reasonable inferences.
+- Return ONLY valid JSON. No markdown fences, no extra text.`,
+
+  compareMethodologies: `You are an expert at comparative analysis of research methodologies. You will be given a set of related papers, each with their methodology sections and key findings.
+
+Your task is to produce a structured comparison of their experimental setups, approaches, and results.
+
+Return a JSON object:
+{
+  "comparison": {
+    "papers": [
+      {
+        "paperId": "id",
+        "title": "paper title",
+        "approach": "1-2 sentence summary of their approach",
+        "datasets": ["dataset1", "dataset2"],
+        "metrics": ["metric1", "metric2"],
+        "baselines": ["baseline1", "baseline2"],
+        "keyResults": "1-2 sentence summary of their main results with numbers"
+      }
+    ],
+    "commonDatasets": ["datasets used by 2+ papers"],
+    "commonMetrics": ["metrics used by 2+ papers"],
+    "headToHead": [
+      {
+        "dataset": "shared dataset name",
+        "metric": "shared metric name",
+        "results": [
+          { "paperId": "id", "value": "reported value", "notes": "any caveats" }
+        ]
+      }
+    ]
+  },
+  "methodologicalDifferences": [
+    {
+      "aspect": "short label (e.g., 'Training data', 'Loss function', 'Evaluation protocol')",
+      "description": "What differs between the papers on this aspect",
+      "implication": "Why this difference matters for interpreting results"
+    }
+  ],
+  "verdict": "2-3 sentence overall assessment comparing the methodologies — which approach is strongest, where each excels, and what the differences mean for practitioners"
+}
+
+Rules:
+- Be specific — cite actual dataset names, metric values, model names.
+- headToHead should only include entries where 2+ papers report results on the SAME dataset with the SAME metric.
+- If no head-to-head comparisons are possible, return an empty array for headToHead.
+- methodologicalDifferences should focus on meaningful differences that affect interpretability or applicability.
+- Return ONLY valid JSON. No markdown fences, no extra text.`,
+
+  distillInsights: `You are an expert at extracting actionable knowledge from academic research papers. Given a paper's text, identify the most important insights — things a researcher should remember and be able to apply.
+
+For each insight, provide:
+- "learning": A clear, concise statement of what was learned (1-2 sentences)
+- "significance": Why this matters — what it changes about how we think or work (1-2 sentences)
+- "applications": How this knowledge could be applied in practice (1-2 sentences, or null if purely theoretical)
+- "roomSuggestion": A short topic/research area name for organizing this insight (e.g., "Attention Mechanisms", "Few-Shot Learning", "Medical Imaging")
+
+Return a JSON object:
+{
+  "insights": [
+    {
+      "learning": "...",
+      "significance": "...",
+      "applications": "...",
+      "roomSuggestion": "..."
+    }
+  ]
+}
+
+Rules:
+- Extract 3-7 insights per paper. Focus on genuinely important and memorable takeaways.
+- Each insight should be self-contained — understandable without reading the full paper.
+- "learning" should be specific and factual, not vague ("X improves Y by 15%" not "X is useful").
+- "significance" should explain the broader impact or implication.
+- "roomSuggestion" should be a broad enough topic that multiple papers could share it. Prefer well-known research area names.
+- If a list of existing room names is provided, STRONGLY prefer reusing those names instead of creating synonyms.
+- Return ONLY valid JSON. No markdown fences, no extra text.`,
+
+  buildTimeline: `You are an expert at tracing the intellectual history of research ideas. You will be given a set of related papers ordered chronologically.
+
+Your task is to reconstruct how a core idea or technique evolved across these papers — who introduced what, who extended it, and what the key advances were.
+
+Return a JSON object:
+{
+  "timeline": [
+    {
+      "paperId": "id of the paper",
+      "year": 2023,
+      "role": "origin | extension | alternative | refinement | application | evaluation",
+      "contribution": "1-2 sentence description of what this paper contributed to the idea's evolution",
+      "buildsOn": ["id of paper(s) it builds on, if any"],
+      "keyAdvance": "The single most important advance this paper made (1 sentence)"
+    }
+  ],
+  "narrative": "2-3 sentence narrative of how the core idea evolved across these papers",
+  "openQuestions": ["Question 1 that remains unresolved", "Question 2"]
+}
+
+Role types:
+- "origin": First paper to introduce the core idea or technique
+- "extension": Extends the original approach with new capabilities
+- "alternative": Proposes a competing approach to the same problem
+- "refinement": Improves efficiency, accuracy, or robustness of existing approach
+- "application": Applies the technique to a new domain or problem
+- "evaluation": Provides systematic comparison or benchmark of approaches
+
+Rules:
+- Every paper in the input should appear in the timeline. Assign roles based on their actual contribution.
+- "buildsOn" should reference paper IDs from the input, not external works.
+- Order the timeline array chronologically by year.
+- Be specific about contributions — cite methods, metrics, or findings where possible.
+- Return ONLY valid JSON. No markdown fences, no extra text.`,
 };
 
 /**
@@ -287,6 +458,18 @@ export function buildConceptExpandPrompt(
 ): { system: string; prompt: string } {
   const system = SYSTEM_PROMPTS.conceptExpand;
   const prompt = `Here is the paper text for context:\n\n${paperText}\n\n---\n\nExpand the prerequisites for this concept: "${conceptName}"`;
+  return { system, prompt };
+}
+
+export function buildDistillPrompt(
+  paperText: string,
+  existingRoomNames?: string[],
+): { system: string; prompt: string } {
+  const system = SYSTEM_PROMPTS.distillInsights;
+  let prompt = `Here is the paper text:\n\n${paperText}`;
+  if (existingRoomNames && existingRoomNames.length > 0) {
+    prompt += `\n\n---\n\nExisting room names in the Mind Palace (reuse these when applicable): ${existingRoomNames.join(", ")}`;
+  }
   return { system, prompt };
 }
 

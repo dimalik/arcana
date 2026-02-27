@@ -16,6 +16,7 @@ import {
   ResponsiveContainer,
   Cell,
 } from "recharts";
+import { DailyDigest } from "@/components/mind-palace/daily-digest";
 
 interface YearData {
   year: number;
@@ -67,19 +68,15 @@ export default function DashboardPage() {
     setLoading(true);
     try {
       const params = new URLSearchParams({ limit: "10" });
-      // The papers API supports a single tagId; for multi-tag, fetch for first selected
-      // or all if none selected
       if (tagIds.size === 1) {
         params.set("tagId", Array.from(tagIds)[0]);
       } else if (tagIds.size > 1) {
-        // Fetch more and filter client-side for multi-tag
         params.set("limit", "200");
       }
       const res = await fetch(`/api/papers?${params}`);
       const data = await res.json();
       let list: PaperCardData[] = data.papers ?? [];
 
-      // Client-side filtering for multi-tag selection
       if (tagIds.size > 1) {
         list = list.filter((p) =>
           p.tags.some((pt) => tagIds.has(pt.tag.id))
@@ -110,27 +107,12 @@ export default function DashboardPage() {
 
   const clearTags = () => setSelectedTagIds(new Set());
 
-  const handleBookmarkToggle = async (id: string) => {
-    const res = await fetch(`/api/papers/${id}/bookmark`, { method: "PATCH" });
+  const handleLikeToggle = async (id: string) => {
+    const res = await fetch(`/api/papers/${id}/like`, { method: "PATCH" });
     if (res.ok) {
-      const { isBookmarked } = await res.json();
+      const { isLiked } = await res.json();
       setPapers((prev) =>
-        prev.map((p) => (p.id === id ? { ...p, isBookmarked } : p))
-      );
-    }
-  };
-
-  const handleStatusChange = async (id: string, status: string) => {
-    const res = await fetch(`/api/papers/${id}/status`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ status }),
-    });
-    if (res.ok) {
-      setPapers((prev) =>
-        prev.map((p) =>
-          p.id === id ? { ...p, readingStatus: status } : p
-        )
+        prev.map((p) => (p.id === id ? { ...p, isLiked } : p))
       );
     }
   };
@@ -214,6 +196,9 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
 
+        {/* Mind Palace digest */}
+        <DailyDigest />
+
         {/* Recent papers */}
         <div>
           <h3 className="mb-3 text-lg font-semibold">
@@ -253,8 +238,7 @@ export default function DashboardPage() {
                 <PaperCard
                   key={paper.id}
                   paper={paper}
-                  onBookmarkToggle={handleBookmarkToggle}
-                  onStatusChange={handleStatusChange}
+                  onLikeToggle={handleLikeToggle}
                 />
               ))}
             </div>

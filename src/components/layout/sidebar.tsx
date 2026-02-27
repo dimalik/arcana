@@ -20,6 +20,8 @@ import {
   Download,
   BookOpen,
   Compass,
+  Activity,
+  Brain,
   PanelLeftClose,
   PanelLeftOpen,
 } from "lucide-react";
@@ -32,7 +34,9 @@ const navItems = [
   { href: "/tags", label: "Tags", icon: Tags },
   { href: "/collections", label: "Collections", icon: FolderTree },
   { href: "/discovery", label: "Discovery", icon: Compass },
+  { href: "/mind-palace", label: "Mind Palace", icon: Brain },
   { href: "/notebook", label: "Notebook", icon: BookOpen },
+  { href: "/engagement", label: "Engagement", icon: Activity },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 
