@@ -15,7 +15,7 @@ const OPENALEX_SELECT =
 
 const S2_BASE = "https://api.semanticscholar.org/graph/v1/paper";
 const S2_FIELDS =
-  "title,authors,year,venue,doi,externalIds,openAccessPdf,citationCount";
+  "title,authors,year,venue,externalIds,openAccessPdf,citationCount";
 
 const CROSSREF_BASE = "https://api.crossref.org/works";
 const CROSSREF_MAILTO = process.env.CROSSREF_MAILTO || "paperfinder@localhost";

@@ -6,6 +6,7 @@ export interface ProxyConfig {
   enabled: boolean;
   vendor: ProxyVendor;
   baseUrl: string;
+  anthropicBaseUrl: string;
   apiKey: string;
   headerName: string;
   headerValue: string;
@@ -52,6 +53,7 @@ const PROXY_KEYS = [
   "proxy_enabled",
   "proxy_vendor",
   "proxy_base_url",
+  "proxy_anthropic_base_url",
   "proxy_api_key",
   "proxy_header_name",
   "proxy_header_value",
@@ -59,6 +61,23 @@ const PROXY_KEYS = [
   "proxy_context_window",
   "proxy_max_tokens",
 ] as const;
+
+/**
+ * Derive an Anthropic proxy URL from an OpenAI proxy URL.
+ * Replaces "/openai/" with "/anthropic/" in the path.
+ */
+function deriveAnthropicUrl(openaiUrl: string): string {
+  if (!openaiUrl) return "";
+  if (openaiUrl.includes("/openai/")) {
+    return openaiUrl.replace("/openai/", "/anthropic/");
+  }
+  return "";
+}
+
+/** Check if a model ID is an Anthropic/Claude model. */
+export function isAnthropicModel(modelId: string): boolean {
+  return modelId.startsWith("claude");
+}
 
 /**
  * Read proxy configuration from DB, falling back to env vars.
@@ -74,11 +93,13 @@ export async function getProxyConfig(): Promise<ProxyConfig> {
     const vendor = (db.proxy_vendor || "custom") as ProxyVendor;
     const apiKey = db.proxy_api_key || "";
     const preset = VENDOR_PRESETS[vendor];
+    const baseUrl = db.proxy_base_url || preset.baseUrl;
 
     return {
       enabled: db.proxy_enabled === "true",
       vendor,
-      baseUrl: db.proxy_base_url || preset.baseUrl,
+      baseUrl,
+      anthropicBaseUrl: db.proxy_anthropic_base_url || deriveAnthropicUrl(baseUrl),
       apiKey,
       headerName: db.proxy_header_name || preset.headerName,
       headerValue: db.proxy_header_value || (preset.prefix + apiKey),
@@ -94,10 +115,12 @@ export async function getProxyConfig(): Promise<ProxyConfig> {
   const headerValue = process.env.LLM_PROXY_HEADER_VALUE || "";
 
   if (proxyUrl && headerValue) {
+    const baseUrl = proxyUrl.replace(/\/chat\/completions$/, "");
     return {
       enabled: true,
       vendor: "custom",
-      baseUrl: proxyUrl.replace(/\/chat\/completions$/, ""),
+      baseUrl,
+      anthropicBaseUrl: deriveAnthropicUrl(baseUrl),
       apiKey: "",
       headerName,
       headerValue,
@@ -111,6 +134,7 @@ export async function getProxyConfig(): Promise<ProxyConfig> {
     enabled: false,
     vendor: "custom",
     baseUrl: "",
+    anthropicBaseUrl: "",
     apiKey: "",
     headerName: "Authorization",
     headerValue: "",
@@ -127,6 +151,7 @@ export async function saveProxyConfig(config: {
   enabled: boolean;
   vendor: ProxyVendor;
   baseUrl: string;
+  anthropicBaseUrl?: string;
   apiKey: string | null;
   headerName: string;
   headerValue: string;
@@ -155,6 +180,7 @@ export async function saveProxyConfig(config: {
     ["proxy_enabled", String(config.enabled)],
     ["proxy_vendor", config.vendor],
     ["proxy_base_url", config.baseUrl],
+    ["proxy_anthropic_base_url", config.anthropicBaseUrl || deriveAnthropicUrl(config.baseUrl)],
     ["proxy_api_key", apiKey],
     ["proxy_header_name", headerName],
     ["proxy_header_value", headerValue],

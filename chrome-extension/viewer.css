@@ -162,6 +162,7 @@ a.tb-btn {
   line-height: 1;
   -webkit-text-size-adjust: none;
   text-size-adjust: none;
+  z-index: 1;
 }
 
 .textLayer span {
@@ -175,6 +176,33 @@ a.tb-btn {
 
 .textLayer ::selection {
   background: rgba(79, 70, 229, 0.3);
+}
+
+/* ---- Link annotation layer ---- */
+.link-layer {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  z-index: 2;
+}
+
+.pdf-link-annot {
+  position: absolute;
+  cursor: pointer;
+  border-radius: 1px;
+  background: transparent;
+  text-decoration: none;
+  transition: background 0.15s;
+}
+
+.pdf-link-annot:hover {
+  background: rgba(79, 70, 229, 0.15);
+  outline: 1px solid rgba(79, 70, 229, 0.4);
+}
+
+/* In area-select mode, disable link clicks */
+body.area-mode .link-layer {
+  pointer-events: none;
 }
 
 .highlight-layer {

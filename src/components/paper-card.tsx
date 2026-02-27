@@ -3,11 +3,12 @@
 import Link from "next/link";
 import { Card, CardContent } from "@/components/ui/card";
 import {
-  Bookmark,
+  Heart,
   Users,
   Calendar,
   FileText,
   ExternalLink,
+  Flame,
 } from "lucide-react";
 
 interface Tag {
@@ -26,22 +27,36 @@ export interface PaperCardData {
   doi: string | null;
   sourceUrl: string | null;
   citationCount: number | null;
-  readingStatus: string;
-  isBookmarked: boolean;
+  isLiked: boolean;
+  engagementScore: number;
   tags: { tag: Tag }[];
 }
 
 interface PaperCardProps {
   paper: PaperCardData;
-  onBookmarkToggle: (id: string) => void;
-  onStatusChange: (id: string, status: string) => void;
+  onLikeToggle: (id: string) => void;
   onDelete?: (id: string) => void;
+}
+
+const HEAT_COLORS = [
+  "", // 0 = no indicator
+  "text-blue-400",
+  "text-yellow-500",
+  "text-orange-500",
+  "text-red-500",
+];
+
+function getHeatLevel(score: number): number {
+  if (score <= 0) return 0;
+  if (score < 2) return 1;
+  if (score < 5) return 2;
+  if (score < 12) return 3;
+  return 4;
 }
 
 export function PaperCard({
   paper,
-  onBookmarkToggle,
-  onStatusChange,
+  onLikeToggle,
 }: PaperCardProps) {
   const authors: string[] = paper.authors
     ? JSON.parse(paper.authors)
@@ -54,32 +69,38 @@ export function PaperCard({
   const externalUrl =
     paper.sourceUrl || (paper.doi ? `https://doi.org/${paper.doi}` : null);
 
+  const heat = getHeatLevel(paper.engagementScore);
+
   return (
     <Card className="transition-colors hover:bg-accent/50">
       <CardContent className="p-4">
         <Link href={`/papers/${paper.id}`} className="block">
-          {/* Title + Bookmark */}
+          {/* Title + Like */}
           <div className="flex items-start justify-between gap-2">
             <h3 className="text-lg font-semibold leading-tight">
               {paper.title}
             </h3>
-            <button
-              type="button"
-              onClick={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                onBookmarkToggle(paper.id);
-              }}
-              className="mt-0.5 shrink-0"
-            >
-              <Bookmark
-                className={`h-5 w-5 ${
-                  paper.isBookmarked
-                    ? "fill-blue-500 text-blue-500"
-                    : "text-muted-foreground"
-                }`}
-              />
-            </button>
+            <div className="flex items-center gap-1 shrink-0 mt-0.5">
+              {heat > 0 && (
+                <Flame className={`h-4 w-4 ${HEAT_COLORS[heat]}`} />
+              )}
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  onLikeToggle(paper.id);
+                }}
+              >
+                <Heart
+                  className={`h-5 w-5 ${
+                    paper.isLiked
+                      ? "fill-red-500 text-red-500"
+                      : "text-muted-foreground"
+                  }`}
+                />
+              </button>
+            </div>
           </div>
 
           {/* Metadata row */}
@@ -131,27 +152,7 @@ export function PaperCard({
         </Link>
 
         {/* Footer */}
-        <div className="mt-3 flex items-center justify-between border-t pt-3">
-          <div
-            className="flex items-center gap-2"
-            onClick={(e) => e.preventDefault()}
-          >
-            <span className="text-xs text-muted-foreground">Status:</span>
-            <select
-              value={paper.readingStatus}
-              onChange={(e) => {
-                e.stopPropagation();
-                onStatusChange(paper.id, e.target.value);
-              }}
-              onClick={(e) => e.stopPropagation()}
-              className="h-7 rounded-md border bg-background px-2 text-xs"
-            >
-              <option value="unread">Unread</option>
-              <option value="reading">Reading</option>
-              <option value="read">Read</option>
-            </select>
-          </div>
-
+        <div className="mt-3 flex items-center justify-end border-t pt-3">
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
             {paper.venue && (
               <span>

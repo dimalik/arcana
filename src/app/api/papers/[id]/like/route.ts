@@ -8,7 +8,7 @@ export async function PATCH(
   try {
     const paper = await prisma.paper.findUnique({
       where: { id: params.id },
-      select: { isBookmarked: true },
+      select: { isLiked: true },
     });
 
     if (!paper) {
@@ -17,15 +17,15 @@ export async function PATCH(
 
     const updated = await prisma.paper.update({
       where: { id: params.id },
-      data: { isBookmarked: !paper.isBookmarked },
-      select: { id: true, isBookmarked: true },
+      data: { isLiked: !paper.isLiked },
+      select: { id: true, isLiked: true },
     });
 
     return NextResponse.json(updated);
   } catch (error) {
-    console.error("Bookmark toggle error:", error);
+    console.error("Like toggle error:", error);
     return NextResponse.json(
-      { error: "Failed to toggle bookmark" },
+      { error: "Failed to toggle like" },
       { status: 500 }
     );
   }

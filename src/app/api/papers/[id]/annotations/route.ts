@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { trackEngagement } from "@/lib/engagement/track";
 
 export async function GET(
   _request: NextRequest,
@@ -53,6 +54,8 @@ export async function POST(
       content: JSON.stringify({ pageNumber, rects, color: color || "yellow" }),
     },
   });
+
+  trackEngagement(id, "annotate").catch(() => {});
 
   return NextResponse.json(
     {

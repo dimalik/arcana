@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { runDiscovery } from "@/lib/discovery/engine";
+import { trackEngagement } from "@/lib/engagement/track";
 
 /**
  * POST /api/discovery — Start a new discovery session
@@ -42,6 +43,11 @@ export async function POST(req: NextRequest) {
       },
     },
   });
+
+  // Track engagement for each seed paper
+  for (const paperId of paperIds) {
+    trackEngagement(paperId, "discovery_seed").catch(() => {});
+  }
 
   // Stream discovery progress
   const encoder = new TextEncoder();

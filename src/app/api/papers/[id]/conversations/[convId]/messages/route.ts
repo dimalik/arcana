@@ -6,6 +6,7 @@ import {
 } from "@/lib/llm/provider";
 import { SYSTEM_PROMPTS } from "@/lib/llm/prompts";
 import { resolveModelConfig } from "@/lib/llm/auto-process";
+import { trackEngagement } from "@/lib/engagement/track";
 
 export async function GET(
   _request: NextRequest,
@@ -111,6 +112,8 @@ export async function POST(
         model: modelId,
       },
     });
+
+    trackEngagement(id, "chat").catch(() => {});
   }
 
   // Normalize messages for streamText — preserve multi-part content (images)

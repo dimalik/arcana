@@ -14,8 +14,6 @@ const updatePaperSchema = z.object({
   categories: z.array(z.string()).optional(),
   processingStatus: z.string().optional(),
   citationCount: z.number().int().nullable().optional(),
-  readingStatus: z.enum(["unread", "reading", "read"]).optional(),
-  isBookmarked: z.boolean().optional(),
 });
 
 export async function GET(

@@ -36,10 +36,11 @@ export default function SettingsPage() {
   const [proxyEnabled, setProxyEnabled] = useState(false);
   const [proxyVendor, setProxyVendor] = useState<ProxyVendor>("openrouter");
   const [proxyBaseUrl, setProxyBaseUrl] = useState("");
+  const [proxyAnthropicBaseUrl, setProxyAnthropicBaseUrl] = useState("");
   const [proxyApiKey, setProxyApiKey] = useState("");
   const [proxyHeaderName, setProxyHeaderName] = useState("Authorization");
   const [proxyHeaderValue, setProxyHeaderValue] = useState("");
-  const [proxyModelId, setProxyModelId] = useState("");
+  const [proxyModels, setProxyModels] = useState("");
   const [proxyContextWindow, setProxyContextWindow] = useState("128000");
   const [proxyMaxTokens, setProxyMaxTokens] = useState("4096");
   const [proxySaving, setProxySaving] = useState(false);
@@ -66,9 +67,10 @@ export default function SettingsPage() {
         setProxyEnabled(data.enabled);
         setProxyVendor(data.vendor || "openrouter");
         setProxyBaseUrl(data.baseUrl || "");
+        setProxyAnthropicBaseUrl(data.anthropicBaseUrl || "");
         setProxyHeaderName(data.headerName || "Authorization");
         setProxyHeaderValue(data.headerValue || "");
-        setProxyModelId(data.modelId || "");
+        setProxyModels(data.modelId || "");
         setProxyContextWindow(String(data.contextWindow || 128000));
         setProxyMaxTokens(String(data.maxTokens || 4096));
         setProxyHasExistingKey(!!data.apiKey);
@@ -123,10 +125,11 @@ export default function SettingsPage() {
           enabled: proxyEnabled,
           vendor: proxyVendor,
           baseUrl: proxyBaseUrl,
-          apiKey: proxyApiKey || null, // null = keep existing
+          anthropicBaseUrl: proxyAnthropicBaseUrl,
+          apiKey: proxyApiKey || null,
           headerName: proxyHeaderName,
           headerValue: proxyVendor === "custom" ? proxyHeaderValue : "",
-          modelId: proxyModelId,
+          modelId: proxyModels,
           contextWindow: proxyContextWindow,
           maxTokens: proxyMaxTokens,
         }),
@@ -153,19 +156,22 @@ export default function SettingsPage() {
     setProxyTestResult(null);
     try {
       const headerValue = buildHeaderValue();
+      // Test with the first model in the list
+      const firstModel = proxyModels.split(",").map(s => s.trim()).filter(Boolean)[0] || "gpt-3.5-turbo";
       const res = await fetch("/api/settings/proxy", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           baseUrl: proxyBaseUrl,
+          anthropicBaseUrl: proxyAnthropicBaseUrl,
           headerName: proxyHeaderName,
           headerValue,
-          modelId: proxyModelId,
+          modelId: firstModel,
         }),
       });
       const data = await res.json();
       if (data.ok) {
-        setProxyTestResult({ ok: true, message: `Connected! Response: "${data.response}"` });
+        setProxyTestResult({ ok: true, message: `Connected! Model: ${firstModel}. Response: "${data.response}"` });
       } else {
         setProxyTestResult({ ok: false, message: data.error || "Connection failed" });
       }
@@ -187,12 +193,13 @@ export default function SettingsPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Default Model</CardTitle>
+          <CardTitle>AI Model</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           <p className="text-sm text-muted-foreground">
-            Choose the default provider and model used for all AI analysis
-            (summaries, metadata extraction, tagging, concepts, etc.).
+            The model used for all AI analysis — summaries, metadata extraction,
+            tagging, concepts, and chat. Proxy models appear when a proxy is
+            configured and enabled below.
           </p>
           {loaded && (
             <div className="flex items-end gap-3">
@@ -224,8 +231,8 @@ export default function SettingsPage() {
         </CardHeader>
         <CardContent className="space-y-4">
           <p className="text-sm text-muted-foreground">
-            Connect to any OpenAI-compatible proxy (OpenRouter, LiteLLM, Azure, etc.)
-            to use additional models.
+            Connect to an LLM proxy to use models without direct API keys.
+            Configured models appear in the model selector above.
           </p>
 
           {proxyLoaded && (
@@ -262,15 +269,28 @@ export default function SettingsPage() {
                     </Select>
                   </div>
 
-                  {/* Base URL */}
+                  {/* Base URLs */}
                   <div className="space-y-1">
-                    <Label>Base URL</Label>
+                    <Label>Base URL (OpenAI-compatible)</Label>
                     <Input
                       value={proxyBaseUrl}
                       onChange={(e) => setProxyBaseUrl(e.target.value)}
-                      placeholder="https://openrouter.ai/api/v1"
+                      placeholder="https://proxy.example.com/openai/v1"
                       className="font-mono text-sm"
                     />
+                  </div>
+
+                  <div className="space-y-1">
+                    <Label>Base URL (Anthropic)</Label>
+                    <Input
+                      value={proxyAnthropicBaseUrl}
+                      onChange={(e) => setProxyAnthropicBaseUrl(e.target.value)}
+                      placeholder="https://proxy.example.com/anthropic/v1"
+                      className="font-mono text-sm"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Only needed if you use Claude models via the proxy. Auto-derived if left blank.
+                    </p>
                   </div>
 
                   {/* API Key */}
@@ -294,7 +314,7 @@ export default function SettingsPage() {
                   {proxyVendor === "custom" && (
                     <>
                       <div className="space-y-1">
-                        <Label>Header Name</Label>
+                        <Label>Auth Header Name</Label>
                         <Input
                           value={proxyHeaderName}
                           onChange={(e) => setProxyHeaderName(e.target.value)}
@@ -303,7 +323,7 @@ export default function SettingsPage() {
                         />
                       </div>
                       <div className="space-y-1">
-                        <Label>Header Value</Label>
+                        <Label>Auth Header Value</Label>
                         <Input
                           type="password"
                           value={proxyHeaderValue}
@@ -315,17 +335,18 @@ export default function SettingsPage() {
                     </>
                   )}
 
-                  {/* Model ID */}
+                  {/* Available Models */}
                   <div className="space-y-1">
-                    <Label>Default Model ID</Label>
+                    <Label>Available Models</Label>
                     <Input
-                      value={proxyModelId}
-                      onChange={(e) => setProxyModelId(e.target.value)}
-                      placeholder="anthropic/claude-sonnet-4"
+                      value={proxyModels}
+                      onChange={(e) => setProxyModels(e.target.value)}
+                      placeholder="gpt-5.2, claude-sonnet-4-6"
                       className="font-mono text-sm"
                     />
                     <p className="text-xs text-muted-foreground">
-                      The model identifier your proxy expects (free-text).
+                      Comma-separated model IDs. These appear in the model selector above.
+                      Claude models (starting with &quot;claude&quot;) automatically route through the Anthropic endpoint.
                     </p>
                   </div>
 
@@ -372,7 +393,7 @@ export default function SettingsPage() {
                     <Button
                       variant="outline"
                       onClick={handleProxyTest}
-                      disabled={proxyTesting || !proxyBaseUrl || !proxyModelId}
+                      disabled={proxyTesting || !proxyBaseUrl || !proxyModels}
                     >
                       {proxyTesting ? (
                         <Loader2 className="mr-2 h-4 w-4 animate-spin" />

@@ -21,8 +21,13 @@ export function titleSimilarity(a: string, b: string): number {
   // Exact match
   if (na === nb) return 1.0;
 
-  // Containment: one title fully contained in the other
-  if (na.includes(nb) || nb.includes(na)) return 0.9;
+  // Containment: one title fully contained in the other,
+  // but only if the shorter title is a significant portion of the longer one.
+  // Without this ratio check, "Attention Is All You Need" would falsely match
+  // "TransMLA: Multi-Head Latent Attention Is All You Need".
+  const shorter = na.length < nb.length ? na : nb;
+  const longer = na.length < nb.length ? nb : na;
+  if (longer.includes(shorter) && shorter.length / longer.length >= 0.6) return 0.9;
 
   // Jaccard word-token overlap
   const tokensA = na.split(" ").filter(Boolean);

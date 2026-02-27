@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { generateLLMResponse, truncateText } from "@/lib/llm/provider";
 import { buildConceptExpandPrompt, cleanJsonResponse } from "@/lib/llm/prompts";
 import { resolveModelConfig } from "@/lib/llm/auto-process";
+import { trackEngagement } from "@/lib/engagement/track";
 
 export async function POST(
   request: NextRequest,
@@ -84,6 +85,8 @@ export async function POST(
       where: { id: concept.id },
       data: { isExpanded: true },
     });
+
+    trackEngagement(id, "concept_explore").catch(() => {});
 
     // Return all concepts for the paper
     const allConcepts = await prisma.concept.findMany({

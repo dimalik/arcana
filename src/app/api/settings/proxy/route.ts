@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getProxyConfig, saveProxyConfig, VENDOR_PRESETS, type ProxyVendor } from "@/lib/llm/proxy-settings";
+import { getProxyConfig, saveProxyConfig, isAnthropicModel, VENDOR_PRESETS, type ProxyVendor } from "@/lib/llm/proxy-settings";
 import { createOpenAI } from "@ai-sdk/openai";
-import { generateText } from "ai";
+import { createAnthropic } from "@ai-sdk/anthropic";
+import { streamText } from "ai";
 
 /**
  * GET — return proxy config with API key masked.
@@ -13,6 +14,7 @@ export async function GET() {
     enabled: config.enabled,
     vendor: config.vendor,
     baseUrl: config.baseUrl,
+    anthropicBaseUrl: config.anthropicBaseUrl,
     apiKey: config.apiKey ? `****${config.apiKey.slice(-4)}` : "",
     headerName: config.headerName,
     headerValue: config.headerValue ? `****${config.headerValue.slice(-4)}` : "",
@@ -39,6 +41,7 @@ export async function PUT(req: NextRequest) {
       enabled: Boolean(body.enabled),
       vendor,
       baseUrl: body.baseUrl || "",
+      anthropicBaseUrl: body.anthropicBaseUrl || "",
       apiKey: body.apiKey ?? null, // null = keep existing
       headerName: body.headerName || "Authorization",
       headerValue: body.headerValue || "",
@@ -62,30 +65,49 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
 
     const baseUrl = body.baseUrl;
+    const anthropicBaseUrl = body.anthropicBaseUrl;
     const headerName = body.headerName || "Authorization";
     const headerValue = body.headerValue || "";
     const modelId = body.modelId || "gpt-3.5-turbo";
 
-    if (!baseUrl) {
-      return NextResponse.json({ error: "Base URL is required" }, { status: 400 });
-    }
     if (!headerValue) {
       return NextResponse.json({ error: "Header value / API key is required" }, { status: 400 });
     }
 
-    const proxy = createOpenAI({
-      baseURL: baseUrl.replace(/\/chat\/completions$/, ""),
-      apiKey: "not-needed",
-      headers: {
-        [headerName]: headerValue,
-      },
-    });
+    let model;
+    if (isAnthropicModel(modelId)) {
+      if (!anthropicBaseUrl) {
+        return NextResponse.json({ error: "Anthropic Base URL is required for Claude models" }, { status: 400 });
+      }
+      const anthropic = createAnthropic({
+        baseURL: anthropicBaseUrl,
+        apiKey: "not-needed",
+        headers: {
+          [headerName]: headerValue,
+          "X-LLM-Proxy-Target-URL": "https://api.anthropic.com",
+        },
+      });
+      model = anthropic(modelId);
+    } else {
+      if (!baseUrl) {
+        return NextResponse.json({ error: "Base URL is required" }, { status: 400 });
+      }
+      const proxy = createOpenAI({
+        baseURL: baseUrl.replace(/\/chat\/completions$/, ""),
+        apiKey: "not-needed",
+        headers: {
+          [headerName]: headerValue,
+        },
+      });
+      model = proxy(modelId);
+    }
 
-    const { text } = await generateText({
-      model: proxy(modelId),
+    const result = streamText({
+      model,
       prompt: "Say 'ok' and nothing else.",
       maxOutputTokens: 10,
     });
+    const text = await result.text;
 
     return NextResponse.json({ ok: true, response: text.trim() });
   } catch (e) {

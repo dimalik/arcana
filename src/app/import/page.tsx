@@ -127,14 +127,14 @@ export default function ImportPage() {
               <div>
                 <Label>URL</Label>
                 <Input
-                  placeholder="https://example.com/paper"
+                  placeholder="https://doi.org/10.1073/pnas... or any URL"
                   value={urlInput}
                   onChange={(e) => setUrlInput(e.target.value)}
                   onKeyDown={(e) => e.key === "Enter" && handleUrlImport()}
                 />
                 <p className="mt-1 text-xs text-muted-foreground">
-                  Enter any web URL. The content will be extracted using
-                  Readability.
+                  Paste a DOI link, publisher URL (PNAS, Nature, Science...),
+                  or any web page.
                 </p>
               </div>
               <Button onClick={handleUrlImport} disabled={loading}>

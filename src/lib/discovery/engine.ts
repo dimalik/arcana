@@ -49,6 +49,9 @@ export type DiscoveryEvent =
 /**
  * Run discovery for a session. Yields progress events as NDJSON.
  */
+// Maximum total proposals per discovery session
+const MAX_PROPOSALS = 75;
+
 export async function* runDiscovery(
   sessionId: string,
   seedPaperIds: string[],
@@ -127,6 +130,7 @@ export async function* runDiscovery(
       };
 
       for (const ref of references) {
+        if (totalFound >= MAX_PROPOSALS) break;
         const result = await processCandidate(
           ref,
           `cited_by:${seed.id}`,
@@ -141,6 +145,8 @@ export async function* runDiscovery(
           yield { type: "proposal", proposal: result };
         }
       }
+
+      if (totalFound >= MAX_PROPOSALS) break;
 
       // Get inbound citations (papers that cite this seed)
       yield {
@@ -158,6 +164,7 @@ export async function* runDiscovery(
       };
 
       for (const cit of citations) {
+        if (totalFound >= MAX_PROPOSALS) break;
         const result = await processCandidate(
           cit,
           `cites:${seed.id}`,
@@ -172,6 +179,8 @@ export async function* runDiscovery(
           yield { type: "proposal", proposal: result };
         }
       }
+
+      if (totalFound >= MAX_PROPOSALS) break;
 
       yield {
         type: "progress",

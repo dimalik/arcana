@@ -125,6 +125,12 @@ async function renderAllPages() {
     wrapper.appendChild(textLayerDiv);
     await renderTextLayer(page, viewport, textLayerDiv);
 
+    // Link annotation layer (clickable links from the PDF)
+    const linkLayer = document.createElement("div");
+    linkLayer.className = "link-layer";
+    wrapper.appendChild(linkLayer);
+    await renderLinkLayer(page, viewport, linkLayer);
+
     // Highlight layer
     const highlightLayer = document.createElement("div");
     highlightLayer.className = "highlight-layer";
@@ -196,6 +202,80 @@ async function renderTextLayer(page, viewport, container) {
         span.style.transform = `scaleX(${scaleX})`;
       }
     }
+  }
+}
+
+// ---- Link annotation layer ----
+async function renderLinkLayer(page, viewport, container) {
+  let annots;
+  try {
+    annots = await page.getAnnotations();
+  } catch {
+    return;
+  }
+
+  for (const annot of annots) {
+    if (annot.subtype !== "Link") continue;
+    if (!annot.rect || annot.rect.length < 4) continue;
+
+    // Convert PDF rect to viewport coordinates
+    const [x1, y1, x2, y2] = viewport.convertToViewportRectangle(annot.rect);
+    const left = Math.min(x1, x2);
+    const top = Math.min(y1, y2);
+    const width = Math.abs(x2 - x1);
+    const height = Math.abs(y2 - y1);
+
+    if (width < 1 || height < 1) continue;
+
+    const link = document.createElement("a");
+    link.className = "pdf-link-annot";
+    link.style.left = `${left}px`;
+    link.style.top = `${top}px`;
+    link.style.width = `${width}px`;
+    link.style.height = `${height}px`;
+
+    if (annot.url) {
+      // External link
+      link.href = annot.url;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      link.title = annot.url;
+    } else if (annot.dest) {
+      // Internal link (cross-reference within the PDF)
+      link.href = "#";
+      link.addEventListener("click", (e) => {
+        e.preventDefault();
+        resolveDestination(annot.dest);
+      });
+    } else if (annot.action?.type === "GoTo" && annot.action.dest) {
+      link.href = "#";
+      link.addEventListener("click", (e) => {
+        e.preventDefault();
+        resolveDestination(annot.action.dest);
+      });
+    } else {
+      continue; // Skip annotations we can't handle
+    }
+
+    container.appendChild(link);
+  }
+}
+
+async function resolveDestination(dest) {
+  try {
+    let destArray = dest;
+
+    // Named destination → resolve to array
+    if (typeof dest === "string") {
+      destArray = await pdfDoc.getDestination(dest);
+      if (!destArray) return;
+    }
+
+    // destArray[0] is a page reference object
+    const pageIndex = await pdfDoc.getPageIndex(destArray[0]);
+    goToPage(pageIndex + 1); // getPageIndex is 0-based
+  } catch (err) {
+    console.warn("Could not resolve PDF destination:", err);
   }
 }
 

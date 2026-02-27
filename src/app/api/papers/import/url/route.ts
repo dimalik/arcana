@@ -1,7 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { extractUrlContent } from "@/lib/import/url";
+import {
+  extractUrlContent,
+  extractDoiFromUrl,
+  fetchDoiMetadata,
+} from "@/lib/import/url";
 import { processingQueue } from "@/lib/processing/queue";
+import { findAndDownloadPdf } from "@/lib/import/pdf-finder";
 import { z } from "zod";
 
 const importSchema = z.object({
@@ -13,31 +18,102 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const { url } = importSchema.parse(body);
 
-    // Check for duplicate
-    const existing = await prisma.paper.findFirst({
+    // Check for duplicate by URL
+    const existingByUrl = await prisma.paper.findFirst({
       where: { sourceUrl: url },
     });
-    if (existing) {
+    if (existingByUrl) {
       return NextResponse.json(
-        { error: "URL already imported", paper: existing },
+        { error: "URL already imported", paper: existingByUrl },
         { status: 409 }
       );
     }
 
+    // ── DOI-first path ───────────────────────────────────────────────
+    const doi = extractDoiFromUrl(url);
+
+    if (doi) {
+      // Check for duplicate by DOI
+      const existingByDoi = await prisma.paper.findFirst({
+        where: { doi },
+      });
+      if (existingByDoi) {
+        return NextResponse.json(
+          { error: "Paper with this DOI already imported", paper: existingByDoi },
+          { status: 409 }
+        );
+      }
+
+      const metadata = await fetchDoiMetadata(doi);
+
+      if (metadata) {
+        // Aggressively search for PDF from multiple sources
+        const pdfResult = await findAndDownloadPdf({
+          doi: metadata.doi,
+          existingPdfUrl: metadata.openAccessPdfUrl,
+        });
+
+        const paper = await prisma.paper.create({
+          data: {
+            title: metadata.title,
+            abstract: metadata.abstract,
+            authors: JSON.stringify(metadata.authors),
+            year: metadata.year,
+            venue: metadata.venue,
+            doi: metadata.doi,
+            sourceType: "URL",
+            sourceUrl: url,
+            filePath: pdfResult?.filePath,
+            processingStatus: pdfResult?.filePath ? "EXTRACTING_TEXT" : "TEXT_EXTRACTED",
+          },
+        });
+
+        processingQueue.enqueue(paper.id);
+        return NextResponse.json(paper, { status: 201 });
+      }
+      // metadata fetch failed — fall through to Readability
+    }
+
+    // ── HTML scrape fallback (meta tags + Readability) ────────────────
     const content = await extractUrlContent(url);
+
+    // If meta tags found a DOI we didn't catch from the URL, dedup by it
+    if (content.doi) {
+      const existingByDoi = await prisma.paper.findFirst({
+        where: { doi: content.doi },
+      });
+      if (existingByDoi) {
+        return NextResponse.json(
+          { error: "Paper with this DOI already imported", paper: existingByDoi },
+          { status: 409 }
+        );
+      }
+    }
+
+    // Try to find and download PDF from multiple sources
+    const pdfResult = await findAndDownloadPdf({
+      doi: content.doi,
+      existingPdfUrl: content.pdfUrl,
+    });
 
     const paper = await prisma.paper.create({
       data: {
         title: content.title,
-        abstract: content.excerpt,
+        abstract: content.excerpt || undefined,
+        authors: content.authors?.length
+          ? JSON.stringify(content.authors)
+          : undefined,
+        year: content.year ?? undefined,
+        venue: content.siteName || undefined,
+        doi: content.doi || undefined,
         sourceType: "URL",
         sourceUrl: url,
-        fullText: content.content,
-        processingStatus: "TEXT_EXTRACTED",
+        fullText: content.content || undefined,
+        filePath: pdfResult?.filePath,
+        processingStatus: pdfResult?.filePath ? "EXTRACTING_TEXT" : "TEXT_EXTRACTED",
       },
     });
 
-    // Queue handles LLM pipeline
     processingQueue.enqueue(paper.id);
 
     return NextResponse.json(paper, { status: 201 });

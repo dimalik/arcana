@@ -63,6 +63,41 @@ async function detectPage(tab) {
     // invalid URL, continue
   }
 
+  // Check for DOI in URL (publisher sites: PNAS, Nature, Science, Wiley, etc.)
+  const doiMatch = url.match(
+    /(?:doi\.org\/|\/(?:doi\/(?:full\/)?|article\/))(10\.\d{4,9}\/[^\s?#]+)/i
+  );
+  if (doiMatch) {
+    const doi = doiMatch[1].replace(/[.)]+$/, "");
+    // Read title + PDF URL from the page's citation meta tags
+    let pageTitle = tab.title || "";
+    let citationPdfUrl = null;
+    if (tab.id) {
+      try {
+        const [result] = await chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          func: () => {
+            const titleEl =
+              document.querySelector('meta[name="citation_title"]') ||
+              document.querySelector('meta[property="og:title"]') ||
+              document.querySelector('meta[name="DC.title"]');
+            const pdfEl = document.querySelector('meta[name="citation_pdf_url"]');
+            return {
+              title: titleEl?.getAttribute("content") || null,
+              pdfUrl: pdfEl?.getAttribute("content") || null,
+            };
+          },
+        });
+        if (result?.result?.title) pageTitle = result.result.title;
+        if (result?.result?.pdfUrl) citationPdfUrl = result.result.pdfUrl;
+      } catch {
+        // scripting may fail on restricted pages
+      }
+    }
+    showDoiImport(doi, pageTitle, url, citationPdfUrl);
+    return;
+  }
+
   // Fallback: check actual content type via scripting API
   // This catches PDFs served without .pdf in the URL (journals, repositories, etc.)
   if (tab.id) {
@@ -166,6 +201,48 @@ function showOpenReviewImport(forumId, pageTitle, url) {
   });
 }
 
+function showDoiImport(doi, pageTitle, url, pdfUrl) {
+  const title = pageTitle
+    ?.replace(/ \|.*$/, "")
+    .replace(/ - .*$/, "")
+    .trim();
+
+  importSection.innerHTML = `
+    <div class="detect-label">Paper Detected (DOI)</div>
+    ${title ? `<div class="detect-title">${escapeHtml(title)}</div>` : ""}
+    <div class="detect-id">DOI: ${escapeHtml(doi)}</div>
+    <button id="import-btn" class="btn btn-primary">Import to Arcana</button>
+  `;
+
+  document.getElementById("import-btn").addEventListener("click", async (e) => {
+    const btn = e.target;
+    btn.disabled = true;
+    btn.textContent = "Importing…";
+
+    const result = await chrome.runtime.sendMessage({
+      type: "import-url",
+      url: url,
+      pdfUrl: pdfUrl,
+    });
+
+    if (result.success) {
+      btn.textContent = "✓ Imported";
+      btn.style.background = "#16a34a";
+      showResult(
+        result.alreadyExists ? "warning" : "success",
+        result.alreadyExists ? "Already in Arcana" : "Paper imported!",
+        result.paper?.id
+      );
+    } else {
+      btn.textContent = "Import to Arcana";
+      btn.disabled = false;
+      showResult("error", result.error || "Import failed");
+    }
+
+    loadHistory();
+  });
+}
+
 function showPdfUpload(url) {
   const filename = new URL(url).pathname.split("/").pop() || "paper.pdf";
 
@@ -209,7 +286,7 @@ function showPdfUpload(url) {
 
 function showNoAction() {
   importSection.innerHTML = `
-    <p class="no-action">Navigate to an arXiv, OpenReview, or PDF page to import</p>
+    <p class="no-action">Navigate to an arXiv, OpenReview, DOI/publisher, or PDF page to import</p>
   `;
 }
 

@@ -2,9 +2,8 @@ import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { fetchArxivMetadata, downloadArxivPdf } from "@/lib/import/arxiv";
 import { processingQueue } from "@/lib/processing/queue";
-import { writeFile, mkdir } from "fs/promises";
-import path from "path";
-import { v4 as uuidv4 } from "uuid";
+import { findAndDownloadPdf } from "@/lib/import/pdf-finder";
+import { fetchDoiMetadata } from "@/lib/import/url";
 
 /**
  * POST /api/discovery/[sessionId]/proposals/[proposalId]/import
@@ -37,7 +36,7 @@ export async function POST(
     let paper;
 
     if (proposal.arxivId) {
-      // Check if already in library by arXiv ID
+      // ── arXiv path (unchanged) ──────────────────────────────────────
       const existing = await prisma.paper.findFirst({
         where: { arxivId: proposal.arxivId },
       });
@@ -74,24 +73,35 @@ export async function POST(
       });
 
       processingQueue.enqueue(paper.id);
-    } else if (proposal.openAccessPdfUrl) {
-      // Try to download open access PDF
-      let filePath: string | undefined;
-      try {
-        const pdfRes = await fetch(proposal.openAccessPdfUrl);
-        const contentType = pdfRes.headers.get("content-type") || "";
-        if (pdfRes.ok && contentType.includes("pdf")) {
-          const uploadDir = path.join(process.cwd(), "uploads");
-          await mkdir(uploadDir, { recursive: true });
-          const buffer = Buffer.from(await pdfRes.arrayBuffer());
-          const filename = `discovery-${uuidv4().slice(0, 8)}.pdf`;
-          const fullPath = path.join(uploadDir, filename);
-          await writeFile(fullPath, buffer);
-          filePath = `uploads/${filename}`;
+    } else {
+      // ── Non-arXiv: aggressive PDF search + metadata fetch ───────────
+
+      // 1. Try to find a PDF from multiple sources
+      const pdfResult = await findAndDownloadPdf({
+        doi: proposal.doi,
+        arxivId: null,
+        existingPdfUrl: proposal.openAccessPdfUrl,
+      });
+
+      // 2. Fetch abstract/metadata via DOI APIs (OpenAlex → CrossRef)
+      let abstract: string | null = null;
+      if (proposal.doi) {
+        const doiMeta = await fetchDoiMetadata(proposal.doi);
+        if (doiMeta?.abstract) {
+          abstract = doiMeta.abstract;
         }
-      } catch {
-        // PDF download failed
       }
+
+      // 3. Determine processing status:
+      //    - Has PDF → EXTRACTING_TEXT (queue will extract text then run LLM)
+      //    - No PDF but has abstract → TEXT_EXTRACTED (queue will run LLM from abstract)
+      //    - Neither → PENDING (needs manual PDF upload)
+      const hasContent = !!pdfResult?.filePath || !!abstract;
+      const processingStatus = pdfResult?.filePath
+        ? "EXTRACTING_TEXT"
+        : abstract
+          ? "TEXT_EXTRACTED"
+          : "PENDING";
 
       paper = await prisma.paper.create({
         data: {
@@ -101,29 +111,19 @@ export async function POST(
           venue: proposal.venue,
           doi: proposal.doi,
           sourceType: "URL",
-          sourceUrl: proposal.externalUrl || undefined,
-          filePath,
-          processingStatus: filePath ? "EXTRACTING_TEXT" : "PENDING",
+          sourceUrl:
+            proposal.externalUrl ||
+            (proposal.doi ? `https://doi.org/${proposal.doi}` : undefined),
+          filePath: pdfResult?.filePath,
+          abstract,
+          processingStatus,
         },
       });
 
-      if (filePath) {
+      // Always enqueue if we have something to process
+      if (hasContent) {
         processingQueue.enqueue(paper.id);
       }
-    } else {
-      // Create minimal paper record
-      paper = await prisma.paper.create({
-        data: {
-          title: proposal.title,
-          authors: proposal.authors,
-          year: proposal.year,
-          venue: proposal.venue,
-          doi: proposal.doi,
-          sourceType: "URL",
-          sourceUrl: proposal.externalUrl || (proposal.doi ? `https://doi.org/${proposal.doi}` : undefined),
-          processingStatus: "PENDING",
-        },
-      });
     }
 
     // Mark proposal as imported

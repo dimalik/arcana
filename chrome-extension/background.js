@@ -213,6 +213,70 @@ async function uploadPdf(pdfUrl, includeSourceUrl = false) {
   return { success: false, error: data.error || "Upload failed" };
 }
 
+async function importUrl(url, pdfUrl) {
+  const baseUrl = await getBaseUrl();
+  const response = await fetch(`${baseUrl}/api/papers/import/url`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ url }),
+  });
+
+  const data = await response.json();
+
+  if (response.status === 201) {
+    // If we have a PDF URL from the page and the paper has no PDF yet,
+    // download it from the browser (avoids publisher 403s) and upload
+    if (pdfUrl && !data.filePath) {
+      try {
+        const pdfRes = await fetch(pdfUrl);
+        if (pdfRes.ok) {
+          const blob = await pdfRes.blob();
+          if (blob.type.includes("pdf") || pdfUrl.endsWith(".pdf")) {
+            const formData = new FormData();
+            formData.append("file", blob, "paper.pdf");
+            await fetch(`${baseUrl}/api/papers/${data.id}/file`, {
+              method: "POST",
+              body: formData,
+            });
+          }
+        }
+      } catch {
+        // PDF download failed — paper still imported with metadata
+      }
+    }
+
+    setBadge("✓", "#16a34a");
+    await addToHistory({
+      type: "doi",
+      title: data.title || url,
+      paperId: data.id,
+      success: true,
+    });
+    return { success: true, paper: data };
+  }
+
+  if (response.status === 409) {
+    setBadge("!", "#eab308");
+    await addToHistory({
+      type: "doi",
+      title: data.paper?.title || url,
+      paperId: data.paper?.id,
+      success: true,
+      note: "Already imported",
+    });
+    return { success: true, paper: data.paper, alreadyExists: true };
+  }
+
+  setBadge("✗", "#dc2626");
+  await addToHistory({
+    type: "doi",
+    title: url,
+    success: false,
+    error: data.error,
+  });
+  return { success: false, error: data.error || "Import failed" };
+}
+
 async function lookupPaper(sourceUrl) {
   const baseUrl = await getBaseUrl();
   try {
@@ -306,6 +370,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (message.type === "import-openreview") {
     importOpenReview(message.input).then(sendResponse);
+    return true;
+  }
+
+  if (message.type === "import-url") {
+    importUrl(message.url, message.pdfUrl).then(sendResponse);
     return true;
   }
 

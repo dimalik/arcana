@@ -43,27 +43,12 @@ export default function PapersPage() {
     fetchPapers();
   }, [fetchPapers]);
 
-  const handleBookmarkToggle = async (id: string) => {
-    const res = await fetch(`/api/papers/${id}/bookmark`, { method: "PATCH" });
+  const handleLikeToggle = async (id: string) => {
+    const res = await fetch(`/api/papers/${id}/like`, { method: "PATCH" });
     if (res.ok) {
-      const { isBookmarked } = await res.json();
+      const { isLiked } = await res.json();
       setPapers((prev) =>
-        prev.map((p) => (p.id === id ? { ...p, isBookmarked } : p))
-      );
-    }
-  };
-
-  const handleStatusChange = async (id: string, status: string) => {
-    const res = await fetch(`/api/papers/${id}/status`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ status }),
-    });
-    if (res.ok) {
-      setPapers((prev) =>
-        prev.map((p) =>
-          p.id === id ? { ...p, readingStatus: status } : p
-        )
+        prev.map((p) => (p.id === id ? { ...p, isLiked } : p))
       );
     }
   };
@@ -146,8 +131,7 @@ export default function PapersPage() {
             <PaperCard
               key={paper.id}
               paper={paper}
-              onBookmarkToggle={handleBookmarkToggle}
-              onStatusChange={handleStatusChange}
+              onLikeToggle={handleLikeToggle}
               onDelete={handleDelete}
             />
           ))}
