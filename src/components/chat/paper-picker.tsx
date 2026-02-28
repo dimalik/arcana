@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Popover,
@@ -14,43 +14,51 @@ import {
   CommandItem,
   CommandList,
 } from "@/components/ui/command";
-import { BookOpen, X, Loader2 } from "lucide-react";
-
-interface ReferencedPaper {
-  id: string;
-  title: string;
-}
+import { BookOpen, Loader2 } from "lucide-react";
 
 interface PaperPickerProps {
-  paperId: string; // primary paper id (excluded from search)
+  paperId: string;
   conversationId: string;
+  /** Custom trigger element (renders inside PopoverTrigger) */
+  trigger?: ReactNode;
+  /** Called after a paper is added server-side */
+  onAdd?: (paperId: string, title: string) => void;
+  /** Called after a paper is removed server-side */
+  onRemove?: (paperId: string) => void;
 }
 
-export function PaperPicker({ paperId, conversationId }: PaperPickerProps) {
+export function PaperPicker({
+  paperId,
+  conversationId,
+  trigger,
+  onAdd,
+  onRemove,
+}: PaperPickerProps) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [searchResults, setSearchResults] = useState<
     { id: string; title: string }[]
   >([]);
-  const [referenced, setReferenced] = useState<ReferencedPaper[]>([]);
+  const [referencedIds, setReferencedIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(false);
 
-  // Load currently referenced papers
-  const loadReferenced = useCallback(async () => {
-    const res = await fetch(
-      `/api/papers/${paperId}/conversations/${conversationId}`
-    );
-    const data = await res.json();
-    setReferenced(
-      (data.additionalPapers || []).map(
-        (ap: { paper: { id: string; title: string } }) => ap.paper
-      )
-    );
-  }, [paperId, conversationId]);
-
+  // Load currently referenced paper ids when opened
   useEffect(() => {
-    if (open) loadReferenced();
-  }, [open, loadReferenced]);
+    if (!open) return;
+    (async () => {
+      const res = await fetch(
+        `/api/papers/${paperId}/conversations/${conversationId}`
+      );
+      const data = await res.json();
+      setReferencedIds(
+        new Set(
+          (data.additionalPapers || []).map(
+            (ap: { paper: { id: string } }) => ap.paper.id
+          )
+        )
+      );
+    })();
+  }, [open, paperId, conversationId]);
 
   // Search papers
   useEffect(() => {
@@ -64,8 +72,6 @@ export function PaperPicker({ paperId, conversationId }: PaperPickerProps) {
         `/api/papers?search=${encodeURIComponent(search)}&limit=10`
       );
       const data = await res.json();
-      // Exclude primary paper and already-referenced papers
-      const referencedIds = new Set(referenced.map((r) => r.id));
       setSearchResults(
         (data.papers || [])
           .filter(
@@ -80,7 +86,7 @@ export function PaperPicker({ paperId, conversationId }: PaperPickerProps) {
       setLoading(false);
     }, 300);
     return () => clearTimeout(timer);
-  }, [search, paperId, referenced]);
+  }, [search, paperId, referencedIds]);
 
   const handleAdd = async (addPaperId: string, title: string) => {
     await fetch(`/api/papers/${paperId}/conversations/${conversationId}`, {
@@ -88,41 +94,40 @@ export function PaperPicker({ paperId, conversationId }: PaperPickerProps) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ addPaperIds: [addPaperId] }),
     });
-    setReferenced((prev) => [...prev, { id: addPaperId, title }]);
+    setReferencedIds((prev) => {
+      const next = new Set(Array.from(prev));
+      next.add(addPaperId);
+      return next;
+    });
+    onAdd?.(addPaperId, title);
     setSearch("");
     setSearchResults([]);
-  };
-
-  const handleRemove = async (removePaperId: string) => {
-    await fetch(`/api/papers/${paperId}/conversations/${conversationId}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ removePaperIds: [removePaperId] }),
-    });
-    setReferenced((prev) => prev.filter((r) => r.id !== removePaperId));
+    setOpen(false);
   };
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-7 w-7"
-          title="Add paper context"
-        >
-          <BookOpen className="h-3.5 w-3.5" />
-        </Button>
+        {trigger || (
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7"
+            title="Add paper context"
+          >
+            <BookOpen className="h-3.5 w-3.5" />
+          </Button>
+        )}
       </PopoverTrigger>
       <PopoverContent
         className="w-80 p-0"
-        align="end"
-        side="bottom"
+        align="start"
+        side="top"
         sideOffset={4}
       >
         <Command shouldFilter={false}>
           <CommandInput
-            placeholder="Search papers..."
+            placeholder="Search papers to add..."
             value={search}
             onValueChange={setSearch}
           />
@@ -147,31 +152,6 @@ export function PaperPicker({ paperId, conversationId }: PaperPickerProps) {
             ))}
           </CommandList>
         </Command>
-
-        {/* Referenced papers */}
-        {referenced.length > 0 && (
-          <div className="border-t px-3 py-2 space-y-1">
-            <p className="text-xs text-muted-foreground font-medium">
-              Referenced papers
-            </p>
-            {referenced.map((paper) => (
-              <div
-                key={paper.id}
-                className="flex items-center gap-1.5 text-sm"
-              >
-                <span className="truncate flex-1">{paper.title}</span>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-5 w-5 shrink-0"
-                  onClick={() => handleRemove(paper.id)}
-                >
-                  <X className="h-3 w-3" />
-                </Button>
-              </div>
-            ))}
-          </div>
-        )}
       </PopoverContent>
     </Popover>
   );

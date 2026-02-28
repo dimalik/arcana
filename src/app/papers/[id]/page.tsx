@@ -48,7 +48,15 @@ import {
   Clock,
   Sparkles,
   Upload,
+  MoreHorizontal,
 } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { toast } from "sonner";
 import { TagPicker } from "@/components/tags/tag-picker";
 import { MarkdownRenderer } from "@/components/ui/markdown-renderer";
@@ -59,6 +67,8 @@ import { SelectionHighlighter } from "@/components/chat/selection-highlighter";
 import { AnalysisHistory } from "@/components/history/analysis-history";
 import { CrossPaperInsights } from "@/components/analysis/cross-paper-insights";
 import { parseSummarySections } from "@/lib/papers/parse-sections";
+import { useLayoutTheme } from "@/components/layout/theme-context";
+import { RightPanel } from "@/components/paper-detail/right-panel";
 
 interface Tag {
   id: string;
@@ -175,6 +185,7 @@ export default function PaperDetailPage() {
   const [editing, setEditing] = useState(false);
   const [distilling, setDistilling] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [chatOpen, setChatOpen] = useState(false);
   const [activeView, setActiveView] = useState<ViewTab>("review");
   const [relatedPaperMap, setRelatedPaperMap] = useState<Record<string, string>>({});
   const [editForm, setEditForm] = useState({
@@ -187,6 +198,8 @@ export default function PaperDetailPage() {
   });
 
   const contentRef = useRef<HTMLDivElement>(null);
+  const { theme, setPageInfo } = useLayoutTheme();
+  const isClean = theme === "clean";
 
   // Number key hotkeys: 1-6 switch view tabs
   useEffect(() => {
@@ -200,6 +213,12 @@ export default function PaperDetailPage() {
         return;
       }
       if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (e.key === "l") {
+        fetch(`/api/papers/${id}/like`, { method: "PATCH" })
+          .then((r) => r.ok ? r.json() : null)
+          .then((data) => data && setPaper((prev) => prev ? { ...prev, isLiked: data.isLiked } : prev));
+        return;
+      }
       const idx = parseInt(e.key, 10);
       if (idx >= 1 && idx <= viewTabs.length) {
         setActiveView(viewTabs[idx - 1].value);
@@ -383,6 +402,232 @@ export default function PaperDetailPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
+  // Push paper info into clean topbar
+  useEffect(() => {
+    if (!paper) return;
+    const authors: string[] = paper.authors ? JSON.parse(paper.authors) : [];
+    const keyFindings: string[] = paper.keyFindings ? JSON.parse(paper.keyFindings) : [];
+    const tags = paper.tags ?? [];
+    const hasMetadata = authors.length > 0 || paper.venue || paper.doi || paper.arxivId;
+
+    setPageInfo({
+      title: paper.title + (paper.year ? ` (${paper.year})` : ""),
+      meta: (
+        <div className="flex items-center gap-0.5 shrink-0">
+          {hasMetadata && (
+            <Popover>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <PopoverTrigger asChild>
+                    <button className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground">
+                      <Info className="h-3.5 w-3.5" />
+                    </button>
+                  </PopoverTrigger>
+                </TooltipTrigger>
+                <TooltipContent>Details</TooltipContent>
+              </Tooltip>
+              <PopoverContent className="w-80" align="start">
+                <div className="space-y-3 text-sm">
+                  {authors.length > 0 && (
+                    <div className="flex gap-2">
+                      <Users className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                      <span>{authors.join(", ")}</span>
+                    </div>
+                  )}
+                  {paper.venue && (
+                    <div className="flex items-center gap-2">
+                      <Building2 className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                      <span>{paper.venue}</span>
+                    </div>
+                  )}
+                  {paper.doi && (
+                    <div className="flex items-center gap-2">
+                      <Fingerprint className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                      <a href={`https://doi.org/${paper.doi}`} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline break-all">
+                        {paper.doi}
+                      </a>
+                    </div>
+                  )}
+                  {paper.arxivId && (
+                    <div className="flex items-center gap-2">
+                      <ExternalLink className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                      <a href={`https://arxiv.org/abs/${paper.arxivId}`} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">
+                        arXiv:{paper.arxivId}
+                      </a>
+                    </div>
+                  )}
+                </div>
+              </PopoverContent>
+            </Popover>
+          )}
+          {paper.abstract && (
+            <Popover>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <PopoverTrigger asChild>
+                    <button className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground">
+                      <FileText className="h-3.5 w-3.5" />
+                    </button>
+                  </PopoverTrigger>
+                </TooltipTrigger>
+                <TooltipContent>Abstract</TooltipContent>
+              </Tooltip>
+              <PopoverContent className="w-96" align="start">
+                <p className="text-sm leading-relaxed text-muted-foreground">{paper.abstract}</p>
+              </PopoverContent>
+            </Popover>
+          )}
+          {keyFindings.length > 0 && (
+            <Popover>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <PopoverTrigger asChild>
+                    <button className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground">
+                      <Lightbulb className="h-3.5 w-3.5" />
+                    </button>
+                  </PopoverTrigger>
+                </TooltipTrigger>
+                <TooltipContent>Key Findings</TooltipContent>
+              </Tooltip>
+              <PopoverContent className="w-96" align="start">
+                <ul className="space-y-1.5">
+                  {keyFindings.map((finding, i) => (
+                    <li key={i} className="flex gap-2.5 text-sm text-muted-foreground leading-relaxed">
+                      <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-amber-500/50" />
+                      {finding}
+                    </li>
+                  ))}
+                </ul>
+              </PopoverContent>
+            </Popover>
+          )}
+          {tags.length > 0 && (
+            <div className="flex items-center gap-1 ml-1">
+              {tags.slice(0, 3).map((pt) => (
+                <span
+                  key={pt.tag.id}
+                  className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium"
+                  style={{ backgroundColor: pt.tag.color + "20", color: pt.tag.color }}
+                >
+                  {pt.tag.name}
+                </span>
+              ))}
+              {tags.length > 3 && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span className="text-xs text-muted-foreground cursor-default">+{tags.length - 3}</span>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom" className="flex flex-col gap-1 bg-popover text-popover-foreground border shadow-md">
+                    {tags.slice(3).map((pt) => (
+                      <span
+                        key={pt.tag.id}
+                        className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium"
+                        style={{ backgroundColor: pt.tag.color + "20", color: pt.tag.color }}
+                      >
+                        {pt.tag.name}
+                      </span>
+                    ))}
+                  </TooltipContent>
+                </Tooltip>
+              )}
+            </div>
+          )}
+          {/* Processing status — minimal inline */}
+          {paper.processingStatus !== "COMPLETED" && paper.processingStatus !== "FAILED" && (
+            <span className="ml-1 flex items-center gap-1 text-xs text-muted-foreground">
+              <Loader2 className="h-3 w-3 animate-spin" />
+              {getProcessingLabel(paper)}
+            </span>
+          )}
+          {paper.processingStatus === "FAILED" && (
+            <span className="ml-1 text-xs text-destructive">Failed</span>
+          )}
+        </div>
+      ),
+      actions: (
+        <div className="flex items-center gap-0.5">
+          {/* Like */}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                onClick={() => {
+                  fetch(`/api/papers/${id}/like`, { method: "PATCH" })
+                    .then((res) => res.ok ? res.json() : null)
+                    .then((data) => data && setPaper((prev) => prev ? { ...prev, isLiked: data.isLiked } : prev));
+                }}
+                className="inline-flex h-8 w-8 items-center justify-center rounded-md hover:bg-accent"
+              >
+                <Heart className={`h-4 w-4 ${paper.isLiked ? "fill-red-500 text-red-500" : "text-muted-foreground"}`} />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>{paper.isLiked ? "Unlike" : "Like"}</TooltipContent>
+          </Tooltip>
+
+          {/* PDF */}
+          {paper.filePath && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <a
+                  href={`/api/papers/${id}/file`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-md hover:bg-accent"
+                >
+                  <FileText className="h-4 w-4 text-muted-foreground" />
+                </a>
+              </TooltipTrigger>
+              <TooltipContent>View PDF</TooltipContent>
+            </Tooltip>
+          )}
+
+          {/* Overflow menu */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground">
+                <MoreHorizontal className="h-4 w-4" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => { setReprocessing(true); fetch(`/api/papers/${id}/reprocess`, { method: "POST" }).then((r) => { if (r.ok) { toast.success("Reprocessing started"); fetchPaper(); } else { setReprocessing(false); } }); }}>
+                <RefreshCw className="mr-2 h-4 w-4" />
+                Reprocess
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => { setDistilling(true); fetch(`/api/papers/${id}/distill`, { method: "POST" }).then(async (r) => { if (r.ok) { const d = await r.json(); toast.success(`${d.created} insights extracted`); } else { toast.error("Failed to distill"); } }).finally(() => setDistilling(false)); }}>
+                <Brain className="mr-2 h-4 w-4" />
+                Distill insights
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setHistoryOpen(true)}>
+                <Clock className="mr-2 h-4 w-4" />
+                Analysis history
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setEditing((prev) => !prev)}>
+                <Pencil className="mr-2 h-4 w-4" />
+                Edit metadata
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                className="text-destructive focus:text-destructive"
+                onClick={() => {
+                  if (!confirm("Delete this paper permanently?")) return;
+                  fetch(`/api/papers/${id}`, { method: "DELETE" }).then(() => {
+                    toast.success("Paper deleted");
+                    router.push("/papers");
+                  });
+                }}
+              >
+                <Trash2 className="mr-2 h-4 w-4" />
+                Delete
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+      ),
+    });
+
+    return () => setPageInfo(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [paper, setPageInfo]);
+
   if (loading) {
     return (
       <div className="space-y-4">
@@ -410,8 +655,9 @@ export default function PaperDetailPage() {
 
   return (
     <TooltipProvider>
-      <div className="space-y-3">
-        {/* ── Paper title bar ── */}
+      <div className={isClean ? "flex flex-col gap-3 h-[calc(100vh-48px-2.5rem)] overflow-hidden" : "space-y-3"}>
+        {/* ── Paper title bar (classic only — clean shows it in topbar) ── */}
+        {!isClean && (
         <div className="flex items-center gap-2 min-w-0">
           <Tooltip>
             <TooltipTrigger asChild>
@@ -586,8 +832,10 @@ export default function PaperDetailPage() {
             </div>
           )}
         </div>
+        )}
 
         {/* ── Toolbar: view icons (left) | action icons (right) ── */}
+        {!isClean && (
         <div className="flex items-center justify-between">
           {/* View switcher icons */}
           <div className="flex items-center gap-0.5">
@@ -750,9 +998,10 @@ export default function PaperDetailPage() {
             </Tooltip>
           </div>
         </div>
+        )}
 
-        {/* Processing status */}
-        {(isProcessing || paper.processingStatus === "FAILED") && (
+        {/* Processing status (classic only — clean shows it in topbar) */}
+        {!isClean && (isProcessing || paper.processingStatus === "FAILED") && (
           <div className="flex items-center gap-1.5">
             {isProcessing && (
               <>
@@ -955,110 +1204,135 @@ export default function PaperDetailPage() {
         )}
 
         {/* ── View content ── */}
-        <div ref={contentRef}>
-          {activeView === "review" && (
-            <>
-              {paper.summary ? (
-                <Card>
-                  <CardContent className="pt-6">
-                    <MarkdownRenderer
-                      content={parseSummarySections(paper.summary).overview}
-                      className="text-sm"
-                    />
-                  </CardContent>
-                </Card>
-              ) : (
-                <Card>
-                  <CardContent className="py-8 text-center text-muted-foreground">
-                    {isProcessing
-                      ? "Processing... review will appear when ready"
-                      : "No review available"}
-                  </CardContent>
-                </Card>
-              )}
-            </>
-          )}
+          <div className={isClean ? "flex-1 min-h-0 overflow-y-auto" : ""}>
+          <div ref={contentRef} className={isClean && activeView !== "concepts" ? "prose-readable" : ""}>
+            {activeView === "review" && (
+              <>
+                {paper.summary ? (
+                  <Card>
+                    <CardContent className="pt-6">
+                      <MarkdownRenderer
+                        content={parseSummarySections(paper.summary).overview}
+                        className="text-sm"
+                      />
+                    </CardContent>
+                  </Card>
+                ) : (
+                  <Card>
+                    <CardContent className="py-8 text-center text-muted-foreground">
+                      {isProcessing
+                        ? "Processing... review will appear when ready"
+                        : "No review available"}
+                    </CardContent>
+                  </Card>
+                )}
+              </>
+            )}
 
-          {activeView === "methodology" && (
-            <>
-              {paper.summary &&
-              parseSummarySections(paper.summary).methodology ? (
-                <Card>
-                  <CardContent className="pt-6">
-                    <MarkdownRenderer
-                      content={parseSummarySections(paper.summary).methodology}
-                      className="text-sm"
-                    />
-                  </CardContent>
-                </Card>
-              ) : (
-                <Card>
-                  <CardContent className="py-8 text-center text-muted-foreground">
-                    {isProcessing
-                      ? "Processing... methodology will appear when ready"
-                      : "No methodology section available"}
-                  </CardContent>
-                </Card>
-              )}
-            </>
-          )}
+            {activeView === "methodology" && (
+              <>
+                {paper.summary &&
+                parseSummarySections(paper.summary).methodology ? (
+                  <Card>
+                    <CardContent className="pt-6">
+                      <MarkdownRenderer
+                        content={parseSummarySections(paper.summary).methodology}
+                        className="text-sm"
+                      />
+                    </CardContent>
+                  </Card>
+                ) : (
+                  <Card>
+                    <CardContent className="py-8 text-center text-muted-foreground">
+                      {isProcessing
+                        ? "Processing... methodology will appear when ready"
+                        : "No methodology section available"}
+                    </CardContent>
+                  </Card>
+                )}
+              </>
+            )}
 
-          {activeView === "results" && (
-            <>
-              {paper.summary &&
-              parseSummarySections(paper.summary).results ? (
-                <Card>
-                  <CardContent className="pt-6">
-                    <MarkdownRenderer
-                      content={parseSummarySections(paper.summary).results}
-                      className="text-sm"
-                    />
-                  </CardContent>
-                </Card>
-              ) : (
-                <Card>
-                  <CardContent className="py-8 text-center text-muted-foreground">
-                    {isProcessing
-                      ? "Processing... results will appear when ready"
-                      : "No results section available"}
-                  </CardContent>
-                </Card>
-              )}
-            </>
-          )}
+            {activeView === "results" && (
+              <>
+                {paper.summary &&
+                parseSummarySections(paper.summary).results ? (
+                  <Card>
+                    <CardContent className="pt-6">
+                      <MarkdownRenderer
+                        content={parseSummarySections(paper.summary).results}
+                        className="text-sm"
+                      />
+                    </CardContent>
+                  </Card>
+                ) : (
+                  <Card>
+                    <CardContent className="py-8 text-center text-muted-foreground">
+                      {isProcessing
+                        ? "Processing... results will appear when ready"
+                        : "No results section available"}
+                    </CardContent>
+                  </Card>
+                )}
+              </>
+            )}
 
-          {activeView === "connections" && (
-            <PaperConnections
-              paperId={paper.id}
-              paperTitle={paper.title}
-            />
-          )}
+            {activeView === "connections" && (
+              <PaperConnections
+                paperId={paper.id}
+                paperTitle={paper.title}
+              />
+            )}
 
-          {activeView === "analyze" && (
-            <CrossPaperInsights
-              paperId={paper.id}
-              promptResults={paper.promptResults}
-              onUpdate={fetchPaper}
-              relatedPapers={relatedPaperMap}
-            />
-          )}
+            {activeView === "analyze" && (
+              <CrossPaperInsights
+                paperId={paper.id}
+                promptResults={paper.promptResults}
+                onUpdate={fetchPaper}
+                relatedPapers={relatedPaperMap}
+              />
+            )}
 
-          {activeView === "concepts" && (
-            <ConceptMindmap
-              paperId={paper.id}
-              paperTitle={paper.title}
-              hasText={!!(paper.fullText || paper.abstract)}
-            />
-          )}
-        </div>
+            {activeView === "concepts" && (
+              <ConceptMindmap
+                paperId={paper.id}
+                paperTitle={paper.title}
+                hasText={!!(paper.fullText || paper.abstract)}
+              />
+            )}
+          </div>
+          </div>
 
         <SelectionHighlighter paperId={paper.id} containerRef={contentRef} />
 
-        <PaperChat
-          paperId={paper.id}
-          hasText={!!(paper.fullText || paper.abstract)}
-          initialConversationId={initialConversationId}
-        />
+        {/* Clean mode: fixed right strip + docked chat */}
+        {isClean && (
+          <>
+            <RightPanel
+              activeView={activeView}
+              onViewChange={setActiveView}
+              chatOpen={chatOpen}
+              onChatToggle={() => setChatOpen((o) => !o)}
+            />
+            <PaperChat
+              paperId={paper.id}
+              hasText={!!(paper.fullText || paper.abstract)}
+              initialConversationId={initialConversationId}
+              docked
+              dockedOpen={chatOpen}
+              onDockedToggle={() => setChatOpen((o) => !o)}
+            />
+          </>
+        )}
+
+        {/* Classic mode: floating chat */}
+        {!isClean && (
+          <PaperChat
+            paperId={paper.id}
+            hasText={!!(paper.fullText || paper.abstract)}
+            initialConversationId={initialConversationId}
+          />
+        )}
 
         <AnalysisHistory
           paperId={paper.id}

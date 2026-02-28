@@ -12,38 +12,18 @@ import {
 } from "@/components/ui/tooltip";
 import {
   FileText,
-  Upload,
-  Tags,
-  FolderTree,
-  LayoutDashboard,
-  Settings,
-  Download,
-  BookOpen,
-  Compass,
-  Activity,
-  Brain,
   PanelLeftClose,
   PanelLeftOpen,
+  Paintbrush,
 } from "lucide-react";
-
-const navItems = [
-  { href: "/", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/papers", label: "Papers", icon: FileText },
-  { href: "/upload", label: "Upload", icon: Upload },
-  { href: "/import", label: "Import", icon: Download },
-  { href: "/tags", label: "Tags", icon: Tags },
-  { href: "/collections", label: "Collections", icon: FolderTree },
-  { href: "/discovery", label: "Discovery", icon: Compass },
-  { href: "/mind-palace", label: "Mind Palace", icon: Brain },
-  { href: "/notebook", label: "Notebook", icon: BookOpen },
-  { href: "/engagement", label: "Engagement", icon: Activity },
-  { href: "/settings", label: "Settings", icon: Settings },
-];
+import { navItems } from "./nav-items";
+import { useLayoutTheme } from "./theme-context";
 
 const STORAGE_KEY = "sidebar-collapsed";
 
 export function Sidebar() {
   const pathname = usePathname();
+  const { setTheme } = useLayoutTheme();
   const [collapsed, setCollapsed] = useState(true);
   const [mounted, setMounted] = useState(false);
 
@@ -122,8 +102,29 @@ export function Sidebar() {
           })}
         </nav>
 
-        {/* Collapse toggle */}
-        <div className="p-2">
+        {/* Theme toggle + Collapse toggle */}
+        <div className="p-2 space-y-1">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                onClick={() => setTheme("clean")}
+                className={cn(
+                  "flex items-center rounded-md text-sm font-medium text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors",
+                  collapsed
+                    ? "h-9 w-10 justify-center"
+                    : "gap-3 px-3 py-2 w-full"
+                )}
+              >
+                <Paintbrush className="h-4 w-4 shrink-0" />
+                {!collapsed && <span className="whitespace-nowrap">Clean theme</span>}
+              </button>
+            </TooltipTrigger>
+            {collapsed && (
+              <TooltipContent side="right" sideOffset={8}>
+                Switch to clean theme
+              </TooltipContent>
+            )}
+          </Tooltip>
           <Tooltip>
             <TooltipTrigger asChild>
               <button

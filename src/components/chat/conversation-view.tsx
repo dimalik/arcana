@@ -7,13 +7,16 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import {
   ArrowLeft,
-  Send,
+  ArrowUp,
   Loader2,
   Minimize2,
   Maximize2,
   X,
-  MessageSquare,
   BookmarkPlus,
+  Plus,
+  History,
+  Paperclip,
+  BookOpen,
 } from "lucide-react";
 import { useNotebook } from "@/hooks/use-notebook";
 import { MarkdownRenderer } from "@/components/ui/markdown-renderer";
@@ -29,6 +32,9 @@ interface ConversationViewProps {
   onToggleExpand: () => void;
   onClose: () => void;
   onBack: () => void;
+  hideControls?: boolean;
+  onNewChat?: () => void;
+  onShowHistory?: () => void;
 }
 
 export function ConversationView({
@@ -40,6 +46,9 @@ export function ConversationView({
   onToggleExpand,
   onClose,
   onBack,
+  hideControls,
+  onNewChat,
+  onShowHistory,
 }: ConversationViewProps) {
   const [input, setInput] = useState("");
   const [title, setTitle] = useState<string | null>(null);
@@ -48,6 +57,9 @@ export function ConversationView({
     selectedContext || null
   );
   const [historyLoaded, setHistoryLoaded] = useState(false);
+  const [referencedPapers, setReferencedPapers] = useState<
+    { id: string; title: string }[]
+  >([]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const initialSent = useRef(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -78,6 +90,11 @@ export function ConversationView({
       const history = await historyRes.json();
       const conv = await convRes.json();
       setTitle(conv.title || null);
+      setReferencedPapers(
+        (conv.additionalPapers || []).map(
+          (ap: { paper: { id: string; title: string } }) => ap.paper
+        )
+      );
 
       if (history.length > 0) {
         setMessages(
@@ -118,6 +135,32 @@ export function ConversationView({
     }
   }, [messages]);
 
+  const handleAddPaper = useCallback(
+    async (addPaperId: string, title: string) => {
+      await fetch(`/api/papers/${paperId}/conversations/${conversationId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ addPaperIds: [addPaperId] }),
+      });
+      setReferencedPapers((prev) => [...prev, { id: addPaperId, title }]);
+    },
+    [paperId, conversationId]
+  );
+
+  const handleRemovePaper = useCallback(
+    async (removePaperId: string) => {
+      await fetch(`/api/papers/${paperId}/conversations/${conversationId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ removePaperIds: [removePaperId] }),
+      });
+      setReferencedPapers((prev) =>
+        prev.filter((r) => r.id !== removePaperId)
+      );
+    },
+    [paperId, conversationId]
+  );
+
   const handleSend = useCallback(async () => {
     if (!input.trim() || isLoading) return;
     let text = input;
@@ -132,58 +175,80 @@ export function ConversationView({
 
   return (
     <>
-      {/* Header */}
-      <div className="flex items-center justify-between border-b px-3 py-2.5">
-        <div className="flex items-center gap-1.5 min-w-0">
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-7 w-7 shrink-0"
-            onClick={onBack}
-            title="Back to conversations"
-          >
-            <ArrowLeft className="h-3.5 w-3.5" />
-          </Button>
-          <span className="text-sm font-medium truncate">
-            {title || "New conversation"}
-          </span>
+      {/* Minimal toolbar */}
+      <div className="flex items-center px-2 py-1.5">
+        {/* Left: back arrow (only when conversation started) */}
+        <div className="flex items-center gap-0.5">
+          {messages.length > 0 && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7 text-muted-foreground"
+              onClick={onBack}
+              title="Back"
+            >
+              <ArrowLeft className="h-3.5 w-3.5" />
+            </Button>
+          )}
         </div>
-        <div className="flex items-center gap-1 shrink-0">
-          <PaperPicker
-            paperId={paperId}
-            conversationId={conversationId}
-          />
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-7 w-7"
-            onClick={onToggleExpand}
-            title={expanded ? "Minimize" : "Expand"}
-          >
-            {expanded ? (
-              <Minimize2 className="h-3.5 w-3.5" />
-            ) : (
-              <Maximize2 className="h-3.5 w-3.5" />
-            )}
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-7 w-7"
-            onClick={onClose}
-            title="Close"
-          >
-            <X className="h-3.5 w-3.5" />
-          </Button>
+        {/* Right: new chat, history, expand/close */}
+        <div className="flex items-center gap-0.5 ml-auto">
+          {messages.length > 0 && onNewChat && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7 text-muted-foreground"
+              onClick={onNewChat}
+              title="New chat"
+            >
+              <Plus className="h-3.5 w-3.5" />
+            </Button>
+          )}
+          {onShowHistory && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7 text-muted-foreground"
+              onClick={onShowHistory}
+              title="Chat history"
+            >
+              <History className="h-3.5 w-3.5" />
+            </Button>
+          )}
+          {!hideControls && (
+            <>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7"
+                onClick={onToggleExpand}
+                title={expanded ? "Minimize" : "Expand"}
+              >
+                {expanded ? (
+                  <Minimize2 className="h-3.5 w-3.5" />
+                ) : (
+                  <Maximize2 className="h-3.5 w-3.5" />
+                )}
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7"
+                onClick={onClose}
+                title="Close"
+              >
+                <X className="h-3.5 w-3.5" />
+              </Button>
+            </>
+          )}
         </div>
       </div>
 
       {/* Messages */}
       <div className="flex-1 overflow-y-auto px-4" ref={scrollRef}>
-        <div className="space-y-3 py-3">
+        <div className="flex min-h-full flex-col space-y-3 py-3">
           {messages.length === 0 && !initialMessage && !selectedContext && (
-            <div className="flex flex-col items-center gap-2 py-8 text-center">
-              <MessageSquare className="h-8 w-8 text-muted-foreground/40" />
+            <div className="flex flex-1 flex-col items-center justify-end gap-2 pb-4 text-center">
               <p className="text-sm text-muted-foreground">
                 Ask anything about this paper
               </p>
@@ -198,7 +263,7 @@ export function ConversationView({
                     variant="outline"
                     size="sm"
                     className="text-xs h-7"
-                    onClick={() => setInput(suggestion)}
+                    onClick={() => sendMessage({ text: suggestion })}
                   >
                     {suggestion}
                   </Button>
@@ -271,8 +336,8 @@ export function ConversationView({
         </div>
       </div>
 
-      {/* Context chip + Input */}
-      <div className="border-t p-3">
+      {/* Input area */}
+      <div className="p-3">
         {context && (
           <div className="mb-2 flex items-start gap-1.5 rounded-md bg-muted/60 border px-2.5 py-1.5">
             <p className="text-xs text-muted-foreground flex-1 line-clamp-2">
@@ -287,7 +352,28 @@ export function ConversationView({
             </button>
           </div>
         )}
-        <div className="flex gap-2">
+        <div className="relative rounded-2xl border border-muted-foreground/20 focus-within:border-muted-foreground/40 transition-colors">
+          {/* Paper chips */}
+          {referencedPapers.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 px-3 pt-2.5 pr-10">
+              {referencedPapers.map((paper) => (
+                <span
+                  key={paper.id}
+                  className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[11px] text-muted-foreground max-w-[180px]"
+                >
+                  <BookOpen className="h-2.5 w-2.5 shrink-0" />
+                  <span className="truncate">{paper.title}</span>
+                  <button
+                    onClick={() => handleRemovePaper(paper.id)}
+                    className="shrink-0 hover:text-foreground"
+                  >
+                    <X className="h-2.5 w-2.5" />
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
+          {/* Textarea */}
           <Textarea
             ref={inputRef}
             value={input}
@@ -295,10 +381,10 @@ export function ConversationView({
             placeholder={
               context
                 ? "Ask your question about this passage..."
-                : "Ask about this paper..."
+                : "Chat about the paper"
             }
-            rows={1}
-            className="min-h-[36px] resize-none text-sm"
+            rows={3}
+            className="min-h-[80px] resize-none border-0 shadow-none focus-visible:ring-0 pr-12 text-sm"
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
@@ -306,14 +392,28 @@ export function ConversationView({
               }
             }}
           />
-          <Button
-            size="sm"
+          {/* Paperclip (top-right) + Send (bottom-right) */}
+          <PaperPicker
+            paperId={paperId}
+            conversationId={conversationId}
+            onAdd={handleAddPaper}
+            onRemove={handleRemovePaper}
+            trigger={
+              <button
+                className="absolute top-2 right-2.5 flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground/30 hover:text-muted-foreground transition-colors"
+                title="Add paper context"
+              >
+                <Paperclip className="h-4 w-4" />
+              </button>
+            }
+          />
+          <button
             onClick={handleSend}
             disabled={isLoading || !input.trim()}
-            className="h-9 w-9 p-0"
+            className="absolute bottom-2.5 right-2.5 flex h-8 w-8 items-center justify-center rounded-lg bg-muted-foreground/15 text-muted-foreground transition-colors hover:bg-muted-foreground/25 disabled:opacity-40 disabled:hover:bg-muted-foreground/15"
           >
-            <Send className="h-4 w-4" />
-          </Button>
+            <ArrowUp className="h-4 w-4" />
+          </button>
         </div>
       </div>
     </>

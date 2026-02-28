@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
 import localFont from "next/font/local";
 import "./globals.css";
-import { Sidebar } from "@/components/layout/sidebar";
+import { LayoutThemeProvider } from "@/components/layout/theme-context";
+import { LayoutSwitcher } from "@/components/layout/layout-switcher";
 import { Toaster } from "@/components/ui/sonner";
 
 const geistSans = localFont({
@@ -30,10 +31,9 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
-        <div className="flex h-screen overflow-hidden">
-          <Sidebar />
-          <main className="flex-1 overflow-y-auto p-6">{children}</main>
-        </div>
+        <LayoutThemeProvider>
+          <LayoutSwitcher>{children}</LayoutSwitcher>
+        </LayoutThemeProvider>
         <Toaster />
       </body>
     </html>

@@ -1,16 +1,18 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import {
   MessageSquare,
-  Plus,
   Trash2,
   Loader2,
   Minimize2,
   Maximize2,
   X,
+  ArrowLeft,
+  ArrowUp,
   Lightbulb,
   MessageCircle,
 } from "lucide-react";
@@ -33,6 +35,10 @@ interface ConversationListProps {
   onSelectConversation: (id: string) => void;
   onNewConversation: (id: string) => void;
   refreshKey: number;
+  hideControls?: boolean;
+  onBack?: () => void;
+  /** Called when user types a message from the history view — creates a new conversation */
+  onSendNew?: (text: string) => void;
 }
 
 function timeAgo(dateStr: string): string {
@@ -54,10 +60,15 @@ export function ConversationList({
   onSelectConversation,
   onNewConversation,
   refreshKey,
+  hideControls,
+  onBack,
+  onSendNew,
 }: ConversationListProps) {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [loading, setLoading] = useState(true);
-  const [creating, setCreating] = useState(false);
+  const [input, setInput] = useState("");
+  const [sending, setSending] = useState(false);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
 
   const fetchConversations = useCallback(async () => {
     setLoading(true);
@@ -71,18 +82,6 @@ export function ConversationList({
     fetchConversations();
   }, [fetchConversations, refreshKey]);
 
-  const handleNewChat = async () => {
-    setCreating(true);
-    const res = await fetch(`/api/papers/${paperId}/conversations`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({}),
-    });
-    const data = await res.json();
-    setCreating(false);
-    onNewConversation(data.id);
-  };
-
   const handleDelete = async (convId: string, e: React.MouseEvent) => {
     e.stopPropagation();
     await fetch(`/api/papers/${paperId}/conversations/${convId}`, {
@@ -91,75 +90,80 @@ export function ConversationList({
     setConversations((prev) => prev.filter((c) => c.id !== convId));
   };
 
+  const handleSend = () => {
+    if (!input.trim() || sending || !onSendNew) return;
+    setSending(true);
+    onSendNew(input.trim());
+    setInput("");
+  };
+
   return (
     <>
-      {/* Header */}
-      <div className="flex items-center justify-between border-b px-4 py-2.5">
-        <div className="flex items-center gap-2">
-          <MessageSquare className="h-4 w-4 text-primary" />
-          <span className="text-sm font-medium">Conversations</span>
-        </div>
-        <div className="flex items-center gap-1">
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-7 w-7"
-            onClick={onToggleExpand}
-            title={expanded ? "Minimize" : "Expand"}
-          >
-            {expanded ? (
-              <Minimize2 className="h-3.5 w-3.5" />
-            ) : (
-              <Maximize2 className="h-3.5 w-3.5" />
+      {/* Minimal toolbar — back arrow left, controls right */}
+      {(onBack || !hideControls) && (
+        <div className="flex items-center px-2 py-1.5">
+          <div className="flex items-center gap-0.5">
+            {onBack && (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7 text-muted-foreground"
+                onClick={onBack}
+                title="Back to chat"
+              >
+                <ArrowLeft className="h-3.5 w-3.5" />
+              </Button>
             )}
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-7 w-7"
-            onClick={onClose}
-            title="Close"
-          >
-            <X className="h-3.5 w-3.5" />
-          </Button>
+          </div>
+          {!hideControls && (
+            <div className="flex items-center gap-0.5 ml-auto">
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7"
+                onClick={onToggleExpand}
+                title={expanded ? "Minimize" : "Expand"}
+              >
+                {expanded ? (
+                  <Minimize2 className="h-3.5 w-3.5" />
+                ) : (
+                  <Maximize2 className="h-3.5 w-3.5" />
+                )}
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7"
+                onClick={onClose}
+                title="Close"
+              >
+                <X className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+          )}
         </div>
-      </div>
+      )}
 
-      {/* Content */}
+      {/* Conversation list */}
       <div className="flex-1 overflow-y-auto">
-        {/* New Chat button */}
-        <div className="p-3">
-          <Button
-            onClick={handleNewChat}
-            disabled={creating}
-            className="w-full gap-2"
-            size="sm"
-          >
-            {creating ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <Plus className="h-4 w-4" />
-            )}
-            New Chat
-          </Button>
-        </div>
-
         {loading ? (
           <div className="flex justify-center py-8">
             <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
           </div>
         ) : conversations.length === 0 ? (
           <div className="flex flex-col items-center gap-2 py-8 text-center px-4">
-            <MessageSquare className="h-8 w-8 text-muted-foreground/40" />
             <p className="text-sm text-muted-foreground">
               No conversations yet
             </p>
             <p className="text-xs text-muted-foreground/60">
-              Start a new chat or select text to explain
+              Type below to start a new chat
             </p>
           </div>
         ) : (
           <div className="space-y-1 px-3 pb-3">
+            <p className="text-xs text-muted-foreground font-medium px-3 py-1.5">
+              Past conversations
+            </p>
             {conversations.map((conv) => (
               <button
                 key={conv.id}
@@ -209,6 +213,35 @@ export function ConversationList({
           </div>
         )}
       </div>
+
+      {/* Input area — typing here starts a new conversation */}
+      {onSendNew && (
+        <div className="p-3">
+          <div className="relative rounded-2xl border border-muted-foreground/20 focus-within:border-muted-foreground/40 transition-colors">
+            <Textarea
+              ref={inputRef}
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              placeholder="Chat about the paper"
+              rows={3}
+              className="min-h-[80px] resize-none border-0 shadow-none focus-visible:ring-0 pr-12 text-sm"
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  handleSend();
+                }
+              }}
+            />
+            <button
+              onClick={handleSend}
+              disabled={sending || !input.trim()}
+              className="absolute bottom-2.5 right-2.5 flex h-8 w-8 items-center justify-center rounded-lg bg-muted-foreground/15 text-muted-foreground transition-colors hover:bg-muted-foreground/25 disabled:opacity-40 disabled:hover:bg-muted-foreground/15"
+            >
+              <ArrowUp className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+      )}
     </>
   );
 }
