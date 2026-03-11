@@ -23,6 +23,41 @@ import path from "path";
 
 const execAsync = promisify(exec);
 
+// ── Helpers ──────────────────────────────────────────────────────
+
+function processHtml(html: string, url: string): string {
+  const isPlainText = url.endsWith(".md") || url.endsWith(".txt") ||
+    url.includes("raw.githubusercontent.com");
+
+  let text: string;
+  if (isPlainText) {
+    text = html;
+  } else {
+    text = html
+      .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
+      .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
+      .replace(/<nav[^>]*>[\s\S]*?<\/nav>/gi, "")
+      .replace(/<header[^>]*>[\s\S]*?<\/header>/gi, "")
+      .replace(/<footer[^>]*>[\s\S]*?<\/footer>/gi, "")
+      .replace(/<[^>]+>/g, " ")
+      .replace(/&nbsp;/g, " ")
+      .replace(/&amp;/g, "&")
+      .replace(/&lt;/g, "<")
+      .replace(/&gt;/g, ">")
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  if (text.length > 12000) {
+    text = text.slice(0, 10000) + "\n\n[...truncated — page is very long...]\n\n" + text.slice(-2000);
+  }
+
+  if (text.length < 50) return `Page at ${url} had no readable content.`;
+  return `Content from ${url}:\n\n${text}`;
+}
+
 // ── Types ────────────────────────────────────────────────────────
 
 export interface AgentEvent {
@@ -1384,50 +1419,45 @@ function createTools(
       }),
       execute: async ({ url }: { url: string }) => {
         emit({ type: "tool_progress", toolName: "fetch_webpage", content: `Fetching: ${url.slice(0, 80)}...` });
+
+        // For GitHub repos, try the raw README first (more readable, no HTML noise)
+        let fetchUrl = url;
+        const ghMatch = url.match(/^https?:\/\/github\.com\/([^/]+\/[^/]+)\/?$/);
+        if (ghMatch) {
+          fetchUrl = `https://raw.githubusercontent.com/${ghMatch[1]}/main/README.md`;
+        }
+
         try {
-          const res = await fetch(url, {
+          // Use a realistic browser User-Agent — many sites block bot-like UAs
+          const res = await fetch(fetchUrl, {
             headers: {
-              "User-Agent": "Mozilla/5.0 (compatible; ArcanaResearchBot/1.0)",
-              "Accept": "text/html,application/xhtml+xml,text/plain",
+              "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+              "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,text/plain;q=0.8,*/*;q=0.7",
+              "Accept-Language": "en-US,en;q=0.9",
             },
             signal: AbortSignal.timeout(20_000),
             redirect: "follow",
           });
-          if (!res.ok) return `Failed to fetch ${url} (HTTP ${res.status}).`;
 
-          const contentType = res.headers.get("content-type") || "";
+          // If raw README failed for GitHub, fall back to the original URL
+          if (!res.ok && fetchUrl !== url) {
+            const fallback = await fetch(url, {
+              headers: {
+                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "Accept": "text/html,application/xhtml+xml,text/plain",
+              },
+              signal: AbortSignal.timeout(20_000),
+              redirect: "follow",
+            });
+            if (!fallback.ok) return `Failed to fetch ${url} (HTTP ${fallback.status}). The site may require authentication or block automated access. Try a different URL or search for the same content elsewhere.`;
+            const html = await fallback.text();
+            return processHtml(html, url);
+          }
+
+          if (!res.ok) return `Failed to fetch ${url} (HTTP ${res.status}). The site may require authentication or block automated access. Try a different URL or search for the same content elsewhere.`;
+
           const html = await res.text();
-
-          let text: string;
-          if (contentType.includes("text/plain") || url.endsWith(".md") || url.endsWith(".txt")) {
-            text = html;
-          } else {
-            // Strip HTML tags, scripts, styles to get readable text
-            text = html
-              .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
-              .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
-              .replace(/<nav[^>]*>[\s\S]*?<\/nav>/gi, "")
-              .replace(/<header[^>]*>[\s\S]*?<\/header>/gi, "")
-              .replace(/<footer[^>]*>[\s\S]*?<\/footer>/gi, "")
-              .replace(/<[^>]+>/g, " ")
-              .replace(/&nbsp;/g, " ")
-              .replace(/&amp;/g, "&")
-              .replace(/&lt;/g, "<")
-              .replace(/&gt;/g, ">")
-              .replace(/&quot;/g, '"')
-              .replace(/&#39;/g, "'")
-              .replace(/\s+/g, " ")
-              .trim();
-          }
-
-          // Truncate to avoid blowing context
-          if (text.length > 12000) {
-            text = text.slice(0, 10000) + "\n\n[...truncated — page is very long...]\n\n" + text.slice(-2000);
-          }
-
-          if (text.length < 50) return `Page at ${url} had no readable content.`;
-
-          return `Content from ${url}:\n\n${text}`;
+          return processHtml(html, fetchUrl);
         } catch (err) {
           return `Failed to fetch ${url}: ${err instanceof Error ? err.message : "unknown error"}`;
         }
