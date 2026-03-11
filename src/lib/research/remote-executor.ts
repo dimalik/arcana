@@ -107,8 +107,8 @@ export const sshExecutor: ExecutorBackend = {
     const sshCmd = `ssh ${sshArgs(host).join(" ")}`;
     const target = sshTarget(host);
 
-    // Exclude NFS lock files (.nfs*) and use --ignore-errors to not fail on busy files
-    const rsyncCmd = `rsync -azP --delete --exclude='.nfs*' --ignore-errors -e "${sshCmd}" "${src}" "${target}:${remoteDir}/"`;
+    // Exclude NFS lock files (.nfs*), venvs (created on remote, not local), and use --ignore-errors to not fail on busy files
+    const rsyncCmd = `rsync -azP --delete --exclude='.nfs*' --exclude='.venv' --exclude='__pycache__' --exclude='*.pyc' --exclude='stdout.log' --exclude='stderr.log' --exclude='.exit_code' --ignore-errors -e "${sshCmd}" "${src}" "${target}:${remoteDir}/"`;
 
     try {
       await execAsync(rsyncCmd, { timeout: 120_000 });
