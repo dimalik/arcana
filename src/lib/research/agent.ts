@@ -404,6 +404,7 @@ ${c.instructions}`).join("\n\n")}
 - Identify what the literature DOESN'T answer. That's where you contribute.
 
 ### Phase 2: Experiment
+- **Before writing code, search the web for existing tools.** Use \`web_search\` to find libraries that already do what you need (e.g., \`trl\` for RLHF, \`peft\` for parameter-efficient fine-tuning, \`accelerate\` for distributed training). Read their documentation with \`fetch_webpage\`. Don't rewrite from scratch what a mature library already provides — use pip packages.
 - **USE REAL DATASETS.** When papers mention specific datasets (GLUE, SQuAD, MMLU, ImageNet, WMT, etc.), use those SAME datasets so your results are directly comparable. Download them via HuggingFace \`datasets\`, \`torchvision\`, or direct URLs. NEVER generate tiny synthetic toy data as a substitute for real benchmarks — the results would be scientifically meaningless.
 - If the real dataset is very large, use a well-known subset or split (e.g., validation set, first 1000 examples) and note this explicitly. A subset of real data is infinitely better than fake data.
 - Write a complete, runnable experiment. Include baselines from the literature — you can't claim something is good without comparing it to known results.
@@ -436,8 +437,9 @@ When experiments produce disappointing, surprising, or hard-to-explain results, 
 1. **Search your existing library first** — use \`search_library\` with a specific question about the phenomenon you're observing (e.g., "why does attention mechanism fail on long sequences" or "methods to handle class imbalance in few-shot learning"). This searches all papers you already have: their full text, summaries, abstracts, and insights from the Mind Palace.
 2. **Check existing insights** — use \`query_insights\` to find relevant methodology insights, learned techniques, and applications from your Mind Palace. These are distilled learnings from papers you've studied.
 3. **Search for NEW papers** — if your library doesn't have the answer, use \`search_papers\` with targeted queries about the specific problem (NOT the original broad topic). For example, if your model is overfitting: search for "regularization techniques for [your specific architecture]" or "overfitting mitigation in [your domain]".
-4. **Read the relevant papers** — extract the specific technique, dataset, hyperparameter, or trick they used to solve the problem you're facing.
-5. **Adapt their approach** — incorporate what you learned into a new experiment design. Cite why: "Paper X showed that technique Y improves Z by N% in a similar setting, so I'm applying it here."
+4. **Search the web** — use \`web_search\` to find library documentation, Stack Overflow answers, GitHub repos, or tutorials that address the specific technical problem. Then \`fetch_webpage\` to read them. Often the solution is a library parameter you didn't know about or a known issue with a workaround.
+5. **Read the relevant papers** — extract the specific technique, dataset, hyperparameter, or trick they used to solve the problem you're facing.
+6. **Adapt their approach** — incorporate what you learned into a new experiment design. Cite why: "Paper X showed that technique Y improves Z by N% in a similar setting, so I'm applying it here."
 
 **Example flow:**
 - Experiment shows 60% accuracy vs. 85% baseline from Paper A
@@ -576,6 +578,10 @@ function thinkingHint(toolCalls?: { toolName: string; input: unknown }[]): strin
       return "Analyzing library search results for relevant techniques...";
     case "query_insights":
       return "Reviewing Mind Palace insights for applicable methods...";
+    case "web_search":
+      return "Reviewing web search results...";
+    case "fetch_webpage":
+      return "Reading webpage content...";
     default:
       return "Thinking about next step...";
   }
@@ -1223,6 +1229,124 @@ function createTools(
         }).join("\n\n");
 
         return `Found ${scored.length} relevant insights from the Mind Palace:\n\n${results}`;
+      },
+    }),
+
+    web_search: tool({
+      description: "Search the web for programming libraries, datasets, documentation, tutorials, code examples, or technical solutions. Use this to find the right tools for your experiments (e.g., 'trl library reinforcement learning from human feedback', 'huggingface datasets load squad', 'pytorch distributed training tutorial'). This searches the general web, not academic papers — use search_papers for that.",
+      inputSchema: z.object({
+        query: z.string().describe("Search query — be specific about what you need (library name, task, framework)"),
+      }),
+      execute: async ({ query }: { query: string }) => {
+        emit({ type: "tool_progress", toolName: "web_search", content: `Searching web: "${query.slice(0, 60)}..."` });
+        try {
+          // Use DuckDuckGo HTML search — no API key required
+          const encoded = encodeURIComponent(query);
+          const url = `https://html.duckduckgo.com/html/?q=${encoded}`;
+          const res = await fetch(url, {
+            headers: {
+              "User-Agent": "Mozilla/5.0 (compatible; ArcanaResearchBot/1.0)",
+            },
+            signal: AbortSignal.timeout(15_000),
+          });
+          if (!res.ok) return `Web search failed (HTTP ${res.status}). Try a different query.`;
+
+          const html = await res.text();
+
+          // Parse results from DuckDuckGo HTML response
+          const results: { title: string; url: string; snippet: string }[] = [];
+          // Match result blocks: class="result__a" for links, class="result__snippet" for descriptions
+          const linkRegex = /<a[^>]*class="result__a"[^>]*href="([^"]*)"[^>]*>([\s\S]*?)<\/a>/g;
+          const snippetRegex = /<a[^>]*class="result__snippet"[^>]*>([\s\S]*?)<\/a>/g;
+
+          const links: RegExpExecArray[] = [];
+          const snippets: RegExpExecArray[] = [];
+          let m: RegExpExecArray | null;
+          while ((m = linkRegex.exec(html)) !== null) links.push(m);
+          while ((m = snippetRegex.exec(html)) !== null) snippets.push(m);
+
+          for (let i = 0; i < Math.min(links.length, 8); i++) {
+            const rawUrl = links[i][1];
+            // DuckDuckGo wraps URLs — extract the actual URL from redirect
+            let actualUrl = rawUrl;
+            const uddgMatch = rawUrl.match(/uddg=([^&]+)/);
+            if (uddgMatch) actualUrl = decodeURIComponent(uddgMatch[1]);
+
+            const title = links[i][2].replace(/<[^>]+>/g, "").trim();
+            const snippet = snippets[i]?.[1]?.replace(/<[^>]+>/g, "").trim() || "";
+
+            if (title && actualUrl) {
+              results.push({ title, url: actualUrl, snippet });
+            }
+          }
+
+          if (results.length === 0) return `No web results found for "${query}". Try a different query.`;
+
+          const formatted = results.map((r, i) =>
+            `${i + 1}. ${r.title}\n   ${r.url}\n   ${r.snippet}`
+          ).join("\n\n");
+
+          return `Web search results for "${query}":\n\n${formatted}\n\nUse fetch_webpage to read any of these pages for more detail.`;
+        } catch (err) {
+          return `Web search failed: ${err instanceof Error ? err.message : "unknown error"}. Try again or use a different query.`;
+        }
+      },
+    }),
+
+    fetch_webpage: tool({
+      description: "Fetch and read a webpage — useful for reading documentation, README files, GitHub repos, PyPI pages, tutorials, or any URL from web search results. Returns the text content of the page (HTML stripped). Use this after web_search to read promising results.",
+      inputSchema: z.object({
+        url: z.string().describe("Full URL to fetch (e.g., https://github.com/huggingface/trl)"),
+      }),
+      execute: async ({ url }: { url: string }) => {
+        emit({ type: "tool_progress", toolName: "fetch_webpage", content: `Fetching: ${url.slice(0, 80)}...` });
+        try {
+          const res = await fetch(url, {
+            headers: {
+              "User-Agent": "Mozilla/5.0 (compatible; ArcanaResearchBot/1.0)",
+              "Accept": "text/html,application/xhtml+xml,text/plain",
+            },
+            signal: AbortSignal.timeout(20_000),
+            redirect: "follow",
+          });
+          if (!res.ok) return `Failed to fetch ${url} (HTTP ${res.status}).`;
+
+          const contentType = res.headers.get("content-type") || "";
+          const html = await res.text();
+
+          let text: string;
+          if (contentType.includes("text/plain") || url.endsWith(".md") || url.endsWith(".txt")) {
+            text = html;
+          } else {
+            // Strip HTML tags, scripts, styles to get readable text
+            text = html
+              .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
+              .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
+              .replace(/<nav[^>]*>[\s\S]*?<\/nav>/gi, "")
+              .replace(/<header[^>]*>[\s\S]*?<\/header>/gi, "")
+              .replace(/<footer[^>]*>[\s\S]*?<\/footer>/gi, "")
+              .replace(/<[^>]+>/g, " ")
+              .replace(/&nbsp;/g, " ")
+              .replace(/&amp;/g, "&")
+              .replace(/&lt;/g, "<")
+              .replace(/&gt;/g, ">")
+              .replace(/&quot;/g, '"')
+              .replace(/&#39;/g, "'")
+              .replace(/\s+/g, " ")
+              .trim();
+          }
+
+          // Truncate to avoid blowing context
+          if (text.length > 12000) {
+            text = text.slice(0, 10000) + "\n\n[...truncated — page is very long...]\n\n" + text.slice(-2000);
+          }
+
+          if (text.length < 50) return `Page at ${url} had no readable content.`;
+
+          return `Content from ${url}:\n\n${text}`;
+        } catch (err) {
+          return `Failed to fetch ${url}: ${err instanceof Error ? err.message : "unknown error"}`;
+        }
       },
     }),
 

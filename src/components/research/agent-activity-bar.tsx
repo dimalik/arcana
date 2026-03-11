@@ -43,6 +43,8 @@ const TOOL_LABELS: Record<string, string> = {
   update_hypothesis: "Updating hypothesis",
   search_library: "Searching library",
   query_insights: "Querying Mind Palace",
+  web_search: "Searching the web",
+  fetch_webpage: "Reading webpage",
 };
 
 // ── Public handle for parent component ───────────────────
