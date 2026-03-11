@@ -555,7 +555,6 @@ export default function NotebookPage() {
                         conversationId={inlineChat.conversationId}
                         selectedText={inlineChat.selectedText}
                         mode={inlineChat.mode}
-                        position={{ x: 0, y: 0, placement: "below" }}
                         onClose={() => setInlineChat(null)}
                         onOpenFull={() => {
                           window.open(

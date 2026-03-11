@@ -5,14 +5,16 @@ import { buildPrompt, cleanJsonResponse } from "@/lib/llm/prompts";
 import { resolveModelConfig } from "@/lib/llm/auto-process";
 import { getBodyTextForContextExtraction } from "@/lib/references/extract-section";
 import { matchCitationToReference } from "@/lib/references/match-citation";
+import { requireUserId } from "@/lib/paper-auth";
 
 export async function POST(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { id } = await params;
+  const userId = await requireUserId();
+    const { id } = await params;
 
-  const paper = await prisma.paper.findUnique({ where: { id } });
+  const paper = await prisma.paper.findFirst({ where: { id, userId } });
   if (!paper) {
     return NextResponse.json({ error: "Paper not found" }, { status: 404 });
   }

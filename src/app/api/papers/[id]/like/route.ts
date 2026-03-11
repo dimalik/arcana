@@ -1,13 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { requireUserId } from "@/lib/paper-auth";
 
 export async function PATCH(
   _request: NextRequest,
   { params }: { params: { id: string } }
 ) {
   try {
-    const paper = await prisma.paper.findUnique({
-      where: { id: params.id },
+    const userId = await requireUserId();
+    const paper = await prisma.paper.findFirst({
+      where: { id: params.id, userId },
       select: { isLiked: true },
     });
 

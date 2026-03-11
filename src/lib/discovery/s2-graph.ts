@@ -198,6 +198,7 @@ function parseOpenAlexWork(work: OpenAlexWork): S2Result {
   return {
     semanticScholarId: work.id,
     title: work.title || work.display_name || "",
+    abstract: null,
     authors: (work.authorships || []).map((a) => a.author.display_name),
     year: work.publication_year ?? null,
     venue,

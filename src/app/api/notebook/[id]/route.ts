@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { z } from "zod";
+import { requireUserId } from "@/lib/paper-auth";
 
 const updateEntrySchema = z.object({
   annotation: z.string().nullable().optional(),
@@ -12,6 +13,14 @@ export async function PATCH(
   { params }: { params: { id: string } }
 ) {
   try {
+    const userId = await requireUserId();
+    const existing = await prisma.notebookEntry.findFirst({
+      where: { id: params.id, paper: { userId } },
+    });
+    if (!existing) {
+      return NextResponse.json({ error: "Entry not found" }, { status: 404 });
+    }
+
     const body = await request.json();
     const data = updateEntrySchema.parse(body);
 
@@ -39,6 +48,13 @@ export async function DELETE(
   { params }: { params: { id: string } }
 ) {
   try {
+    const userId = await requireUserId();
+    const existing = await prisma.notebookEntry.findFirst({
+      where: { id: params.id, paper: { userId } },
+    });
+    if (!existing) {
+      return NextResponse.json({ error: "Entry not found" }, { status: 404 });
+    }
     await prisma.notebookEntry.delete({ where: { id: params.id } });
     return NextResponse.json({ success: true });
   } catch {

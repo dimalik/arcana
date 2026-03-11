@@ -7,6 +7,8 @@ import {
 import { SYSTEM_PROMPTS } from "@/lib/llm/prompts";
 import { resolveModelConfig } from "@/lib/llm/auto-process";
 import { trackEngagement } from "@/lib/engagement/track";
+import { requireUserId } from "@/lib/paper-auth";
+import { getUserContext, buildUserContextPreamble } from "@/lib/llm/user-context";
 
 export async function GET(
   _request: NextRequest,
@@ -34,7 +36,8 @@ export async function POST(
   const { provider, modelId, proxyConfig } = await resolveModelConfig(body);
 
   // Fetch primary paper
-  const paper = await prisma.paper.findUnique({ where: { id } });
+  const userId = await requireUserId();
+    const paper = await prisma.paper.findFirst({ where: { id, userId } });
   if (!paper) {
     return new Response(JSON.stringify({ error: "Paper not found" }), {
       status: 404,
@@ -76,7 +79,9 @@ export async function POST(
     ? "\n\nIMPORTANT: Be very concise and brief. Use 2-4 sentences maximum. Get straight to the point — no preamble, no filler."
     : "";
 
-  let systemPrompt = `${SYSTEM_PROMPTS.chat}${briefSuffix}\n\nPrimary Paper: "${paper.title}"\n\nFull text:\n${primary}`;
+  const userCtx = await getUserContext(userId);
+  const userPreamble = buildUserContextPreamble(userCtx);
+  let systemPrompt = `${SYSTEM_PROMPTS.chat}${userPreamble}${briefSuffix}\n\nPrimary Paper: "${paper.title}"\n\nFull text:\n${primary}`;
 
   if (additional.length > 0) {
     systemPrompt += "\n\n---\n\nAdditional referenced papers:\n";
@@ -153,7 +158,7 @@ export async function POST(
     }
   );
 
-  const result = streamLLMResponse({
+  const result = await streamLLMResponse({
     provider,
     modelId,
     system: systemPrompt,

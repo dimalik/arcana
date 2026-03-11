@@ -11,10 +11,12 @@ import {
   GitBranch,
   FlaskConical,
   ArrowRight,
+  Bot,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cleanJsonResponse } from "@/lib/llm/prompts";
 import { MethodologyComparator } from "./methodology-comparator";
+import { AgentActions } from "@/components/agent/agent-panel";
 import Link from "next/link";
 
 interface PromptResult {
@@ -415,6 +417,15 @@ function TimelineSection({ paperId, promptResults, onUpdate, relatedPapers }: { 
 export function CrossPaperInsights({ paperId, promptResults, onUpdate, relatedPapers }: CrossPaperInsightsProps) {
   return (
     <div className="space-y-6">
+      {/* Agent Actions */}
+      <section>
+        <h3 className="flex items-center gap-2 text-sm font-medium mb-3">
+          <Bot className="h-4 w-4 text-indigo-500" />
+          Agent Actions
+        </h3>
+        <AgentActions paperId={paperId} />
+      </section>
+
       {/* Methodology Comparison */}
       <section>
         <h3 className="flex items-center gap-2 text-sm font-medium mb-3">

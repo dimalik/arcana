@@ -1,12 +1,17 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { formatBibtex, formatAPA } from "@/lib/references/citation";
+import { requirePaperAccess } from "@/lib/paper-auth";
 
 export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string; refId: string }> }
 ) {
   const { id, refId } = await params;
+  const paper = await requirePaperAccess(id);
+  if (!paper) {
+    return Response.json({ error: "Paper not found" }, { status: 404 });
+  }
   const format = req.nextUrl.searchParams.get("format") || "bibtex";
 
   const reference = await prisma.reference.findFirst({

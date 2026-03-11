@@ -1,11 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { requirePaperAccess } from "@/lib/paper-auth";
 
 export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string; convId: string }> }
 ) {
-  const { convId } = await params;
+  const { id, convId } = await params;
+  const paper = await requirePaperAccess(id);
+  if (!paper) {
+    return NextResponse.json({ error: "Paper not found" }, { status: 404 });
+  }
 
   const conversation = await prisma.conversation.findUnique({
     where: { id: convId },
@@ -30,7 +35,11 @@ export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string; convId: string }> }
 ) {
-  const { convId } = await params;
+  const { id: paperId, convId } = await params;
+  const paper = await requirePaperAccess(paperId);
+  if (!paper) {
+    return NextResponse.json({ error: "Paper not found" }, { status: 404 });
+  }
   const body = await request.json();
   const { title, addPaperIds, removePaperIds } = body;
 
@@ -74,7 +83,11 @@ export async function DELETE(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string; convId: string }> }
 ) {
-  const { convId } = await params;
+  const { id: paperId, convId } = await params;
+  const paper = await requirePaperAccess(paperId);
+  if (!paper) {
+    return NextResponse.json({ error: "Paper not found" }, { status: 404 });
+  }
 
   await prisma.conversation.delete({ where: { id: convId } });
 

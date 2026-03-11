@@ -2,14 +2,16 @@ import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { searchByTitle, S2RateLimitError } from "@/lib/import/semantic-scholar";
 import { findLibraryMatchByIds } from "@/lib/references/match";
+import { requireUserId } from "@/lib/paper-auth";
 
 export async function POST(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { id } = await params;
+  const userId = await requireUserId();
+    const { id } = await params;
 
-  const paper = await prisma.paper.findUnique({ where: { id } });
+  const paper = await prisma.paper.findFirst({ where: { id, userId } });
   if (!paper) {
     return Response.json({ error: "Paper not found" }, { status: 404 });
   }

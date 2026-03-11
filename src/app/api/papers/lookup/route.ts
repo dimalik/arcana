@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { requireUserId } from "@/lib/paper-auth";
 
 export async function GET(request: NextRequest) {
+  const userId = await requireUserId();
   const sourceUrl = request.nextUrl.searchParams.get("sourceUrl");
 
   if (!sourceUrl) {
@@ -12,7 +14,7 @@ export async function GET(request: NextRequest) {
   }
 
   const paper = await prisma.paper.findFirst({
-    where: { sourceUrl },
+    where: { sourceUrl, userId },
     select: { id: true, title: true },
   });
 

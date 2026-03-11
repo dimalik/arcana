@@ -3,10 +3,15 @@
 import { useState } from "react";
 import Link from "next/link";
 import { Card, CardContent } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { FileText, Clock, Pencil, Check, Trash2 } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { FileText, Check, MoreVertical, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 interface InsightCardProps {
@@ -19,6 +24,7 @@ interface InsightCardProps {
     nextReviewAt: string;
     interval: number;
     repetitions: number;
+    easeFactor?: number;
     paper: { id: string; title: string };
     room?: { id: string; name: string; color: string };
   };
@@ -36,12 +42,41 @@ const RATING_LABELS = [
   { value: 5, label: "Easy", color: "text-emerald-600" },
 ];
 
-function formatNextReview(date: string): string {
-  const diff = new Date(date).getTime() - Date.now();
-  if (diff <= 0) return "Due now";
-  const days = Math.ceil(diff / (1000 * 60 * 60 * 24));
-  if (days === 1) return "Due tomorrow";
-  return `Due in ${days}d`;
+function StrengthMeter({
+  repetitions,
+  easeFactor,
+}: {
+  repetitions: number;
+  easeFactor?: number;
+}) {
+  // Determine how many bars to fill (0-4) based on SM-2 state
+  let filledBars = 0;
+  if (repetitions >= 1) filledBars = 1;
+  if (repetitions >= 2) filledBars = 2;
+  if (repetitions >= 3 && (easeFactor ?? 2.5) >= 2.2) filledBars = 3;
+  if (repetitions >= 3 && (easeFactor ?? 2.5) >= 2.5) filledBars = 4;
+
+  const barColors = [
+    "bg-orange-500",
+    "bg-yellow-500",
+    "bg-green-500",
+    "bg-emerald-500",
+  ];
+  const heights = [8, 10, 12, 14];
+
+  return (
+    <div className="flex items-end gap-[2px]" title={`${filledBars}/4 strength`}>
+      {heights.map((h, i) => (
+        <div
+          key={i}
+          className={`w-[3px] rounded-sm transition-colors ${
+            i < filledBars ? barColors[i] : "bg-muted-foreground/20"
+          }`}
+          style={{ height: `${h}px` }}
+        />
+      ))}
+    </div>
+  );
 }
 
 export function InsightCard({
@@ -83,48 +118,86 @@ export function InsightCard({
 
   return (
     <Card className={isDue ? "border-primary/30" : ""}>
-      <CardContent className="p-4 space-y-2">
-        <div className="flex items-start justify-between gap-2">
-          <p className="font-medium text-sm leading-relaxed">{insight.learning}</p>
-          <div className="flex items-center gap-1 shrink-0">
-            <Badge variant={isDue ? "default" : "secondary"} className="text-xs">
-              <Clock className="h-3 w-3 mr-1" />
-              {formatNextReview(insight.nextReviewAt)}
-            </Badge>
-          </div>
-        </div>
-
-        <p className="text-sm text-muted-foreground">{insight.significance}</p>
-
-        {insight.applications && (
-          <p className="text-sm text-muted-foreground italic">
-            {insight.applications}
-          </p>
-        )}
-
-        <div className="flex items-center gap-2 pt-1">
+      <CardContent className="p-4 space-y-3">
+        {/* Header: strength meter · paper · room · overflow */}
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <StrengthMeter
+            repetitions={insight.repetitions}
+            easeFactor={insight.easeFactor}
+          />
+          <span className="text-muted-foreground/40">·</span>
           <Link
             href={`/papers/${insight.paper.id}`}
-            className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-primary"
+            className="inline-flex items-center gap-1 hover:text-primary truncate max-w-[200px]"
           >
-            <FileText className="h-3 w-3" />
-            <span className="truncate max-w-[200px]">{insight.paper.title}</span>
+            <FileText className="h-3 w-3 shrink-0" />
+            <span className="truncate">{insight.paper.title}</span>
           </Link>
           {showRoom && insight.room && (
-            <Link
-              href={`/mind-palace/${insight.room.id}`}
-              className="inline-flex items-center gap-1 text-xs"
-            >
-              <span
-                className="h-2 w-2 rounded-full"
-                style={{ backgroundColor: insight.room.color }}
-              />
-              {insight.room.name}
-            </Link>
+            <>
+              <span className="text-muted-foreground/40">·</span>
+              <Link
+                href={`/mind-palace/${insight.room.id}`}
+                className="inline-flex items-center gap-1 shrink-0"
+              >
+                <span
+                  className="h-2 w-2 rounded-full"
+                  style={{ backgroundColor: insight.room.color }}
+                />
+                {insight.room.name}
+              </Link>
+            </>
           )}
+          <div className="flex-1" />
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button className="inline-flex h-5 w-5 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground transition-colors">
+                <MoreVertical className="h-3 w-3" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-36">
+              <DropdownMenuItem
+                onClick={handleDelete}
+                className="text-destructive focus:text-destructive"
+              >
+                <Trash2 className="h-4 w-4" />
+                Delete
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
 
-        {/* User notes */}
+        {/* WHAT I LEARNED */}
+        <div>
+          <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60 mb-0.5">
+            What I learned
+          </p>
+          <p className="text-sm leading-relaxed">{insight.learning}</p>
+        </div>
+
+        {/* WHY IT MATTERS */}
+        <div>
+          <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60 mb-0.5">
+            Why it matters
+          </p>
+          <p className="text-sm text-muted-foreground leading-relaxed">
+            {insight.significance}
+          </p>
+        </div>
+
+        {/* HOW TO APPLY (optional) */}
+        {insight.applications && (
+          <div>
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60 mb-0.5">
+              How to apply
+            </p>
+            <p className="text-sm text-muted-foreground leading-relaxed">
+              {insight.applications}
+            </p>
+          </div>
+        )}
+
+        {/* User notes — always visible, clickable to edit */}
         {editingNotes ? (
           <div className="space-y-1">
             <Textarea
@@ -133,29 +206,43 @@ export function InsightCard({
               rows={2}
               placeholder="Add your notes..."
               className="text-sm"
+              autoFocus
             />
             <div className="flex gap-1">
-              <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={saveNotes}>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-7 text-xs"
+                onClick={saveNotes}
+              >
                 <Check className="h-3 w-3 mr-1" /> Save
               </Button>
-              <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => setEditingNotes(false)}>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-7 text-xs"
+                onClick={() => {
+                  setEditingNotes(false);
+                  setNotes(insight.userNotes || "");
+                }}
+              >
                 Cancel
               </Button>
             </div>
           </div>
-        ) : insight.userNotes ? (
+        ) : (
           <div
-            className="text-xs bg-muted/50 rounded px-2 py-1.5 cursor-pointer hover:bg-muted"
+            className="rounded border border-dashed border-muted-foreground/20 px-2.5 py-1.5 text-xs text-muted-foreground cursor-pointer hover:border-muted-foreground/40 hover:bg-muted/30 transition-colors"
             onClick={() => setEditingNotes(true)}
           >
-            {insight.userNotes}
+            {insight.userNotes || "Add your notes..."}
           </div>
-        ) : null}
+        )}
 
-        {/* Actions row */}
-        <div className="flex items-center justify-between pt-1">
-          <div className="flex gap-1">
-            {onReview && isDue && RATING_LABELS.map((r) => (
+        {/* Rating buttons (only when due) */}
+        {onReview && isDue && (
+          <div className="flex gap-1 pt-0.5">
+            {RATING_LABELS.map((r) => (
               <Button
                 key={r.value}
                 size="sm"
@@ -167,25 +254,7 @@ export function InsightCard({
               </Button>
             ))}
           </div>
-          <div className="flex items-center gap-1">
-            <Button
-              size="sm"
-              variant="ghost"
-              className="h-7 w-7 p-0"
-              onClick={() => setEditingNotes(true)}
-            >
-              <Pencil className="h-3 w-3" />
-            </Button>
-            <Button
-              size="sm"
-              variant="ghost"
-              className="h-7 w-7 p-0 text-destructive hover:text-destructive"
-              onClick={handleDelete}
-            >
-              <Trash2 className="h-3 w-3" />
-            </Button>
-          </div>
-        </div>
+        )}
       </CardContent>
     </Card>
   );

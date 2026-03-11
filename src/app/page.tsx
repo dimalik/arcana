@@ -1,100 +1,116 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
+import Link from "next/link";
 import { Card, CardContent } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { FileText } from "lucide-react";
-import { PaperCard, PaperCardData } from "@/components/paper-card";
-import { toast } from "sonner";
 import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-  Cell,
-} from "recharts";
-import { DailyDigest } from "@/components/mind-palace/daily-digest";
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+  DropdownMenuSeparator,
+} from "@/components/ui/dropdown-menu";
+import {
+  FileText,
+  ChevronRight,
+  ArrowUpDown,
+  MoreHorizontal,
+  Plus,
+  Tags,
+  Trash2,
+  Check,
+} from "lucide-react";
+import { PaperCard, PaperCardData } from "@/components/paper-card";
+import { DiscoveriesPanel } from "@/components/recommendations/discoveries-panel";
+import { AddPaperDialog } from "@/components/add-paper-dialog";
+import { toast } from "sonner";
 
-interface YearData {
-  year: number;
-  count: number;
-}
-
-interface Tag {
+interface TagCluster {
   id: string;
   name: string;
   color: string;
-  _count: { papers: number };
+  tags: { id: string; name: string; color: string; _count: { papers: number } }[];
 }
 
-export default function DashboardPage() {
-  const [yearData, setYearData] = useState<YearData[]>([]);
-  const [tags, setTags] = useState<Tag[]>([]);
+export default function HomePage() {
+  const [clusters, setClusters] = useState<TagCluster[]>([]);
   const [selectedTagIds, setSelectedTagIds] = useState<Set<string>>(new Set());
   const [papers, setPapers] = useState<PaperCardData[]>([]);
   const [loading, setLoading] = useState(true);
-  const [chartLoading, setChartLoading] = useState(true);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [sort, setSort] = useState("newest");
 
-  // Fetch tags once
+  // Add Paper dialog
+  const [addDialogOpen, setAddDialogOpen] = useState(false);
+  const [addDialogTab, setAddDialogTab] = useState<"pdf" | "arxiv" | "anthology" | "url">("pdf");
+
+  // Topics sidebar
+  const [expandedClusters, setExpandedClusters] = useState<Set<string>>(new Set());
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const sidebarRef = useRef<HTMLDivElement>(null);
+
+  // Fetch clusters once
   useEffect(() => {
-    fetch("/api/tags")
+    fetch("/api/tags/clusters")
       .then((r) => r.json())
-      .then(setTags)
+      .then((data) => {
+        if (Array.isArray(data)) {
+          setClusters(data);
+          setExpandedClusters(new Set(data.map((c: TagCluster) => c.id)));
+        }
+      })
       .catch(() => {});
   }, []);
 
-  // Fetch chart data whenever selected tags change
-  const fetchYearData = useCallback(async (tagIds: Set<string>) => {
-    setChartLoading(true);
-    try {
-      const params = new URLSearchParams();
-      if (tagIds.size > 0) {
-        params.set("tagIds", Array.from(tagIds).join(","));
-      }
-      const res = await fetch(`/api/stats/papers-by-year?${params}`);
-      const data = await res.json();
-      setYearData(data);
-    } catch {
-      toast.error("Failed to load chart data");
-    }
-    setChartLoading(false);
-  }, []);
-
-  // Fetch papers whenever selected tags change
-  const fetchPapers = useCallback(async (tagIds: Set<string>) => {
+  // Fetch papers
+  const fetchPapers = useCallback(async () => {
     setLoading(true);
     try {
-      const params = new URLSearchParams({ limit: "10" });
-      if (tagIds.size === 1) {
-        params.set("tagId", Array.from(tagIds)[0]);
-      } else if (tagIds.size > 1) {
-        params.set("limit", "200");
+      const params = new URLSearchParams({ page: page.toString(), sort });
+
+      if (selectedTagIds.size === 1) {
+        params.set("tagId", Array.from(selectedTagIds)[0]);
+      } else if (selectedTagIds.size > 1) {
+        params.set("tagIds", Array.from(selectedTagIds).join(","));
       }
+
       const res = await fetch(`/api/papers?${params}`);
       const data = await res.json();
-      let list: PaperCardData[] = data.papers ?? [];
-
-      if (tagIds.size > 1) {
-        list = list.filter((p) =>
-          p.tags.some((pt) => tagIds.has(pt.tag.id))
-        );
-        list = list.slice(0, 10);
-      }
-
-      setPapers(list);
+      setPapers(data.papers ?? []);
+      setTotal(data.total ?? 0);
+      setTotalPages(data.totalPages ?? 1);
     } catch {
       toast.error("Failed to load papers");
     }
     setLoading(false);
-  }, []);
+  }, [page, selectedTagIds, sort]);
 
   useEffect(() => {
-    fetchYearData(selectedTagIds);
-    fetchPapers(selectedTagIds);
-  }, [selectedTagIds, fetchYearData, fetchPapers]);
+    fetchPapers();
+  }, [fetchPapers]);
+
+  // Auto-refresh when a paper is imported from the sidebar
+  useEffect(() => {
+    const handler = () => fetchPapers();
+    window.addEventListener("paper-imported", handler);
+    return () => window.removeEventListener("paper-imported", handler);
+  }, [fetchPapers]);
+
+  // Sidebar click-outside
+  useEffect(() => {
+    if (!sidebarOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (sidebarRef.current && !sidebarRef.current.contains(e.target as Node)) {
+        setSidebarOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [sidebarOpen]);
 
   const toggleTag = (tagId: string) => {
     setSelectedTagIds((prev) => {
@@ -103,9 +119,22 @@ export default function DashboardPage() {
       else next.add(tagId);
       return next;
     });
+    setPage(1);
   };
 
-  const clearTags = () => setSelectedTagIds(new Set());
+  const toggleCluster = (id: string) => {
+    setExpandedClusters((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const clearFilters = () => {
+    setSelectedTagIds(new Set());
+    setPage(1);
+  };
 
   const handleLikeToggle = async (id: string) => {
     const res = await fetch(`/api/papers/${id}/like`, { method: "PATCH" });
@@ -117,185 +146,246 @@ export default function DashboardPage() {
     }
   };
 
-  const totalPapers = yearData.reduce((sum, d) => sum + d.count, 0);
+  const handleDelete = async (id: string) => {
+    if (!confirm("Delete this paper?")) return;
+    await fetch(`/api/papers/${id}`, { method: "DELETE" });
+    toast.success("Paper deleted");
+    fetchPapers();
+  };
+
+  const hasFilters = selectedTagIds.size > 0;
 
   return (
     <div className="flex gap-6">
-      {/* Main content */}
-      <div className="flex-1 min-w-0 space-y-6">
-        <div>
-          <h2 className="text-2xl font-bold tracking-tight">Dashboard</h2>
-          <p className="text-muted-foreground">
-            Your research paper repository at a glance.
-          </p>
+      {/* Papers list — 3/4 */}
+      <div className="flex-1 min-w-0 space-y-4">
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2">
+            <h3 className="text-sm font-medium">Library</h3>
+            <span className="text-[11px] font-medium rounded-full bg-muted px-1.5 py-0.5 text-muted-foreground">
+              {total}
+            </span>
+          </div>
+          <div className="flex items-center gap-0.5">
+            {/* Add paper */}
+            <button
+              onClick={() => { setAddDialogTab("pdf"); setAddDialogOpen(true); }}
+              className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+              title="Add paper"
+            >
+              <Plus className="h-3.5 w-3.5" />
+            </button>
+
+            {/* Sort */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors">
+                  <ArrowUpDown className="h-3.5 w-3.5" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-40">
+                {[
+                  { value: "newest", label: "Newest first" },
+                  { value: "oldest", label: "Oldest first" },
+                  { value: "title", label: "Title A-Z" },
+                  { value: "year", label: "Year" },
+                  { value: "engagement", label: "Most read" },
+                ].map((opt) => (
+                  <DropdownMenuItem
+                    key={opt.value}
+                    onClick={() => { setSort(opt.value); setPage(1); }}
+                    className="flex items-center justify-between"
+                  >
+                    {opt.label}
+                    {sort === opt.value && <Check className="h-3.5 w-3.5 text-primary" />}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+
+            {/* More actions */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors">
+                  <MoreHorizontal className="h-3.5 w-3.5" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-44">
+                <DropdownMenuItem onClick={() => { setAddDialogTab("pdf"); setAddDialogOpen(true); }} className="flex items-center gap-2">
+                  <Plus className="h-3.5 w-3.5" />
+                  Add paper
+                </DropdownMenuItem>
+                <DropdownMenuItem asChild>
+                  <Link href="/tags" className="flex items-center gap-2">
+                    <Tags className="h-3.5 w-3.5" />
+                    Manage tags
+                  </Link>
+                </DropdownMenuItem>
+                {hasFilters && (
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem onClick={clearFilters} className="flex items-center gap-2">
+                      <Trash2 className="h-3.5 w-3.5" />
+                      Clear filters
+                    </DropdownMenuItem>
+                  </>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
         </div>
 
-        {/* Year chart */}
-        <Card>
-          <CardContent className="pt-6">
-            <div className="flex items-baseline justify-between mb-4">
-              <h3 className="text-sm font-medium text-muted-foreground">
-                Papers by Year
-              </h3>
-              <span className="text-2xl font-bold">{totalPapers}</span>
-            </div>
-            {chartLoading ? (
-              <Skeleton className="h-[260px] w-full" />
-            ) : yearData.length === 0 ? (
-              <div className="flex items-center justify-center h-[260px] text-sm text-muted-foreground">
-                No papers with year data
-                {selectedTagIds.size > 0 ? " for selected tags" : ""}
+        {loading ? (
+          <div className="space-y-3">
+            {[1, 2, 3].map((i) => (
+              <Card key={i}>
+                <CardContent className="p-4">
+                  <Skeleton className="mb-2 h-5 w-3/4" />
+                  <Skeleton className="mb-2 h-4 w-1/2" />
+                  <Skeleton className="h-4 w-full" />
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        ) : papers.length === 0 ? (
+          <Card>
+            <CardContent className="flex flex-col items-center gap-3 p-12">
+              <FileText className="h-12 w-12 text-muted-foreground" />
+              <p className="text-muted-foreground">
+                {hasFilters
+                  ? "No papers found for these filters."
+                  : "No papers yet. Upload or import your first paper to get started."}
+              </p>
+              {!hasFilters && (
+                <Button variant="outline" size="sm" onClick={() => { setAddDialogTab("pdf"); setAddDialogOpen(true); }}>
+                  Upload a Paper
+                </Button>
+              )}
+            </CardContent>
+          </Card>
+        ) : (
+          <div className="space-y-3">
+            {papers.map((paper) => (
+              <PaperCard
+                key={paper.id}
+                paper={paper}
+                onLikeToggle={handleLikeToggle}
+                onDelete={handleDelete}
+              />
+            ))}
+          </div>
+        )}
+
+        {/* Pagination */}
+        {totalPages > 1 && (
+          <div className="flex justify-center items-center gap-3 pt-4">
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={page <= 1}
+              onClick={() => setPage(page - 1)}
+            >
+              Previous
+            </Button>
+            <span className="text-xs text-muted-foreground">
+              {page} / {totalPages}
+            </span>
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={page >= totalPages}
+              onClick={() => setPage(page + 1)}
+            >
+              Next
+            </Button>
+          </div>
+        )}
+
+        {/* Add Paper dialog */}
+        <AddPaperDialog
+          open={addDialogOpen}
+          onOpenChange={setAddDialogOpen}
+          defaultTab={addDialogTab}
+        />
+      </div>
+
+      {/* Discoveries — 1/4 */}
+      <div className="w-72 shrink-0 hidden lg:block">
+        <div className="sticky top-0">
+          <DiscoveriesPanel tagIds={Array.from(selectedTagIds)} />
+        </div>
+      </div>
+
+      {/* Topics sidebar toggle */}
+      {clusters.length > 0 && (
+        <div ref={sidebarRef}>
+          <button
+            onClick={() => setSidebarOpen((prev) => !prev)}
+            className={`fixed top-1/2 -translate-y-1/2 z-40 flex items-center justify-center h-8 w-4 rounded-r-md bg-muted/60 hover:bg-muted text-muted-foreground/40 hover:text-muted-foreground transition-all ${
+              sidebarOpen ? "left-56" : "left-0"
+            }`}
+            title="Topics"
+          >
+            <ChevronRight className={`h-3.5 w-3.5 transition-transform ${sidebarOpen ? "rotate-180" : ""}`} />
+          </button>
+
+          {sidebarOpen && (
+            <div className="fixed left-0 top-12 bottom-0 z-30 w-56 bg-background/95 backdrop-blur-sm border-r border-border/30 overflow-y-auto scrollbar-thin p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-medium text-muted-foreground">Topics</span>
+                {selectedTagIds.size > 0 && (
+                  <button
+                    onClick={clearFilters}
+                    className="text-[11px] text-muted-foreground/50 hover:text-muted-foreground transition-colors"
+                  >
+                    Clear
+                  </button>
+                )}
               </div>
-            ) : (
-              <ResponsiveContainer width="100%" height={260}>
-                <BarChart
-                  data={yearData}
-                  margin={{ top: 4, right: 4, left: -20, bottom: 0 }}
-                >
-                  <CartesianGrid
-                    strokeDasharray="3 3"
-                    vertical={false}
-                    className="stroke-border"
-                  />
-                  <XAxis
-                    dataKey="year"
-                    tickLine={false}
-                    axisLine={false}
-                    className="text-xs fill-muted-foreground"
-                    tickFormatter={(v) => String(v)}
-                  />
-                  <YAxis
-                    tickLine={false}
-                    axisLine={false}
-                    className="text-xs fill-muted-foreground"
-                    allowDecimals={false}
-                  />
-                  <Tooltip
-                    contentStyle={{
-                      backgroundColor: "hsl(var(--popover))",
-                      border: "1px solid hsl(var(--border))",
-                      borderRadius: "0.5rem",
-                      fontSize: "0.875rem",
-                    }}
-                    labelStyle={{ color: "hsl(var(--foreground))" }}
-                    itemStyle={{ color: "hsl(var(--foreground))" }}
-                    formatter={(value) => [value, "Papers"]}
-                    labelFormatter={(label) => `Year ${label}`}
-                  />
-                  <Bar dataKey="count" radius={[4, 4, 0, 0]}>
-                    {yearData.map((_, index) => (
-                      <Cell
-                        key={index}
-                        className="fill-primary hover:fill-primary/80"
-                      />
-                    ))}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* Mind Palace digest */}
-        <DailyDigest />
-
-        {/* Recent papers */}
-        <div>
-          <h3 className="mb-3 text-lg font-semibold">
-            Recent Papers
-            {selectedTagIds.size > 0 && (
-              <span className="ml-2 text-sm font-normal text-muted-foreground">
-                (filtered)
-              </span>
-            )}
-          </h3>
-          {loading ? (
-            <div className="space-y-3">
-              {[1, 2, 3].map((i) => (
-                <Card key={i}>
-                  <CardContent className="p-4">
-                    <Skeleton className="mb-2 h-5 w-3/4" />
-                    <Skeleton className="mb-2 h-4 w-1/2" />
-                    <Skeleton className="h-4 w-full" />
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
-          ) : papers.length === 0 ? (
-            <Card>
-              <CardContent className="flex flex-col items-center gap-3 p-12">
-                <FileText className="h-12 w-12 text-muted-foreground" />
-                <p className="text-muted-foreground">
-                  {selectedTagIds.size > 0
-                    ? "No papers found for selected tags."
-                    : "No papers yet. Upload or import your first paper to get started."}
-                </p>
-              </CardContent>
-            </Card>
-          ) : (
-            <div className="space-y-3">
-              {papers.map((paper) => (
-                <PaperCard
-                  key={paper.id}
-                  paper={paper}
-                  onLikeToggle={handleLikeToggle}
-                />
-              ))}
+              {clusters.map((cluster) => {
+                const isExpanded = expandedClusters.has(cluster.id);
+                const visibleTags = cluster.tags.filter((t) => t._count.papers >= 1);
+                if (visibleTags.length === 0) return null;
+                return (
+                  <div key={cluster.id}>
+                    <button
+                      onClick={() => toggleCluster(cluster.id)}
+                      className="flex items-center gap-1 w-full text-left text-[11px] font-medium uppercase tracking-wider px-0 py-0.5 hover:opacity-80 transition-opacity"
+                      style={{ color: cluster.color }}
+                    >
+                      <ChevronRight className={`h-3 w-3 transition-transform ${isExpanded ? "rotate-90" : ""}`} />
+                      {cluster.name}
+                    </button>
+                    {isExpanded && (
+                      <div className="space-y-0.5 mt-0.5">
+                        {visibleTags.map((tag) => {
+                          const isSelected = selectedTagIds.has(tag.id);
+                          return (
+                            <button
+                              key={tag.id}
+                              onClick={() => toggleTag(tag.id)}
+                              className={`flex items-center justify-between w-full rounded-md px-2.5 py-1 text-sm transition-colors ${
+                                isSelected
+                                  ? "bg-accent font-medium"
+                                  : "hover:bg-accent/50"
+                              }`}
+                            >
+                              <span className="truncate">{tag.name}</span>
+                              <span className="text-[11px] text-muted-foreground/60 ml-2 shrink-0">
+                                {tag._count.papers}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>
-      </div>
-
-      {/* Tag filter sidebar */}
-      <div className="w-56 shrink-0">
-        <div className="sticky top-0">
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="text-sm font-medium text-muted-foreground">
-              Filter by Tags
-            </h3>
-            {selectedTagIds.size > 0 && (
-              <button
-                onClick={clearTags}
-                className="text-xs text-muted-foreground hover:text-foreground transition-colors"
-              >
-                Clear
-              </button>
-            )}
-          </div>
-          <div className="space-y-1">
-            {tags.map((tag) => {
-              const isSelected = selectedTagIds.has(tag.id);
-              return (
-                <button
-                  key={tag.id}
-                  onClick={() => toggleTag(tag.id)}
-                  className={`flex items-center justify-between w-full rounded-md px-2.5 py-1.5 text-sm transition-colors ${
-                    isSelected
-                      ? "bg-accent font-medium"
-                      : "hover:bg-accent/50"
-                  }`}
-                >
-                  <div className="flex items-center gap-2 min-w-0">
-                    <span
-                      className="h-2.5 w-2.5 rounded-full shrink-0"
-                      style={{ backgroundColor: tag.color }}
-                    />
-                    <span className="truncate">{tag.name}</span>
-                  </div>
-                  <span className="text-xs text-muted-foreground ml-2 shrink-0">
-                    {tag._count.papers}
-                  </span>
-                </button>
-              );
-            })}
-            {tags.length === 0 && (
-              <p className="text-xs text-muted-foreground px-2.5 py-4">
-                No tags yet
-              </p>
-            )}
-          </div>
-        </div>
-      </div>
+      )}
     </div>
   );
 }

@@ -122,7 +122,7 @@ Rules:
 - If a field cannot be determined, use null (for strings) or an empty array (for arrays).
 - Return ONLY valid JSON. No markdown fences, no extra text.`,
 
-  categorize: `Classify this research paper with a small set of tags.
+  categorize: `Classify this research paper with exactly 3 DISCRIMINATING tags.
 
 Return a JSON object:
 {
@@ -130,28 +130,33 @@ Return a JSON object:
 }
 
 Rules:
-- Return 3-5 tags total. No more.
+- Return EXACTLY 3 tags. No more, no fewer.
 - Each tag: lowercase, hyphenated, 1-3 words (e.g., "transformer", "medical-imaging", "reinforcement-learning").
-- First tag should be the primary field (e.g., "nlp", "computer-vision", "robotics").
-- Remaining tags: the most specific technique or domain (e.g., "diffusion-model", "code-generation").
+- Focus on DISCRIMINATING tags — tags that distinguish this paper from others. A good tag applies to 10-30% of papers in a research library.
+- AVOID overly broad tags like "nlp", "machine-learning", "deep-learning", "artificial-intelligence". These apply to almost every paper and provide zero retrieval value.
+- Instead, use specific techniques, tasks, or domains (e.g., "code-generation", "diffusion-model", "medical-imaging", "graph-neural-network").
 - Prefer well-known terms. Do not invent niche tags.
 - IMPORTANT: If a list of existing tags is provided below, STRONGLY prefer reusing those exact tag names instead of creating new ones that mean the same thing. Only create a new tag if none of the existing tags adequately describes the concept.
+- If a list of OVER-USED tags is provided, do NOT use those tags.
 - Return ONLY valid JSON. No markdown fences, no extra text.`,
 
   code: `You are a skilled research engineer who translates academic papers into working code. Your task is to generate a clear, well-documented implementation based on the key concepts in the provided paper.
 
-Guidelines:
-- Use Python by default unless the paper is clearly about another language or the user specifies otherwise.
-- Start with necessary imports.
-- Include docstrings and inline comments explaining how the code relates to the paper.
-- Focus on the core algorithm or method — not boilerplate.
-- If the paper describes a model architecture, implement it (e.g., using PyTorch or JAX).
-- If the paper describes an algorithm, implement the pseudocode as runnable code.
-- If the paper is theoretical, create a demonstration or simulation that illustrates the key concepts.
-- Include a brief usage example or main block showing how to run the code.
-- Note any simplifications you made compared to the full paper.
+First, identify the paper's domain (ML, statistics, pharmacology, neuroscience, biology, physics, economics, etc.) and choose the appropriate language and libraries.
 
-The code should be runnable and educational — prioritize clarity over production-readiness.`,
+Guidelines:
+- **Language**: Use whatever is conventional for the paper's domain. Python by default; R for biostatistics/bioinformatics if more appropriate.
+- **Stack**: ML → PyTorch/JAX; Stats → scipy/statsmodels; Bio → biopython/scanpy; Neuro → MNE/nilearn; Pharma → lifelines/scipy; Physics → numpy/scipy.
+- Start with necessary imports.
+- Include docstrings and inline comments referencing specific paper sections ("Implements Eq. 3, Section 4.1").
+- Implement the core method faithfully — not boilerplate.
+- Include a mock/synthetic data section that generates realistic test data matching the paper's description.
+- Include basic tests (assertions or a test function) verifying the implementation works on mock data.
+- Include a visualization section that generates at least one key figure from the paper using mock data (matplotlib/seaborn).
+- Include a \`if __name__ == "__main__"\` block that runs the full pipeline: generate data → run analysis → show results → plot figures.
+- Note any simplifications compared to the full paper.
+
+The code should be runnable end-to-end and educational — someone should be able to run it and see the paper's methodology in action.`,
 
   chat: `You are a knowledgeable research assistant with deep expertise in analyzing academic papers. You have been given the full text of a research paper. Your job is to help the user understand and engage with the paper.
 
@@ -477,15 +482,26 @@ export function buildPrompt(
   type: keyof typeof SYSTEM_PROMPTS,
   paperText: string,
   customPrompt?: string,
-  opts?: { existingTags?: string[] }
+  opts?: { existingTags?: string[]; overusedTags?: string[]; userContextPreamble?: string }
 ): { system: string; prompt: string } {
-  const system = SYSTEM_PROMPTS[type];
+  let system = SYSTEM_PROMPTS[type];
+
+  // Inject user context for personalized prompts
+  if (opts?.userContextPreamble && ["summarize", "chat", "custom", "code"].includes(type)) {
+    system = system + opts.userContextPreamble;
+  }
+
   let prompt = customPrompt
     ? `Here is the paper text:\n\n${paperText}\n\n---\n\nUser request: ${customPrompt}`
     : `Here is the paper text:\n\n${paperText}`;
 
-  if (type === "categorize" && opts?.existingTags && opts.existingTags.length > 0) {
-    prompt += `\n\n---\n\nExisting tags in the library (reuse these when applicable): ${opts.existingTags.join(", ")}`;
+  if (type === "categorize") {
+    if (opts?.existingTags && opts.existingTags.length > 0) {
+      prompt += `\n\n---\n\nGood existing tags (reuse these when applicable): ${opts.existingTags.join(", ")}`;
+    }
+    if (opts?.overusedTags && opts.overusedTags.length > 0) {
+      prompt += `\n\nOVER-USED tags (AVOID these): ${opts.overusedTags.join(", ")}`;
+    }
   }
 
   return { system, prompt };

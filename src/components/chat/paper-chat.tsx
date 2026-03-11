@@ -17,6 +17,7 @@ interface PaperChatProps {
   docked?: boolean;
   dockedOpen?: boolean;
   onDockedToggle?: () => void;
+  scrollContainerRef?: React.RefObject<HTMLElement | null>;
 }
 
 type View = "list" | "chat";
@@ -25,10 +26,10 @@ interface InlineChatState {
   conversationId: string;
   mode: "explain" | "chat";
   selectedText: string;
-  position: { x: number; y: number; placement: "above" | "below" };
+  yOffset: number;
 }
 
-export function PaperChat({ paperId, hasText, initialConversationId, className, docked, dockedOpen, onDockedToggle }: PaperChatProps) {
+export function PaperChat({ paperId, hasText, initialConversationId, className, docked, dockedOpen, onDockedToggle, scrollContainerRef }: PaperChatProps) {
   const [open, setOpen] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [view, setView] = useState<View>(docked ? "chat" : "list");
@@ -115,6 +116,14 @@ export function PaperChat({ paperId, hasText, initialConversationId, className, 
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [docked, dockedOpen, onDockedToggle, handleDockedClose]);
 
+  /** Compute yOffset from a selection rect relative to the scroll container */
+  const computeYOffset = useCallback((rect: DOMRect): number => {
+    const container = scrollContainerRef?.current;
+    if (!container) return rect.top;
+    const containerRect = container.getBoundingClientRect();
+    return rect.top - containerRect.top + container.scrollTop;
+  }, [scrollContainerRef]);
+
   // Text selection handler
   useEffect(() => {
     const handleMouseUp = () => {
@@ -189,27 +198,22 @@ export function PaperChat({ paperId, hasText, initialConversationId, className, 
       });
       const data = await res.json();
 
-      // Position inline card relative to selection
-      const cardHeight = 300;
-      const spaceBelow = window.innerHeight - pos.rectBottom - 12;
-      const placement = spaceBelow >= cardHeight ? "below" : "above";
+      // Compute yOffset from selection rect
+      const rect = new DOMRect(pos.x, pos.rectTop, 0, pos.rectBottom - pos.rectTop);
+      const yOffset = computeYOffset(rect);
 
       setInlineChat({
         conversationId: data.id,
         mode,
         selectedText: text,
-        position: {
-          x: pos.x,
-          y: placement === "below" ? pos.rectBottom + 8 : pos.rectTop - 8,
-          placement,
-        },
+        yOffset,
       });
 
       // Notify highlighter about the new conversation
       window.dispatchEvent(new CustomEvent("paper-highlights-changed"));
       window.dispatchEvent(new CustomEvent("inline-chat-active", { detail: { active: true } }));
     },
-    [paperId, selectionPopover]
+    [paperId, selectionPopover, computeYOffset]
   );
 
   const handleCloseInline = useCallback(async () => {
@@ -291,23 +295,17 @@ export function PaperChat({ paperId, hasText, initialConversationId, className, 
       });
       const data = await res.json();
 
-      // Open inline card near the highlighted text (not the floating panel)
-      const cardHeight = 300;
-      const spaceBelow = window.innerHeight - (rect?.bottom ?? 0) - 12;
-      const placement = spaceBelow >= cardHeight ? "below" : "above";
-      const x = rect
-        ? Math.max(80, Math.min(rect.left + rect.width / 2, window.innerWidth - 80))
-        : window.innerWidth / 2;
+      // Compute yOffset from the event rect
+      const domRect = rect
+        ? new DOMRect(rect.left, rect.top, rect.width, rect.height)
+        : new DOMRect(0, 0, 0, 0);
+      const yOffset = computeYOffset(domRect);
 
       setInlineChat({
         conversationId: data.id,
         mode,
         selectedText,
-        position: {
-          x,
-          y: placement === "below" ? (rect?.bottom ?? 0) + 8 : (rect?.top ?? 0) - 8,
-          placement,
-        },
+        yOffset,
       });
 
       setListRefreshKey((k) => k + 1);
@@ -323,7 +321,7 @@ export function PaperChat({ paperId, hasText, initialConversationId, className, 
       window.removeEventListener("delete-highlight-conversation", handleDelete);
       window.removeEventListener("create-highlight-conversation", handleCreate);
     };
-  }, [handleOpenMatchedConversation, paperId]);
+  }, [handleOpenMatchedConversation, paperId, computeYOffset]);
 
   const handleDeleteMatchedConversation = useCallback(
     async (convId: string) => {
@@ -405,6 +403,10 @@ export function PaperChat({ paperId, hasText, initialConversationId, className, 
     setView("list");
   };
 
+  // Fallback ref if none provided
+  const fallbackRef = useRef<HTMLElement>(null);
+  const effectiveScrollRef = scrollContainerRef ?? fallbackRef;
+
   if (!hasText) return null;
 
   return (
@@ -425,7 +427,7 @@ export function PaperChat({ paperId, hasText, initialConversationId, className, 
         />
       )}
 
-      {/* Inline card */}
+      {/* Margin annotation card */}
       {inlineChat && (
         <InlineChat
           key={inlineChat.conversationId}
@@ -433,13 +435,14 @@ export function PaperChat({ paperId, hasText, initialConversationId, className, 
           conversationId={inlineChat.conversationId}
           selectedText={inlineChat.selectedText}
           mode={inlineChat.mode}
-          position={inlineChat.position}
+          yOffset={inlineChat.yOffset}
+          scrollContainerRef={effectiveScrollRef}
           onClose={handleCloseInline}
           onOpenFull={handleOpenFullFromInline}
         />
       )}
 
-      {/* ── Docked mode (clean theme) — fixed panel left of right strip ── */}
+      {/* ── Docked mode — fixed panel left of right strip ── */}
       {docked ? (
         dockedOpen && (
           <div className="fixed top-12 bottom-0 right-10 z-30 flex flex-col border-l bg-card shadow-lg" style={{ width: 380 }}>

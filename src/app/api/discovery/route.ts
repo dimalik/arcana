@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { runDiscovery } from "@/lib/discovery/engine";
 import { trackEngagement } from "@/lib/engagement/track";
+import { requireUserId } from "@/lib/paper-auth";
 
 /**
  * POST /api/discovery — Start a new discovery session
@@ -19,9 +20,11 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // Verify all papers exist
+  const userId = await requireUserId();
+
+  // Verify all papers exist and belong to user
   const papers = await prisma.paper.findMany({
-    where: { id: { in: paperIds } },
+    where: { id: { in: paperIds }, userId },
     select: { id: true, title: true },
   });
 

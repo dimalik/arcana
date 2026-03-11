@@ -6,6 +6,7 @@ import {
   downloadArxivPdf,
 } from "@/lib/import/arxiv";
 import { processingQueue } from "@/lib/processing/queue";
+import { requireUserId } from "@/lib/paper-auth";
 import { z } from "zod";
 
 const importSchema = z.object({
@@ -17,6 +18,7 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const { input } = importSchema.parse(body);
 
+    const userId = await requireUserId();
     const arxivId = parseArxivId(input);
     if (!arxivId) {
       return NextResponse.json(
@@ -25,9 +27,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Check for duplicate
+    // Check for duplicate (per user)
     const existing = await prisma.paper.findFirst({
-      where: { arxivId },
+      where: { arxivId, userId },
     });
     if (existing) {
       return NextResponse.json(
@@ -51,6 +53,7 @@ export async function POST(request: NextRequest) {
     const paper = await prisma.paper.create({
       data: {
         title: metadata.title,
+        userId,
         abstract: metadata.abstract,
         authors: JSON.stringify(metadata.authors),
         year: metadata.year,

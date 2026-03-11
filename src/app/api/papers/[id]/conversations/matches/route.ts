@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { requirePaperAccess } from "@/lib/paper-auth";
 
 function normalize(text: string): string {
   return text.replace(/\s+/g, " ").trim().toLowerCase();
@@ -12,6 +13,10 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
+  const paper = await requirePaperAccess(id);
+  if (!paper) {
+    return NextResponse.json({ error: "Paper not found" }, { status: 404 });
+  }
   const text = request.nextUrl.searchParams.get("text");
 
   if (!text) {

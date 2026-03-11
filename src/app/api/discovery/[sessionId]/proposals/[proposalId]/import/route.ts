@@ -4,6 +4,7 @@ import { fetchArxivMetadata, downloadArxivPdf } from "@/lib/import/arxiv";
 import { processingQueue } from "@/lib/processing/queue";
 import { findAndDownloadPdf } from "@/lib/import/pdf-finder";
 import { fetchDoiMetadata } from "@/lib/import/url";
+import { requireUserId } from "@/lib/paper-auth";
 
 /**
  * POST /api/discovery/[sessionId]/proposals/[proposalId]/import
@@ -15,6 +16,7 @@ export async function POST(
     params,
   }: { params: Promise<{ sessionId: string; proposalId: string }> }
 ) {
+  const userId = await requireUserId();
   const { sessionId, proposalId } = await params;
 
   const proposal = await prisma.discoveryProposal.findFirst({
@@ -38,7 +40,7 @@ export async function POST(
     if (proposal.arxivId) {
       // ── arXiv path (unchanged) ──────────────────────────────────────
       const existing = await prisma.paper.findFirst({
-        where: { arxivId: proposal.arxivId },
+        where: { arxivId: proposal.arxivId, userId },
       });
       if (existing) {
         await prisma.discoveryProposal.update({
@@ -60,6 +62,7 @@ export async function POST(
       paper = await prisma.paper.create({
         data: {
           title: metadata.title,
+          userId,
           abstract: metadata.abstract,
           authors: JSON.stringify(metadata.authors),
           year: metadata.year,
@@ -106,6 +109,7 @@ export async function POST(
       paper = await prisma.paper.create({
         data: {
           title: proposal.title,
+          userId,
           authors: proposal.authors,
           year: proposal.year,
           venue: proposal.venue,

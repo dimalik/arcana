@@ -73,14 +73,25 @@ async function collectPdfUrls(opts: {
     candidates.push({ url, source });
   }
 
+  // Extract arXiv ID from DOI if not explicitly provided
+  // DOIs like "10.48550/arXiv.2502.15902" contain the arXiv ID
+  let arxivId = opts.arxivId || null;
+  if (!arxivId && opts.doi) {
+    const doiArxivMatch = opts.doi.match(/10\.48550\/arXiv\.(\d+\.\d+)/i);
+    if (doiArxivMatch) {
+      arxivId = doiArxivMatch[1];
+      console.log(`[pdf-finder] Extracted arXiv ID ${arxivId} from DOI ${opts.doi}`);
+    }
+  }
+
   // 1. Existing URL (already known from discovery/OpenAlex)
   if (opts.existingPdfUrl) {
     add(opts.existingPdfUrl, "existing");
   }
 
   // 2. ArXiv direct (always works for arXiv papers)
-  if (opts.arxivId) {
-    add(`https://arxiv.org/pdf/${opts.arxivId}.pdf`, "arxiv");
+  if (arxivId) {
+    add(`https://arxiv.org/pdf/${arxivId}.pdf`, "arxiv");
   }
 
   // 3-5. API lookups (run in parallel for speed)

@@ -19,7 +19,7 @@ export async function resolveAndAssignTags(
     select: { id: true, name: true },
   });
 
-  for (const name of tagNames.slice(0, 5)) {
+  for (const name of tagNames.slice(0, 3)) {
     // Try to find an existing tag that's similar enough
     const match = findMatchingTag(name, existingTags);
 
@@ -64,4 +64,33 @@ export async function getExistingTagNames(): Promise<string[]> {
     orderBy: { name: "asc" },
   });
   return tags.map((t) => t.name);
+}
+
+/**
+ * Get tag names split into good (reusable) and overused (to avoid),
+ * based on score. Tags with score 0 and high paper counts are overused.
+ */
+export async function getScoredTagHints(): Promise<{
+  goodTags: string[];
+  overusedTags: string[];
+}> {
+  const tags = await prisma.tag.findMany({
+    include: { _count: { select: { papers: true } } },
+    orderBy: { score: "desc" },
+  });
+
+  const totalPapers = await prisma.paper.count();
+  const goodTags: string[] = [];
+  const overusedTags: string[] = [];
+
+  for (const t of tags) {
+    const pct = totalPapers > 0 ? t._count.papers / totalPapers : 0;
+    if (pct > 0.5) {
+      overusedTags.push(t.name);
+    } else if (t.score > 0.3) {
+      goodTags.push(t.name);
+    }
+  }
+
+  return { goodTags, overusedTags };
 }

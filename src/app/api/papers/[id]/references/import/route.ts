@@ -6,6 +6,7 @@ import {
   downloadArxivPdf,
 } from "@/lib/import/arxiv";
 import { processingQueue } from "@/lib/processing/queue";
+import { requireUserId } from "@/lib/paper-auth";
 import { writeFile, mkdir } from "fs/promises";
 import path from "path";
 import { v4 as uuidv4 } from "uuid";
@@ -14,6 +15,7 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const userId = await requireUserId();
   const { id } = await params;
   const body = await req.json();
   const { referenceId } = body;
@@ -53,7 +55,7 @@ export async function POST(
     if (reference.arxivId) {
       // Import from arXiv
       const existing = await prisma.paper.findFirst({
-        where: { arxivId: reference.arxivId },
+        where: { arxivId: reference.arxivId, userId },
       });
       if (existing) {
         // Already in library — just link it
@@ -77,6 +79,7 @@ export async function POST(
       paper = await prisma.paper.create({
         data: {
           title: metadata.title,
+          userId,
           abstract: metadata.abstract,
           authors: JSON.stringify(metadata.authors),
           year: metadata.year,
@@ -113,6 +116,7 @@ export async function POST(
       paper = await prisma.paper.create({
         data: {
           title: reference.title,
+          userId,
           authors: reference.authors || JSON.stringify(authors),
           year: reference.year,
           venue: reference.venue,
@@ -133,6 +137,7 @@ export async function POST(
       paper = await prisma.paper.create({
         data: {
           title: reference.title,
+          userId,
           authors: reference.authors || JSON.stringify(authors),
           year: reference.year,
           venue: reference.venue,

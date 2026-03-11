@@ -1,11 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { requirePaperAccess } from "@/lib/paper-auth";
 
 export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
+  const paper = await requirePaperAccess(id);
+  if (!paper) {
+    return NextResponse.json({ error: "Paper not found" }, { status: 404 });
+  }
 
   const references = await prisma.reference.findMany({
     where: { paperId: id },
@@ -25,6 +30,10 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
+  const paper = await requirePaperAccess(id);
+  if (!paper) {
+    return NextResponse.json({ error: "Paper not found" }, { status: 404 });
+  }
   const referenceId = req.nextUrl.searchParams.get("referenceId");
 
   if (!referenceId) {

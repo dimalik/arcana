@@ -7,6 +7,7 @@ import {
 } from "@/lib/import/url";
 import { processingQueue } from "@/lib/processing/queue";
 import { findAndDownloadPdf } from "@/lib/import/pdf-finder";
+import { requireUserId } from "@/lib/paper-auth";
 import { z } from "zod";
 
 const importSchema = z.object({
@@ -16,11 +17,12 @@ const importSchema = z.object({
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
+    const userId = await requireUserId();
     const { url } = importSchema.parse(body);
 
-    // Check for duplicate by URL
+    // Check for duplicate by URL (per user)
     const existingByUrl = await prisma.paper.findFirst({
-      where: { sourceUrl: url },
+      where: { sourceUrl: url, userId },
     });
     if (existingByUrl) {
       return NextResponse.json(
@@ -35,7 +37,7 @@ export async function POST(request: NextRequest) {
     if (doi) {
       // Check for duplicate by DOI
       const existingByDoi = await prisma.paper.findFirst({
-        where: { doi },
+        where: { doi, userId },
       });
       if (existingByDoi) {
         return NextResponse.json(
@@ -56,6 +58,7 @@ export async function POST(request: NextRequest) {
         const paper = await prisma.paper.create({
           data: {
             title: metadata.title,
+            userId,
             abstract: metadata.abstract,
             authors: JSON.stringify(metadata.authors),
             year: metadata.year,
@@ -99,6 +102,7 @@ export async function POST(request: NextRequest) {
     const paper = await prisma.paper.create({
       data: {
         title: content.title,
+        userId,
         abstract: content.excerpt || undefined,
         authors: content.authors?.length
           ? JSON.stringify(content.authors)

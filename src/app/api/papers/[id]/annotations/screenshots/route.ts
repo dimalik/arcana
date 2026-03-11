@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { writeFile, mkdir } from "fs/promises";
 import path from "path";
 import { v4 as uuidv4 } from "uuid";
+import { requireUserId } from "@/lib/paper-auth";
 
 const SCREENSHOTS_DIR = path.join(process.cwd(), "uploads", "screenshots");
 
@@ -10,9 +11,10 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { id } = await params;
+  const userId = await requireUserId();
+    const { id } = await params;
 
-  const paper = await prisma.paper.findUnique({ where: { id } });
+  const paper = await prisma.paper.findFirst({ where: { id, userId } });
   if (!paper) {
     return NextResponse.json({ error: "Paper not found" }, { status: 404 });
   }

@@ -1,14 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { processingQueue } from "@/lib/processing/queue";
+import { requireUserId } from "@/lib/paper-auth";
 
 export async function POST(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { id } = await params;
+  const userId = await requireUserId();
+    const { id } = await params;
 
-  const paper = await prisma.paper.findUnique({ where: { id } });
+  const paper = await prisma.paper.findFirst({ where: { id, userId } });
   if (!paper) {
     return NextResponse.json({ error: "Paper not found" }, { status: 404 });
   }

@@ -100,25 +100,43 @@ mark.selection-highlight-chat:hover {
   background: rgb(255 255 255 / 0.3);
 }
 
+/* Thin rounded scrollbar — reusable */
+.scrollbar-thin {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(0 0 0 / 0.12) transparent;
+}
+.dark .scrollbar-thin {
+  scrollbar-color: rgb(255 255 255 / 0.12) transparent;
+}
+.scrollbar-thin::-webkit-scrollbar {
+  width: 6px;
+}
+.scrollbar-thin::-webkit-scrollbar-track {
+  background: transparent;
+  margin: 4px 0;
+}
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background: rgb(0 0 0 / 0.12);
+  border-radius: 9999px;
+}
+.scrollbar-thin::-webkit-scrollbar-thumb:hover {
+  background: rgb(0 0 0 / 0.25);
+}
+.dark .scrollbar-thin::-webkit-scrollbar-thumb {
+  background: rgb(255 255 255 / 0.12);
+}
+.dark .scrollbar-thin::-webkit-scrollbar-thumb:hover {
+  background: rgb(255 255 255 / 0.25);
+}
 
-
-/* Clean theme — lock html/body so only inner containers scroll */
-html[data-theme="clean"],
-html[data-theme="clean"] body {
+/* Lock html/body so only inner containers scroll */
+html, body {
   overflow: hidden;
   height: 100%;
 }
 
-/* Clean theme overrides — borderless, no card background */
-[data-theme="clean"] {
-  --border: 0 0% 100%;
-  --card: 0 0% 100%;
-}
-.dark[data-theme="clean"] {
-  --border: 0 0% 3.9%;
-  --card: 0 0% 3.9%;
-}
-[data-theme="clean"] .rounded-xl.border {
+/* Borderless cards */
+.rounded-xl.border {
   border-color: transparent;
   box-shadow: none;
 }
@@ -145,6 +163,9 @@ html[data-theme="clean"] body {
   line-height: 1.3;
   margin-top: 1.5em;
 }
+.prose-readable :first-child {
+  margin-top: 0;
+}
 .prose-readable li {
   line-height: 1.65;
 }
@@ -154,25 +175,25 @@ html[data-theme="clean"] body {
 
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 0 0% 3.9%;
+    --background: 240 5% 97%;
+    --foreground: 233 11% 23%;
     --card: 0 0% 100%;
-    --card-foreground: 0 0% 3.9%;
+    --card-foreground: 233 11% 23%;
     --popover: 0 0% 100%;
-    --popover-foreground: 0 0% 3.9%;
-    --primary: 0 0% 9%;
-    --primary-foreground: 0 0% 98%;
-    --secondary: 0 0% 96.1%;
-    --secondary-foreground: 0 0% 9%;
-    --muted: 0 0% 96.1%;
-    --muted-foreground: 0 0% 45.1%;
-    --accent: 0 0% 96.1%;
-    --accent-foreground: 0 0% 9%;
+    --popover-foreground: 233 11% 23%;
+    --primary: 233 11% 23%;
+    --primary-foreground: 240 5% 97%;
+    --secondary: 240 5% 94%;
+    --secondary-foreground: 233 11% 23%;
+    --muted: 240 4% 95%;
+    --muted-foreground: 240 4% 46%;
+    --accent: 240 5% 93%;
+    --accent-foreground: 233 11% 23%;
     --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 0 0% 98%;
-    --border: 0 0% 89.8%;
-    --input: 0 0% 89.8%;
-    --ring: 0 0% 3.9%;
+    --destructive-foreground: 240 5% 97%;
+    --border: 240 6% 87%;
+    --input: 240 5% 87%;
+    --ring: 233 11% 23%;
     --chart-1: 12 76% 61%;
     --chart-2: 173 58% 39%;
     --chart-3: 197 37% 24%;
@@ -181,24 +202,24 @@ html[data-theme="clean"] body {
     --radius: 0.5rem;
   }
   .dark {
-    --background: 0 0% 3.9%;
-    --foreground: 0 0% 98%;
-    --card: 0 0% 3.9%;
-    --card-foreground: 0 0% 98%;
-    --popover: 0 0% 3.9%;
-    --popover-foreground: 0 0% 98%;
-    --primary: 0 0% 98%;
+    --background: 0 0% 13%;
+    --foreground: 0 0% 93%;
+    --card: 0 0% 13%;
+    --card-foreground: 0 0% 93%;
+    --popover: 0 0% 18%;
+    --popover-foreground: 0 0% 93%;
+    --primary: 0 0% 93%;
     --primary-foreground: 0 0% 9%;
-    --secondary: 0 0% 14.9%;
-    --secondary-foreground: 0 0% 98%;
-    --muted: 0 0% 14.9%;
-    --muted-foreground: 0 0% 63.9%;
-    --accent: 0 0% 14.9%;
-    --accent-foreground: 0 0% 98%;
+    --secondary: 0 0% 18%;
+    --secondary-foreground: 0 0% 93%;
+    --muted: 0 0% 18%;
+    --muted-foreground: 0 0% 61%;
+    --accent: 0 0% 18%;
+    --accent-foreground: 0 0% 93%;
     --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 0 0% 98%;
-    --border: 0 0% 14.9%;
-    --input: 0 0% 14.9%;
+    --destructive-foreground: 0 0% 93%;
+    --border: 0 0% 13%;
+    --input: 0 0% 18%;
     --ring: 0 0% 83.1%;
     --chart-1: 220 70% 50%;
     --chart-2: 160 60% 45%;

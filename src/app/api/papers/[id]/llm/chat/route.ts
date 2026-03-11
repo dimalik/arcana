@@ -3,18 +3,21 @@ import { prisma } from "@/lib/prisma";
 import { streamLLMResponse, truncateText } from "@/lib/llm/provider";
 import { SYSTEM_PROMPTS } from "@/lib/llm/prompts";
 import { resolveModelConfig } from "@/lib/llm/auto-process";
+import { requireUserId } from "@/lib/paper-auth";
+import { getUserContext, buildUserContextPreamble } from "@/lib/llm/user-context";
 
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { id } = await params;
+  const userId = await requireUserId();
+    const { id } = await params;
   const body = await request.json();
   const { messages } = body;
   const { provider, modelId, proxyConfig } = await resolveModelConfig(body);
 
-  const paper = await prisma.paper.findUnique({
-    where: { id },
+  const paper = await prisma.paper.findFirst({
+    where: { id, userId },
   });
 
   if (!paper) {
@@ -36,7 +39,9 @@ export async function POST(
   }
 
   const truncated = truncateText(text, modelId, proxyConfig);
-  const systemPrompt = `${SYSTEM_PROMPTS.chat}\n\nPaper: "${paper.title}"\n\nFull text:\n${truncated}`;
+  const userCtx = await getUserContext(userId);
+  const preamble = buildUserContextPreamble(userCtx);
+  const systemPrompt = `${SYSTEM_PROMPTS.chat}${preamble}\n\nPaper: "${paper.title}"\n\nFull text:\n${truncated}`;
 
   // Save user message
   const lastUserMessage = messages[messages.length - 1];
@@ -73,7 +78,7 @@ export async function POST(
     })
   );
 
-  const result = streamLLMResponse({
+  const result = await streamLLMResponse({
     provider,
     modelId,
     system: systemPrompt,

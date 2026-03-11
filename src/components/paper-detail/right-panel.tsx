@@ -37,7 +37,7 @@ interface Props {
 
 export function RightPanel({ activeView, onViewChange, chatOpen, onChatToggle }: Props) {
   return (
-    <aside className="fixed right-0 top-12 bottom-0 z-40 flex w-10 flex-col items-center border-l bg-card/50">
+    <aside className="fixed right-0 top-12 bottom-0 z-40 flex w-10 flex-col items-center bg-card/50">
       {/* View tabs — vertically centered */}
       <div className="flex flex-1 flex-col items-center justify-center">
         {items.map((item) => {

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { saveUploadedFile } from "@/lib/upload";
 import { processingQueue } from "@/lib/processing/queue";
+import { requireUserId } from "@/lib/paper-auth";
 
 export async function POST(request: NextRequest) {
   try {
@@ -19,15 +20,16 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const userId = await requireUserId();
     const { filePath, originalName } = await saveUploadedFile(file);
     const sourceUrl = (formData.get("sourceUrl") as string) || null;
     const titleFromFile = originalName.replace(/\.pdf$/i, "");
 
-    // Check for duplicate by filename-derived title or sourceUrl
+    // Check for duplicate by filename-derived title or sourceUrl (per user)
     const existing = await prisma.paper.findFirst({
       where: sourceUrl
-        ? { sourceUrl }
-        : { title: titleFromFile, sourceType: "UPLOAD" },
+        ? { sourceUrl, userId }
+        : { title: titleFromFile, sourceType: "UPLOAD", userId },
     });
     if (existing) {
       return NextResponse.json(
@@ -39,6 +41,7 @@ export async function POST(request: NextRequest) {
     const paper = await prisma.paper.create({
       data: {
         title: originalName.replace(/\.pdf$/i, ""),
+        userId,
         sourceType: "UPLOAD",
         sourceUrl,
         filePath,

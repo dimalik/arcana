@@ -3,12 +3,14 @@ import { prisma } from "@/lib/prisma";
 import { generateLLMResponse, truncateText } from "@/lib/llm/provider";
 import { buildPrompt, cleanJsonResponse } from "@/lib/llm/prompts";
 import { resolveModelConfig } from "@/lib/llm/auto-process";
+import { requireUserId } from "@/lib/paper-auth";
 
 export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const userId = await requireUserId();
     const { id } = await params;
     const concepts = await prisma.concept.findMany({
       where: { paperId: id },
@@ -30,12 +32,13 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const userId = await requireUserId();
     const { id } = await params;
     const body = await request.json();
     const { provider, modelId, proxyConfig } = await resolveModelConfig(body);
 
-    const paper = await prisma.paper.findUnique({
-      where: { id },
+    const paper = await prisma.paper.findFirst({
+      where: { id, userId },
     });
 
     if (!paper) {

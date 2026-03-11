@@ -1,15 +1,19 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { requireUserId } from "@/lib/paper-auth";
 
 // GET /api/mind-palace/stats
 export async function GET() {
+  const userId = await requireUserId();
+  const userPaperFilter = { paper: { userId } };
   const [totalInsights, totalRooms, dueCount, recentReviews] = await Promise.all([
-    prisma.insight.count(),
+    prisma.insight.count({ where: userPaperFilter }),
     prisma.mindPalaceRoom.count(),
-    prisma.insight.count({ where: { nextReviewAt: { lte: new Date() } } }),
+    prisma.insight.count({ where: { nextReviewAt: { lte: new Date() }, ...userPaperFilter } }),
     // Streak: count distinct days with reviews in the last 30 days
     prisma.insight.findMany({
       where: {
+        ...userPaperFilter,
         lastReviewedAt: {
           not: null,
           gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000),

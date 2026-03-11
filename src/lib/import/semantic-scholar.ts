@@ -15,16 +15,19 @@ const OPENALEX_SELECT =
 
 const S2_BASE = "https://api.semanticscholar.org/graph/v1/paper";
 const S2_FIELDS =
-  "title,authors,year,venue,externalIds,openAccessPdf,citationCount";
+  "title,abstract,authors,year,venue,externalIds,openAccessPdf,citationCount";
 
 const CROSSREF_BASE = "https://api.crossref.org/works";
 const CROSSREF_MAILTO = process.env.CROSSREF_MAILTO || "paperfinder@localhost";
 
 // ── Public types ────────────────────────────────────────────────────
 
+export type SearchSource = "openalex" | "s2" | "crossref";
+
 export interface S2Result {
   semanticScholarId: string; // source-specific ID (OpenAlex URL, S2 paperId, or crossref:DOI)
   title: string;
+  abstract: string | null;
   authors: string[];
   year: number | null;
   venue: string | null;
@@ -34,6 +37,7 @@ export interface S2Result {
   externalUrl: string;
   citationCount: number | null;
   openAccessPdfUrl: string | null;
+  source?: SearchSource;
 }
 
 export class S2RateLimitError extends Error {
@@ -138,6 +142,7 @@ function parseOpenAlexWork(work: OpenAlexWork): S2Result {
   return {
     semanticScholarId: work.id,
     title: work.title || work.display_name || "",
+    abstract: null, // OpenAlex uses inverted index format; not worth reconstructing here
     authors: (work.authorships || []).map((a) => a.author.display_name),
     year: work.publication_year ?? null,
     venue,
@@ -170,6 +175,7 @@ async function searchOpenAlex(
 interface S2PaperRaw {
   paperId: string;
   title: string;
+  abstract?: string | null;
   authors?: { name: string }[];
   year?: number;
   venue?: string;
@@ -181,8 +187,9 @@ interface S2PaperRaw {
 
 export function parseS2Paper(raw: S2PaperRaw): S2Result {
   const externalIds = raw.externalIds || {};
-  const arxivId = externalIds.ArXiv || null;
-  const doi = raw.doi || externalIds.DOI || null;
+  const rawDoi = raw.doi || externalIds.DOI || null;
+  const arxivId = externalIds.ArXiv || extractArxivIdFromDoi(rawDoi) || null;
+  const doi = arxivId ? null : rawDoi;
   const openReviewId = externalIds.OpenReview || null;
 
   let externalUrl = `https://www.semanticscholar.org/paper/${raw.paperId}`;
@@ -192,6 +199,7 @@ export function parseS2Paper(raw: S2PaperRaw): S2Result {
   return {
     semanticScholarId: `s2:${raw.paperId}`,
     title: raw.title,
+    abstract: raw.abstract || null,
     authors: (raw.authors || []).map((a) => a.name),
     year: raw.year ?? null,
     venue: raw.venue || null,
@@ -254,6 +262,7 @@ interface CrossRefItem {
 
 function parseCrossRefItem(item: CrossRefItem): S2Result {
   const doi = item.DOI || null;
+  const arxivId = extractArxivIdFromDoi(doi);
   const title = item.title?.[0] || "";
   const authors = (item.author || [])
     .map((a) => [a.given, a.family].filter(Boolean).join(" "))
@@ -264,13 +273,14 @@ function parseCrossRefItem(item: CrossRefItem): S2Result {
   return {
     semanticScholarId: doi ? `crossref:${doi}` : `crossref:${title}`,
     title,
+    abstract: null, // CrossRef doesn't return abstracts in search results
     authors,
     year,
     venue,
-    doi,
-    arxivId: null,
+    doi: arxivId ? null : doi,
+    arxivId,
     openReviewId: null,
-    externalUrl: doi ? `https://doi.org/${doi}` : "",
+    externalUrl: arxivId ? `https://arxiv.org/abs/${arxivId}` : doi ? `https://doi.org/${doi}` : "",
     citationCount: item["is-referenced-by-count"] ?? null,
     openAccessPdfUrl: null,
   };
@@ -303,7 +313,16 @@ export async function searchByTitle(
 ): Promise<S2Result | null> {
   // 1. OpenAlex (fast, generous limits)
   const oaResult = await searchOpenAlex(title, year);
-  if (oaResult) return oaResult;
+  if (oaResult) {
+    // OpenAlex doesn't provide abstracts — try S2 to fill it in
+    if (!oaResult.abstract) {
+      const s2Result = await searchS2(title, year);
+      if (s2Result?.abstract) {
+        oaResult.abstract = s2Result.abstract;
+      }
+    }
+    return oaResult;
+  }
 
   // 2. Semantic Scholar (if API key configured)
   const s2Result = await searchS2(title, year);
@@ -311,7 +330,16 @@ export async function searchByTitle(
 
   // 3. CrossRef (fallback)
   const crResult = await searchCrossRef(title, year);
-  if (crResult) return crResult;
+  if (crResult) {
+    // CrossRef doesn't provide abstracts — try S2 to fill it in
+    if (!crResult.abstract) {
+      const s2Fallback = await searchS2(title, year);
+      if (s2Fallback?.abstract) {
+        crResult.abstract = s2Fallback.abstract;
+      }
+    }
+    return crResult;
+  }
 
   return null;
 }
@@ -326,6 +354,172 @@ export async function fetchById(id: string): Promise<S2Result | null> {
 
   const work: OpenAlexWork = await res.json();
   return parseOpenAlexWork(work);
+}
+
+// ── Multi-source search (returns all candidates) ────────────────────
+
+async function searchOpenAlexMulti(
+  query: string,
+  year: number | null | undefined
+): Promise<S2Result[]> {
+  let url =
+    `${OPENALEX_BASE}?filter=title.search:${encodeURIComponent(query)}` +
+    `&select=${OPENALEX_SELECT}&per_page=5`;
+  if (year) url += `&filter=publication_year:${year}`;
+  const res = await fetchWithRetry(url, "openalex", 200);
+  if (!res) return [];
+
+  const data = await res.json();
+  const works: OpenAlexWork[] = data.results || [];
+  return works.map((w) => ({ ...parseOpenAlexWork(w), source: "openalex" as SearchSource }));
+}
+
+async function searchS2Multi(
+  query: string,
+): Promise<S2Result[]> {
+  const headers = getS2Headers();
+  if (!headers) return [];
+
+  const cleaned = query.replace(/-/g, " ").replace(/\s+/g, " ").trim();
+  const searchUrl = `${S2_BASE}/search?query=${encodeURIComponent(cleaned)}&fields=${S2_FIELDS}&limit=5`;
+  const searchRes = await fetchWithRetry(searchUrl, "s2", 1100, headers);
+  if (!searchRes) return [];
+
+  const data = await searchRes.json();
+  const papers: S2PaperRaw[] = data.data || [];
+  return papers.map((p) => ({ ...parseS2Paper(p), source: "s2" as SearchSource }));
+}
+
+async function searchCrossRefMulti(
+  query: string,
+): Promise<S2Result[]> {
+  const url =
+    `${CROSSREF_BASE}?query.bibliographic=${encodeURIComponent(query)}` +
+    `&rows=5&mailto=${encodeURIComponent(CROSSREF_MAILTO)}`;
+  const res = await fetchWithRetry(url, "crossref", 150);
+  if (!res) return [];
+
+  const data = await res.json();
+  const items: CrossRefItem[] = data.message?.items || [];
+  return items.map((item) => ({ ...parseCrossRefItem(item), source: "crossref" as SearchSource }));
+}
+
+function deduplicateResults(results: S2Result[]): S2Result[] {
+  const seen = new Map<string, S2Result>();
+
+  for (const r of results) {
+    // Deduplicate by DOI first
+    if (r.doi) {
+      const key = `doi:${r.doi.toLowerCase()}`;
+      if (seen.has(key)) continue;
+      seen.set(key, r);
+      continue;
+    }
+    // Then by arXiv ID
+    if (r.arxivId) {
+      const key = `arxiv:${r.arxivId.toLowerCase()}`;
+      if (seen.has(key)) continue;
+      seen.set(key, r);
+      continue;
+    }
+    // Then by normalized title
+    const normTitle = r.title.toLowerCase().replace(/[^a-z0-9]/g, "");
+    if (normTitle.length < 10) {
+      seen.set(r.semanticScholarId, r);
+      continue;
+    }
+    let isDupe = false;
+    const existingEntries = Array.from(seen.values());
+    for (const existing of existingEntries) {
+      const existingNorm = existing.title.toLowerCase().replace(/[^a-z0-9]/g, "");
+      if (titleSimilarity(normTitle, existingNorm) > 0.85) {
+        isDupe = true;
+        break;
+      }
+    }
+    if (!isDupe) {
+      seen.set(r.semanticScholarId, r);
+    }
+  }
+
+  return Array.from(seen.values());
+}
+
+/**
+ * Search all sources in parallel and return deduplicated results sorted by citation count.
+ */
+export async function searchAllSources(
+  query: string,
+  year?: number | null
+): Promise<S2Result[]> {
+  const [oaResults, s2Results, crResults] = await Promise.all([
+    searchOpenAlexMulti(query, year),
+    searchS2Multi(query),
+    searchCrossRefMulti(query),
+  ]);
+
+  const all = [...oaResults, ...s2Results, ...crResults];
+  const deduped = deduplicateResults(all);
+
+  // Sort by citation count descending (nulls last)
+  deduped.sort((a, b) => (b.citationCount ?? -1) - (a.citationCount ?? -1));
+  return deduped;
+}
+
+// ── S2 Recommendations API (SPECTER embeddings) ────────────────────
+
+const S2_RECS_BASE = "https://api.semanticscholar.org/recommendations/v1/papers";
+
+/**
+ * Get paper recommendations from S2's SPECTER embedding similarity API.
+ * Accepts paper IDs formatted as "DOI:xxx" or "ArXiv:xxx".
+ * Works without API key (public endpoint).
+ */
+export async function getS2Recommendations(
+  paperIds: string[],
+  limit = 20
+): Promise<S2Result[]> {
+  if (paperIds.length === 0) return [];
+
+  const url = `${S2_RECS_BASE}/?fields=${S2_FIELDS}&limit=${limit}`;
+
+  await delayForSource("s2", 1100);
+
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    if (attempt > 0) await delayForSource("s2", 1100);
+
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(getS2Headers() || {}),
+      },
+      body: JSON.stringify({ positivePaperIds: paperIds }),
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      const papers: S2PaperRaw[] = data.recommendedPapers || [];
+      return papers.map((p) => ({ ...parseS2Paper(p), source: "s2" as SearchSource }));
+    }
+
+    if (res.status === 429) {
+      const retryAfter = res.headers.get("Retry-After");
+      const waitSec = retryAfter
+        ? Math.max(parseInt(retryAfter, 10), 2)
+        : 3 * (attempt + 1);
+      console.warn(
+        `[s2-recs] 429 rate limited, waiting ${waitSec}s (retry ${attempt + 1}/${MAX_RETRIES})`
+      );
+      await new Promise((resolve) => setTimeout(resolve, waitSec * 1000));
+      continue;
+    }
+
+    console.error(`[s2-recs] ${res.status} ${res.statusText}`);
+    return [];
+  }
+
+  return [];
 }
 
 // ── Shared helpers ──────────────────────────────────────────────────

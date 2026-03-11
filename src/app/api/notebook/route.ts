@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { z } from "zod";
+import { requireUserId } from "@/lib/paper-auth";
 
 const createEntrySchema = z.object({
   paperId: z.string().min(1),
@@ -13,11 +14,12 @@ const createEntrySchema = z.object({
 });
 
 export async function GET(request: NextRequest) {
+  const userId = await requireUserId();
   const { searchParams } = new URL(request.url);
   const paperId = searchParams.get("paperId");
   const type = searchParams.get("type");
 
-  const where: Record<string, string> = {};
+  const where: Record<string, unknown> = { paper: { userId } };
   if (paperId) where.paperId = paperId;
   if (type) where.type = type;
 
@@ -34,8 +36,17 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
+    const userId = await requireUserId();
     const body = await request.json();
     const data = createEntrySchema.parse(body);
+
+    // Verify the paper belongs to the user
+    const paper = await prisma.paper.findFirst({
+      where: { id: data.paperId, userId },
+    });
+    if (!paper) {
+      return NextResponse.json({ error: "Paper not found" }, { status: 404 });
+    }
 
     const entry = await prisma.notebookEntry.create({
       data,

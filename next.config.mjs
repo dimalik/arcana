@@ -1,7 +1,7 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   experimental: {
-    serverComponentsExternalPackages: ["pdf-parse", "pdfjs-dist"],
+    serverComponentsExternalPackages: ["pdf-parse", "@anthropic-ai/claude-agent-sdk"],
   },
 };
 

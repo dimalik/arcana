@@ -3,18 +3,21 @@ import { prisma } from "@/lib/prisma";
 import { generateLLMResponse, truncateText } from "@/lib/llm/provider";
 import { buildPrompt, cleanJsonResponse } from "@/lib/llm/prompts";
 import { resolveModelConfig, getDefaultModel } from "@/lib/llm/auto-process";
+import { requireUserId } from "@/lib/paper-auth";
+import { getUserContext, buildUserContextPreamble } from "@/lib/llm/user-context";
 
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const userId = await requireUserId();
     const { id } = await params;
     const body = await request.json();
     const { provider, modelId, proxyConfig } = await resolveModelConfig(body);
 
-    const paper = await prisma.paper.findUnique({
-      where: { id },
+    const paper = await prisma.paper.findFirst({
+      where: { id, userId },
     });
 
     if (!paper) {
@@ -30,7 +33,9 @@ export async function POST(
     }
 
     const truncated = truncateText(text, modelId, proxyConfig);
-    const { system, prompt } = buildPrompt("summarize", truncated);
+    const userCtx = await getUserContext(userId);
+    const userContextPreamble = buildUserContextPreamble(userCtx);
+    const { system, prompt } = buildPrompt("summarize", truncated, undefined, { userContextPreamble });
 
     const result = await generateLLMResponse({
       provider,

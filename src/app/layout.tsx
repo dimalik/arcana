@@ -1,8 +1,8 @@
 import type { Metadata } from "next";
 import localFont from "next/font/local";
 import "./globals.css";
-import { LayoutThemeProvider } from "@/components/layout/theme-context";
-import { LayoutSwitcher } from "@/components/layout/layout-switcher";
+import { PageInfoProvider } from "@/components/layout/theme-context";
+import { AppShell } from "@/components/layout/app-shell";
 import { Toaster } from "@/components/ui/sonner";
 
 const geistSans = localFont({
@@ -18,7 +18,7 @@ const geistMono = localFont({
 
 export const metadata: Metadata = {
   title: "Arcana",
-  description: "Research paper repository with AI-powered analysis",
+  description: "Your personal research engine — collect papers, extract insights, form hypotheses, and iterate.",
 };
 
 export default function RootLayout({
@@ -27,13 +27,13 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
-        <LayoutThemeProvider>
-          <LayoutSwitcher>{children}</LayoutSwitcher>
-        </LayoutThemeProvider>
+        <PageInfoProvider>
+          <AppShell>{children}</AppShell>
+        </PageInfoProvider>
         <Toaster />
       </body>
     </html>

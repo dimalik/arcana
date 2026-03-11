@@ -3,8 +3,35 @@ import { createOpenAI } from "@ai-sdk/openai";
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { getModelInfo, type LLMProvider } from "./models";
 import { isAnthropicModel, type ProxyConfig } from "./proxy-settings";
+import { logLlmUsage } from "../usage";
+import { logger } from "../logger";
 
-export function getModel(provider: LLMProvider, modelId: string, proxyConfig?: ProxyConfig): LanguageModel {
+// Cache resolved API keys for the lifetime of the process to avoid
+// hitting the DB on every single LLM call. Cleared on save.
+let _cachedOpenAIKey: string | null | undefined;
+let _cachedAnthropicKey: string | null | undefined;
+
+export function clearApiKeyCache() {
+  _cachedOpenAIKey = undefined;
+  _cachedAnthropicKey = undefined;
+}
+
+async function getResolvedApiKey(provider: "openai" | "anthropic"): Promise<string | undefined> {
+  if (provider === "openai") {
+    if (_cachedOpenAIKey === undefined) {
+      const { getApiKey } = await import("./api-keys");
+      _cachedOpenAIKey = await getApiKey("openai");
+    }
+    return _cachedOpenAIKey || undefined;
+  }
+  if (_cachedAnthropicKey === undefined) {
+    const { getApiKey } = await import("./api-keys");
+    _cachedAnthropicKey = await getApiKey("anthropic");
+  }
+  return _cachedAnthropicKey || undefined;
+}
+
+export async function getModel(provider: LLMProvider, modelId: string, proxyConfig?: ProxyConfig): Promise<LanguageModel> {
   if (provider === "proxy") {
     // Use provided proxyConfig, or fall back to env vars
     const baseUrl = proxyConfig?.baseUrl || process.env.LLM_PROXY_URL;
@@ -47,16 +74,20 @@ export function getModel(provider: LLMProvider, modelId: string, proxyConfig?: P
   }
 
   if (provider === "openai") {
-    const openai = createOpenAI({ apiKey: process.env.OPENAI_API_KEY });
+    const apiKey = await getResolvedApiKey("openai");
+    if (!apiKey) throw new Error("OpenAI API key not configured. Set it in Settings → LLM.");
+    const openai = createOpenAI({ apiKey });
     return openai(modelId);
   } else {
-    const anthropic = createAnthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+    const apiKey = await getResolvedApiKey("anthropic");
+    if (!apiKey) throw new Error("Anthropic API key not configured. Set it in Settings → LLM.");
+    const anthropic = createAnthropic({ apiKey });
     return anthropic(modelId);
   }
 }
 
 /**
- * Hard cap per LLM call: 20,000 chars ≈ 5,000 tokens. Keeps requests
+ * Hard cap per LLM call: 20,000 chars ~ 5,000 tokens. Keeps requests
  * well within proxy gateway timeout limits. Longer papers are handled
  * via chunked map-reduce in the summarize step.
  */
@@ -129,6 +160,26 @@ function isLLMRetryable(err: unknown): boolean {
   return false;
 }
 
+// ── Tracked operation context (set per-request) ──────────────────
+
+let _currentOperation = "unknown";
+let _currentUserId: string | undefined;
+let _currentMetadata: Record<string, unknown> | undefined;
+
+/**
+ * Set the operation context for subsequent LLM calls.
+ * Call this at the start of an API route handler.
+ */
+export function setLlmContext(
+  operation: string,
+  userId?: string,
+  metadata?: Record<string, unknown>
+) {
+  _currentOperation = operation;
+  _currentUserId = userId;
+  _currentMetadata = metadata;
+}
+
 export async function generateLLMResponse(params: {
   provider: LLMProvider;
   modelId: string;
@@ -137,9 +188,10 @@ export async function generateLLMResponse(params: {
   maxTokens?: number;
   proxyConfig?: ProxyConfig;
 }): Promise<string> {
-  const model = getModel(params.provider, params.modelId, params.proxyConfig);
+  const model = await getModel(params.provider, params.modelId, params.proxyConfig);
+  const startMs = Date.now();
 
-  console.log(`[llm] generateText: model=${params.modelId} system=${params.system.length}chars prompt=${params.prompt.length}chars maxTokens=${params.maxTokens ?? "unset"}`);
+  console.log(`[llm] generateText: model=${params.modelId} op=${_currentOperation} system=${params.system.length}chars prompt=${params.prompt.length}chars maxTokens=${params.maxTokens ?? "unset"}`);
 
   let lastErr: unknown;
   for (let attempt = 0; attempt <= LLM_MAX_RETRIES; attempt++) {
@@ -156,8 +208,25 @@ export async function generateLLMResponse(params: {
       });
 
       const text = await result.text;
+      const usage = await result.usage;
+      const durationMs = Date.now() - startMs;
 
-      console.log(`[llm] generateText OK: ${text.length} chars returned`);
+      console.log(`[llm] generateText OK: ${text.length} chars, ${usage.totalTokens} tokens, ${durationMs}ms`);
+
+      // Log usage asynchronously — don't block response
+      logLlmUsage({
+        userId: _currentUserId,
+        provider: params.provider,
+        modelId: params.modelId,
+        operation: _currentOperation,
+        inputTokens: usage.inputTokens ?? 0,
+        outputTokens: usage.outputTokens ?? 0,
+        totalTokens: usage.totalTokens ?? 0,
+        durationMs,
+        success: true,
+        metadata: _currentMetadata,
+      });
+
       return text;
     } catch (err) {
       lastErr = err;
@@ -171,7 +240,38 @@ export async function generateLLMResponse(params: {
         continue;
       }
 
+      const durationMs = Date.now() - startMs;
       console.error(`[llm] generateText FAILED: status=${status} error=${msg.slice(0, 500)}`);
+
+      // Log failure
+      logLlmUsage({
+        userId: _currentUserId,
+        provider: params.provider,
+        modelId: params.modelId,
+        operation: _currentOperation,
+        inputTokens: 0,
+        outputTokens: 0,
+        totalTokens: 0,
+        durationMs,
+        success: false,
+        error: msg.slice(0, 2000),
+        metadata: _currentMetadata,
+      });
+
+      logger.error(`LLM call failed: ${_currentOperation}`, {
+        category: "llm",
+        userId: _currentUserId,
+        error: err,
+        metadata: {
+          provider: params.provider,
+          modelId: params.modelId,
+          operation: _currentOperation,
+          status,
+          attempt: attempt + 1,
+          ..._currentMetadata,
+        },
+      });
+
       throw err;
     }
   }
@@ -180,14 +280,15 @@ export async function generateLLMResponse(params: {
 
 type MessageContent = string | Array<{ type: string; text?: string; image?: string; mediaType?: string }>;
 
-export function streamLLMResponse(params: {
+export async function streamLLMResponse(params: {
   provider: LLMProvider;
   modelId: string;
   system: string;
   messages: { role: "user" | "assistant" | "system"; content: MessageContent }[];
   proxyConfig?: ProxyConfig;
 }) {
-  const model = getModel(params.provider, params.modelId, params.proxyConfig);
+  const model = await getModel(params.provider, params.modelId, params.proxyConfig);
+  const startMs = Date.now();
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const messages = params.messages as any[];
@@ -196,5 +297,20 @@ export function streamLLMResponse(params: {
     model,
     system: params.system,
     messages,
+    onFinish: ({ usage }) => {
+      const durationMs = Date.now() - startMs;
+      logLlmUsage({
+        userId: _currentUserId,
+        provider: params.provider,
+        modelId: params.modelId,
+        operation: _currentOperation,
+        inputTokens: usage.inputTokens ?? 0,
+        outputTokens: usage.outputTokens ?? 0,
+        totalTokens: usage.totalTokens ?? 0,
+        durationMs,
+        success: true,
+        metadata: _currentMetadata,
+      });
+    },
   });
 }

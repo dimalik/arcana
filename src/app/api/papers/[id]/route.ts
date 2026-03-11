@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { requireUserId } from "@/lib/paper-auth";
 import { z } from "zod";
 
 const updatePaperSchema = z.object({
@@ -20,8 +21,9 @@ export async function GET(
   _request: NextRequest,
   { params }: { params: { id: string } }
 ) {
-  const paper = await prisma.paper.findUnique({
-    where: { id: params.id },
+  const userId = await requireUserId();
+  const paper = await prisma.paper.findFirst({
+    where: { id: params.id, userId },
     include: {
       tags: { include: { tag: true } },
       collections: { include: { collection: true } },
@@ -55,6 +57,17 @@ export async function PATCH(
   { params }: { params: { id: string } }
 ) {
   try {
+    const userId = await requireUserId();
+
+    // Verify ownership
+    const existing = await prisma.paper.findFirst({
+      where: { id: params.id, userId },
+      select: { id: true },
+    });
+    if (!existing) {
+      return NextResponse.json({ error: "Paper not found" }, { status: 404 });
+    }
+
     const body = await request.json();
     const data = updatePaperSchema.parse(body);
 
@@ -95,6 +108,16 @@ export async function DELETE(
   { params }: { params: { id: string } }
 ) {
   try {
+    const userId = await requireUserId();
+
+    const existing = await prisma.paper.findFirst({
+      where: { id: params.id, userId },
+      select: { id: true },
+    });
+    if (!existing) {
+      return NextResponse.json({ error: "Paper not found" }, { status: 404 });
+    }
+
     await prisma.paper.delete({ where: { id: params.id } });
     return NextResponse.json({ success: true });
   } catch {

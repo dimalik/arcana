@@ -16,6 +16,8 @@ interface Tag {
   id: string;
   name: string;
   color: string;
+  score?: number;
+  cluster?: { id: string; name: string; color: string } | null;
 }
 
 interface TagPickerProps {
@@ -116,26 +118,61 @@ export function TagPicker({ paperId, currentTags, onUpdate }: TagPickerProps) {
         </PopoverTrigger>
         <PopoverContent className="w-64 p-3" align="start">
           <div className="space-y-2">
-            {availableTags.length > 0 && (
-              <div className="flex flex-wrap gap-1">
-                {availableTags.map((tag) => (
-                  <button
-                    key={tag.id}
-                    onClick={() => {
-                      addTag(tag.id);
-                      setOpen(false);
-                    }}
-                    className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium transition-opacity hover:opacity-80"
-                    style={{
-                      backgroundColor: tag.color + "20",
-                      color: tag.color,
-                    }}
-                  >
-                    {tag.name}
-                  </button>
-                ))}
-              </div>
-            )}
+            {availableTags.length > 0 && (() => {
+              // Group by cluster
+              const byCluster = new Map<string, Tag[]>();
+              const unclustered: Tag[] = [];
+              for (const tag of availableTags) {
+                if (tag.cluster) {
+                  const key = tag.cluster.name;
+                  if (!byCluster.has(key)) byCluster.set(key, []);
+                  byCluster.get(key)!.push(tag);
+                } else {
+                  unclustered.push(tag);
+                }
+              }
+              const groups = Array.from(byCluster.entries());
+              return (
+                <div className="space-y-2 max-h-[200px] overflow-auto">
+                  {groups.map(([clusterName, tags]) => (
+                    <div key={clusterName}>
+                      <span className="text-[10px] font-medium uppercase text-muted-foreground">{clusterName}</span>
+                      <div className="flex flex-wrap gap-1 mt-0.5">
+                        {tags.sort((a: Tag, b: Tag) => (b.score ?? 0) - (a.score ?? 0)).map((tag: Tag) => (
+                          <button
+                            key={tag.id}
+                            onClick={() => { addTag(tag.id); setOpen(false); }}
+                            className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium transition-opacity hover:opacity-80"
+                            style={{ backgroundColor: tag.color + "20", color: tag.color }}
+                          >
+                            {tag.name}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                  {unclustered.length > 0 && (
+                    <div>
+                      {groups.length > 0 && (
+                        <span className="text-[10px] font-medium uppercase text-muted-foreground">Other</span>
+                      )}
+                      <div className="flex flex-wrap gap-1 mt-0.5">
+                        {unclustered.sort((a, b) => (b.score ?? 0) - (a.score ?? 0)).map((tag) => (
+                          <button
+                            key={tag.id}
+                            onClick={() => { addTag(tag.id); setOpen(false); }}
+                            className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium transition-opacity hover:opacity-80"
+                            style={{ backgroundColor: tag.color + "20", color: tag.color }}
+                          >
+                            {tag.name}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
             <div className="flex gap-2">
               <Input
                 placeholder="New tag..."

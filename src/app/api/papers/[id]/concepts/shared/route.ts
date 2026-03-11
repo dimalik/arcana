@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { requirePaperAccess } from "@/lib/paper-auth";
 
 export async function GET(
   _request: NextRequest,
@@ -7,6 +8,10 @@ export async function GET(
 ) {
   try {
     const { id } = await params;
+    const paper = await requirePaperAccess(id);
+    if (!paper) {
+      return NextResponse.json({ error: "Paper not found" }, { status: 404 });
+    }
 
     // Get this paper's root concepts (depth 0)
     const localConcepts = await prisma.concept.findMany({
@@ -20,11 +25,12 @@ export async function GET(
 
     const localNames = localConcepts.map((c) => c.name.toLowerCase());
 
-    // Get concepts from other papers
+    // Get concepts from other papers owned by this user
     const foreignConcepts = await prisma.concept.findMany({
       where: {
         paperId: { not: id },
         depth: 0,
+        paper: { userId: paper.userId },
       },
       select: {
         id: true,

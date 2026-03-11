@@ -2,12 +2,17 @@ import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { searchByTitle, S2RateLimitError } from "@/lib/import/semantic-scholar";
 import { findLibraryMatchByIds } from "@/lib/references/match";
+import { requirePaperAccess } from "@/lib/paper-auth";
 
 export async function POST(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string; refId: string }> }
 ) {
   const { id, refId } = await params;
+  const paper = await requirePaperAccess(id);
+  if (!paper) {
+    return Response.json({ error: "Paper not found" }, { status: 404 });
+  }
 
   const reference = await prisma.reference.findFirst({
     where: { id: refId, paperId: id },
@@ -27,8 +32,9 @@ export async function POST(
       );
     }
 
-    // Re-check library match with enriched data
+    // Re-check library match with enriched data (scoped to user's papers)
     const libraryPapers = await prisma.paper.findMany({
+      where: { userId: paper.userId },
       select: { id: true, title: true, doi: true, arxivId: true },
     });
 

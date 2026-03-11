@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { z } from "zod";
+import { requireUserId } from "@/lib/paper-auth";
 
 const createRelationSchema = z.object({
   targetPaperId: z.string().uuid(),
@@ -12,9 +13,10 @@ export async function GET(
   _request: NextRequest,
   { params }: { params: { id: string } }
 ) {
-  const paperId = params.id;
+  const userId = await requireUserId();
+    const paperId = params.id;
 
-  const paper = await prisma.paper.findUnique({ where: { id: paperId } });
+  const paper = await prisma.paper.findFirst({ where: { id: paperId, userId } });
   if (!paper) {
     return NextResponse.json({ error: "Paper not found" }, { status: 404 });
   }
@@ -77,6 +79,7 @@ export async function POST(
   { params }: { params: { id: string } }
 ) {
   const paperId = params.id;
+  const userId = await requireUserId();
 
   try {
     const body = await request.json();
@@ -90,8 +93,8 @@ export async function POST(
     }
 
     const [source, target] = await Promise.all([
-      prisma.paper.findUnique({ where: { id: paperId } }),
-      prisma.paper.findUnique({ where: { id: data.targetPaperId } }),
+      prisma.paper.findFirst({ where: { id: paperId, userId } }),
+      prisma.paper.findFirst({ where: { id: data.targetPaperId, userId } }),
     ]);
 
     if (!source || !target) {

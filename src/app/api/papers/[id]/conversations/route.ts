@@ -1,11 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { requirePaperAccess } from "@/lib/paper-auth";
 
 export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
+  const paper = await requirePaperAccess(id);
+  if (!paper) {
+    return NextResponse.json({ error: "Paper not found" }, { status: 404 });
+  }
 
   const conversations = await prisma.conversation.findMany({
     where: { paperId: id },
@@ -31,6 +36,10 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
+  const paper = await requirePaperAccess(id);
+  if (!paper) {
+    return NextResponse.json({ error: "Paper not found" }, { status: 404 });
+  }
   const body = await request.json().catch(() => ({}));
   const title = body.title || null;
   const selectedText = body.selectedText || null;

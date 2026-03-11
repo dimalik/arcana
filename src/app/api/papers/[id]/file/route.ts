@@ -5,13 +5,15 @@ import path from "path";
 import { saveUploadedFile } from "@/lib/upload";
 import { processingQueue } from "@/lib/processing/queue";
 import { trackEngagement } from "@/lib/engagement/track";
+import { requireUserId } from "@/lib/paper-auth";
 
 export async function GET(
   _request: NextRequest,
   { params }: { params: { id: string } }
 ) {
-  const paper = await prisma.paper.findUnique({
-    where: { id: params.id },
+  const userId = await requireUserId();
+    const paper = await prisma.paper.findFirst({
+    where: { id: params.id, userId },
     select: { filePath: true, title: true },
   });
 
@@ -53,8 +55,9 @@ export async function POST(
   request: NextRequest,
   { params }: { params: { id: string } }
 ) {
-  const paper = await prisma.paper.findUnique({
-    where: { id: params.id },
+  const userId = await requireUserId();
+  const paper = await prisma.paper.findFirst({
+    where: { id: params.id, userId },
     select: { id: true, filePath: true, processingStatus: true },
   });
 

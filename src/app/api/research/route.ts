@@ -1,0 +1,130 @@
+import { NextRequest, NextResponse } from "next/server";
+import { prisma } from "@/lib/prisma";
+import { requireUserId } from "@/lib/paper-auth";
+
+// POST — Create a new research project
+export async function POST(request: NextRequest) {
+  try {
+    const userId = await requireUserId();
+    const body = await request.json();
+    const { title, question, subQuestions, domains, keywords, methodology, seedPaperIds } = body as {
+      title: string;
+      question: string;
+      subQuestions?: string[];
+      domains?: string[];
+      keywords?: string[];
+      methodology?: string;
+      seedPaperIds?: string[];
+    };
+
+    if (!title?.trim() || !question?.trim()) {
+      return NextResponse.json({ error: "Title and question are required" }, { status: 400 });
+    }
+
+    const brief = JSON.stringify({
+      question: question.trim(),
+      subQuestions: subQuestions || [],
+      domains: domains || [],
+      keywords: keywords || [],
+    });
+
+    // Create a collection for this project's papers
+    const collection = await prisma.collection.create({
+      data: { name: `Research: ${title.trim()}` },
+    });
+
+    // If seed papers provided, verify ownership and add to collection
+    if (seedPaperIds && seedPaperIds.length > 0) {
+      const papers = await prisma.paper.findMany({
+        where: { id: { in: seedPaperIds }, userId },
+        select: { id: true },
+      });
+      if (papers.length > 0) {
+        for (const p of papers) {
+          await prisma.collectionPaper.create({
+            data: { paperId: p.id, collectionId: collection.id },
+          }).catch(() => {}); // ignore duplicates
+        }
+      }
+    }
+
+    const project = await prisma.researchProject.create({
+      data: {
+        userId,
+        title: title.trim(),
+        brief,
+        methodology: methodology || null,
+        collectionId: collection.id,
+        status: "ACTIVE",
+        iterations: {
+          create: {
+            number: 1,
+            goal: "Initial literature review and hypothesis formation",
+          },
+        },
+        log: {
+          create: {
+            type: "decision",
+            content: `Project created: "${title.trim()}"`,
+          },
+        },
+      },
+      include: {
+        iterations: true,
+      },
+    });
+
+    return NextResponse.json(project, { status: 201 });
+  } catch (err) {
+    console.error("[api/research] POST error:", err);
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : "Failed to create project" },
+      { status: 500 }
+    );
+  }
+}
+
+// GET — List user's projects
+export async function GET(request: NextRequest) {
+  try {
+    const userId = await requireUserId();
+    const { searchParams } = new URL(request.url);
+    const status = searchParams.get("status"); // "ACTIVE" | "COMPLETED" | null (all)
+
+    const where: Record<string, unknown> = { userId };
+    if (status) where.status = status;
+
+    const projects = await prisma.researchProject.findMany({
+      where,
+      orderBy: { updatedAt: "desc" },
+      select: {
+        id: true,
+        title: true,
+        status: true,
+        methodology: true,
+        currentPhase: true,
+        createdAt: true,
+        updatedAt: true,
+        brief: true,
+        iterations: {
+          orderBy: { number: "desc" },
+          take: 1,
+          select: { number: true, status: true },
+        },
+        collection: {
+          select: {
+            _count: { select: { papers: true } },
+          },
+        },
+        _count: {
+          select: { hypotheses: true },
+        },
+      },
+    });
+
+    return NextResponse.json(projects);
+  } catch (err) {
+    console.error("[api/research] GET error:", err);
+    return NextResponse.json({ error: "Failed to fetch projects" }, { status: 500 });
+  }
+}

@@ -1,0 +1,144 @@
+"use client";
+
+import { useState } from "react";
+import { ChevronDown, ChevronUp, Edit2, Check, X } from "lucide-react";
+
+const STATUS_BADGES: Record<string, { color: string; label: string }> = {
+  PROPOSED: { color: "bg-amber-500/10 text-amber-600", label: "Proposed" },
+  TESTING: { color: "bg-blue-500/10 text-blue-600", label: "Testing" },
+  SUPPORTED: { color: "bg-emerald-500/10 text-emerald-600", label: "Supported" },
+  REFUTED: { color: "bg-red-500/10 text-red-600", label: "Refuted" },
+  REVISED: { color: "bg-purple-500/10 text-purple-600", label: "Revised" },
+};
+
+interface HypothesisCardProps {
+  hypothesis: {
+    id: string;
+    statement: string;
+    rationale: string | null;
+    status: string;
+    evidence: string | null;
+    parent?: { id: string; statement: string } | null;
+    children?: { id: string; statement: string; status: string }[];
+  };
+  onUpdateStatus?: (id: string, status: string) => void;
+  onEdit?: (id: string, statement: string, rationale: string) => void;
+}
+
+export function HypothesisCard({ hypothesis, onUpdateStatus, onEdit }: HypothesisCardProps) {
+  const [expanded, setExpanded] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [editStatement, setEditStatement] = useState(hypothesis.statement);
+  const [editRationale, setEditRationale] = useState(hypothesis.rationale || "");
+
+  const badge = STATUS_BADGES[hypothesis.status] || STATUS_BADGES.PROPOSED;
+  const evidence = (() => {
+    try { return hypothesis.evidence ? JSON.parse(hypothesis.evidence) : []; } catch { return []; }
+  })() as { type: string; summary: string; supports: boolean }[];
+
+  const handleSave = () => {
+    onEdit?.(hypothesis.id, editStatement, editRationale);
+    setEditing(false);
+  };
+
+  return (
+    <div className="rounded-md border border-border p-3 space-y-2">
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0 flex-1">
+          {editing ? (
+            <div className="space-y-1.5">
+              <textarea
+                value={editStatement}
+                onChange={(e) => setEditStatement(e.target.value)}
+                className="w-full rounded-md border border-input bg-background px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-ring resize-none"
+                rows={2}
+              />
+              <textarea
+                value={editRationale}
+                onChange={(e) => setEditRationale(e.target.value)}
+                placeholder="Rationale..."
+                className="w-full rounded-md border border-input bg-background px-2 py-1 text-[11px] focus:outline-none focus:ring-1 focus:ring-ring resize-none"
+                rows={2}
+              />
+              <div className="flex gap-1">
+                <button onClick={handleSave} className="inline-flex h-5 w-5 items-center justify-center rounded text-emerald-500 hover:bg-emerald-500/10"><Check className="h-3 w-3" /></button>
+                <button onClick={() => setEditing(false)} className="inline-flex h-5 w-5 items-center justify-center rounded text-muted-foreground hover:bg-muted"><X className="h-3 w-3" /></button>
+              </div>
+            </div>
+          ) : (
+            <>
+              <p className="text-xs font-medium">{hypothesis.statement}</p>
+              {hypothesis.rationale && (
+                <p className="text-[11px] text-muted-foreground mt-0.5">{hypothesis.rationale}</p>
+              )}
+            </>
+          )}
+        </div>
+        <div className="flex items-center gap-1 shrink-0">
+          <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${badge.color}`}>
+            {badge.label}
+          </span>
+          {!editing && (
+            <button
+              onClick={() => setEditing(true)}
+              className="inline-flex h-5 w-5 items-center justify-center rounded text-muted-foreground hover:text-foreground transition-colors"
+            >
+              <Edit2 className="h-3 w-3" />
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Status actions */}
+      {!editing && onUpdateStatus && (
+        <div className="flex flex-wrap gap-1">
+          {["PROPOSED", "TESTING", "SUPPORTED", "REFUTED"].map((s) => {
+            if (s === hypothesis.status) return null;
+            const b = STATUS_BADGES[s]!;
+            return (
+              <button
+                key={s}
+                onClick={() => onUpdateStatus(hypothesis.id, s)}
+                className={`text-[10px] px-1.5 py-0.5 rounded-full border border-transparent hover:border-current transition-colors ${b.color}`}
+              >
+                {b.label}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Evidence */}
+      {evidence.length > 0 && (
+        <div>
+          <button
+            onClick={() => setExpanded(!expanded)}
+            className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground transition-colors"
+          >
+            {expanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+            {evidence.length} evidence item{evidence.length !== 1 ? "s" : ""}
+          </button>
+          {expanded && (
+            <div className="mt-1 space-y-1">
+              {evidence.map((e, i) => (
+                <div key={i} className="flex items-start gap-1.5 text-[11px]">
+                  <span className={e.supports ? "text-emerald-500" : "text-red-500"}>
+                    {e.supports ? "+" : "-"}
+                  </span>
+                  <span className="text-muted-foreground">{e.summary}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Revision chain */}
+      {hypothesis.parent && (
+        <p className="text-[10px] text-muted-foreground/70">
+          Revised from: {hypothesis.parent.statement.slice(0, 60)}...
+        </p>
+      )}
+    </div>
+  );
+}

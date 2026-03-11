@@ -1,11 +1,13 @@
 "use client";
 
 import { useEffect, useRef, useCallback, useState } from "react";
+import { createPortal } from "react-dom";
 import { HighlightTooltip } from "./highlight-tooltip";
 
 interface SelectionHighlighterProps {
   paperId: string;
   containerRef: React.RefObject<HTMLElement | null>;
+  scrollContainerRef?: React.RefObject<HTMLElement | null>;
 }
 
 interface ConversationHighlight {
@@ -41,9 +43,17 @@ const MARK_ATTR = "data-selection-highlight";
  * Walks the DOM after render, wraps matches in <mark> elements, and shows
  * a rich tooltip card on hover.
  */
+interface MarginDot {
+  key: string;
+  top: number;
+  mode: string;
+  convIds: string[];
+}
+
 export function SelectionHighlighter({
   paperId,
   containerRef,
+  scrollContainerRef,
 }: SelectionHighlighterProps) {
   const highlightsRef = useRef<ConversationHighlight[]>([]);
   const observerRef = useRef<MutationObserver | null>(null);
@@ -54,6 +64,40 @@ export function SelectionHighlighter({
   const tooltipRef = useRef<HTMLDivElement>(null);
   const pinnedRef = useRef(false);
   const suppressedRef = useRef(false);
+  const [marginDots, setMarginDots] = useState<MarginDot[]>([]);
+
+  const computeMarginDots = useCallback(() => {
+    const container = containerRef.current;
+    const scrollContainer = scrollContainerRef?.current;
+    if (!container || !scrollContainer) {
+      setMarginDots([]);
+      return;
+    }
+
+    const marks = container.querySelectorAll(`mark[${MARK_ATTR}]`);
+    const dots: MarginDot[] = [];
+    const seen = new Set<string>();
+    const scrollRect = scrollContainer.getBoundingClientRect();
+
+    marks.forEach((mark) => {
+      const convIdsStr = mark.getAttribute("data-conv-ids") || "";
+      if (seen.has(convIdsStr)) return;
+      seen.add(convIdsStr);
+
+      const markRect = mark.getBoundingClientRect();
+      const top = markRect.top - scrollRect.top + scrollContainer.scrollTop;
+      const mode = mark.getAttribute("data-conv-mode") || "chat";
+
+      dots.push({
+        key: convIdsStr,
+        top,
+        mode,
+        convIds: convIdsStr.split(","),
+      });
+    });
+
+    setMarginDots(dots);
+  }, [containerRef, scrollContainerRef]);
 
   const cancelHoverTimer = useCallback(() => {
     if (hoverTimerRef.current) {
@@ -224,7 +268,10 @@ export function SelectionHighlighter({
       await fetchHighlights();
       if (!cancelled) {
         requestAnimationFrame(() => {
-          if (!cancelled) applyHighlights();
+          if (!cancelled) {
+            applyHighlights();
+            computeMarginDots();
+          }
         });
       }
     };
@@ -247,6 +294,7 @@ export function SelectionHighlighter({
       debounceId = requestAnimationFrame(() => {
         debounceId = null;
         applyHighlights();
+        computeMarginDots();
       });
     });
 
@@ -258,19 +306,20 @@ export function SelectionHighlighter({
       observer.disconnect();
       observerRef.current = null;
     };
-  }, [containerRef, applyHighlights]);
+  }, [containerRef, applyHighlights, computeMarginDots]);
 
   // Listen for paper-highlights-changed events
   useEffect(() => {
     const handler = async () => {
       await fetchHighlights();
       applyHighlights();
+      computeMarginDots();
     };
 
     window.addEventListener("paper-highlights-changed", handler);
     return () =>
       window.removeEventListener("paper-highlights-changed", handler);
-  }, [fetchHighlights, applyHighlights]);
+  }, [fetchHighlights, applyHighlights, computeMarginDots]);
 
   // Suppress tooltip while InlineChat is active
   useEffect(() => {
@@ -355,19 +404,48 @@ export function SelectionHighlighter({
     return () => window.removeEventListener("scroll", handleScroll);
   }, [hoverState]);
 
-  return hoverState ? (
-    <HighlightTooltip
-      paperId={paperId}
-      conversations={hoverState.conversations}
-      selectedText={hoverState.selectedText}
-      rect={hoverState.rect}
-      onMouseEnter={cancelHoverTimer}
-      onMouseLeave={startHoverHide}
-      onPin={handlePin}
-      onDismiss={handleDismiss}
-      tooltipRef={tooltipRef}
-    />
-  ) : null;
+  const scrollEl = scrollContainerRef?.current;
+
+  return (
+    <>
+      {hoverState && (
+        <HighlightTooltip
+          paperId={paperId}
+          conversations={hoverState.conversations}
+          selectedText={hoverState.selectedText}
+          rect={hoverState.rect}
+          onMouseEnter={cancelHoverTimer}
+          onMouseLeave={startHoverHide}
+          onPin={handlePin}
+          onDismiss={handleDismiss}
+          tooltipRef={tooltipRef}
+        />
+      )}
+
+      {/* Margin dots for existing highlights */}
+      {scrollEl &&
+        marginDots.map((dot) =>
+          createPortal(
+            <button
+              key={dot.key}
+              className={`absolute z-[50] h-2.5 w-2.5 rounded-full shadow-sm hover:scale-150 transition-transform cursor-pointer ${
+                dot.mode === "explain" ? "bg-amber-400" : "bg-blue-400"
+              }`}
+              style={{ top: dot.top + 4, right: 6 }}
+              onClick={() => {
+                window.dispatchEvent(
+                  new CustomEvent("open-highlight-conversation", {
+                    detail: { conversationId: dot.convIds[0] },
+                  })
+                );
+              }}
+              title={dot.mode === "explain" ? "Explanation" : "Chat"}
+            />,
+            scrollEl
+          )
+        )}
+    </>
+  );
 }
 
 /**

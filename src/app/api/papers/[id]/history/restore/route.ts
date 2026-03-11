@@ -2,12 +2,14 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { cleanJsonResponse } from "@/lib/llm/prompts";
 import { resolveAndAssignTags } from "@/lib/tags/auto-tag";
+import { requireUserId } from "@/lib/paper-auth";
 
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { id } = await params;
+  const userId = await requireUserId();
+    const { id } = await params;
   const { promptResultId } = await request.json();
 
   if (!promptResultId) {
@@ -85,8 +87,8 @@ export async function POST(
     }
 
     // Return updated paper
-    const paper = await prisma.paper.findUnique({
-      where: { id },
+    const paper = await prisma.paper.findFirst({
+      where: { id, userId },
       include: {
         tags: { include: { tag: true } },
         promptResults: { orderBy: { createdAt: "desc" } },

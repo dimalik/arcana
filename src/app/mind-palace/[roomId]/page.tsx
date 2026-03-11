@@ -42,6 +42,7 @@ interface Insight {
   nextReviewAt: string;
   interval: number;
   repetitions: number;
+  easeFactor: number;
   paper: { id: string; title: string };
 }
 

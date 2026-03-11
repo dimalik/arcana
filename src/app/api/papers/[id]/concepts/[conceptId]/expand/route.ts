@@ -4,6 +4,7 @@ import { generateLLMResponse, truncateText } from "@/lib/llm/provider";
 import { buildConceptExpandPrompt, cleanJsonResponse } from "@/lib/llm/prompts";
 import { resolveModelConfig } from "@/lib/llm/auto-process";
 import { trackEngagement } from "@/lib/engagement/track";
+import { requireUserId } from "@/lib/paper-auth";
 
 export async function POST(
   request: NextRequest,
@@ -25,8 +26,9 @@ export async function POST(
       );
     }
 
-    const paper = await prisma.paper.findUnique({
-      where: { id },
+    const userId = await requireUserId();
+    const paper = await prisma.paper.findFirst({
+      where: { id, userId },
     });
 
     if (!paper) {

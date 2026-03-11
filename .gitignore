@@ -44,3 +44,9 @@ next-env.d.ts
 # database
 *.db
 *.db-journal
+
+# research output (experiments, venvs, results)
+/output/
+
+# claude code local settings (may contain approved command patterns with sensitive URLs)
+.claude/settings.local.json

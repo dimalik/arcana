@@ -7,7 +7,9 @@ import { getProxyConfig } from "./proxy-settings";
 import { getTextForReferenceExtraction, getBodyTextForContextExtraction } from "@/lib/references/extract-section";
 import { findBestMatch } from "@/lib/references/match";
 import { matchCitationToReference } from "@/lib/references/match-citation";
-import { resolveAndAssignTags, getExistingTagNames } from "@/lib/tags/auto-tag";
+import { resolveAndAssignTags, getExistingTagNames, getScoredTagHints } from "@/lib/tags/auto-tag";
+import { refreshTagScores } from "@/lib/tags/cleanup";
+import { getUserContext, buildUserContextPreamble } from "@/lib/llm/user-context";
 
 
 
@@ -48,19 +50,23 @@ export async function getDefaultModel(): Promise<{ provider: LLMProvider; modelI
     return { provider, modelId };
   }
 
-  // Fall back to env-based detection
-  if (process.env.LLM_PROXY_URL && process.env.LLM_PROXY_HEADER_VALUE) {
-    const proxyConfig = await getProxyConfig();
+  // Fall back: check proxy, then DB/env keys
+  const proxyConfig = await getProxyConfig();
+  if (proxyConfig.enabled && proxyConfig.modelId) {
     const firstModel = proxyConfig.modelId.split(",").map(s => s.trim()).filter(Boolean)[0] || "gpt-4o";
     return { provider: "proxy", modelId: firstModel, proxyConfig };
   }
-  if (process.env.OPENAI_API_KEY) {
+
+  const { getApiKey } = await import("./api-keys");
+  const openaiKey = await getApiKey("openai");
+  if (openaiKey) {
     return { provider: "openai", modelId: "gpt-4o-mini" };
   }
-  if (process.env.ANTHROPIC_API_KEY) {
+  const anthropicKey = await getApiKey("anthropic");
+  if (anthropicKey) {
     return { provider: "anthropic", modelId: "claude-haiku-4-5-20251001" };
   }
-  throw new Error("No LLM provider configured");
+  throw new Error("No LLM provider configured. Add an API key in Settings → LLM.");
 }
 
 /**
@@ -129,14 +135,15 @@ async function chunkedSummarize(params: {
   modelId: string;
   proxyConfig?: ProxyConfig;
   signal?: AbortSignal;
+  userContextPreamble?: string;
 }): Promise<string> {
-  const { fullText, provider, modelId, proxyConfig, signal } = params;
+  const { fullText, provider, modelId, proxyConfig, signal, userContextPreamble } = params;
   const chunkSize = MAX_PAPER_CHARS;
   const overlap = 2000;
 
   // Small enough for a single call — use the normal path
   if (fullText.length <= chunkSize) {
-    const { system, prompt } = buildPrompt("summarize", fullText);
+    const { system, prompt } = buildPrompt("summarize", fullText, undefined, { userContextPreamble });
     return generateLLMResponse({ provider, modelId, system, prompt, proxyConfig });
   }
 
@@ -200,7 +207,7 @@ Be thorough and specific — include every number, model name, and dataset name 
 
   // Final synthesis
   console.log(`[auto-process] Synthesizing final summary from ${combined.length} chars of notes`);
-  const { system } = buildPrompt("summarize", "");
+  const { system } = buildPrompt("summarize", "", undefined, { userContextPreamble });
 
   return generateLLMResponse({
     provider, modelId,
@@ -226,8 +233,12 @@ export async function runAutoProcessPipeline(opts: {
   paperId: string;
   skipExtract?: boolean;
   signal?: AbortSignal;
+  /** When true, only run essential steps (metadata + summarize + categorize) and skip
+   *  cross-paper linking, references, contradictions, contexts, and distill.
+   *  The deferred steps run later via runDeferredProcessing(). */
+  essentialOnly?: boolean;
 }) {
-  const { paperId, skipExtract, signal } = opts;
+  const { paperId, skipExtract, signal, essentialOnly } = opts;
 
   function checkCancelled() {
     if (signal?.aborted) {
@@ -266,6 +277,13 @@ export async function runAutoProcessPipeline(opts: {
 
   const truncated = truncateText(text, modelId, proxyConfig);
   console.log(`[auto-process] Paper ${paperId}: text=${text.length}chars → truncated=${truncated.length}chars, model=${modelId}`);
+
+  // Fetch user context for personalized prompts
+  let userContextPreamble = "";
+  if (paper.userId) {
+    const userCtx = await getUserContext(paper.userId);
+    userContextPreamble = buildUserContextPreamble(userCtx);
+  }
 
   // Step 1: Extract metadata
   if (!skipExtract) {
@@ -325,6 +343,7 @@ export async function runAutoProcessPipeline(opts: {
       modelId,
       proxyConfig,
       signal,
+      userContextPreamble,
     });
 
     await prisma.promptResult.create({
@@ -346,13 +365,17 @@ export async function runAutoProcessPipeline(opts: {
     console.error("[auto-process] Summarize failed for", paperId, ":", e instanceof Error ? e.message : e);
   }
 
-  // Step 3: Categorize + auto-tag (with duplicate prevention)
+  // Step 3: Categorize + auto-tag (with duplicate prevention + score-aware hints)
   try {
     checkCancelled();
     await setStep(paperId, "categorize");
     console.log("[auto-process] Categorizing", paperId);
     const existingTags = await getExistingTagNames();
-    const { system, prompt } = buildPrompt("categorize", truncated, undefined, { existingTags });
+    const { goodTags, overusedTags } = await getScoredTagHints();
+    const { system, prompt } = buildPrompt("categorize", truncated, undefined, {
+      existingTags: goodTags.length > 0 ? goodTags : existingTags,
+      overusedTags,
+    });
     const result = await generateLLMResponse({ provider, modelId, system, prompt, maxTokens: 1000, proxyConfig });
 
     await prisma.promptResult.create({
@@ -375,8 +398,30 @@ export async function runAutoProcessPipeline(opts: {
     } catch {
       // JSON parse failed
     }
+
+    // Refresh scores after new tags are assigned
+    try {
+      await refreshTagScores();
+    } catch (e) {
+      console.error("[auto-process] Score refresh failed:", e instanceof Error ? e.message : e);
+    }
   } catch (e) {
     console.error("[auto-process] Categorize failed for", paperId, ":", e instanceof Error ? e.message : e);
+  }
+
+  // If essentialOnly mode, mark as completed and stop here.
+  // Deferred steps (linking, contradictions, references, contexts, distill) run later.
+  if (essentialOnly) {
+    await prisma.paper.update({
+      where: { id: paperId },
+      data: {
+        processingStatus: "COMPLETED",
+        processingStep: null,
+        processingStartedAt: null,
+      },
+    });
+    console.log("[auto-process] Essential pipeline completed for", paperId, "(deferred steps pending)");
+    return;
   }
 
   // Step 4: Link related papers

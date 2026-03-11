@@ -13,9 +13,9 @@ import {
   ChevronRight,
   Loader2,
   BookmarkPlus,
+  Search,
 } from "lucide-react";
 import { useNotebook } from "@/hooks/use-notebook";
-
 interface Match {
   id: string;
   matchType: "exact" | "superset" | "subset";
@@ -96,6 +96,10 @@ export const SelectionPopover = forwardRef<
 
   const { saveToNotebook, saving: notebookSaving } = useNotebook();
 
+  const handleSearch = () => {
+    window.dispatchEvent(new CustomEvent("topbar-search", { detail: text }));
+  };
+
   const primaryMatches = matches?.filter(
     (m) => m.matchType === "exact" || m.matchType === "superset"
   );
@@ -154,6 +158,14 @@ export const SelectionPopover = forwardRef<
             <BookmarkPlus className="h-3 w-3" />
             Notebook
           </button>
+          <button
+            title="Search externally"
+            onClick={handleSearch}
+            className="flex items-center gap-1 text-[11px] font-medium px-2 py-1 rounded-md bg-purple-500/10 text-purple-600 dark:text-purple-400 hover:bg-purple-500/20 transition-colors"
+          >
+            <Search className="h-3 w-3" />
+            Search
+          </button>
         </div>
       </div>
     );
@@ -208,6 +220,14 @@ export const SelectionPopover = forwardRef<
             >
               <BookmarkPlus className="h-3 w-3" />
               Notebook
+            </button>
+            <button
+              title="Search externally"
+              onClick={handleSearch}
+              className="flex items-center gap-1 text-[11px] font-medium px-2 py-1 rounded-md bg-purple-500/10 text-purple-600 dark:text-purple-400 hover:bg-purple-500/20 transition-colors"
+            >
+              <Search className="h-3 w-3" />
+              Search
             </button>
           </div>
         </div>

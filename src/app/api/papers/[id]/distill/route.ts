@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { resolveModelConfig } from "@/lib/llm/auto-process";
 import { generateLLMResponse, truncateText } from "@/lib/llm/provider";
 import { buildDistillPrompt, cleanJsonResponse } from "@/lib/llm/prompts";
+import { requireUserId } from "@/lib/paper-auth";
 
 // POST /api/papers/[id]/distill - On-demand distill insights from a paper
 export async function POST(
@@ -11,8 +12,9 @@ export async function POST(
 ) {
   const { id: paperId } = await params;
 
-  const paper = await prisma.paper.findUnique({
-    where: { id: paperId },
+  const userId = await requireUserId();
+    const paper = await prisma.paper.findFirst({
+    where: { id: paperId, userId },
     select: { id: true, fullText: true, abstract: true },
   });
 

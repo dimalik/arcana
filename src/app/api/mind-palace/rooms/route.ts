@@ -1,12 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { requireUserId } from "@/lib/paper-auth";
 
-// GET /api/mind-palace/rooms - List rooms with insight counts
+// GET /api/mind-palace/rooms - List rooms with insight counts scoped to user
 export async function GET() {
+  const userId = await requireUserId();
   const rooms = await prisma.mindPalaceRoom.findMany({
+    where: { insights: { some: { paper: { userId } } } },
     orderBy: { name: "asc" },
     include: {
-      _count: { select: { insights: true } },
+      _count: {
+        select: {
+          insights: { where: { paper: { userId } } },
+        },
+      },
     },
   });
   return NextResponse.json(rooms);

@@ -3,13 +3,14 @@
 import { useEffect, useState, useCallback } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+  DropdownMenuSeparator,
+} from "@/components/ui/dropdown-menu";
 import {
   Trash2,
   Library,
@@ -22,6 +23,9 @@ import {
   CheckCircle2,
   Zap,
   ClipboardCopy,
+  MoreVertical,
+  MoreHorizontal,
+  ArrowUpDown,
 } from "lucide-react";
 import { toast } from "sonner";
 import Link from "next/link";
@@ -62,6 +66,7 @@ export function PaperReferences({ paperId }: { paperId: string }) {
   } | null>(null);
   const [lookingUp, setLookingUp] = useState<Set<string>>(new Set());
   const [importing, setImporting] = useState<Set<string>>(new Set());
+  const [sortBy, setSortBy] = useState<"appearance" | "alpha" | "year">("appearance");
 
   const handleExtractContexts = async () => {
     setExtracting(true);
@@ -209,6 +214,24 @@ export function PaperReferences({ paperId }: { paperId: string }) {
   const handleImport = async (refId: string) => {
     setImporting((prev) => new Set(prev).add(refId));
     try {
+      // Step 1: Enrich the reference via lookup (Semantic Scholar / OpenAlex)
+      const ref = references.find((r) => r.id === refId);
+      if (ref && !ref.semanticScholarId) {
+        const lookupRes = await fetch(
+          `/api/papers/${paperId}/references/${refId}/lookup`,
+          { method: "POST" }
+        );
+        if (lookupRes.ok) {
+          const lookupData = await lookupRes.json();
+          // Update local state with enriched data
+          setReferences((prev) =>
+            prev.map((r) => (r.id === refId ? lookupData.reference : r))
+          );
+        }
+        // Continue with import even if lookup fails
+      }
+
+      // Step 2: Import to library
       const res = await fetch(
         `/api/papers/${paperId}/references/import`,
         { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ referenceId: refId }) }
@@ -288,57 +311,86 @@ export function PaperReferences({ paperId }: { paperId: string }) {
     );
   }
 
-  const matchedCount = references.filter((r) => r.matchedPaper).length;
-  const contextCount = references.filter((r) => r.citationContext).length;
   const enrichedCount = references.filter((r) => r.semanticScholarId).length;
   const unenrichedCount = references.length - enrichedCount;
 
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
-        <p className="text-sm text-muted-foreground">
-          {references.length} reference{references.length !== 1 && "s"}
-          {matchedCount > 0 && `, ${matchedCount} in library`}
-          {contextCount > 0 && `, ${contextCount} with context`}
-          {enrichedCount > 0 && `, ${enrichedCount} enriched`}
-        </p>
-        <div className="flex items-center gap-2">
-          {unenrichedCount > 0 && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleEnrich}
-              disabled={enriching}
-            >
-              {enriching ? (
-                <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
-              ) : (
-                <Zap className="h-3.5 w-3.5 mr-1.5" />
+        <span className="text-sm font-medium">References</span>
+        <div className="flex items-center gap-0.5">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+                title="Sort"
+              >
+                <ArrowUpDown className="h-3.5 w-3.5" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="p-1 [&_[role=menuitem]]:px-2.5 [&_[role=menuitem]]:py-1.5 [&_[role=menuitem]]:gap-2 [&_[role=menuitem]]:text-xs">
+              <DropdownMenuItem onClick={() => setSortBy("appearance")}>
+                {sortBy === "appearance" ? <CheckCircle2 className="h-4 w-4" /> : <span className="w-4" />}
+                Order of appearance
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setSortBy("alpha")}>
+                {sortBy === "alpha" ? <CheckCircle2 className="h-4 w-4" /> : <span className="w-4" />}
+                Alphabetical
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setSortBy("year")}>
+                {sortBy === "year" ? <CheckCircle2 className="h-4 w-4" /> : <span className="w-4" />}
+                By year
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+                title="Actions"
+              >
+                <MoreHorizontal className="h-3.5 w-3.5" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              {unenrichedCount > 0 && (
+                <DropdownMenuItem
+                  onClick={handleEnrich}
+                  disabled={enriching}
+                >
+                  {enriching ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Zap className="h-4 w-4" />
+                  )}
+                  {enriching && enrichProgress
+                    ? `Enriching ${enrichProgress.current}/${enrichProgress.total}...`
+                    : enriching
+                      ? "Starting..."
+                      : "Enrich references"}
+                </DropdownMenuItem>
               )}
-              {enriching && enrichProgress
-                ? `Enriching ${enrichProgress.current}/${enrichProgress.total}...`
-                : enriching
-                  ? "Starting..."
-                  : "Enrich References"}
-            </Button>
-          )}
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleExtractContexts}
-            disabled={extracting}
-          >
-            {extracting ? (
-              <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
-            ) : (
-              <Sparkles className="h-3.5 w-3.5 mr-1.5" />
-            )}
-            {extracting ? "Extracting..." : "Extract Citation Contexts"}
-          </Button>
+              <DropdownMenuItem
+                onClick={handleExtractContexts}
+                disabled={extracting}
+              >
+                {extracting ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Sparkles className="h-4 w-4" />
+                )}
+                {extracting ? "Extracting..." : "Extract citation contexts"}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </div>
 
-      {references.map((ref) => {
+      {[...references].sort((a, b) => {
+        if (sortBy === "alpha") return a.title.localeCompare(b.title);
+        if (sortBy === "year") return (b.year ?? 0) - (a.year ?? 0);
+        return (a.referenceIndex ?? 0) - (b.referenceIndex ?? 0);
+      }).map((ref) => {
         let authors: string[] = [];
         try {
           if (ref.authors) authors = JSON.parse(ref.authors);
@@ -350,15 +402,10 @@ export function PaperReferences({ paperId }: { paperId: string }) {
         const isImporting = importing.has(ref.id);
 
         return (
-          <Card key={ref.id} className="group">
-            <CardContent className="py-4 flex items-start justify-between gap-4">
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2 flex-wrap mb-1">
-                  {ref.referenceIndex != null && (
-                    <Badge variant="outline" className="text-xs shrink-0">
-                      {ref.referenceIndex}
-                    </Badge>
-                  )}
+          <Card key={ref.id} className="group relative">
+            <CardContent className="py-3">
+              <div className="min-w-0">
+                <div className="mb-1 pr-16">
                   {ref.matchedPaper ? (
                     <Link
                       href={`/papers/${ref.matchedPaper.id}`}
@@ -369,20 +416,11 @@ export function PaperReferences({ paperId }: { paperId: string }) {
                   ) : (
                     <span className="font-medium text-sm">{ref.title}</span>
                   )}
-                  {ref.matchedPaper && (
-                    <Badge className="text-xs gap-1 bg-green-600 hover:bg-green-700">
-                      <Library className="h-3 w-3" />
-                      In Library
-                    </Badge>
-                  )}
                   {ref.semanticScholarId && (
-                    <Badge
-                      variant="secondary"
-                      className="text-xs gap-1"
-                    >
-                      <CheckCircle2 className="h-3 w-3" />
-                      Enriched
-                    </Badge>
+                    <CheckCircle2 className="inline h-3.5 w-3.5 text-green-500 ml-1.5 align-text-bottom" />
+                  )}
+                  {ref.matchedPaper && (
+                    <Library className="inline h-3.5 w-3.5 text-green-600 ml-1.5 align-text-bottom" />
                   )}
                 </div>
                 <div className="flex items-center gap-2 text-xs text-muted-foreground flex-wrap">
@@ -399,56 +437,6 @@ export function PaperReferences({ paperId }: { paperId: string }) {
                     </Badge>
                   )}
                 </div>
-
-                {/* External links */}
-                {(ref.doi || ref.arxivId || ref.semanticScholarId) && (
-                  <div className="flex items-center gap-2 mt-1.5 flex-wrap">
-                    {ref.doi && (
-                      <a
-                        href={`https://doi.org/${ref.doi}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300"
-                      >
-                        <ExternalLink className="h-3 w-3" />
-                        DOI
-                      </a>
-                    )}
-                    {ref.arxivId && (
-                      <a
-                        href={`https://arxiv.org/abs/${ref.arxivId}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300"
-                      >
-                        <ExternalLink className="h-3 w-3" />
-                        arXiv
-                      </a>
-                    )}
-                    {ref.semanticScholarId && (() => {
-                      const id = ref.semanticScholarId!;
-                      const isS2 = id.startsWith("s2:");
-                      const isOA = id.startsWith("https://openalex.org/");
-                      const href = isS2
-                        ? `https://www.semanticscholar.org/paper/${id.slice(3)}`
-                        : isOA
-                          ? id
-                          : id.startsWith("http") ? id : `https://openalex.org/${id}`;
-                      const label = isS2 ? "S2" : isOA ? "OpenAlex" : "Source";
-                      return (
-                        <a
-                          href={href}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300"
-                        >
-                          <ExternalLink className="h-3 w-3" />
-                          {label}
-                        </a>
-                      );
-                    })()}
-                  </div>
-                )}
 
                 {ref.citationContext && (
                   <div className="mt-1.5 flex items-start gap-1.5 rounded-md bg-muted/50 border border-border/50 px-2.5 py-1.5">
@@ -468,85 +456,121 @@ export function PaperReferences({ paperId }: { paperId: string }) {
               </div>
 
               {/* Action buttons */}
-              <div className="flex items-center gap-1 shrink-0">
-                {/* Find / Lookup button */}
-                {!ref.semanticScholarId && (
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="opacity-0 group-hover:opacity-100 transition-opacity"
-                    onClick={() => handleLookup(ref.id)}
-                    disabled={isLookingUp}
-                    title="Find on Semantic Scholar"
-                  >
-                    {isLookingUp ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <Search className="h-4 w-4" />
-                    )}
-                  </Button>
-                )}
-
+              <div className="absolute top-2 right-2 flex items-center gap-0.5">
                 {/* Import button */}
                 {!ref.matchedPaper &&
                   (ref.arxivId || ref.externalUrl || ref.title) && (
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="opacity-0 group-hover:opacity-100 transition-opacity"
+                    <button
+                      className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
                       onClick={() => handleImport(ref.id)}
                       disabled={isImporting}
                       title="Import to library"
                     >
                       {isImporting ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
                       ) : (
-                        <Download className="h-4 w-4" />
+                        <Download className="h-3.5 w-3.5" />
                       )}
-                    </Button>
+                    </button>
                   )}
 
-                {/* Cite button */}
-                <Popover>
-                  <PopoverTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="opacity-0 group-hover:opacity-100 transition-opacity"
-                      title="Copy citation"
+                {/* Open in new tab — prefer arxiv > doi > semantic scholar */}
+                {(() => {
+                  const primaryUrl = ref.arxivId
+                    ? `https://arxiv.org/abs/${ref.arxivId}`
+                    : ref.doi
+                      ? `https://doi.org/${ref.doi}`
+                      : ref.semanticScholarId
+                        ? ref.semanticScholarId.startsWith("s2:")
+                          ? `https://www.semanticscholar.org/paper/${ref.semanticScholarId.slice(3)}`
+                          : ref.semanticScholarId.startsWith("http")
+                            ? ref.semanticScholarId
+                            : `https://openalex.org/${ref.semanticScholarId}`
+                        : null;
+                  return primaryUrl ? (
+                    <a
+                      href={primaryUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+                      title="Open in new tab"
                     >
-                      <ClipboardCopy className="h-4 w-4" />
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-40 p-1" align="end">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="w-full justify-start text-xs"
-                      onClick={() => handleCopyCitation(ref.id, "bibtex")}
-                    >
-                      Copy BibTeX
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="w-full justify-start text-xs"
-                      onClick={() => handleCopyCitation(ref.id, "apa")}
-                    >
-                      Copy APA
-                    </Button>
-                  </PopoverContent>
-                </Popover>
+                      <ExternalLink className="h-3.5 w-3.5" />
+                    </a>
+                  ) : null;
+                })()}
 
-                {/* Delete button */}
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="opacity-0 group-hover:opacity-100 transition-opacity"
-                  onClick={() => handleDelete(ref.id)}
-                >
-                  <Trash2 className="h-4 w-4" />
-                </Button>
+                {/* Three-dot menu */}
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <button
+                      className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+                      title="More actions"
+                    >
+                      <MoreVertical className="h-3.5 w-3.5" />
+                    </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-48 p-1 [&_[role=menuitem]]:px-2.5 [&_[role=menuitem]]:py-1.5 [&_[role=menuitem]]:gap-2 [&_[role=menuitem]]:text-xs">
+                    {!ref.semanticScholarId && (
+                      <>
+                        <DropdownMenuItem
+                          onClick={() => handleLookup(ref.id)}
+                          disabled={isLookingUp}
+                        >
+                          {isLookingUp ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <Search className="h-4 w-4" />
+                          )}
+                          Find on Semantic Scholar
+                        </DropdownMenuItem>
+                        <DropdownMenuSeparator />
+                      </>
+                    )}
+                    {ref.arxivId && (
+                      <DropdownMenuItem onClick={() => window.open(`https://arxiv.org/abs/${ref.arxivId}`, "_blank")}>
+                        <ExternalLink className="h-4 w-4" />
+                        Open on arXiv
+                      </DropdownMenuItem>
+                    )}
+                    {ref.doi && (
+                      <DropdownMenuItem onClick={() => window.open(`https://doi.org/${ref.doi}`, "_blank")}>
+                        <ExternalLink className="h-4 w-4" />
+                        Open DOI
+                      </DropdownMenuItem>
+                    )}
+                    {ref.semanticScholarId && (() => {
+                      const sid = ref.semanticScholarId!;
+                      const href = sid.startsWith("s2:")
+                        ? `https://www.semanticscholar.org/paper/${sid.slice(3)}`
+                        : sid.startsWith("http") ? sid : `https://openalex.org/${sid}`;
+                      const label = sid.startsWith("s2:") ? "Semantic Scholar" : sid.startsWith("https://openalex.org/") ? "OpenAlex" : "Source";
+                      return (
+                        <DropdownMenuItem onClick={() => window.open(href, "_blank")}>
+                          <ExternalLink className="h-4 w-4" />
+                          Open on {label}
+                        </DropdownMenuItem>
+                      );
+                    })()}
+                    {(ref.arxivId || ref.doi || ref.semanticScholarId) && <DropdownMenuSeparator />}
+                    <DropdownMenuItem onClick={() => handleCopyCitation(ref.id, "bibtex")}>
+                      <ClipboardCopy className="h-4 w-4" />
+                      Copy BibTeX
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => handleCopyCitation(ref.id, "apa")}>
+                      <ClipboardCopy className="h-4 w-4" />
+                      Copy APA
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      onClick={() => handleDelete(ref.id)}
+                      className="text-destructive focus:text-destructive"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                      Delete
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
               </div>
             </CardContent>
           </Card>

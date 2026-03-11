@@ -1,12 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { requireUserId } from "@/lib/paper-auth";
 
 export async function GET(request: NextRequest) {
+  const userId = await requireUserId();
   const { searchParams } = new URL(request.url);
   const tagIds = searchParams.get("tagIds");
 
   const where: Record<string, unknown> = {
     year: { not: null },
+    userId,
   };
 
   if (tagIds) {

@@ -15,6 +15,7 @@ interface Tag {
   id: string;
   name: string;
   color: string;
+  score?: number;
 }
 
 export interface PaperCardData {
@@ -30,6 +31,7 @@ export interface PaperCardData {
   isLiked: boolean;
   engagementScore: number;
   tags: { tag: Tag }[];
+  matchFields?: string[];
 }
 
 interface PaperCardProps {
@@ -125,6 +127,13 @@ export function PaperCard({
             )}
           </div>
 
+          {/* Match indicator */}
+          {paper.matchFields && paper.matchFields.length > 0 && (
+            <p className="mt-1.5 text-xs text-muted-foreground/70">
+              matches: {paper.matchFields.join(", ")}
+            </p>
+          )}
+
           {/* Abstract */}
           {paper.abstract && (
             <p className="mt-2 line-clamp-3 text-sm text-muted-foreground">
@@ -132,23 +141,35 @@ export function PaperCard({
             </p>
           )}
 
-          {/* Tags */}
-          {paper.tags.length > 0 && (
-            <div className="mt-2.5 flex flex-wrap gap-1.5">
-              {paper.tags.map((pt) => (
-                <span
-                  key={pt.tag.id}
-                  className="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium"
-                  style={{
-                    backgroundColor: pt.tag.color + "20",
-                    color: pt.tag.color,
-                  }}
-                >
-                  {pt.tag.name}
-                </span>
-              ))}
-            </div>
-          )}
+          {/* Tags — show top 3 by score, "+N" for the rest */}
+          {paper.tags.length > 0 && (() => {
+            const sorted = [...paper.tags].sort(
+              (a, b) => (b.tag.score ?? 0) - (a.tag.score ?? 0)
+            );
+            const visible = sorted.slice(0, 3);
+            const remaining = sorted.length - visible.length;
+            return (
+              <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+                {visible.map((pt) => (
+                  <span
+                    key={pt.tag.id}
+                    className="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium"
+                    style={{
+                      backgroundColor: pt.tag.color + "20",
+                      color: pt.tag.color,
+                    }}
+                  >
+                    {pt.tag.name}
+                  </span>
+                ))}
+                {remaining > 0 && (
+                  <span className="text-xs text-muted-foreground">
+                    +{remaining}
+                  </span>
+                )}
+              </div>
+            );
+          })()}
         </Link>
 
         {/* Footer */}

@@ -4,19 +4,21 @@ import { generateLLMResponse, truncateText } from "@/lib/llm/provider";
 import { buildPrompt, cleanJsonResponse } from "@/lib/llm/prompts";
 import { resolveModelConfig } from "@/lib/llm/auto-process";
 import { resolveAndAssignTags, getExistingTagNames } from "@/lib/tags/auto-tag";
+import { requireUserId } from "@/lib/paper-auth";
 
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const userId = await requireUserId();
     const { id } = await params;
     const body = await request.json();
     const { provider, modelId, proxyConfig } = await resolveModelConfig(body);
     const autoTag = body.autoTag ?? false;
 
-    const paper = await prisma.paper.findUnique({
-      where: { id },
+    const paper = await prisma.paper.findFirst({
+      where: { id, userId },
     });
 
     if (!paper) {

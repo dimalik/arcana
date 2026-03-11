@@ -1,12 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { trackEngagement } from "@/lib/engagement/track";
+import { requireUserId } from "@/lib/paper-auth";
 
 export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { id } = await params;
+  const userId = await requireUserId();
+    const { id } = await params;
 
   const entries = await prisma.notebookEntry.findMany({
     where: { paperId: id, type: { in: ["selection", "screenshot"] } },
@@ -28,9 +30,10 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const userId = await requireUserId();
   const { id } = await params;
 
-  const paper = await prisma.paper.findUnique({ where: { id } });
+  const paper = await prisma.paper.findFirst({ where: { id, userId } });
   if (!paper) {
     return NextResponse.json({ error: "Paper not found" }, { status: 404 });
   }

@@ -1,11 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { requirePaperAccess } from "@/lib/paper-auth";
 
 export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string; annotationId: string }> }
 ) {
   const { id, annotationId } = await params;
+  const paper = await requirePaperAccess(id);
+  if (!paper) {
+    return NextResponse.json({ error: "Paper not found" }, { status: 404 });
+  }
 
   const entry = await prisma.notebookEntry.findFirst({
     where: { id: annotationId, paperId: id, type: "selection" },
@@ -53,6 +58,10 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string; annotationId: string }> }
 ) {
   const { id, annotationId } = await params;
+  const paper = await requirePaperAccess(id);
+  if (!paper) {
+    return NextResponse.json({ error: "Paper not found" }, { status: 404 });
+  }
 
   const entry = await prisma.notebookEntry.findFirst({
     where: { id: annotationId, paperId: id, type: "selection" },

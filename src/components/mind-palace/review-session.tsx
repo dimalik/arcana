@@ -164,8 +164,8 @@ export function ReviewSession({ open, onOpenChange, onComplete }: ReviewSessionP
           </div>
         ) : current ? (
           <div className="space-y-4">
-            {/* Room badge */}
-            <div className="flex items-center gap-2">
+            {/* Cue: room + paper title */}
+            <div className="flex items-center gap-2 flex-wrap">
               <Badge variant="outline" className="text-xs">
                 <span
                   className="h-2 w-2 rounded-full mr-1.5"
@@ -173,44 +173,65 @@ export function ReviewSession({ open, onOpenChange, onComplete }: ReviewSessionP
                 />
                 {current.room.name}
               </Badge>
-            </div>
-
-            {/* Learning (always shown) */}
-            <div className="rounded-lg bg-muted/50 p-4">
-              <p className="font-medium text-sm leading-relaxed">{current.learning}</p>
-            </div>
-
-            {/* Reveal button or revealed content */}
-            {!revealed ? (
-              <Button
-                variant="outline"
-                className="w-full"
-                onClick={() => setRevealed(true)}
+              <Link
+                href={`/papers/${current.paper.id}`}
+                className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-primary"
+                onClick={() => onOpenChange(false)}
               >
-                <Eye className="h-4 w-4 mr-2" />
-                Reveal (Space)
-              </Button>
-            ) : (
+                <FileText className="h-3 w-3" />
+                {current.paper.title}
+              </Link>
+            </div>
+
+            {/* Prompt — cue-first: ask "What did you learn?" */}
+            {!revealed && (
+              <div className="rounded-lg bg-muted/50 p-6 text-center space-y-3">
+                <p className="text-sm font-medium text-muted-foreground">
+                  What did you learn from this paper?
+                </p>
+                <Button
+                  variant="outline"
+                  className="w-full"
+                  onClick={() => setRevealed(true)}
+                >
+                  <Eye className="h-4 w-4 mr-2" />
+                  Reveal (Space)
+                </Button>
+              </div>
+            )}
+
+            {/* Revealed: full labeled insight */}
+            {revealed && (
               <div className="space-y-3">
-                <div className="space-y-2">
-                  <p className="text-sm text-muted-foreground">{current.significance}</p>
-                  {current.applications && (
-                    <p className="text-sm text-muted-foreground italic">
-                      {current.applications}
-                    </p>
-                  )}
-                  <Link
-                    href={`/papers/${current.paper.id}`}
-                    className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-primary"
-                    onClick={() => onOpenChange(false)}
-                  >
-                    <FileText className="h-3 w-3" />
-                    {current.paper.title}
-                  </Link>
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60 mb-0.5">
+                    What I learned
+                  </p>
+                  <p className="text-sm leading-relaxed">{current.learning}</p>
                 </div>
 
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60 mb-0.5">
+                    Why it matters
+                  </p>
+                  <p className="text-sm text-muted-foreground leading-relaxed">
+                    {current.significance}
+                  </p>
+                </div>
+
+                {current.applications && (
+                  <div>
+                    <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60 mb-0.5">
+                      How to apply
+                    </p>
+                    <p className="text-sm text-muted-foreground leading-relaxed">
+                      {current.applications}
+                    </p>
+                  </div>
+                )}
+
                 {/* Rating buttons */}
-                <div className="flex gap-2">
+                <div className="flex gap-2 pt-1">
                   {RATINGS.map((r) => (
                     <Button
                       key={r.value}

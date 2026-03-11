@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { runTextExtraction, runAutoProcessPipeline } from "@/lib/llm/auto-process";
 
 const STALL_THRESHOLD_MS = 5 * 60 * 1000; // 5 minutes
+const MAX_CONCURRENT = 3; // Process up to N papers simultaneously
 
 export class CancelledError extends Error {
   constructor(paperId: string) {
@@ -12,16 +13,14 @@ export class CancelledError extends Error {
 
 class ProcessingQueue {
   private queue: string[] = [];
-  private processing: string | null = null;
-  private abortController: AbortController | null = null;
+  private processing = new Map<string, AbortController>();
   private initialized = false;
 
   /**
    * Add a paper to the processing queue (deduped).
-   * If nothing is currently processing, starts processNext().
+   * Starts processing if slots are available.
    */
   enqueue(paperId: string): void {
-    // Recover stalled papers on first use
     if (!this.initialized) {
       this.initialized = true;
       this.recoverStalled().catch((e) =>
@@ -30,17 +29,15 @@ class ProcessingQueue {
     }
 
     // Dedupe: don't add if already queued or currently processing
-    if (this.processing === paperId || this.queue.includes(paperId)) {
+    if (this.processing.has(paperId) || this.queue.includes(paperId)) {
       return;
     }
 
     this.queue.push(paperId);
-    console.log(`[queue] Enqueued ${paperId} (queue length: ${this.queue.length})`);
+    console.log(`[queue] Enqueued ${paperId} (queue: ${this.queue.length}, active: ${this.processing.size})`);
 
-    // If nothing is running, start processing
-    if (!this.processing) {
-      this.processNext();
-    }
+    // Fill available slots
+    this.fillSlots();
   }
 
   /**
@@ -65,34 +62,48 @@ class ProcessingQueue {
     }
 
     // Abort if currently processing
-    if (this.processing === paperId && this.abortController) {
+    const controller = this.processing.get(paperId);
+    if (controller) {
       console.log(`[queue] Aborting active processing for ${paperId}`);
-      this.abortController.abort();
-      // The processNext loop will handle cleanup via the CancelledError catch
+      controller.abort();
       return true;
     }
 
     return false;
   }
 
-  private async processNext(): Promise<void> {
-    if (this.queue.length === 0) {
-      this.processing = null;
-      this.abortController = null;
-      return;
+  /**
+   * Start processing papers up to MAX_CONCURRENT slots.
+   */
+  private fillSlots(): void {
+    while (this.queue.length > 0 && this.processing.size < MAX_CONCURRENT) {
+      const paperId = this.queue.shift()!;
+      this.startProcessing(paperId);
     }
+  }
 
-    const paperId = this.queue.shift()!;
-    this.processing = paperId;
-    this.abortController = new AbortController();
-    const signal = this.abortController.signal;
-    console.log(`[queue] Processing ${paperId} (${this.queue.length} remaining)`);
+  private startProcessing(paperId: string): void {
+    const controller = new AbortController();
+    this.processing.set(paperId, controller);
+    console.log(`[queue] Processing ${paperId} (active: ${this.processing.size}, queued: ${this.queue.length})`);
 
+    this.processPaper(paperId, controller.signal)
+      .catch((e) => {
+        if (!controller.signal.aborted) {
+          console.error(`[queue] Pipeline failed for ${paperId}:`, e);
+        }
+      })
+      .finally(() => {
+        this.processing.delete(paperId);
+        // Fill the freed slot
+        this.fillSlots();
+      });
+  }
+
+  private async processPaper(paperId: string, signal: AbortSignal): Promise<void> {
     try {
-      // Check cancellation before starting
       if (signal.aborted) throw new CancelledError(paperId);
 
-      // Check if paper needs text extraction
       const paper = await prisma.paper.findUnique({
         where: { id: paperId },
         select: { filePath: true, fullText: true, sourceType: true, processingStatus: true },
@@ -100,9 +111,6 @@ class ProcessingQueue {
 
       if (!paper) {
         console.error(`[queue] Paper not found: ${paperId}`);
-        this.processing = null;
-        this.abortController = null;
-        this.processNext();
         return;
       }
 
@@ -122,16 +130,13 @@ class ProcessingQueue {
               processingStartedAt: null,
             },
           });
-          this.processing = null;
-          this.abortController = null;
-          this.processNext();
           return;
         }
       }
 
       if (signal.aborted) throw new CancelledError(paperId);
 
-      // Re-fetch to check for text availability and determine skipExtract
+      // Re-fetch to check text availability
       const updated = await prisma.paper.findUnique({
         where: { id: paperId },
         select: { fullText: true, abstract: true, sourceType: true },
@@ -147,16 +152,19 @@ class ProcessingQueue {
             processingStartedAt: null,
           },
         });
-        this.processing = null;
-        this.abortController = null;
-        this.processNext();
         return;
       }
 
       // Step 2: Run LLM pipeline
-      // Skip metadata extraction for ArXiv/OpenReview papers (already have metadata)
+      // When backlog is large (>5 papers), run essential-only mode to get summaries fast.
+      // Deferred steps (linking, refs, distill) run later when queue drains.
       const skipExtract = updated.sourceType === "ARXIV" || updated.sourceType === "OPENREVIEW";
-      await runAutoProcessPipeline({ paperId, skipExtract, signal });
+      const backlogSize = this.queue.length + this.processing.size;
+      const essentialOnly = backlogSize > 5;
+      if (essentialOnly) {
+        console.log(`[queue] Large backlog (${backlogSize}), running essential-only for ${paperId}`);
+      }
+      await runAutoProcessPipeline({ paperId, skipExtract, signal, essentialOnly });
 
     } catch (e) {
       const cancelled = signal.aborted || e instanceof CancelledError;
@@ -165,7 +173,6 @@ class ProcessingQueue {
       } else {
         console.error(`[queue] Pipeline failed for ${paperId}:`, e);
       }
-      // Mark paper as failed
       try {
         await prisma.paper.update({
           where: { id: paperId },
@@ -179,11 +186,6 @@ class ProcessingQueue {
         // Paper may have been deleted
       }
     }
-
-    // Always process the next item
-    this.processing = null;
-    this.abortController = null;
-    this.processNext();
   }
 
   /**
@@ -193,7 +195,6 @@ class ProcessingQueue {
   async recoverStalled(): Promise<void> {
     const stallCutoff = new Date(Date.now() - STALL_THRESHOLD_MS);
 
-    // Find papers that are stuck: non-terminal status with an old processingStartedAt
     const stalledPapers = await prisma.paper.findMany({
       where: {
         processingStatus: {
@@ -206,8 +207,6 @@ class ProcessingQueue {
       select: { id: true, processingStatus: true, processingStep: true },
     });
 
-    // Also find papers with non-terminal status but NO processingStartedAt
-    // (legacy papers from before this feature, or papers where the server crashed before setting it)
     const legacyStuck = await prisma.paper.findMany({
       where: {
         processingStatus: {
@@ -227,7 +226,6 @@ class ProcessingQueue {
       );
 
       for (const paper of allStalled) {
-        // Reset step tracking so the queue starts fresh
         await prisma.paper.update({
           where: { id: paper.id },
           data: {
@@ -236,22 +234,25 @@ class ProcessingQueue {
           },
         });
 
-        // Enqueue for reprocessing (dedupe handled by enqueue)
-        if (!this.queue.includes(paper.id) && this.processing !== paper.id) {
+        if (!this.queue.includes(paper.id) && !this.processing.has(paper.id)) {
           this.queue.push(paper.id);
         }
       }
+
+      // Kick off processing for recovered papers
+      this.fillSlots();
     }
   }
 
   /**
    * Get current queue status for the API.
    */
-  getStatus(): { processing: string | null; queue: string[]; queueLength: number } {
+  getStatus(): { processing: string | null; queue: string[]; queueLength: number; activeCount: number } {
     return {
-      processing: this.processing,
+      processing: this.processing.size > 0 ? Array.from(this.processing.keys())[0] : null,
       queue: [...this.queue],
       queueLength: this.queue.length,
+      activeCount: this.processing.size,
     };
   }
 }

@@ -3,18 +3,20 @@ import { prisma } from "@/lib/prisma";
 import { generateLLMResponse } from "@/lib/llm/provider";
 import { buildPrompt } from "@/lib/llm/prompts";
 import { resolveModelConfig } from "@/lib/llm/auto-process";
+import { requireUserId } from "@/lib/paper-auth";
 
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const userId = await requireUserId();
     const { id } = await params;
     const body = await request.json();
     const { provider, modelId, proxyConfig } = await resolveModelConfig(body);
 
-    const paper = await prisma.paper.findUnique({
-      where: { id },
+    const paper = await prisma.paper.findFirst({
+      where: { id, userId },
       select: { id: true, title: true, abstract: true, summary: true, keyFindings: true },
     });
 
