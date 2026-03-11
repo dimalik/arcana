@@ -1,8 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
-import { ChevronDown, ChevronUp, FileText } from "lucide-react";
+import { ChevronDown, ChevronUp, FileText, Brain, Trash2 } from "lucide-react";
 
 interface ContextSidebarProps {
   project: {
@@ -24,9 +24,34 @@ const STATUS_DOT: Record<string, string> = {
   REVISED: "bg-purple-500",
 };
 
+interface AgentMemory {
+  id: string;
+  category: string;
+  lesson: string;
+  usageCount: number;
+}
+
 export function ContextSidebar({ project, papers, hypotheses, iteration }: ContextSidebarProps) {
   const [briefExpanded, setBriefExpanded] = useState(false);
   const [papersExpanded, setPapersExpanded] = useState(false);
+  const [memoriesExpanded, setMemoriesExpanded] = useState(false);
+  const [memories, setMemories] = useState<AgentMemory[]>([]);
+
+  useEffect(() => {
+    fetch("/api/research/memories")
+      .then((r) => r.ok ? r.json() : [])
+      .then(setMemories)
+      .catch(() => {});
+  }, []);
+
+  const deleteMemory = async (id: string) => {
+    await fetch("/api/research/memories", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id }),
+    });
+    setMemories((m) => m.filter((mem) => mem.id !== id));
+  };
 
   const brief = (() => {
     try { return JSON.parse(project.brief); } catch { return {}; }
@@ -131,6 +156,38 @@ export function ContextSidebar({ project, papers, hypotheses, iteration }: Conte
                 <span className="text-[9px] text-muted-foreground/50">
                   {completedSteps}/{totalSteps}
                 </span>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Process Memory */}
+        {memories.length > 0 && (
+          <div>
+            <button
+              onClick={() => setMemoriesExpanded(!memoriesExpanded)}
+              className="flex items-center gap-1 text-[11px] font-medium text-muted-foreground hover:text-foreground w-full"
+            >
+              {memoriesExpanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+              <Brain className="h-3 w-3" />
+              Process Memory ({memories.length})
+            </button>
+            {memoriesExpanded && (
+              <div className="mt-1 space-y-1">
+                {memories.map((m) => (
+                  <div key={m.id} className="group flex items-start gap-1">
+                    <span className="text-[9px] text-muted-foreground/50 bg-muted rounded px-1 shrink-0 mt-0.5">
+                      {m.category}
+                    </span>
+                    <p className="text-[10px] text-muted-foreground flex-1 line-clamp-2">{m.lesson}</p>
+                    <button
+                      onClick={() => deleteMemory(m.id)}
+                      className="opacity-0 group-hover:opacity-100 text-muted-foreground/30 hover:text-destructive transition-opacity shrink-0"
+                    >
+                      <Trash2 className="h-2.5 w-2.5" />
+                    </button>
+                  </div>
+                ))}
               </div>
             )}
           </div>

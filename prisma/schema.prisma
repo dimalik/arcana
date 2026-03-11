@@ -38,6 +38,7 @@ model User {
   researchProjects   ResearchProject[]
   discoverySessions  DiscoverySession[]
   agentCapabilities  AgentCapability[]
+  agentMemories      AgentMemory[]
 }
 
 model UserSession {
@@ -676,6 +677,24 @@ model AgentCapability {
   updatedAt    DateTime @updatedAt
 
   owner        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+// ── Agent Process Memory (practical learnings from trial & error) ──
+
+model AgentMemory {
+  id         String   @id @default(uuid())
+  userId     String
+  category   String   // package, environment, code_pattern, debugging, dataset, performance, general
+  lesson     String   // The actual learning (concise, actionable)
+  context    String?  // When/why this was learned (the error or situation)
+  projectId  String?  // Which project it was learned in (optional)
+  usageCount Int      @default(0)  // Incremented each time referenced in a session
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  owner      User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
 }

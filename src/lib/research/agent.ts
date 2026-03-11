@@ -193,9 +193,29 @@ async function runAgent(
     researchLog = initial;
   }
 
+  // 5b. Load process memories (practical learnings from previous experiments)
+  let processMemories: { id: string; category: string; lesson: string; context: string | null }[] = [];
+  try {
+    processMemories = await prisma.agentMemory.findMany({
+      where: { userId },
+      select: { id: true, category: true, lesson: true, context: true },
+      orderBy: { usageCount: "desc" },
+      take: 50,
+    });
+    // Bump usage count for loaded memories
+    if (processMemories.length > 0) {
+      await prisma.agentMemory.updateMany({
+        where: { id: { in: processMemories.map((m) => m.id) } },
+        data: { usageCount: { increment: 1 } },
+      });
+    }
+  } catch (err) {
+    console.warn("[research-agent] Could not load process memories:", (err as Error).message);
+  }
+
   // 6. Build context
   const papers = project.collection?.papers.map((cp) => cp.paper) || [];
-  const systemPrompt = buildSystemPrompt(project, papers, workDir, remoteHosts, capabilities, gpuInfo);
+  const systemPrompt = buildSystemPrompt(project, papers, workDir, remoteHosts, capabilities, gpuInfo, processMemories);
   const messages = buildMessages(project, papers, userMessage, researchLog);
 
   // 6. Get model
@@ -340,6 +360,7 @@ function buildSystemPrompt(
   remoteHosts: { alias: string; gpuType: string | null }[],
   capabilities?: { name: string; description: string; instructions: string }[],
   gpuInfo?: { alias: string; gpuCount: number; gpus: { index: number; name: string; memoryTotal: string; memoryFree: string }[]; summary: string }[],
+  processMemories?: { category: string; lesson: string; context: string | null }[],
 ): string {
   // Build detailed GPU info section
   let gpuSection = "";
@@ -446,6 +467,29 @@ The user has configured the following capabilities. USE THEM when relevant — t
 ${capabilities.map((c) => `### ${c.name}
 ${c.description ? c.description + "\n" : ""}**How to use:**
 ${c.instructions}`).join("\n\n")}
+` : ""}${processMemories && processMemories.length > 0 ? `
+## Process Memory (lessons from previous experiments)
+These are practical lessons learned from trial and error in past experiments. **Follow these — they will save you from repeating mistakes.**
+
+${(() => {
+  const byCategory = new Map<string, string[]>();
+  for (const m of processMemories) {
+    const cat = m.category || "general";
+    if (!byCategory.has(cat)) byCategory.set(cat, []);
+    byCategory.get(cat)!.push(m.lesson);
+  }
+  return Array.from(byCategory.entries())
+    .map(([cat, lessons]) => `**${cat}:**\n${lessons.map((l) => `- ${l}`).join("\n")}`)
+    .join("\n\n");
+})()}
+
+**When you discover something new that would help future experiments, use \`save_lesson\` to record it.** Save lessons when:
+- You fix a bug caused by a package version, import issue, or environment quirk
+- You find a code pattern that works better than the obvious approach
+- You discover a dataset requires specific preprocessing
+- A library needs specific configuration to work in this environment
+- You find a workaround for a common error
+
 ` : ""}
 ## The Research Cycle (repeat this loop — NEVER stop after one experiment)
 
@@ -553,6 +597,7 @@ When you've accumulated enough evidence across multiple experiments:
 - **NEVER reinstall packages on every run.** Create a venv ONCE with \`python3 -m venv .venv\`, install requirements into it, then reuse it. On subsequent runs just \`source .venv/bin/activate && python3 script.py\`. Only reinstall if requirements.txt has changed.
 - **execute_remote handles job management automatically.** Do NOT manually nohup, background, sleep, or poll. Just pass the command.
 - **ALWAYS use flush=True in print() and save results incrementally.** Remote jobs buffer stdout — without flushing you won't see progress. Without incremental saves, a crash after training means zero results.
+- **Save lessons with save_lesson whenever you fix a non-obvious bug or discover a practical trick.** Future you (and other projects) will benefit. Don't save obvious things — save things that cost you time to figure out.
 - Use log_finding liberally: record hypotheses, findings, decisions, and breakthroughs. This is your lab notebook.
 - Use update_hypothesis to track evidence for/against each hypothesis as you go.
 - **NEVER design a follow-up experiment after failure without consulting literature first.** Use search_library + query_insights before retrying. Blind trial-and-error is not science.
@@ -660,6 +705,8 @@ function thinkingHint(toolCalls?: { toolName: string; input: unknown }[]): strin
       return "Reading webpage content...";
     case "view_figures":
       return "Examining paper figures and tables...";
+    case "save_lesson":
+      return "Saving process lesson for future sessions...";
     default:
       return "Thinking about next step...";
   }
@@ -1215,6 +1262,56 @@ function createTools(
         }
 
         return `Logged: [${type}] ${content.slice(0, 100)}...`;
+      },
+    }),
+
+    save_lesson: tool({
+      description: "Save a practical lesson learned from trial and error. This goes into your persistent process memory — you'll see it at the start of every future session, across ALL projects. Use this when you discover something that would save time in the future: package quirks, environment fixes, code patterns that work, common errors and their solutions. Be specific and actionable.",
+      inputSchema: z.object({
+        category: z.enum(["package", "environment", "code_pattern", "debugging", "dataset", "performance", "general"])
+          .describe("Category: package (dependency issues), environment (setup/config), code_pattern (what works), debugging (error fixes), dataset (data quirks), performance (speed/memory), general"),
+        lesson: z.string().describe("The lesson — concise, actionable, specific. E.g., 'Always use transformers>=4.35 for Mistral models' or 'Use torch.cuda.empty_cache() between model loads to avoid OOM'"),
+        context: z.string().optional().describe("Brief context: what error or situation led to this lesson"),
+      }),
+      execute: async ({ category, lesson, context }: { category: string; lesson: string; context?: string }) => {
+        // Check for duplicates (similar lesson already exists)
+        const existing = await prisma.agentMemory.findMany({
+          where: { userId },
+          select: { id: true, lesson: true },
+        });
+        const lessonLower = lesson.toLowerCase();
+        const duplicate = existing.find((m) => {
+          const existingLower = m.lesson.toLowerCase();
+          // Simple similarity: check if >60% of words overlap
+          const newWords = lessonLower.split(/\s+/).filter((w) => w.length > 3);
+          const existWords = new Set(existingLower.split(/\s+/).filter((w) => w.length > 3));
+          if (newWords.length === 0) return false;
+          let overlap = 0;
+          for (let i = 0; i < newWords.length; i++) { if (existWords.has(newWords[i])) overlap++; }
+          return overlap / newWords.length > 0.6;
+        });
+
+        if (duplicate) {
+          // Update existing instead of creating duplicate
+          await prisma.agentMemory.update({
+            where: { id: duplicate.id },
+            data: { lesson, context, category, updatedAt: new Date() },
+          });
+          return `Updated existing lesson: "${lesson.slice(0, 100)}"`;
+        }
+
+        await prisma.agentMemory.create({
+          data: {
+            userId,
+            category,
+            lesson: lesson.slice(0, 1000),
+            context: context?.slice(0, 500) || null,
+            projectId,
+          },
+        });
+
+        emit({ type: "tool_progress", toolName: "save_lesson", content: `Lesson saved: ${lesson.slice(0, 60)}` });
+        return `Lesson saved to process memory [${category}]: "${lesson.slice(0, 100)}".\nThis will be available in all future research sessions.`;
       },
     }),
 

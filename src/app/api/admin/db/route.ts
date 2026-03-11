@@ -42,6 +42,7 @@ const MODEL_ORDER = [
   "researchLogEntry",
   "remoteHost",
   "remoteJob",
+  "agentMemory",
 ] as const;
 
 /**
