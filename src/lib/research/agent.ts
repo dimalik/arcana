@@ -15,7 +15,7 @@ import { prisma } from "@/lib/prisma";
 import { searchAllSources } from "@/lib/import/semantic-scholar";
 import { findAndDownloadPdf } from "@/lib/import/pdf-finder";
 import { processingQueue } from "@/lib/processing/queue";
-import { submitRemoteJob, probeGpus } from "./remote-executor";
+import { submitRemoteJob, probeGpus, quickRemoteCommand } from "./remote-executor";
 import { exec, spawn } from "child_process";
 import { promisify } from "util";
 import { writeFile, mkdir, readFile, readdir, stat, appendFile } from "fs/promises";
@@ -413,7 +413,12 @@ You have ${remoteHosts.length} remote server(s) configured:
 ${remoteHosts.map((h) => `- "${h.alias}"${h.gpuType ? ` (${h.gpuType})` : ""}`).join("\n")}
 ${gpuSection}
 
-**You MUST use execute_remote (not execute_command) for running experiments.** The remote servers have GPUs and proper environments. Only use execute_command for quick local tasks like checking file contents, pip freeze, etc.
+**You MUST use execute_remote for running experiments** (training scripts, evaluation scripts). The remote servers have GPUs. But for quick checks — reading log files, listing results, checking file contents on the remote — use **check_remote** instead. It's a direct SSH command with no file sync, so it's instant. Only use execute_command for local-only tasks (editing files, etc.).
+
+**Tool selection guide:**
+- \`execute_remote\` → run experiments (syncs files, creates job, polls for completion)
+- \`check_remote\` → read files/logs on remote, list results, check status (SSH only, instant)
+- \`execute_command\` → local-only tasks (should be rare when remotes are available)
 
 ### Environment Setup (IMPORTANT — do this ONCE, not every run)
 On the FIRST experiment run, create a virtual environment and install dependencies:
@@ -596,6 +601,7 @@ When you've accumulated enough evidence across multiple experiments:
 - **NEVER generate synthetic toy data when a real dataset exists.** If a paper evaluates on GLUE, use GLUE. If on SQuAD, use SQuAD. Generating 50 random samples to "simulate" a dataset invalidates the entire experiment. Use \`datasets\` library, \`torchvision.datasets\`, or direct download URLs from the papers.
 - **NEVER reinstall packages on every run.** Create a venv ONCE with \`python3 -m venv .venv\`, install requirements into it, then reuse it. On subsequent runs just \`source .venv/bin/activate && python3 script.py\`. Only reinstall if requirements.txt has changed.
 - **execute_remote handles job management automatically.** Do NOT manually nohup, background, sleep, or poll. Just pass the command.
+- **NEVER use execute_remote for checking files, reading logs, or listing results.** Use check_remote for that — it's a direct SSH command with no sync overhead. execute_remote does a full rsync which is slow and can fail.
 - **ALWAYS use flush=True in print() and save results incrementally.** Remote jobs buffer stdout — without flushing you won't see progress. Without incremental saves, a crash after training means zero results.
 - **Save lessons with save_lesson whenever you fix a non-obvious bug or discover a practical trick.** Future you (and other projects) will benefit. Don't save obvious things — save things that cost you time to figure out.
 - Use log_finding liberally: record hypotheses, findings, decisions, and breakthroughs. This is your lab notebook.
@@ -691,6 +697,8 @@ function thinkingHint(toolCalls?: { toolName: string; input: unknown }[]): strin
       return "Reviewing written code and planning next action...";
     case "execute_command":
       return "Analyzing command output...";
+    case "check_remote":
+      return "Checking remote files...";
     case "execute_remote":
       return "Reviewing remote execution results...";
     case "log_finding":
@@ -1021,7 +1029,7 @@ function createTools(
 
           proc.on("error", async (err) => {
             if (isPythonRun) {
-              await recordStep("run_experiment", `Local: ${command.slice(0, 80)}`, "FAILED", { error: err.message }, "experiment");
+              await recordStep("run_experiment", `Local: ${command.slice(0, 80)}`, "FAILED", { error: err.message });
             }
             resolve(`Command error: ${err.message}`);
           });
@@ -1029,8 +1037,49 @@ function createTools(
       },
     }),
 
+    check_remote: tool({
+      description: "Run a quick command on the remote server via SSH — NO file sync, NO job record. Use this for lightweight operations: reading log files, checking results, listing files, checking disk space, etc. Much faster than execute_remote since it skips rsync. Do NOT use this for running experiments — use execute_remote for that.",
+      inputSchema: z.object({
+        command: z.string().describe("Shell command to run on the remote host (e.g., 'cat results.json', 'ls -la *.json', 'tail -50 stdout.log')"),
+        host_alias: z.string().optional().describe("Remote host alias. Omit for default."),
+      }),
+      execute: async ({ command, host_alias }: { command: string; host_alias?: string }) => {
+        const hostWhere = host_alias ? { alias: host_alias } : { isDefault: true };
+        let host = await prisma.remoteHost.findFirst({ where: hostWhere });
+        if (!host) host = await prisma.remoteHost.findFirst();
+        if (!host) return "No remote hosts configured.";
+
+        emit({ type: "tool_progress", toolName: "check_remote", content: `$ [${host.alias}] ${command.slice(0, 80)}` });
+
+        // Build the full path to the experiment directory on the remote
+        const slug = workDir.split("/").filter(Boolean).pop() || "experiment";
+        const remoteDir = `${host.workDir}/${slug}`;
+
+        // Wrap with cd to experiment dir + venv activation
+        const fullCmd = `cd ${remoteDir} 2>/dev/null && [ -f .venv/bin/activate ] && source .venv/bin/activate 2>/dev/null; ${command}`;
+
+        const result = await quickRemoteCommand(host.id, fullCmd);
+
+        if (!result.ok) {
+          emit({ type: "tool_output", toolName: "check_remote", content: `ERROR: ${result.error}` });
+          return `Command failed on ${host.alias}: ${result.error}`;
+        }
+
+        // Stream output lines
+        const lines = result.output.split("\n");
+        for (const line of lines.slice(0, 100)) {
+          emit({ type: "tool_output", toolName: "check_remote", content: line });
+        }
+        if (lines.length > 100) {
+          emit({ type: "tool_output", toolName: "check_remote", content: `... (${lines.length - 100} more lines)` });
+        }
+
+        return result.output.slice(-5000) || "Command completed with no output.";
+      },
+    }),
+
     execute_remote: tool({
-      description: "Run an experiment on a remote GPU server. Syncs the experiment directory, runs the command, and syncs results back. Use for GPU-intensive or long-running experiments. Commands run inside the synced experiment directory on the remote. Use relative paths only (e.g., 'python3 experiment.py', not absolute paths).",
+      description: "Run an experiment on a remote GPU server. Syncs the experiment directory, runs the command, and syncs results back. ONLY use for actually running experiments (python scripts). For checking files, reading logs, or listing results, use check_remote instead — it's much faster.",
       inputSchema: z.object({
         command: z.string().describe("Shell command to run on the remote host. Use python3, not python. Use relative file paths only (e.g., 'python3 experiment.py')."),
         host_alias: z.string().optional().describe("Remote host alias. Omit to use the default host."),
@@ -1075,7 +1124,7 @@ function createTools(
         } catch (submitErr) {
           const errMsg = submitErr instanceof Error ? submitErr.message : String(submitErr);
           emit({ type: "tool_output", toolName: "execute_remote", content: `ERROR: Failed to submit job: ${errMsg}` });
-          await recordStep("run_experiment", `Remote (${host.alias}): ${command.slice(0, 60)}`, "FAILED", { host: host.alias, error: errMsg }, "experiment");
+          await recordStep("run_experiment", `Remote (${host.alias}): ${command.slice(0, 60)}`, "FAILED", { host: host.alias, error: errMsg });
           return `Failed to submit remote job to ${host.alias}:\n${errMsg}\n\nThis likely means rsync or SSH failed. Check the remote host configuration.`;
         }
 
@@ -1122,7 +1171,7 @@ function createTools(
           if (job.status === "COMPLETED") {
             emit({ type: "tool_output", toolName: "execute_remote", content: `\n✓ Job completed (exit 0) on ${host.alias}` });
             const result = `Job completed successfully on ${host.alias}.\n\nstdout:\n${(job.stdout || "").slice(-5000)}\n\n${job.stderr ? `stderr:\n${job.stderr.slice(-1000)}` : ""}`;
-            await recordStep("run_experiment", `Remote (${host.alias}): ${command.slice(0, 60)}`, "COMPLETED", { host: host.alias, stdout: (job.stdout || "").slice(-2000), stderr: (job.stderr || "").slice(-500) }, "analysis");
+            await recordStep("run_experiment", `Remote (${host.alias}): ${command.slice(0, 60)}`, "COMPLETED", { host: host.alias, stdout: (job.stdout || "").slice(-2000), stderr: (job.stderr || "").slice(-500) });
             return result;
           }
           if (job.status === "FAILED" || job.status === "CANCELLED") {
@@ -1145,7 +1194,7 @@ function createTools(
             }
 
             const result = `EXPERIMENT FAILED (exit ${job.exitCode ?? "?"}) on ${host.alias}. YOU MUST read the error below, fix the code, and re-run before proceeding.\n\nstdout (last 3000 chars):\n${(job.stdout || "").slice(-3000)}\n\nstderr (last 2000 chars):\n${(job.stderr || "").slice(-2000)}${partialResults}`;
-            await recordStep("run_experiment", `Remote (${host.alias}): ${command.slice(0, 60)}`, "FAILED", { host: host.alias, error: job.stderr?.slice(-1000), exitCode: job.exitCode, hasPartialResults: !!partialResults }, "experiment");
+            await recordStep("run_experiment", `Remote (${host.alias}): ${command.slice(0, 60)}`, "FAILED", { host: host.alias, error: job.stderr?.slice(-1000), exitCode: job.exitCode, hasPartialResults: !!partialResults });
             return result;
           }
         }

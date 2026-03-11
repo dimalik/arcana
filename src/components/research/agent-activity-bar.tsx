@@ -38,6 +38,7 @@ const TOOL_LABELS: Record<string, string> = {
   read_file: "Reading file",
   list_files: "Listing files",
   execute_command: "Running command",
+  check_remote: "Checking remote",
   execute_remote: "Running on remote",
   log_finding: "Recording finding",
   update_hypothesis: "Updating hypothesis",

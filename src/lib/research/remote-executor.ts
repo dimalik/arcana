@@ -92,6 +92,29 @@ async function sshExec(host: HostConfig, cmd: string): Promise<string> {
   });
 }
 
+/**
+ * Run a quick SSH command on a remote host — no rsync, no job record.
+ * For lightweight operations: reading files, checking status, listing dirs.
+ */
+export async function quickRemoteCommand(hostId: string, command: string): Promise<{ ok: boolean; output: string; error?: string }> {
+  const host = await prisma.remoteHost.findUnique({ where: { id: hostId } });
+  if (!host) return { ok: false, output: "", error: "Host not found" };
+
+  const config: HostConfig = {
+    host: host.host, port: host.port, user: host.user,
+    keyPath: host.keyPath, workDir: host.workDir,
+    conda: null, setupCmd: null,
+  };
+
+  try {
+    const output = await sshExec(config, command);
+    return { ok: true, output };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, output: "", error: msg };
+  }
+}
+
 export const sshExecutor: ExecutorBackend = {
   async syncUp(localDir: string, host: HostConfig): Promise<string> {
     // Ensure local dir ends with / for rsync behavior
