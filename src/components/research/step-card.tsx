@@ -5,6 +5,7 @@ import {
   Loader2, Check, X, SkipForward, Undo2, ChevronDown, ChevronRight,
   BrainCircuit, AlertCircle, Play, SearchCheck, ArrowRight, Server,
 } from "lucide-react";
+import { MarkdownRenderer } from "@/components/ui/markdown-renderer";
 
 interface StepCardProps {
   step: {
@@ -132,9 +133,7 @@ export function StepCard({
         {expanded && step.output && (
           <div className="rounded bg-background/50 p-2 text-[11px] text-muted-foreground overflow-auto max-h-96">
             {hasAnalysis ? (
-              <div className="whitespace-pre-wrap leading-relaxed prose prose-xs dark:prose-invert max-w-none">
-                {parsedOutput.analysis}
-              </div>
+              <MarkdownRenderer content={parsedOutput.analysis} className="leading-relaxed [&_p]:mb-1.5 [&_table]:text-[10px]" />
             ) : parsedOutput?.error ? (
               <p className="text-destructive">{parsedOutput.error}</p>
             ) : (

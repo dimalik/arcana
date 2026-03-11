@@ -5,6 +5,7 @@ import {
   Loader2, Sparkles, Lightbulb, CheckCircle2, XCircle,
   RefreshCw, ChevronDown, FlaskConical, TrendingUp,
 } from "lucide-react";
+import { MarkdownRenderer } from "@/components/ui/markdown-renderer";
 import { useStepActions } from "./use-step-actions";
 
 interface Step {
@@ -117,7 +118,7 @@ export function AnalysisPhase({ projectId, steps, hypotheses, onRefresh }: Analy
           <div className="space-y-1.5">
             {breakthroughs.map((f) => (
               <div key={f.id} className="rounded-md border border-amber-500/20 bg-amber-500/5 p-2.5">
-                <p className="text-xs leading-relaxed">{f.content}</p>
+                <MarkdownRenderer content={f.content} className="text-xs leading-relaxed [&_p]:mb-1 [&_table]:text-[10px]" />
               </div>
             ))}
           </div>
@@ -171,8 +172,8 @@ export function AnalysisPhase({ projectId, steps, hypotheses, onRefresh }: Analy
           <div className="space-y-1">
             {otherFindings.map((f) => (
               <div key={f.id} className="flex items-start gap-2 py-1">
-                <Lightbulb className="h-3 w-3 mt-0.5 text-muted-foreground shrink-0" />
-                <p className="text-[11px] text-foreground/80 leading-relaxed">{f.content}</p>
+                <Lightbulb className="h-3 w-3 mt-1 text-muted-foreground shrink-0" />
+                <MarkdownRenderer content={f.content} className="text-[11px] text-foreground/80 leading-relaxed [&_p]:mb-1 [&_table]:text-[10px] flex-1 min-w-0" />
               </div>
             ))}
           </div>
@@ -221,9 +222,10 @@ function HypothesisCard({
       {expanded && evidence.length > 0 && (
         <div className="mt-2 ml-5 space-y-0.5 border-t border-border/50 pt-1.5">
           {evidence.map((e, i) => (
-            <p key={i} className={`text-[10px] ${e.supports ? "text-emerald-500" : "text-red-400"}`}>
-              {e.supports ? "+" : "−"} {e.summary}
-            </p>
+            <div key={i} className={`text-[10px] ${e.supports ? "text-emerald-500" : "text-red-400"}`}>
+              <span className="font-bold mr-1">{e.supports ? "+" : "−"}</span>
+              <MarkdownRenderer content={e.summary} className="inline [&_p]:inline [&_p]:mb-0" />
+            </div>
           ))}
         </div>
       )}

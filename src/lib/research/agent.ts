@@ -251,7 +251,7 @@ async function runAgent(
   };
 
   // 7. Create tools
-  const tools = createTools(projectId, userId, workDir, emit, remoteHosts, recordStep);
+  const tools = createTools(projectId, userId, workDir, emit, remoteHosts, recordStep, { id: iterationId, number: iteration.number });
 
   // 6. Stream with tool use
   const MAX_STEPS = 80;
@@ -591,6 +591,13 @@ When you've accumulated enough evidence across multiple experiments:
 - Identify what was genuinely novel — what did we learn that wasn't already in the literature?
 - Suggest concrete next steps that would extend this work.
 
+### Phase 6: Iteration Advancement
+When you've completed a full research cycle and have solid findings, use \`complete_iteration\` to:
+- Record what was learned in this iteration
+- Start a new iteration with a fresh goal (e.g., deeper investigation, different approach, follow-up question)
+- You should advance iterations naturally as you complete research cycles — don't keep stuffing everything into iteration #1
+- A good time to advance: you've tested all current hypotheses, have clear findings, and see a new direction to explore
+
 ## Critical Rules
 - Write COMPLETE, RUNNABLE Python code. No placeholders. Always include requirements.txt.
 - **NEVER move on after a failed experiment.** Read the error, fix the code, re-run. Only analyze results from successful (exit 0) runs.
@@ -657,6 +664,9 @@ function buildMessages(
     } catch { /* plain text */ }
 
     const hasWork = papers.length > 0 || project.hypotheses.length > 0;
+    const hasPapersNoHypotheses = papers.length > 0 && project.hypotheses.length === 0;
+    const allHypothesesResolved = project.hypotheses.length > 0 && project.hypotheses.every((h) => h.status === "SUPPORTED" || h.status === "REFUTED");
+
     messages.push({
       role: "user",
       content: hasWork
@@ -664,7 +674,11 @@ function buildMessages(
 
 You already have ${papers.length} papers and prior work. Check the existing results files with list_files and read_file before starting new experiments. If experiment code already exists, review it, fix any issues, and re-run. Do NOT re-search for papers you already have.
 
-IMPORTANT: Don't just re-run what failed. Critically examine the results so far. What's missing? What wasn't tested? What would a reviewer criticize? Design follow-up experiments that address these gaps. Your goal is to produce findings that are NOVEL — something not already known from the papers.${context}`
+IMPORTANT: Don't just re-run what failed. Critically examine the results so far. What's missing? What wasn't tested? What would a reviewer criticize? Design follow-up experiments that address these gaps. Your goal is to produce findings that are NOVEL — something not already known from the papers.${hasPapersNoHypotheses ? `
+
+CRITICAL: You have ${papers.length} papers but NO hypotheses yet. Before running any experiments, you MUST formulate 2-3 specific, testable hypotheses using log_finding(type="hypothesis"). Read the papers first if you haven't, extract their key claims and methods, then formulate hypotheses that you can test experimentally.` : ""}${allHypothesesResolved ? `
+
+All current hypotheses have been resolved (supported or refuted). Consider: (1) formulating NEW hypotheses based on what you learned, (2) using complete_iteration to start a new research cycle with a fresh direction, or (3) running deeper experiments on the most interesting findings.` : ""}${context}`
         : `Start researching this topic: ${brief}
 
 Follow the full research cycle:
@@ -715,6 +729,10 @@ function thinkingHint(toolCalls?: { toolName: string; input: unknown }[]): strin
       return "Examining paper figures and tables...";
     case "save_lesson":
       return "Saving process lesson for future sessions...";
+    case "complete_iteration":
+      return "Transitioning to next research iteration...";
+    case "update_hypothesis":
+      return "Updating hypothesis status with evidence...";
     default:
       return "Thinking about next step...";
   }
@@ -729,6 +747,7 @@ function createTools(
   emit: (e: AgentEvent) => void,
   remoteHosts: { id: string; alias: string; isDefault: boolean }[],
   recordStep: (type: string, title: string, status: "COMPLETED" | "FAILED", output: unknown, phase?: string) => Promise<void>,
+  currentIteration: { id: string; number: number },
 ) {
   return {
     search_papers: tool({
@@ -1679,6 +1698,58 @@ function createTools(
         }).join("\n\n---\n\n");
 
         return `Figures and tables from "${paper.title}" (${figures.length} total):\n\n${result}`;
+      },
+    }),
+
+    complete_iteration: tool({
+      description: "Complete the current research iteration and start a new one. Use this when you've finished a full research cycle (literature → hypotheses → experiments → analysis) and want to start a new iteration with a different angle, deeper investigation, or follow-up questions. This creates a new iteration in the project.",
+      inputSchema: z.object({
+        reflection: z.string().describe("Summary of what was learned in this iteration — key findings, what worked, what didn't"),
+        next_goal: z.string().describe("Goal for the next iteration — what new question, approach, or direction to pursue"),
+        start_phase: z.enum(["literature", "hypothesis", "experiment"]).default("literature").describe("Which phase to start the new iteration in"),
+      }),
+      execute: async ({ reflection, next_goal, start_phase }: { reflection: string; next_goal: string; start_phase: string }) => {
+        // Complete current iteration
+        await prisma.researchIteration.update({
+          where: { id: currentIteration.id },
+          data: {
+            status: "COMPLETED",
+            completedAt: new Date(),
+            reflection,
+          },
+        });
+
+        // Create new iteration
+        const newIteration = await prisma.researchIteration.create({
+          data: {
+            projectId,
+            number: currentIteration.number + 1,
+            goal: next_goal,
+            status: "ACTIVE",
+          },
+        });
+
+        // Update project phase
+        await prisma.researchProject.update({
+          where: { id: projectId },
+          data: { currentPhase: start_phase },
+        });
+
+        // Log the transition
+        await prisma.researchLogEntry.create({
+          data: {
+            projectId,
+            type: "decision",
+            content: `Completed iteration #${currentIteration.number}. Starting iteration #${newIteration.number}: ${next_goal}`,
+          },
+        });
+
+        // Append to RESEARCH_LOG.md
+        const timestamp = new Date().toISOString().slice(0, 16).replace("T", " ");
+        const logEntry = `\n---\n## Iteration #${currentIteration.number} Complete (${timestamp})\n**Reflection:** ${reflection}\n\n## Iteration #${newIteration.number}: ${next_goal}\n`;
+        await appendFile(path.join(workDir, "RESEARCH_LOG.md"), logEntry).catch(() => {});
+
+        return `Iteration #${currentIteration.number} completed. Starting iteration #${newIteration.number}: "${next_goal}". Phase set to ${start_phase}.`;
       },
     }),
 

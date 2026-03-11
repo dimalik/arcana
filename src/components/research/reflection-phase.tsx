@@ -5,6 +5,7 @@ import {
   Loader2, Sparkles, ArrowRight, CheckCircle, FileCode,
   FlaskConical, Lightbulb, BookOpen, TrendingUp, XCircle,
 } from "lucide-react";
+import { MarkdownRenderer } from "@/components/ui/markdown-renderer";
 import { useStepActions } from "./use-step-actions";
 import { toast } from "sonner";
 
@@ -199,17 +200,17 @@ export function ReflectionPhase({ projectId, steps, currentIteration, previousIt
               <p className="text-[10px] font-medium text-muted-foreground">Key Outcomes</p>
               {breakthroughs.map((f, i) => (
                 <div key={`b-${i}`} className="flex items-start gap-1.5 text-[11px]">
-                  <TrendingUp className="h-3 w-3 text-amber-500 mt-0.5 shrink-0" />
-                  <span>{f.content}</span>
+                  <TrendingUp className="h-3 w-3 text-amber-500 mt-1 shrink-0" />
+                  <MarkdownRenderer content={f.content} className="flex-1 min-w-0 [&_p]:mb-1 [&_table]:text-[10px]" />
                 </div>
               ))}
               {hypothesisResults.map((f, i) => (
                 <div key={`h-${i}`} className="flex items-start gap-1.5 text-[11px]">
                   {f.status === "SUPPORTED"
-                    ? <CheckCircle className="h-3 w-3 text-emerald-500 mt-0.5 shrink-0" />
-                    : <XCircle className="h-3 w-3 text-red-500 mt-0.5 shrink-0" />
+                    ? <CheckCircle className="h-3 w-3 text-emerald-500 mt-1 shrink-0" />
+                    : <XCircle className="h-3 w-3 text-red-500 mt-1 shrink-0" />
                   }
-                  <span>{f.content}</span>
+                  <MarkdownRenderer content={f.content} className="flex-1 min-w-0 [&_p]:mb-1 [&_table]:text-[10px]" />
                 </div>
               ))}
             </div>
@@ -272,7 +273,7 @@ export function ReflectionPhase({ projectId, steps, currentIteration, previousIt
                   <span className="text-[10px] text-muted-foreground">{iter.status.toLowerCase()}</span>
                 </div>
                 {iter.reflection && (
-                  <p className="text-[11px] text-muted-foreground mt-1">{iter.reflection}</p>
+                  <MarkdownRenderer content={iter.reflection} className="text-[11px] text-muted-foreground mt-1 [&_p]:mb-1" />
                 )}
               </div>
             ))}

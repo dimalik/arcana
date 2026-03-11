@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { ChevronDown, ChevronUp, Edit2, Check, X } from "lucide-react";
+import { MarkdownRenderer } from "@/components/ui/markdown-renderer";
 
 const STATUS_BADGES: Record<string, { color: string; label: string }> = {
   PROPOSED: { color: "bg-amber-500/10 text-amber-600", label: "Proposed" },
@@ -122,10 +123,10 @@ export function HypothesisCard({ hypothesis, onUpdateStatus, onEdit }: Hypothesi
             <div className="mt-1 space-y-1">
               {evidence.map((e, i) => (
                 <div key={i} className="flex items-start gap-1.5 text-[11px]">
-                  <span className={e.supports ? "text-emerald-500" : "text-red-500"}>
-                    {e.supports ? "+" : "-"}
+                  <span className={`font-bold shrink-0 ${e.supports ? "text-emerald-500" : "text-red-500"}`}>
+                    {e.supports ? "+" : "−"}
                   </span>
-                  <span className="text-muted-foreground">{e.summary}</span>
+                  <MarkdownRenderer content={e.summary} className="text-muted-foreground flex-1 min-w-0 [&_p]:mb-0.5 [&_table]:text-[10px]" />
                 </div>
               ))}
             </div>

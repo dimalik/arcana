@@ -48,6 +48,7 @@ const TOOL_LABELS: Record<string, string> = {
   fetch_webpage: "Reading webpage",
   view_figures: "Viewing paper figures",
   save_lesson: "Saving lesson",
+  complete_iteration: "Advancing iteration",
 };
 
 // ── Public handle for parent component ───────────────────
