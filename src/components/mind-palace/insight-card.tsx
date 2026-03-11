@@ -25,6 +25,7 @@ interface InsightCardProps {
     interval: number;
     repetitions: number;
     easeFactor?: number;
+    source?: string;
     paper: { id: string; title: string };
     room?: { id: string; name: string; color: string };
   };
@@ -146,6 +147,18 @@ export function InsightCard({
                 />
                 {insight.room.name}
               </Link>
+            </>
+          )}
+          {insight.source && insight.source !== "manual" && (
+            <>
+              <span className="text-muted-foreground/40">·</span>
+              <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${
+                insight.source === "research"
+                  ? "bg-amber-500/10 text-amber-600"
+                  : "bg-blue-500/10 text-blue-600"
+              }`}>
+                {insight.source === "research" ? "Research" : "Auto"}
+              </span>
             </>
           )}
           <div className="flex-1" />

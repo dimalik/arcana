@@ -237,12 +237,16 @@ async function runAgent(
 
       emit({ type: "step_done", stepNumber: stepCount });
 
-      // Inject step budget reminder at key thresholds
+      // Inject step budget reminders at key thresholds
       const remaining = MAX_STEPS - stepCount;
-      if (remaining === 20) {
-        emit({ type: "text", content: "\n\n[System: 20 steps remaining. Continue experiments but start thinking about synthesis.]\n" });
-      } else if (remaining === 10) {
-        emit({ type: "text", content: "\n\n[System: 10 steps remaining. Wrap up: update all hypotheses, log final findings, produce summary.]\n" });
+      if (stepCount === 15 && remaining > 50) {
+        emit({ type: "text", content: "\n\n[System: 15 steps used, 65+ remaining. You have plenty of budget. If you've only run 1 experiment, that's not enough — you should be designing follow-ups, ablations, and alternative approaches. Keep going.]\n" });
+      } else if (remaining === 30) {
+        emit({ type: "text", content: "\n\n[System: 30 steps remaining. You should have multiple experiments completed by now. If not, focus on running more experiments rather than analysis. If yes, start thinking about what gaps remain.]\n" });
+      } else if (remaining === 15) {
+        emit({ type: "text", content: "\n\n[System: 15 steps remaining. Start wrapping up: run any final critical experiments, then update all hypotheses with evidence, log breakthroughs, and produce a synthesis.]\n" });
+      } else if (remaining === 5) {
+        emit({ type: "text", content: "\n\n[System: 5 steps remaining. Final wrap-up NOW: update_hypothesis for all hypotheses, log_finding for your key results, then summarize.]\n" });
       }
 
       // Emit thinking indicator
@@ -376,6 +380,18 @@ Do NOT reinstall packages every time — the venv persists.`;
 
   return `You are an autonomous research agent — a relentless, self-critical scientist. You don't just run one experiment and write it up. You run experiments, interrogate the results, find weaknesses, design better experiments, and iterate until you have genuine, novel findings backed by evidence.
 
+## CRITICAL: Do NOT stop early
+You have a budget of 80 steps. USE THEM. A single experiment is a first draft, not a result. Real research requires MANY experiments: baselines, ablations, parameter sweeps, alternative approaches, follow-ups. You should be running 5-10+ experiments per session, not 1-2.
+
+**You are NOT done until:**
+- You have run at least 3 substantially different experiments (not just reruns with bug fixes)
+- Every hypothesis has been marked SUPPORTED or REFUTED with specific numerical evidence
+- You have compared your results against at least 2 literature baselines with specific numbers
+- You have identified and addressed at least one weakness in your approach
+- You have found at least one genuinely interesting insight (not just "our method works")
+
+**NEVER say "let's run a final experiment" or "in conclusion" until you are past step 60.** If you catch yourself wanting to wrap up early, ask: "What would a skeptical reviewer say about these results?" Then design an experiment to address that criticism.
+
 ## Your Research Project
 Title: ${project.title}
 Brief: ${project.brief}
@@ -471,7 +487,8 @@ When you've accumulated enough evidence across multiple experiments:
 ## Critical Rules
 - Write COMPLETE, RUNNABLE Python code. No placeholders. Always include requirements.txt.
 - **NEVER move on after a failed experiment.** Read the error, fix the code, re-run. Only analyze results from successful (exit 0) runs.
-- **NEVER stop after one experiment.** One experiment is not research — it's a first draft. Critique it and run follow-ups.
+- **NEVER stop after one or two experiments.** One experiment is not research — it's a first draft. You must run ablations, parameter sweeps, alternative approaches, and follow-ups. Aim for 5-10+ experiments per session. If you find yourself writing a summary after 2 experiments, STOP and design more experiments instead.
+- **NEVER say "final experiment" before step 60.** You have 80 steps — use them. Early wrapping up wastes the user's compute budget and produces shallow results.
 - **NEVER claim a result without comparing to a baseline.** "We got 92% accuracy" is meaningless without "compared to baseline X which gets Y%."
 - **NEVER accept results without statistical rigor.** Run experiments multiple times with different seeds. Report mean and standard deviation.
 - **NEVER generate synthetic toy data when a real dataset exists.** If a paper evaluates on GLUE, use GLUE. If on SQuAD, use SQuAD. Generating 50 random samples to "simulate" a dataset invalidates the entire experiment. Use \`datasets\` library, \`torchvision.datasets\`, or direct download URLs from the papers.
@@ -480,7 +497,7 @@ When you've accumulated enough evidence across multiple experiments:
 - Use log_finding liberally: record hypotheses, findings, decisions, and breakthroughs. This is your lab notebook.
 - Use update_hypothesis to track evidence for/against each hypothesis as you go.
 - **NEVER design a follow-up experiment after failure without consulting literature first.** Use search_library + query_insights before retrying. Blind trial-and-error is not science.
-- When you reach ~70% of your step budget, start wrapping up: synthesize findings, update all hypotheses, produce a final summary.
+- Only start wrapping up when you have ~15 steps remaining (the system will remind you). Until then, keep experimenting.
 
 ## Current Knowledge
 ${papers.length > 0 ? `Papers in collection (${papers.length}):\n${papers.map((p) => `- "${p.title}"${p.abstract ? `: ${p.abstract.slice(0, 200)}` : ""}${p.summary ? `\n  Summary: ${p.summary.slice(0, 200)}` : ""}`).join("\n")}` : "No papers collected yet."}`;
@@ -682,7 +699,7 @@ function createTools(
                 year: r.year ?? null, venue: r.venue ?? null,
                 doi: r.doi ?? null,
                 arxivId: r.arxivId ?? (r.doi?.match(/10\.48550\/arXiv\.(\d+\.\d+)/i)?.[1] || null),
-                sourceType: r.arxivId || r.doi?.match(/10\.48550\/arXiv\./i) ? "ARXIV" : "URL",
+                sourceType: r.arxivId || r.doi?.match(/10\.48550\/arXiv\./i) ? "ARXIV" : "RESEARCH",
                 sourceUrl: r.externalUrl ?? null,
                 filePath,
                 processingStatus: filePath ? "EXTRACTING_TEXT" : "PENDING",
@@ -1017,12 +1034,13 @@ function createTools(
     }),
 
     log_finding: tool({
-      description: "Record an important finding, hypothesis, decision, or question in the research log. This appends to RESEARCH_LOG.md (the persistent lab notebook) AND the project database. Use liberally — this is how you build the project's knowledge base.",
+      description: "Record an important finding, hypothesis, decision, or question in the research log. This appends to RESEARCH_LOG.md (the persistent lab notebook) AND the project database. Findings and breakthroughs are also saved to the Mind Palace so they can be reused in future research projects. Use liberally — this is how you build the project's knowledge base.",
       inputSchema: z.object({
         type: z.enum(["finding", "hypothesis", "decision", "question", "breakthrough"]).describe("Type of entry"),
         content: z.string().describe("What you found/decided/hypothesized"),
+        related_paper_title: z.string().optional().describe("Title (or fragment) of a paper this finding relates to. If provided, the insight will be linked to that paper in the Mind Palace."),
       }),
-      execute: async ({ type, content }: { type: string; content: string }) => {
+      execute: async ({ type, content, related_paper_title }: { type: string; content: string; related_paper_title?: string }) => {
         const logType = type === "finding" ? "observation"
           : type === "hypothesis" ? "agent_suggestion"
           : type === "breakthrough" ? "breakthrough"
@@ -1055,6 +1073,70 @@ function createTools(
 
         if (type === "finding" || type === "breakthrough") {
           await recordStep("analyze_results", `Finding: ${content.slice(0, 80)}`, "COMPLETED", { finding: content, type }, "analysis");
+
+          // Save to Mind Palace for reuse in future research
+          try {
+            // Find or create a "Research Findings" room
+            let room = await prisma.mindPalaceRoom.findFirst({
+              where: { name: "Research Findings" },
+            });
+            if (!room) {
+              room = await prisma.mindPalaceRoom.create({
+                data: {
+                  name: "Research Findings",
+                  description: "Insights and findings from autonomous research projects",
+                  color: "#F59E0B",
+                  icon: "flask",
+                  isAutoGenerated: true,
+                },
+              });
+            }
+
+            // Find a paper to link to (prefer the related paper if specified, otherwise first project paper)
+            let paperId: string | null = null;
+            if (related_paper_title) {
+              const match = await prisma.paper.findFirst({
+                where: { userId, title: { contains: related_paper_title } },
+                select: { id: true },
+              });
+              paperId = match?.id || null;
+            }
+            if (!paperId) {
+              // Use first paper from the project collection
+              const proj = await prisma.researchProject.findUnique({
+                where: { id: projectId },
+                select: { collectionId: true },
+              });
+              if (proj?.collectionId) {
+                const first = await prisma.collectionPaper.findFirst({
+                  where: { collectionId: proj.collectionId },
+                  select: { paperId: true },
+                });
+                paperId = first?.paperId || null;
+              }
+            }
+
+            if (paperId) {
+              await prisma.insight.create({
+                data: {
+                  roomId: room.id,
+                  paperId,
+                  learning: content.slice(0, 1000),
+                  significance: type === "breakthrough"
+                    ? "Major finding from autonomous research"
+                    : "Experimental finding from research project",
+                  applications: null,
+                  isAutoGenerated: true,
+                  source: "research",
+                  projectId,
+                },
+              });
+              emit({ type: "tool_progress", toolName: "log_finding", content: "Finding saved to Mind Palace" });
+            }
+          } catch (err) {
+            // Non-critical — don't fail the tool if Mind Palace write fails
+            console.warn("[research-agent] Failed to save finding to Mind Palace:", (err as Error).message);
+          }
         }
 
         return `Logged: [${type}] ${content.slice(0, 100)}...`;
