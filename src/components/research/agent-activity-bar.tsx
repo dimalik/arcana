@@ -45,6 +45,7 @@ const TOOL_LABELS: Record<string, string> = {
   query_insights: "Querying Mind Palace",
   web_search: "Searching the web",
   fetch_webpage: "Reading webpage",
+  view_figures: "Viewing paper figures",
 };
 
 // ── Public handle for parent component ───────────────────

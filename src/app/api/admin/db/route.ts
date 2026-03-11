@@ -29,6 +29,7 @@ const MODEL_ORDER = [
   "discoverySeed",
   "discoveryProposal",
   "paperEngagement",
+  "paperFigure",
   "mindPalaceRoom",
   "insight",
   "synthesisSession",

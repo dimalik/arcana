@@ -599,6 +599,8 @@ function thinkingHint(toolCalls?: { toolName: string; input: unknown }[]): strin
       return "Reviewing web search results...";
     case "fetch_webpage":
       return "Reading webpage content...";
+    case "view_figures":
+      return "Examining paper figures and tables...";
     default:
       return "Thinking about next step...";
   }
@@ -1429,6 +1431,40 @@ function createTools(
         } catch (err) {
           return `Failed to fetch ${url}: ${err instanceof Error ? err.message : "unknown error"}`;
         }
+      },
+    }),
+
+    view_figures: tool({
+      description: "View extracted figures and tables from a paper in your library. Returns descriptions of all figures/tables with their captions and LLM-generated explanations. Use this to understand experimental setups, architectures, result plots, and data tables from papers without reading the full text.",
+      inputSchema: z.object({
+        title: z.string().describe("Title (or partial title) of the paper whose figures you want to see"),
+      }),
+      execute: async ({ title }: { title: string }) => {
+        emit({ type: "tool_progress", toolName: "view_figures", content: `Looking up figures for "${title.slice(0, 60)}..."` });
+
+        const paper = await prisma.paper.findFirst({
+          where: { userId, title: { contains: title } },
+          select: { id: true, title: true },
+        });
+        if (!paper) return `Paper "${title}" not found in library.`;
+
+        const figures = await prisma.paperFigure.findMany({
+          where: { paperId: paper.id },
+          orderBy: [{ page: "asc" }, { figureIndex: "asc" }],
+        });
+
+        if (figures.length === 0) {
+          return `No figures extracted yet for "${paper.title}". Figures are extracted during paper processing.`;
+        }
+
+        const result = figures.map((f) => {
+          let entry = `[Page ${f.page}] ${f.type.toUpperCase()}`;
+          if (f.caption) entry += `: ${f.caption}`;
+          entry += `\n${f.description || "No description"}`;
+          return entry;
+        }).join("\n\n---\n\n");
+
+        return `Figures and tables from "${paper.title}" (${figures.length} total):\n\n${result}`;
       },
     }),
 

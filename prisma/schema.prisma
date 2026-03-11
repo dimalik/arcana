@@ -140,6 +140,7 @@ model Paper {
   insights         Insight[]
   agentSessions    AgentSession[]
   synthesisPapers  SynthesisPaper[]
+  figures          PaperFigure[]
 }
 
 model AgentSession {
@@ -406,6 +407,25 @@ model PaperEngagement {
 
   @@index([paperId])
   @@index([paperId, event])
+}
+
+model PaperFigure {
+  id          String   @id @default(uuid())
+  paperId     String
+  page        Int      // PDF page number (1-indexed)
+  figureIndex Int      @default(0) // Index within the page (0, 1, 2...)
+  type        String   @default("figure") // figure | table | diagram | equation
+  caption     String?  // Extracted caption from PDF text
+  description String?  // LLM-generated description/explanation
+  imagePath   String   // Path to extracted image file
+  width       Int?
+  height      Int?
+  createdAt   DateTime @default(now())
+
+  paper Paper @relation(fields: [paperId], references: [id], onDelete: Cascade)
+
+  @@index([paperId])
+  @@unique([paperId, page, figureIndex])
 }
 
 model MindPalaceRoom {
