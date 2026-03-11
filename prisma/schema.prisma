@@ -35,8 +35,9 @@ model User {
   llmUsageLogs     LlmUsageLog[]
   appEvents        AppEvent[]
   papers           Paper[]
-  researchProjects  ResearchProject[]
-  agentCapabilities AgentCapability[]
+  researchProjects   ResearchProject[]
+  discoverySessions  DiscoverySession[]
+  agentCapabilities  AgentCapability[]
 }
 
 model UserSession {
@@ -353,6 +354,7 @@ model Setting {
 
 model DiscoverySession {
   id          String   @id @default(uuid())
+  userId      String
   title       String?
   status      String   @default("RUNNING")  // RUNNING | COMPLETED | FAILED | CANCELLED
   depth       Int      @default(1)
@@ -360,8 +362,11 @@ model DiscoverySession {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
+  owner       User              @relation(fields: [userId], references: [id], onDelete: Cascade)
   seedPapers  DiscoverySeed[]
   proposals   DiscoveryProposal[]
+
+  @@index([userId])
 }
 
 model DiscoverySeed {

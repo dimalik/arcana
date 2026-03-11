@@ -460,6 +460,29 @@ ${c.instructions}`).join("\n\n")}
 - If the real dataset is very large, use a well-known subset or split (e.g., validation set, first 1000 examples) and note this explicitly. A subset of real data is infinitely better than fake data.
 - Write a complete, runnable experiment. Include baselines from the literature — you can't claim something is good without comparing it to known results.
 - Make experiments save results to a JSON or CSV file (e.g., results.json) so you can compare across runs.
+- **ALWAYS write robust experiment scripts** that save intermediate results. Follow this pattern:
+  - Print progress after every epoch/major step (e.g., \`print(f"Epoch {epoch}: loss={loss:.4f}, acc={acc:.4f}", flush=True)\`)
+  - Use \`sys.stdout.flush()\` or \`print(..., flush=True)\` — remote jobs only see flushed output
+  - Save partial results after EACH epoch, not just at the end: \`json.dump(results, open("results.json", "w"))\` inside the training loop
+  - Wrap the main experiment in try/except to save whatever results you have on crash:
+    \`\`\`python
+    results = {"status": "running", "epochs": []}
+    try:
+        for epoch in range(num_epochs):
+            # ... training ...
+            results["epochs"].append({"epoch": epoch, "loss": loss, "metrics": metrics})
+            results["status"] = "in_progress"
+            json.dump(results, open("results.json", "w"), indent=2)
+            print(f"Epoch {epoch}/{num_epochs}: loss={loss:.4f}", flush=True)
+        results["status"] = "completed"
+    except Exception as e:
+        results["status"] = f"crashed: {str(e)}"
+        import traceback; traceback.print_exc()
+    finally:
+        json.dump(results, open("results.json", "w"), indent=2)
+        print(f"Results saved. Status: {results['status']}", flush=True)
+    \`\`\`
+  - **NEVER write a script that only saves results at the very end.** If the script crashes after 30 minutes of training, you lose everything. Always save incrementally.
 - Run the experiment. If it fails, FIX it and re-run. Never move on from a failure.
 - On first run, create a venv and install deps. On re-runs, just activate the existing venv (see Environment Setup above).
 
@@ -529,6 +552,7 @@ When you've accumulated enough evidence across multiple experiments:
 - **NEVER generate synthetic toy data when a real dataset exists.** If a paper evaluates on GLUE, use GLUE. If on SQuAD, use SQuAD. Generating 50 random samples to "simulate" a dataset invalidates the entire experiment. Use \`datasets\` library, \`torchvision.datasets\`, or direct download URLs from the papers.
 - **NEVER reinstall packages on every run.** Create a venv ONCE with \`python3 -m venv .venv\`, install requirements into it, then reuse it. On subsequent runs just \`source .venv/bin/activate && python3 script.py\`. Only reinstall if requirements.txt has changed.
 - **execute_remote handles job management automatically.** Do NOT manually nohup, background, sleep, or poll. Just pass the command.
+- **ALWAYS use flush=True in print() and save results incrementally.** Remote jobs buffer stdout — without flushing you won't see progress. Without incremental saves, a crash after training means zero results.
 - Use log_finding liberally: record hypotheses, findings, decisions, and breakthroughs. This is your lab notebook.
 - Use update_hypothesis to track evidence for/against each hypothesis as you go.
 - **NEVER design a follow-up experiment after failure without consulting literature first.** Use search_library + query_insights before retrying. Blind trial-and-error is not science.
@@ -1059,8 +1083,22 @@ function createTools(
             if (job.stderr) {
               emit({ type: "tool_output", toolName: "execute_remote", content: `--- stderr ---\n${job.stderr.slice(-1000)}` });
             }
-            const result = `EXPERIMENT FAILED (exit ${job.exitCode ?? "?"}) on ${host.alias}. YOU MUST read the error below, fix the code, and re-run before proceeding.\n\nstdout (last 3000 chars):\n${(job.stdout || "").slice(-3000)}\n\nstderr (last 2000 chars):\n${(job.stderr || "").slice(-2000)}`;
-            await recordStep("run_experiment", `Remote (${host.alias}): ${command.slice(0, 60)}`, "FAILED", { host: host.alias, error: job.stderr?.slice(-1000), exitCode: job.exitCode }, "experiment");
+
+            // Try to recover partial results even on failure
+            let partialResults = "";
+            try {
+              const resultsPath = path.join(workDir, "results.json");
+              const resultsContent = await readFile(resultsPath, "utf-8").catch(() => null);
+              if (resultsContent) {
+                partialResults = `\n\nPARTIAL RESULTS RECOVERED (results.json was saved before crash):\n${resultsContent.slice(-3000)}`;
+                emit({ type: "tool_output", toolName: "execute_remote", content: `\n📊 Partial results recovered from results.json` });
+              }
+            } catch {
+              // No partial results available
+            }
+
+            const result = `EXPERIMENT FAILED (exit ${job.exitCode ?? "?"}) on ${host.alias}. YOU MUST read the error below, fix the code, and re-run before proceeding.\n\nstdout (last 3000 chars):\n${(job.stdout || "").slice(-3000)}\n\nstderr (last 2000 chars):\n${(job.stderr || "").slice(-2000)}${partialResults}`;
+            await recordStep("run_experiment", `Remote (${host.alias}): ${command.slice(0, 60)}`, "FAILED", { host: host.alias, error: job.stderr?.slice(-1000), exitCode: job.exitCode, hasPartialResults: !!partialResults }, "experiment");
             return result;
           }
         }

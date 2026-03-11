@@ -39,6 +39,7 @@ export async function POST(req: NextRequest) {
   const title = papers.map((p) => p.title).join(", ");
   const session = await prisma.discoverySession.create({
     data: {
+      userId,
       title: title.length > 200 ? title.slice(0, 197) + "..." : title,
       depth,
       seedPapers: {
@@ -63,7 +64,7 @@ export async function POST(req: NextRequest) {
         )
       );
 
-      for await (const event of runDiscovery(session.id, paperIds, depth)) {
+      for await (const event of runDiscovery(session.id, paperIds, depth, userId)) {
         controller.enqueue(
           encoder.encode(JSON.stringify(event) + "\n")
         );
@@ -82,10 +83,13 @@ export async function POST(req: NextRequest) {
 }
 
 /**
- * GET /api/discovery — List all sessions
+ * GET /api/discovery — List user's sessions
  */
 export async function GET() {
+  const userId = await requireUserId();
+
   const sessions = await prisma.discoverySession.findMany({
+    where: { userId },
     orderBy: { createdAt: "desc" },
     include: {
       seedPapers: {

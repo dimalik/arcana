@@ -55,11 +55,13 @@ const MAX_PROPOSALS = 75;
 export async function* runDiscovery(
   sessionId: string,
   seedPaperIds: string[],
-  _depth: number
+  _depth: number,
+  userId?: string
 ): AsyncGenerator<DiscoveryEvent> {
   try {
-    // Load all library papers for dedup
+    // Load user's library papers for dedup
     const libraryPapers = await prisma.paper.findMany({
+      where: userId ? { userId } : undefined,
       select: { id: true, title: true, doi: true, arxivId: true },
     });
 

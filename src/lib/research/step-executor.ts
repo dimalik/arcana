@@ -273,6 +273,7 @@ async function runDiscoverPapers(projectId: string, stepId: string) {
 
     const discoverySession = await prisma.discoverySession.create({
       data: {
+        userId: project.userId,
         title: input.query || `Research: ${project.title}`,
         depth: input.depth || 1,
         seedPapers: {
@@ -288,7 +289,7 @@ async function runDiscoverPapers(projectId: string, stepId: string) {
 
     const depth = input.depth || 1;
     let totalFound = 0;
-    for await (const event of runDiscovery(discoverySession.id, seedPaperIds, depth)) {
+    for await (const event of runDiscovery(discoverySession.id, seedPaperIds, depth, project.userId)) {
       if (event.type === "done") totalFound = event.totalFound;
       if (event.type === "proposal") totalFound++;
     }

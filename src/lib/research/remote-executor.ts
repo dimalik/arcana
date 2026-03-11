@@ -175,8 +175,8 @@ export const sshExecutor: ExecutorBackend = {
   async getLogs(remoteDir: string, host: HostConfig): Promise<{ stdout: string; stderr: string }> {
     try {
       const [stdout, stderr] = await Promise.all([
-        sshExec(host, `tail -50 ${remoteDir}/stdout.log 2>/dev/null || echo ""`),
-        sshExec(host, `tail -20 ${remoteDir}/stderr.log 2>/dev/null || echo ""`),
+        sshExec(host, `tail -200 ${remoteDir}/stdout.log 2>/dev/null || echo ""`),
+        sshExec(host, `tail -50 ${remoteDir}/stderr.log 2>/dev/null || echo ""`),
       ]);
       return { stdout, stderr };
     } catch {
@@ -188,7 +188,7 @@ export const sshExecutor: ExecutorBackend = {
     const sshCmd = `ssh ${sshArgs(host).join(" ")}`;
     const target = sshTarget(host);
 
-    // Sync results/ directory back if it exists, plus log files
+    // Sync results/ directory back if it exists
     await execAsync(
       `rsync -azP -e "${sshCmd}" "${target}:${remoteDir}/results/" "${localDir}/results/"`,
       { timeout: 120_000 },
@@ -196,7 +196,16 @@ export const sshExecutor: ExecutorBackend = {
       // results/ may not exist, that's ok
     });
 
-    // Also grab log files
+    // Sync result files from experiment root (results.json, *.csv, *.json outputs)
+    // Use rsync with include/exclude to grab only output files, not code or venv
+    await execAsync(
+      `rsync -azP --include='*.json' --include='*.csv' --include='*.txt' --include='*.png' --include='*.log' --exclude='*/' --exclude='*.py' --exclude='requirements.txt' -e "${sshCmd}" "${target}:${remoteDir}/" "${localDir}/"`,
+      { timeout: 120_000 },
+    ).catch(() => {
+      // Non-critical — some files may not exist
+    });
+
+    // Also grab log files explicitly (in case the rsync above missed them)
     for (const f of ["stdout.log", "stderr.log"]) {
       const scpArgs = sshArgs(host).map(a => `"${a}"`).join(" ");
       await execAsync(
@@ -336,9 +345,14 @@ async function runAndPoll(
       // couldn't read exit code, check logs for errors
     }
 
-    // 5. Sync results back
+    // 5. Sync results back — ALWAYS, even on failure (to recover partial results)
     if (localDir) {
-      await backend.syncDown(remoteDir, localDir, config);
+      try {
+        await backend.syncDown(remoteDir, localDir, config);
+      } catch (syncErr) {
+        console.warn(`[remote-executor] syncDown failed for job ${jobId}:`, syncErr);
+        // Non-fatal — continue to update status
+      }
     }
 
     // 6. Final status

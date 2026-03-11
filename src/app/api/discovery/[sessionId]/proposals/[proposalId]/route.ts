@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { requireUserId } from "@/lib/paper-auth";
 
 /**
  * PUT /api/discovery/[sessionId]/proposals/[proposalId] — Update proposal status
@@ -9,6 +10,7 @@ export async function PUT(
   req: NextRequest,
   { params }: { params: Promise<{ sessionId: string; proposalId: string }> }
 ) {
+  const userId = await requireUserId();
   const { sessionId, proposalId } = await params;
   const body = await req.json();
   const { status } = body;
@@ -18,6 +20,14 @@ export async function PUT(
       { error: "status must be DISMISSED or PENDING" },
       { status: 400 }
     );
+  }
+
+  // Verify session belongs to user
+  const session = await prisma.discoverySession.findFirst({
+    where: { id: sessionId, userId },
+  });
+  if (!session) {
+    return Response.json({ error: "Session not found" }, { status: 404 });
   }
 
   const proposal = await prisma.discoveryProposal.findFirst({

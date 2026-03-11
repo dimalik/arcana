@@ -19,6 +19,14 @@ export async function POST(
   const userId = await requireUserId();
   const { sessionId, proposalId } = await params;
 
+  // Verify session belongs to user
+  const session = await prisma.discoverySession.findFirst({
+    where: { id: sessionId, userId },
+  });
+  if (!session) {
+    return Response.json({ error: "Session not found" }, { status: 404 });
+  }
+
   const proposal = await prisma.discoveryProposal.findFirst({
     where: { id: proposalId, sessionId },
   });

@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { requireUserId } from "@/lib/paper-auth";
 
 /**
  * GET /api/discovery/[sessionId] — Get session details + proposals
@@ -8,10 +9,11 @@ export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ sessionId: string }> }
 ) {
+  const userId = await requireUserId();
   const { sessionId } = await params;
 
-  const session = await prisma.discoverySession.findUnique({
-    where: { id: sessionId },
+  const session = await prisma.discoverySession.findFirst({
+    where: { id: sessionId, userId },
     include: {
       seedPapers: {
         include: {
@@ -66,10 +68,11 @@ export async function DELETE(
   _req: NextRequest,
   { params }: { params: Promise<{ sessionId: string }> }
 ) {
+  const userId = await requireUserId();
   const { sessionId } = await params;
 
-  const session = await prisma.discoverySession.findUnique({
-    where: { id: sessionId },
+  const session = await prisma.discoverySession.findFirst({
+    where: { id: sessionId, userId },
   });
 
   if (!session) {
