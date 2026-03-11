@@ -58,6 +58,7 @@ export interface AgentActivityHandle {
 
 interface AgentActivityBarProps {
   projectId: string;
+  projectStatus?: string;
   onRefresh: () => void;
   autoStart?: boolean;
 }
@@ -65,7 +66,7 @@ interface AgentActivityBarProps {
 // ── Component ────────────────────────────────────────────
 
 export const AgentActivityBar = forwardRef<AgentActivityHandle, AgentActivityBarProps>(
-  function AgentActivityBar({ projectId, onRefresh, autoStart }, ref) {
+  function AgentActivityBar({ projectId, projectStatus, onRefresh, autoStart }, ref) {
     const [running, setRunning] = useState(false);
     const [feed, setFeed] = useState<FeedItem[]>([]);
     const [currentText, setCurrentText] = useState("");
@@ -82,6 +83,11 @@ export const AgentActivityBar = forwardRef<AgentActivityHandle, AgentActivityBar
     const runningRef = useRef(false);
     const lastHeardRef = useRef<number>(Date.now());
     const [connectionStale, setConnectionStale] = useState(false);
+    const restartCountRef = useRef(0);
+    const MAX_AUTO_RESTARTS = 10;
+    const stoppedByUserRef = useRef(false);
+    const projectStatusRef = useRef(projectStatus);
+    projectStatusRef.current = projectStatus;
 
     // Keep ref in sync
     runningRef.current = running;
@@ -109,8 +115,11 @@ export const AgentActivityBar = forwardRef<AgentActivityHandle, AgentActivityBar
       return () => clearInterval(interval);
     }, [running]);
 
+    const shouldAutoContinueRef = useRef(false);
+
     const startAgent = useCallback(async (message?: string) => {
       if (runningRef.current) return;
+      stoppedByUserRef.current = false;
       setRunning(true);
       setCurrentText("");
       setThinkingMsg(null);
@@ -276,7 +285,7 @@ export const AgentActivityBar = forwardRef<AgentActivityHandle, AgentActivityBar
                   }]);
                   break;
 
-                case "done":
+                case "done": {
                   setThinkingMsg(null);
                   if (textAccumulator.trim()) {
                     setFeed((f) => [...f, {
@@ -287,13 +296,37 @@ export const AgentActivityBar = forwardRef<AgentActivityHandle, AgentActivityBar
                     textAccumulator = "";
                     setCurrentText("");
                   }
-                  setFeed((f) => [...f, {
-                    id: `done-${++itemCounter.current}`,
-                    type: "done",
-                    content: "Agent finished.",
-                  }]);
-                  setStatusLine("Agent finished");
+
+                  // Check if we should auto-continue
+                  const canAutoContinue =
+                    projectStatusRef.current === "ACTIVE" &&
+                    !stoppedByUserRef.current &&
+                    restartCountRef.current < MAX_AUTO_RESTARTS;
+
+                  if (canAutoContinue) {
+                    restartCountRef.current++;
+                    setFeed((f) => [...f, {
+                      id: `done-${++itemCounter.current}`,
+                      type: "done",
+                      content: `Session ${restartCountRef.current} finished. Auto-continuing...`,
+                    }]);
+                    setStatusLine("Auto-continuing...");
+                    // Flag that we need to auto-continue after the stream closes
+                    shouldAutoContinueRef.current = true;
+                  } else {
+                    setFeed((f) => [...f, {
+                      id: `done-${++itemCounter.current}`,
+                      type: "done",
+                      content: stoppedByUserRef.current
+                        ? "Agent stopped by user."
+                        : restartCountRef.current >= MAX_AUTO_RESTARTS
+                          ? `Agent finished after ${restartCountRef.current + 1} sessions (limit reached).`
+                          : "Agent finished.",
+                    }]);
+                    setStatusLine("Agent finished");
+                  }
                   break;
+                }
               }
             } catch {
               // Skip malformed events
@@ -314,10 +347,41 @@ export const AgentActivityBar = forwardRef<AgentActivityHandle, AgentActivityBar
         setThinkingMsg(null);
         abortRef.current = null;
         onRefresh();
+
+        // Auto-continue if flagged by the done handler
+        if (shouldAutoContinueRef.current) {
+          shouldAutoContinueRef.current = false;
+          // Small delay to let state settle, then restart via the restart API
+          setTimeout(async () => {
+            try {
+              const res = await fetch(`/api/research/${projectId}/restart`, { method: "POST" });
+              if (!res.ok) throw new Error("Restart API failed");
+              const { priorWorkSummary } = await res.json();
+
+              onRefresh();
+
+              const continuationMessage = priorWorkSummary
+                ? `You are automatically continuing the research. Here is a summary of all work so far — continue from where you left off, do NOT repeat completed steps:\n\n${priorWorkSummary}`
+                : "You are automatically continuing the research. Continue from where you left off.";
+
+              startAgent(continuationMessage);
+            } catch (err) {
+              console.error("[agent-activity-bar] Auto-continue failed:", err);
+              setStatusLine("Auto-continue failed — click to restart");
+              setFeed((f) => [...f, {
+                id: `err-${++itemCounter.current}`,
+                type: "error",
+                content: "Auto-continue failed. Use the input below to restart manually.",
+              }]);
+            }
+          }, 1500);
+        }
       }
     }, [projectId, onRefresh]);
 
     const stopAgent = useCallback(() => {
+      stoppedByUserRef.current = true;
+      shouldAutoContinueRef.current = false;
       abortRef.current?.abort();
       setRunning(false);
       setThinkingMsg(null);

@@ -399,6 +399,7 @@ export default function ResearchWorkspacePage({ params }: { params: { id: string
         <AgentActivityBar
           ref={agentRef}
           projectId={project.id}
+          projectStatus={project.status}
           onRefresh={fetchProject}
           autoStart={shouldAutoStart}
         />
