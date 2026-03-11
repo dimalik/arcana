@@ -91,6 +91,11 @@ export const AgentActivityBar = forwardRef<AgentActivityHandle, AgentActivityBar
     const projectStatusRef = useRef(projectStatus);
     projectStatusRef.current = projectStatus;
 
+    // Active remote job tracking (independent of SSE)
+    const [activeJob, setActiveJob] = useState<{
+      id: string; status: string; host: string; gpu: string | null; stdout: string | null; updatedAt: string;
+    } | null>(null);
+
     // Keep ref in sync
     runningRef.current = running;
 
@@ -101,6 +106,58 @@ export const AgentActivityBar = forwardRef<AgentActivityHandle, AgentActivityBar
     useEffect(() => {
       if (expanded) scrollToBottom();
     }, [feed, currentText, thinkingMsg, expanded, scrollToBottom]);
+
+    // Poll remote jobs for this project — provides visibility even without SSE
+    useEffect(() => {
+      let cancelled = false;
+      const poll = async () => {
+        try {
+          const res = await fetch(`/api/research/remote-jobs?projectId=${projectId}`);
+          if (!res.ok || cancelled) return;
+          const jobs = await res.json();
+          if (!Array.isArray(jobs) || cancelled) return;
+
+          const active = jobs.find((j: { status: string }) =>
+            ["SYNCING", "QUEUED", "RUNNING"].includes(j.status)
+          );
+
+          if (active) {
+            setActiveJob({
+              id: active.id,
+              status: active.status,
+              host: active.host?.alias || "remote",
+              gpu: active.host?.gpuType || null,
+              stdout: active.stdout,
+              updatedAt: active.updatedAt || active.createdAt,
+            });
+            // If we're not running the agent but a job is active, update status line
+            if (!runningRef.current) {
+              const lastLine = active.stdout?.split("\n").filter(Boolean).pop() || "";
+              setStatusLine(`${active.host?.alias}: ${active.status.toLowerCase()}${lastLine ? ` — ${lastLine.slice(0, 60)}` : ""}`);
+            }
+          } else {
+            setActiveJob((prev) => {
+              if (prev) {
+                // Job just completed — find it and update status
+                const completed = jobs.find((j: { id: string }) => j.id === prev.id);
+                if (completed && !runningRef.current) {
+                  const label = completed.status === "COMPLETED" ? "completed" : completed.status.toLowerCase();
+                  setStatusLine(`Last job ${label} on ${prev.host}`);
+                }
+              }
+              return null;
+            });
+          }
+        } catch {
+          // Non-critical
+        }
+      };
+
+      // Poll immediately, then every 5s
+      poll();
+      const interval = setInterval(poll, 5000);
+      return () => { cancelled = true; clearInterval(interval); };
+    }, [projectId]);
 
     // Elapsed ticker + stale connection detection
     useEffect(() => {
@@ -506,17 +563,24 @@ export const AgentActivityBar = forwardRef<AgentActivityHandle, AgentActivityBar
             <AlertCircle className="h-3.5 w-3.5 text-amber-500 shrink-0" />
           ) : running ? (
             <Loader2 className="h-3.5 w-3.5 animate-spin text-blue-500 shrink-0" />
+          ) : activeJob ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin text-cyan-500 shrink-0" />
           ) : feed.some((f) => f.type === "done") ? (
             <CheckCircle className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
           ) : (
             <Bot className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
           )}
 
-          <span className={`text-xs flex-1 truncate ${connectionStale && running ? "text-amber-500" : "text-muted-foreground"}`}>
+          <span className={`text-xs flex-1 truncate ${connectionStale && running ? "text-amber-500" : activeJob && !running ? "text-cyan-500" : "text-muted-foreground"}`}>
             {connectionStale && running ? "Waiting for agent response..." : statusLine}
           </span>
 
-          {/* Quick terminal preview when collapsed */}
+          {/* Quick output preview when collapsed */}
+          {!expanded && !running && activeJob?.stdout && (
+            <span className="text-[9px] font-mono text-muted-foreground/50 truncate max-w-[250px]">
+              {activeJob.stdout.split("\n").filter(Boolean).pop()?.slice(0, 60)}
+            </span>
+          )}
           {!expanded && running && lastOutputLine && (
             <span className="text-[9px] font-mono text-muted-foreground/50 truncate max-w-[200px]">
               {lastOutputLine}
@@ -581,6 +645,23 @@ export const AgentActivityBar = forwardRef<AgentActivityHandle, AgentActivityBar
                 <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
                   <Loader2 className="h-3 w-3 animate-spin text-blue-500" />
                   {thinkingMsg}
+                </div>
+              )}
+
+              {/* Live remote job panel — visible even without SSE */}
+              {activeJob && (
+                <div className="rounded border border-cyan-500/20 bg-cyan-500/5 px-2 py-1.5">
+                  <div className="flex items-center gap-1.5 mb-1">
+                    <Loader2 className="h-2.5 w-2.5 text-cyan-500 animate-spin" />
+                    <span className="text-[10px] font-medium">{activeJob.host}</span>
+                    {activeJob.gpu && <span className="text-[9px] text-muted-foreground">{activeJob.gpu}</span>}
+                    <span className="text-[9px] text-cyan-400">{activeJob.status}</span>
+                  </div>
+                  {activeJob.stdout && (
+                    <pre className="text-[9px] text-muted-foreground bg-background/50 rounded p-1.5 max-h-28 overflow-auto whitespace-pre-wrap font-mono">
+                      {activeJob.stdout.split("\n").filter(Boolean).slice(-15).join("\n")}
+                    </pre>
+                  )}
                 </div>
               )}
 

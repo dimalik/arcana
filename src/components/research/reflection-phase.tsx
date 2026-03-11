@@ -1,8 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import { Loader2, Sparkles, ArrowRight, CheckCircle } from "lucide-react";
-import { StepCard } from "./step-card";
+import {
+  Loader2, Sparkles, ArrowRight, CheckCircle, FileCode,
+  FlaskConical, Lightbulb, BookOpen, TrendingUp, XCircle,
+} from "lucide-react";
 import { useStepActions } from "./use-step-actions";
 import { toast } from "sonner";
 
@@ -31,15 +33,19 @@ interface ReflectionPhaseProps {
   onRefresh: () => void;
 }
 
+function parseOutput(output: string | null) {
+  if (!output) return null;
+  try { return JSON.parse(output); } catch { return null; }
+}
+
 export function ReflectionPhase({ projectId, steps, currentIteration, previousIterations, onRefresh }: ReflectionPhaseProps) {
-  const {
-    loadingStep, autoRunning, handleAutoRun, handleSkip,
-    handleRestore, handleExecute, handleContinueNext,
-  } = useStepActions(projectId, onRefresh);
+  const { autoRunning, handleAutoRun } = useStepActions(projectId, onRefresh);
   const [reflection, setReflection] = useState(currentIteration?.reflection || "");
   const [nextGoal, setNextGoal] = useState("");
   const [startingNext, setStartingNext] = useState(false);
   const [completing, setCompleting] = useState(false);
+
+  const runningSteps = steps.filter((s) => s.status === "RUNNING");
 
   const handleStartNext = async () => {
     if (!nextGoal.trim()) {
@@ -94,10 +100,32 @@ export function ReflectionPhase({ projectId, steps, currentIteration, previousIt
     }
   };
 
-  const runningSteps = steps.filter((s) => s.status === "RUNNING");
-  const pendingSteps = steps.filter((s) => s.status === "PROPOSED" || s.status === "APPROVED");
+  // Build iteration summary from steps
   const completedSteps = steps.filter((s) => s.status === "COMPLETED");
   const failedSteps = steps.filter((s) => s.status === "FAILED");
+
+  const papersFound = completedSteps
+    .filter((s) => s.type === "search_papers")
+    .reduce((sum, s) => sum + (parseOutput(s.output)?.imported || 0), 0);
+
+  const codeWritten = completedSteps.filter((s) => s.type === "generate_code");
+  const experimentsRun = completedSteps.filter((s) => s.type === "run_experiment");
+  const experimentsFailed = failedSteps.filter((s) => s.type === "run_experiment");
+  const hypothesesFormed = completedSteps.filter((s) => s.type === "formulate_hypothesis");
+
+  const findings = completedSteps
+    .filter((s) => s.type === "analyze_results")
+    .map((s) => {
+      const out = parseOutput(s.output);
+      return {
+        content: out?.finding || s.title,
+        type: out?.type || "finding",
+        status: out?.status,
+      };
+    });
+
+  const breakthroughs = findings.filter((f) => f.type === "breakthrough");
+  const hypothesisResults = findings.filter((f) => f.status);
 
   return (
     <div className="space-y-4">
@@ -112,53 +140,87 @@ export function ReflectionPhase({ projectId, steps, currentIteration, previousIt
         </button>
       </div>
 
-      {/* Running steps */}
-      {runningSteps.map((step) => (
-        <StepCard key={step.id} step={step} onRestore={handleRestore} loading={loadingStep === step.id} />
-      ))}
-
-      {/* Failed steps */}
-      {failedSteps.map((step) => (
-        <StepCard key={step.id} step={step} onRestore={handleRestore} loading={loadingStep === step.id} />
-      ))}
-
-      {/* Completed steps — latest with actions */}
-      {completedSteps.length > 0 && (
-        <div className="space-y-1">
-          {completedSteps.length > 1 && (
-            <div className="border-l-2 border-emerald-500/20 pl-3 space-y-0.5 mb-2">
-              {completedSteps.slice(0, -1).map((step) => (
-                <StepCard key={step.id} step={step} compact />
-              ))}
-            </div>
-          )}
-          {(() => {
-            const latest = completedSteps[completedSteps.length - 1];
-            const next = pendingSteps[0];
-            return (
-              <StepCard
-                key={latest.id}
-                step={latest}
-                isLatestCompleted
-                hasNextStep={!!next}
-                nextStepTitle={next?.title}
-                onContinue={next ? () => handleContinueNext(next.id) : undefined}
-                loading={!!loadingStep}
-              />
-            );
-          })()}
+      {/* Running indicator */}
+      {runningSteps.length > 0 && (
+        <div className="rounded-md border border-blue-500/30 bg-blue-500/5 p-3 flex items-center gap-2">
+          <Loader2 className="h-3.5 w-3.5 animate-spin text-blue-500" />
+          <span className="text-xs">Generating reflection...</span>
         </div>
       )}
 
-      {/* Pending steps */}
-      {pendingSteps.slice(completedSteps.length > 0 ? 1 : 0).map((step) => (
-        <StepCard key={step.id} step={step} onSkip={handleSkip} onExecute={handleExecute} loading={loadingStep === step.id} />
-      ))}
+      {/* Iteration Summary */}
+      {completedSteps.length > 0 && (
+        <div className="rounded-md border border-border p-3">
+          <h3 className="text-xs font-medium mb-2">
+            Iteration #{currentIteration?.number || 1} Summary
+          </h3>
+          <div className="grid grid-cols-2 gap-2">
+            {papersFound > 0 && (
+              <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                <BookOpen className="h-3 w-3 text-blue-400" />
+                {papersFound} papers found
+              </div>
+            )}
+            {hypothesesFormed.length > 0 && (
+              <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                <Lightbulb className="h-3 w-3 text-amber-400" />
+                {hypothesesFormed.length} hypotheses formed
+              </div>
+            )}
+            {codeWritten.length > 0 && (
+              <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                <FileCode className="h-3 w-3 text-purple-400" />
+                {codeWritten.length} scripts written
+              </div>
+            )}
+            {experimentsRun.length > 0 && (
+              <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                <FlaskConical className="h-3 w-3 text-emerald-400" />
+                {experimentsRun.length} experiments run
+              </div>
+            )}
+            {experimentsFailed.length > 0 && (
+              <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                <XCircle className="h-3 w-3 text-destructive" />
+                {experimentsFailed.length} experiments failed
+              </div>
+            )}
+            {findings.length > 0 && (
+              <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                <TrendingUp className="h-3 w-3 text-cyan-400" />
+                {findings.length} findings recorded
+              </div>
+            )}
+          </div>
+
+          {/* Key outcomes */}
+          {(breakthroughs.length > 0 || hypothesisResults.length > 0) && (
+            <div className="mt-3 pt-2 border-t border-border/50 space-y-1">
+              <p className="text-[10px] font-medium text-muted-foreground">Key Outcomes</p>
+              {breakthroughs.map((f, i) => (
+                <div key={`b-${i}`} className="flex items-start gap-1.5 text-[11px]">
+                  <TrendingUp className="h-3 w-3 text-amber-500 mt-0.5 shrink-0" />
+                  <span>{f.content}</span>
+                </div>
+              ))}
+              {hypothesisResults.map((f, i) => (
+                <div key={`h-${i}`} className="flex items-start gap-1.5 text-[11px]">
+                  {f.status === "SUPPORTED"
+                    ? <CheckCircle className="h-3 w-3 text-emerald-500 mt-0.5 shrink-0" />
+                    : <XCircle className="h-3 w-3 text-red-500 mt-0.5 shrink-0" />
+                  }
+                  <span>{f.content}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Iteration reflection */}
       <div>
         <h3 className="text-xs font-medium text-muted-foreground mb-1.5">
-          Iteration #{currentIteration?.number || 1} Reflection
+          Reflection
         </h3>
         <textarea
           value={reflection}
@@ -207,7 +269,7 @@ export function ReflectionPhase({ projectId, steps, currentIteration, previousIt
               <div key={iter.id} className="rounded-md border border-border/50 bg-muted/30 p-2.5">
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-medium">#{iter.number}: {iter.goal}</span>
-                  <span className="text-[10px] text-muted-foreground">{iter.status}</span>
+                  <span className="text-[10px] text-muted-foreground">{iter.status.toLowerCase()}</span>
                 </div>
                 {iter.reflection && (
                   <p className="text-[11px] text-muted-foreground mt-1">{iter.reflection}</p>
