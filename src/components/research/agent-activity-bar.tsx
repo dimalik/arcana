@@ -37,6 +37,42 @@ interface FeedItem {
   outputLines?: string[];
 }
 
+interface RemoteJobInfo {
+  id: string;
+  status: string;
+  command: string;
+  stdout: string | null;
+  stderr: string | null;
+  exitCode: number | null;
+  host?: { alias: string; gpuType: string | null };
+}
+
+/** Extract the most useful error info from a failed remote job */
+function extractJobError(job: RemoteJobInfo): string | null {
+  const stderr = (job.stderr || "").trim();
+  const stdout = (job.stdout || "").trim();
+
+  // Look for Python tracebacks — most common error
+  for (const source of [stderr, stdout]) {
+    if (!source) continue;
+    const lines = source.split("\n");
+    const traceIdx = lines.findLastIndex((l) => l.includes("Traceback"));
+    if (traceIdx >= 0) {
+      return lines.slice(traceIdx).slice(-12).join("\n");
+    }
+    // Look for common error patterns
+    const errorIdx = lines.findLastIndex((l) => /Error:|Exception:|FAILED|error:/i.test(l));
+    if (errorIdx >= 0) {
+      return lines.slice(Math.max(0, errorIdx - 2), errorIdx + 3).join("\n");
+    }
+  }
+
+  // Fall back to last lines of stderr or stdout
+  if (stderr) return stderr.split("\n").slice(-5).join("\n");
+  if (stdout) return stdout.split("\n").slice(-5).join("\n");
+  return null;
+}
+
 const EXECUTION_TOOLS = new Set(["execute_command", "execute_remote", "check_remote"]);
 
 const TOOL_LABELS: Record<string, string> = {
@@ -536,17 +572,29 @@ export const AgentActivityBar = forwardRef<AgentActivityHandle, AgentActivityBar
       get isRunning() { return runningRef.current; },
     }), [startAgent, stopAgent]);
 
-    // Hydrate feed from existing project log + steps on mount
+    // Hydrate feed from existing project data + remote jobs on mount
     useEffect(() => {
       let cancelled = false;
       (async () => {
         try {
-          const res = await fetch(`/api/research/${projectId}`);
-          if (!res.ok || cancelled) return;
-          const project = await res.json();
+          // Fetch project data and remote jobs in parallel
+          const [projectRes, jobsRes] = await Promise.all([
+            fetch(`/api/research/${projectId}`),
+            fetch(`/api/research/remote-jobs?projectId=${projectId}`),
+          ]);
+          if (cancelled) return;
+          if (!projectRes.ok) return;
+
+          const project = await projectRes.json();
+          const jobs: RemoteJobInfo[] = jobsRes.ok ? await jobsRes.json() : [];
 
           const items: FeedItem[] = [];
           let counter = 0;
+
+          // Index remote jobs by ID for quick lookup
+          const jobById = new Map(jobs.map((j) => [j.id, j]));
+          // Track which job IDs we've already shown (to avoid duplicates from log entries)
+          const shownJobIds = new Set<string>();
 
           // Build feed from completed steps (most useful signal)
           const allSteps: { type: string; title: string; status: string; output: string | null; completedAt: string | null; sortOrder: number }[] = [];
@@ -559,18 +607,81 @@ export const AgentActivityBar = forwardRef<AgentActivityHandle, AgentActivityBar
 
           for (const step of allSteps) {
             const label = TOOL_LABELS[step.type] || step.type;
-            items.push({
-              id: `hist-step-${++counter}`,
-              type: step.status === "COMPLETED" ? "tool_result" : step.status === "FAILED" ? "error" : "tool_call",
-              toolName: step.type,
-              content: step.status === "FAILED" ? `Failed: ${step.title}` : `${label}: ${step.title}`,
-              args: step.output ? step.output.slice(0, 500) : undefined,
-            });
+
+            // If step has a linked remote job, show richer info
+            let remoteJobId: string | undefined;
+            try {
+              const out = step.output ? JSON.parse(step.output) : null;
+              remoteJobId = out?.remoteJobId;
+            } catch { /* ignore */ }
+
+            const linkedJob = remoteJobId ? jobById.get(remoteJobId) : undefined;
+            if (linkedJob) shownJobIds.add(linkedJob.id);
+
+            if (step.status === "FAILED" && linkedJob) {
+              // Rich failure item with job details
+              const scriptMatch = linkedJob.command?.match(/python3?\s+(\S+\.py)/);
+              const scriptName = scriptMatch ? scriptMatch[1] : step.title;
+              const errorDetail = extractJobError(linkedJob);
+              items.push({
+                id: `hist-step-${++counter}`,
+                type: "error",
+                toolName: step.type,
+                content: `${scriptName} failed (exit ${linkedJob.exitCode ?? "?"}) on ${linkedJob.host?.alias || "remote"}`,
+                args: errorDetail || undefined,
+              });
+            } else {
+              items.push({
+                id: `hist-step-${++counter}`,
+                type: step.status === "COMPLETED" ? "tool_result" : step.status === "FAILED" ? "error" : "tool_call",
+                toolName: step.type,
+                content: step.status === "FAILED" ? `Failed: ${step.title}` : `${label}: ${step.title}`,
+                args: step.output ? step.output.slice(0, 500) : undefined,
+              });
+            }
           }
 
-          // Add recent log findings (observations, breakthroughs, decisions) not already covered by steps
+          // Add recent remote job results not already covered by steps
+          const recentJobs = jobs
+            .filter((j) => !shownJobIds.has(j.id) && (j.status === "COMPLETED" || j.status === "FAILED"))
+            .slice(0, 10);
+
+          for (const job of recentJobs) {
+            shownJobIds.add(job.id);
+            const scriptMatch = job.command?.match(/python3?\s+(\S+\.py)/);
+            const scriptName = scriptMatch ? scriptMatch[1] : job.command?.slice(0, 50) || "experiment";
+
+            if (job.status === "FAILED") {
+              const errorDetail = extractJobError(job);
+              items.push({
+                id: `hist-job-${++counter}`,
+                type: "error",
+                content: `${scriptName} failed (exit ${job.exitCode ?? "?"}) on ${job.host?.alias || "remote"}`,
+                args: errorDetail || undefined,
+              });
+            } else {
+              items.push({
+                id: `hist-job-${++counter}`,
+                type: "tool_result",
+                toolName: "execute_remote",
+                content: `${scriptName} completed on ${job.host?.alias || "remote"}`,
+              });
+            }
+          }
+
+          // Add recent log findings — but skip job-related entries (we hydrate those from jobs directly)
           const logEntries = (project.log || [])
-            .filter((l: { type: string }) => ["observation", "breakthrough", "dead_end", "decision"].includes(l.type))
+            .filter((l: { type: string; metadata?: string }) => {
+              if (!["observation", "breakthrough", "dead_end", "decision"].includes(l.type)) return false;
+              // Skip entries linked to remote jobs — already shown above
+              if (l.metadata) {
+                try {
+                  const meta = JSON.parse(l.metadata);
+                  if (meta.remoteJobId) return false;
+                } catch { /* keep */ }
+              }
+              return true;
+            })
             .reverse() // oldest first
             .slice(-10);
 
@@ -891,9 +1002,22 @@ function CompactFeedItem({ item }: { item: FeedItem }) {
 
   if (item.type === "error") {
     return (
-      <div className="flex items-center gap-1.5 rounded border border-destructive/20 bg-destructive/5 px-2 py-1">
-        <AlertCircle className="h-2.5 w-2.5 text-destructive shrink-0" />
-        <span className="text-[10px] text-destructive truncate">{item.content}</span>
+      <div className="rounded border border-destructive/20 bg-destructive/5 px-2 py-1">
+        <button
+          onClick={() => setShowDetail(!showDetail)}
+          className="flex items-center gap-1.5 w-full text-left"
+        >
+          <AlertCircle className="h-2.5 w-2.5 text-destructive shrink-0" />
+          <span className="text-[10px] text-destructive flex-1 truncate">{item.content}</span>
+          {item.args && (
+            <ChevronDown className={`h-2.5 w-2.5 text-destructive/40 transition-transform ${showDetail ? "rotate-180" : ""}`} />
+          )}
+        </button>
+        {showDetail && item.args && (
+          <pre className="mt-1 text-[9px] text-destructive/70 bg-destructive/5 rounded p-1.5 max-h-40 overflow-auto whitespace-pre-wrap font-mono">
+            {item.args}
+          </pre>
+        )}
       </div>
     );
   }

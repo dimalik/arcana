@@ -448,13 +448,36 @@ async function runAndPoll(
     }
 
     if (job?.projectId) {
+      // Extract script name from command for readable log entries
+      const scriptMatch = job.command.match(/python3?\s+(\S+\.py)/);
+      const scriptName = scriptMatch ? scriptMatch[1] : job.command.slice(0, 60);
+
+      let failureDetail = "";
+      if (failed) {
+        // Prefer stderr for the error, but fall back to stdout tail if stderr is empty
+        const stderrLines = (finalLogs.stderr || "").trim().split("\n").filter(Boolean);
+        const stdoutLines = (finalLogs.stdout || "").trim().split("\n").filter(Boolean);
+
+        if (stderrLines.length > 0) {
+          // Find the actual error — often the last Traceback + error line
+          const traceIdx = stderrLines.findLastIndex((l) => l.includes("Traceback"));
+          const errorLines = traceIdx >= 0 ? stderrLines.slice(traceIdx).slice(-10) : stderrLines.slice(-10);
+          failureDetail = errorLines.join("\n");
+        } else if (stdoutLines.length > 0) {
+          // Check stdout for Python errors (common when using 2>&1)
+          const traceIdx = stdoutLines.findLastIndex((l) => l.includes("Traceback") || l.includes("Error:"));
+          const errorLines = traceIdx >= 0 ? stdoutLines.slice(traceIdx).slice(-10) : stdoutLines.slice(-5);
+          failureDetail = errorLines.join("\n");
+        }
+      }
+
       await prisma.researchLogEntry.create({
         data: {
           projectId: job.projectId,
           type: failed ? "dead_end" : "observation",
           content: failed
-            ? `Remote experiment failed (exit ${exitCode}) on ${config.host}:\n\`\`\`\n${(finalLogs.stderr || "").trim().split("\n").slice(-15).join("\n") || "No stderr captured"}\n\`\`\``
-            : `Remote experiment completed on ${config.host}, results synced back`,
+            ? `\`${scriptName}\` failed (exit ${exitCode}) on ${config.host}${failureDetail ? `:\n\`\`\`\n${failureDetail}\n\`\`\`` : " — no error output captured"}`
+            : `\`${scriptName}\` completed on ${config.host}, results synced back`,
           metadata: JSON.stringify({ remoteJobId: jobId }),
         },
       });
