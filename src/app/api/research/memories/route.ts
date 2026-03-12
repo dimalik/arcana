@@ -42,6 +42,39 @@ export async function POST(request: NextRequest) {
 }
 
 /**
+ * PATCH /api/research/memories — Update a memory
+ * Body: { id, lesson?, category?, context? }
+ */
+export async function PATCH(request: NextRequest) {
+  const userId = await requireUserId();
+  const body = await request.json();
+  const { id, lesson, category, context } = body;
+
+  if (!id) {
+    return NextResponse.json({ error: "id is required" }, { status: 400 });
+  }
+
+  const memory = await prisma.agentMemory.findFirst({
+    where: { id, userId },
+  });
+  if (!memory) {
+    return NextResponse.json({ error: "Memory not found" }, { status: 404 });
+  }
+
+  const data: Record<string, unknown> = {};
+  if (lesson !== undefined) data.lesson = lesson.slice(0, 1000);
+  if (category !== undefined) data.category = category;
+  if (context !== undefined) data.context = context?.slice(0, 500) || null;
+
+  const updated = await prisma.agentMemory.update({
+    where: { id },
+    data,
+  });
+
+  return NextResponse.json(updated);
+}
+
+/**
  * DELETE /api/research/memories — Delete a memory by ID
  * Body: { id }
  */

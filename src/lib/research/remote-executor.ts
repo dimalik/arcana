@@ -157,22 +157,28 @@ export const sshExecutor: ExecutorBackend = {
   },
 
   async run(remoteDir: string, command: string, host: HostConfig): Promise<number> {
-    // Build the full command with optional conda activation and setup
-    // Use bash -l for login shell so PATH includes common tools (python3, pip, etc.)
-    const parts: string[] = [];
-    parts.push(`cd ${remoteDir}`);
-    // Auto-activate venv if it exists (agent creates .venv on first run)
-    parts.push(`[ -f .venv/bin/activate ] && source .venv/bin/activate || true`);
-    if (host.conda) parts.push(`conda activate ${host.conda} 2>/dev/null || source activate ${host.conda} 2>/dev/null || true`);
-    if (host.setupCmd) parts.push(host.setupCmd);
-    // Escape single quotes in command for safe nesting
-    const escapedCmd = command.replace(/'/g, "'\\''");
-    // Run command, capture exit code to a file, background it, emit PID
-    parts.push(`nohup bash -c '${escapedCmd}; echo $? > .exit_code' > stdout.log 2> stderr.log & echo $!`);
+    // Write the command to a wrapper script on the remote to avoid all shell quoting issues.
+    // This prevents f-strings, curly braces, nested quotes, etc. from breaking bash -c nesting.
+    const scriptLines: string[] = [
+      "#!/usr/bin/env bash",
+      "set -e",
+      `cd ${remoteDir}`,
+      `[ -f .venv/bin/activate ] && source .venv/bin/activate || true`,
+    ];
+    if (host.conda) scriptLines.push(`conda activate ${host.conda} 2>/dev/null || source activate ${host.conda} 2>/dev/null || true`);
+    if (host.setupCmd) scriptLines.push(host.setupCmd);
+    scriptLines.push("set +e"); // Don't exit on command failure — capture exit code
+    scriptLines.push(command);
+    scriptLines.push("echo $? > .exit_code");
 
-    const fullCmd = parts.join(" && ");
-    // Use -t to force pseudo-terminal allocation for better PATH resolution
-    const pidStr = await sshExec(host, fullCmd);
+    const scriptContent = scriptLines.join("\n");
+    // Use heredoc to write the script — avoids all quoting issues
+    const writeScript = `cat > ${remoteDir}/.run.sh << 'ARCANA_EOF'\n${scriptContent}\nARCANA_EOF\nchmod +x ${remoteDir}/.run.sh`;
+    await sshExec(host, writeScript);
+
+    // Run the script in the background, capture stdout/stderr
+    const launchCmd = `cd ${remoteDir} && nohup bash .run.sh > stdout.log 2> stderr.log & echo $!`;
+    const pidStr = await sshExec(host, launchCmd);
 
     // Parse PID — grab just the last line (in case of MOTD or other output)
     const lines = pidStr.trim().split("\n");
@@ -236,7 +242,8 @@ export const sshExecutor: ExecutorBackend = {
   },
 
   async kill(pid: number, host: HostConfig): Promise<void> {
-    await sshExec(host, `kill ${pid} 2>/dev/null || true`).catch(() => {});
+    // Kill the entire process group (negative PID) so child processes (python, etc.) also die
+    await sshExec(host, `kill -- -${pid} 2>/dev/null; kill ${pid} 2>/dev/null; true`).catch(() => {});
   },
 };
 
@@ -433,7 +440,7 @@ async function runAndPoll(
           projectId: job.projectId,
           type: failed ? "dead_end" : "observation",
           content: failed
-            ? `Remote experiment failed (exit ${exitCode}) on ${config.host}`
+            ? `Remote experiment failed (exit ${exitCode}) on ${config.host}:\n\`\`\`\n${(finalLogs.stderr || "").trim().split("\n").slice(-15).join("\n") || "No stderr captured"}\n\`\`\``
             : `Remote experiment completed on ${config.host}, results synced back`,
           metadata: JSON.stringify({ remoteJobId: jobId }),
         },

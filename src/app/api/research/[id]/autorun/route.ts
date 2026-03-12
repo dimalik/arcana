@@ -3,6 +3,8 @@ import { prisma } from "@/lib/prisma";
 import { requireUserId } from "@/lib/paper-auth";
 import { suggestNextSteps } from "@/lib/research/orchestrator";
 import { executeStep } from "@/lib/research/step-executor";
+import { classifyTaskCategory } from "@/lib/research/task-classifier";
+import { getResourcePreference, CONFIDENCE_THRESHOLD } from "@/lib/research/resource-preferences";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -51,13 +53,27 @@ export async function POST(_request: NextRequest, { params }: Params) {
     const createdSteps = [];
     for (const s of suggestions) {
       const isUserAction = s.type === "user_action";
+
+      // Auto-apply learned resource preference if confidence is high enough
+      let input = s.input || {};
+      try {
+        const taskCat = classifyTaskCategory(s.title);
+        const pref = await getResourcePreference(userId, taskCat, id);
+        if (pref.confidence >= CONFIDENCE_THRESHOLD && pref.preference !== "auto") {
+          input = { ...input, resourcePreference: pref.preference };
+        }
+      } catch {
+        // Non-critical
+      }
+      const inputStr = Object.keys(input).length > 0 ? JSON.stringify(input) : null;
+
       const step = await prisma.researchStep.create({
         data: {
           iterationId: activeIteration.id,
           type: s.type,
           title: s.title,
           description: s.description,
-          input: s.input ? JSON.stringify(s.input) : null,
+          input: inputStr,
           sortOrder: s.sortOrder,
           status: isUserAction ? "PROPOSED" : "APPROVED",
         },

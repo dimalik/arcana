@@ -6,6 +6,7 @@ import {
   ChevronDown, ChevronUp, FileText, Brain, Trash2,
   FolderOpen, File, Download, X, RefreshCw,
   Image, FileCode, FileSpreadsheet, FileType,
+  Plus, Pencil, Check as CheckIcon, Loader2,
 } from "lucide-react";
 import { FilePreview } from "./file-preview";
 
@@ -33,8 +34,14 @@ interface AgentMemory {
   id: string;
   category: string;
   lesson: string;
+  context: string | null;
   usageCount: number;
 }
+
+const MEMORY_CATEGORIES = [
+  "package", "environment", "code_pattern", "debugging",
+  "dataset", "performance", "resource_preference", "general",
+];
 
 interface FileEntry {
   name: string;
@@ -73,7 +80,7 @@ export function ContextSidebar({ project, papers, hypotheses, iteration }: Conte
   const [briefExpanded, setBriefExpanded] = useState(false);
   const [papersExpanded, setPapersExpanded] = useState(false);
   const [memoriesExpanded, setMemoriesExpanded] = useState(false);
-  const [filesExpanded, setFilesExpanded] = useState(true);
+  const [filesExpanded, setFilesExpanded] = useState(false);
   const [memories, setMemories] = useState<AgentMemory[]>([]);
   const [files, setFiles] = useState<FileEntry[]>([]);
   const [filesLoading, setFilesLoading] = useState(false);
@@ -116,6 +123,30 @@ export function ContextSidebar({ project, papers, hypotheses, iteration }: Conte
       body: JSON.stringify({ id }),
     });
     setMemories((m) => m.filter((mem) => mem.id !== id));
+  };
+
+  const updateMemory = async (id: string, updates: Partial<Pick<AgentMemory, "lesson" | "category" | "context">>) => {
+    const res = await fetch("/api/research/memories", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id, ...updates }),
+    });
+    if (res.ok) {
+      const updated = await res.json();
+      setMemories((m) => m.map((mem) => mem.id === id ? updated : mem));
+    }
+  };
+
+  const addMemory = async (category: string, lesson: string, context?: string) => {
+    const res = await fetch("/api/research/memories", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ category, lesson, context }),
+    });
+    if (res.ok) {
+      const created = await res.json();
+      setMemories((m) => [created, ...m]);
+    }
   };
 
   const openPreview = (filePath: string, fileName: string) => {
@@ -290,36 +321,26 @@ export function ContextSidebar({ project, papers, hypotheses, iteration }: Conte
         )}
 
         {/* Process Memory */}
-        {memories.length > 0 && (
-          <div>
+        <div>
+          <div className="flex items-center w-full">
             <button
               onClick={() => setMemoriesExpanded(!memoriesExpanded)}
-              className="flex items-center gap-1 text-[11px] font-medium text-muted-foreground hover:text-foreground w-full"
+              className="flex items-center gap-1 text-[11px] font-medium text-muted-foreground hover:text-foreground flex-1"
             >
               {memoriesExpanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
               <Brain className="h-3 w-3" />
-              Process Memory ({memories.length})
+              Process Memory {memories.length > 0 && `(${memories.length})`}
             </button>
-            {memoriesExpanded && (
-              <div className="mt-1 space-y-1">
-                {memories.map((m) => (
-                  <div key={m.id} className="group flex items-start gap-1">
-                    <span className="text-[9px] text-muted-foreground/50 bg-muted rounded px-1 shrink-0 mt-0.5">
-                      {m.category}
-                    </span>
-                    <p className="text-[10px] text-muted-foreground flex-1 line-clamp-2">{m.lesson}</p>
-                    <button
-                      onClick={() => deleteMemory(m.id)}
-                      className="opacity-0 group-hover:opacity-100 text-muted-foreground/30 hover:text-destructive transition-opacity shrink-0"
-                    >
-                      <Trash2 className="h-2.5 w-2.5" />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
           </div>
-        )}
+          {memoriesExpanded && (
+            <div className="mt-1 space-y-0.5">
+              {memories.map((m) => (
+                <MemoryItem key={m.id} memory={m} onDelete={deleteMemory} onUpdate={updateMemory} />
+              ))}
+              <AddMemoryForm onAdd={addMemory} />
+            </div>
+          )}
+        </div>
       </div>
 
       {/* File Preview Modal */}
@@ -437,5 +458,210 @@ function FileTreeItem({
       <span className="truncate min-w-0">{entry.name}</span>
       <span className="text-[8px] text-muted-foreground/40 group-hover:text-muted-foreground/60 tabular-nums text-right w-[3.5rem]">{formatSize(entry.size)}</span>
     </button>
+  );
+}
+
+// ── Memory Item (expandable + editable) ──────────────────────────
+
+function MemoryItem({
+  memory,
+  onDelete,
+  onUpdate,
+}: {
+  memory: AgentMemory;
+  onDelete: (id: string) => void;
+  onUpdate: (id: string, updates: Partial<Pick<AgentMemory, "lesson" | "category" | "context">>) => Promise<void>;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [editLesson, setEditLesson] = useState(memory.lesson);
+  const [editCategory, setEditCategory] = useState(memory.category);
+  const [editContext, setEditContext] = useState(memory.context || "");
+  const [saving, setSaving] = useState(false);
+
+  const handleSave = async () => {
+    if (!editLesson.trim()) return;
+    setSaving(true);
+    await onUpdate(memory.id, {
+      lesson: editLesson.trim(),
+      category: editCategory,
+      context: editContext.trim() || undefined,
+    });
+    setSaving(false);
+    setEditing(false);
+  };
+
+  const handleCancel = () => {
+    setEditLesson(memory.lesson);
+    setEditCategory(memory.category);
+    setEditContext(memory.context || "");
+    setEditing(false);
+  };
+
+  if (editing) {
+    return (
+      <div className="rounded-md border border-border bg-muted/30 p-2 space-y-1.5">
+        <select
+          value={editCategory}
+          onChange={(e) => setEditCategory(e.target.value)}
+          className="w-full h-5 rounded border border-border bg-background px-1 text-[10px] focus:outline-none focus:ring-1 focus:ring-ring"
+        >
+          {MEMORY_CATEGORIES.map((cat) => (
+            <option key={cat} value={cat}>{cat}</option>
+          ))}
+        </select>
+        <textarea
+          value={editLesson}
+          onChange={(e) => setEditLesson(e.target.value)}
+          className="w-full rounded border border-border bg-background px-1.5 py-1 text-[10px] focus:outline-none focus:ring-1 focus:ring-ring resize-none"
+          rows={3}
+          placeholder="Lesson learned..."
+        />
+        <textarea
+          value={editContext}
+          onChange={(e) => setEditContext(e.target.value)}
+          className="w-full rounded border border-border bg-background px-1.5 py-1 text-[10px] text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring resize-none"
+          rows={2}
+          placeholder="Context (optional) — when/why was this learned?"
+        />
+        <div className="flex items-center gap-1 justify-end">
+          <button
+            onClick={handleCancel}
+            className="px-1.5 py-0.5 text-[10px] text-muted-foreground hover:text-foreground transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleSave}
+            disabled={saving || !editLesson.trim()}
+            className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] rounded bg-primary text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"
+          >
+            {saving ? <Loader2 className="h-2.5 w-2.5 animate-spin" /> : <CheckIcon className="h-2.5 w-2.5" />}
+            Save
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="group">
+      <button
+        onClick={() => setExpanded((e) => !e)}
+        className="flex items-center gap-1 w-full text-left py-0.5"
+      >
+        <ChevronDown className={`h-2.5 w-2.5 text-muted-foreground/40 shrink-0 transition-transform ${expanded ? "" : "-rotate-90"}`} />
+        <span className="text-[9px] text-muted-foreground/50 bg-muted rounded px-1 shrink-0">
+          {memory.category}
+        </span>
+        <span className="text-[10px] text-muted-foreground truncate flex-1 min-w-0">{memory.lesson}</span>
+        <span className="opacity-0 group-hover:opacity-100 flex items-center gap-0.5 shrink-0">
+          <button
+            onClick={(e) => { e.stopPropagation(); setExpanded(true); setEditing(true); }}
+            className="text-muted-foreground/30 hover:text-foreground transition-opacity p-0.5"
+            title="Edit"
+          >
+            <Pencil className="h-2.5 w-2.5" />
+          </button>
+          <button
+            onClick={(e) => { e.stopPropagation(); onDelete(memory.id); }}
+            className="text-muted-foreground/30 hover:text-destructive transition-opacity p-0.5"
+            title="Delete"
+          >
+            <Trash2 className="h-2.5 w-2.5" />
+          </button>
+        </span>
+      </button>
+      {expanded && !editing && (
+        <div className="pl-4 pb-1 space-y-0.5">
+          <p className="text-[10px] text-muted-foreground leading-relaxed">
+            {memory.lesson}
+          </p>
+          {memory.context && (
+            <p className="text-[9px] text-muted-foreground/50 italic">
+              {memory.context}
+            </p>
+          )}
+          <span className="text-[8px] text-muted-foreground/30">used {memory.usageCount}x</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Add Memory Form ──────────────────────────────────
+
+function AddMemoryForm({ onAdd }: { onAdd: (category: string, lesson: string, context?: string) => Promise<void> }) {
+  const [open, setOpen] = useState(false);
+  const [category, setCategory] = useState("general");
+  const [lesson, setLesson] = useState("");
+  const [context, setContext] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const handleSubmit = async () => {
+    if (!lesson.trim()) return;
+    setSaving(true);
+    await onAdd(category, lesson.trim(), context.trim() || undefined);
+    setSaving(false);
+    setLesson("");
+    setContext("");
+    setOpen(false);
+  };
+
+  if (!open) {
+    return (
+      <button
+        onClick={() => setOpen(true)}
+        className="flex items-center gap-1 text-[10px] text-muted-foreground/50 hover:text-muted-foreground transition-colors py-1"
+      >
+        <Plus className="h-2.5 w-2.5" />
+        Add memory
+      </button>
+    );
+  }
+
+  return (
+    <div className="rounded-md border border-border bg-muted/30 p-2 space-y-1.5 mt-1">
+      <select
+        value={category}
+        onChange={(e) => setCategory(e.target.value)}
+        className="w-full h-5 rounded border border-border bg-background px-1 text-[10px] focus:outline-none focus:ring-1 focus:ring-ring"
+      >
+        {MEMORY_CATEGORIES.map((cat) => (
+          <option key={cat} value={cat}>{cat}</option>
+        ))}
+      </select>
+      <textarea
+        value={lesson}
+        onChange={(e) => setLesson(e.target.value)}
+        className="w-full rounded border border-border bg-background px-1.5 py-1 text-[10px] focus:outline-none focus:ring-1 focus:ring-ring resize-none"
+        rows={3}
+        placeholder="Lesson to remember..."
+        autoFocus
+      />
+      <textarea
+        value={context}
+        onChange={(e) => setContext(e.target.value)}
+        className="w-full rounded border border-border bg-background px-1.5 py-1 text-[10px] text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring resize-none"
+        rows={2}
+        placeholder="Context (optional) — when/why?"
+      />
+      <div className="flex items-center gap-1 justify-end">
+        <button
+          onClick={() => { setOpen(false); setLesson(""); setContext(""); }}
+          className="px-1.5 py-0.5 text-[10px] text-muted-foreground hover:text-foreground transition-colors"
+        >
+          Cancel
+        </button>
+        <button
+          onClick={handleSubmit}
+          disabled={saving || !lesson.trim()}
+          className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] rounded bg-primary text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"
+        >
+          {saving ? <Loader2 className="h-2.5 w-2.5 animate-spin" /> : <Plus className="h-2.5 w-2.5" />}
+          Add
+        </button>
+      </div>
+    </div>
   );
 }

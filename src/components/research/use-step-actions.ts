@@ -45,6 +45,21 @@ export function useStepActions(projectId: string, onRefresh: () => void) {
   const handleRestore = async (stepId: string) => {
     setLoadingStep(stepId);
     try {
+      // Cancel any remote jobs linked to this step
+      try {
+        const jobsRes = await fetch(`/api/research/remote-jobs?stepId=${stepId}`);
+        if (jobsRes.ok) {
+          const jobs: { id: string; status: string }[] = await jobsRes.json();
+          for (const job of jobs) {
+            if (["RUNNING", "SYNCING", "QUEUED"].includes(job.status)) {
+              await fetch(`/api/research/remote-jobs/${job.id}`, { method: "DELETE" });
+            }
+          }
+        }
+      } catch {
+        // Non-critical — proceed with step restore
+      }
+
       await fetch(`/api/research/${projectId}/steps/${stepId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -58,14 +73,18 @@ export function useStepActions(projectId: string, onRefresh: () => void) {
     }
   };
 
-  const handleExecute = async (stepId: string) => {
+  const handleExecute = async (stepId: string, resourcePreference?: string) => {
     setLoadingStep(stepId);
     try {
-      // Approve then execute
+      // Approve then execute — include resource preference if specified
+      const patchBody: Record<string, unknown> = { status: "APPROVED" };
+      if (resourcePreference && resourcePreference !== "auto") {
+        patchBody.input = { resourcePreference };
+      }
       await fetch(`/api/research/${projectId}/steps/${stepId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: "APPROVED" }),
+        body: JSON.stringify(patchBody),
       });
       await fetch(`/api/research/${projectId}/steps/${stepId}/execute`, { method: "POST" });
       onRefresh();

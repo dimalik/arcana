@@ -2,6 +2,8 @@ import { prisma } from "@/lib/prisma";
 import { buildProjectContext } from "./context-builder";
 import { generateLLMResponse, setLlmContext } from "@/lib/llm/provider";
 import { getDefaultModel } from "@/lib/llm/auto-process";
+import { classifyTaskCategory } from "./task-classifier";
+import { getResourcePreference, CONFIDENCE_THRESHOLD } from "./resource-preferences";
 
 export interface StepSuggestion {
   type: string;
@@ -224,15 +226,31 @@ export async function createProposedSteps(
   projectId: string,
   iterationId: string,
   suggestions: StepSuggestion[],
+  userId?: string,
 ): Promise<void> {
   for (const s of suggestions) {
+    // Auto-apply learned resource preference if confidence is high enough
+    let input = s.input || {};
+    if (userId) {
+      try {
+        const taskCat = classifyTaskCategory(s.title);
+        const pref = await getResourcePreference(userId, taskCat, projectId);
+        if (pref.confidence >= CONFIDENCE_THRESHOLD && pref.preference !== "auto") {
+          input = { ...input, resourcePreference: pref.preference };
+        }
+      } catch {
+        // Non-critical — proceed without preference
+      }
+    }
+
+    const inputStr = Object.keys(input).length > 0 ? JSON.stringify(input) : null;
     await prisma.researchStep.create({
       data: {
         iterationId,
         type: s.type,
         title: s.title,
         description: s.description,
-        input: s.input ? JSON.stringify(s.input) : null,
+        input: inputStr,
         sortOrder: s.sortOrder,
         status: "PROPOSED",
       },

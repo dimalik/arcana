@@ -36,6 +36,16 @@ function parseOutput(output: string | null) {
   try { return JSON.parse(output); } catch { return null; }
 }
 
+/** Extract the first experiment/number from text for sorting (e.g., "Experiment 14b" → 14) */
+function extractSortKey(text: string): number {
+  const m = text.match(/(?:exp(?:eriment)?)\s*(\d+)/i);
+  return m ? parseInt(m[1], 10) : Infinity;
+}
+
+function sortByExperimentNumber<T extends { content: string }>(items: T[]): T[] {
+  return [...items].sort((a, b) => extractSortKey(a.content) - extractSortKey(b.content));
+}
+
 const STATUS_STYLE: Record<string, { icon: typeof CheckCircle2; color: string; bg: string }> = {
   SUPPORTED: { icon: CheckCircle2, color: "text-emerald-500", bg: "border-emerald-500/20 bg-emerald-500/5" },
   REFUTED: { icon: XCircle, color: "text-red-500", bg: "border-red-500/20 bg-red-500/5" },
@@ -76,11 +86,11 @@ export function AnalysisPhase({ projectId, steps, hypotheses, onRefresh }: Analy
     }
   }
 
-  // Separate hypothesis updates from general findings
+  // Separate hypothesis updates from general findings, sorted by experiment number
   const hypothesisUpdates = findings.filter((f) => f.type === "hypothesis_update");
   const generalFindings = findings.filter((f) => f.type !== "hypothesis_update");
-  const breakthroughs = generalFindings.filter((f) => f.type === "breakthrough");
-  const otherFindings = generalFindings.filter((f) => f.type !== "breakthrough");
+  const breakthroughs = sortByExperimentNumber(generalFindings.filter((f) => f.type === "breakthrough"));
+  const otherFindings = sortByExperimentNumber(generalFindings.filter((f) => f.type !== "breakthrough"));
 
   // Hypotheses with resolved evidence
   const resolvedHypotheses = hypotheses.filter((h) => h.status === "SUPPORTED" || h.status === "REFUTED");

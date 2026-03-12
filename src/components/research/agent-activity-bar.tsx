@@ -4,6 +4,7 @@ import { useState, useRef, useEffect, useCallback, useImperativeHandle, forwardR
 import {
   Bot, Square, Send, Loader2, Wrench, CheckCircle,
   AlertCircle, ChevronDown, ChevronUp, Terminal,
+  Play, CirclePause,
 } from "lucide-react";
 
 // ── Types ────────────────────────────────────────────────
@@ -16,6 +17,13 @@ interface AgentEvent {
   args?: unknown;
   result?: unknown;
   stepNumber?: number;
+  activity?: {
+    phase: "generating" | "tool_running" | "thinking" | "idle";
+    tokens?: number;
+    tool?: string;
+    stepCount?: number;
+    lastEventAgoMs?: number;
+  };
 }
 
 interface FeedItem {
@@ -77,7 +85,7 @@ export const AgentActivityBar = forwardRef<AgentActivityHandle, AgentActivityBar
     const [userInput, setUserInput] = useState("");
     const [elapsed, setElapsed] = useState(0);
     const [expanded, setExpanded] = useState(false);
-    const [statusLine, setStatusLine] = useState<string>("Agent idle");
+    const [statusLine, setStatusLine] = useState<string>("Ready");
     const feedEndRef = useRef<HTMLDivElement>(null);
     const abortRef = useRef<AbortController | null>(null);
     const itemCounter = useRef(0);
@@ -85,9 +93,10 @@ export const AgentActivityBar = forwardRef<AgentActivityHandle, AgentActivityBar
     const autoStarted = useRef(false);
     const runningRef = useRef(false);
     const lastHeardRef = useRef<number>(Date.now());
+    const lastActivityRef = useRef<number>(Date.now());
+    const tokenCountRef = useRef(0);
     const [connectionStale, setConnectionStale] = useState(false);
     const restartCountRef = useRef(0);
-    const MAX_AUTO_RESTARTS = 10;
     const stoppedByUserRef = useRef(false);
     const projectStatusRef = useRef(projectStatus);
     projectStatusRef.current = projectStatus;
@@ -169,9 +178,9 @@ export const AgentActivityBar = forwardRef<AgentActivityHandle, AgentActivityBar
       }
       const interval = setInterval(() => {
         setElapsed(Math.floor((Date.now() - startTimeRef.current) / 1000));
-        // If no data received for 30s, mark connection as stale
+        // If no data received for 45s, mark connection as stale (LLM inference can take 30s+)
         const silenceMs = Date.now() - lastHeardRef.current;
-        setConnectionStale(silenceMs > 30_000);
+        setConnectionStale(silenceMs > 45_000);
       }, 1000);
       return () => clearInterval(interval);
     }, [running]);
@@ -187,6 +196,8 @@ export const AgentActivityBar = forwardRef<AgentActivityHandle, AgentActivityBar
       setStatusLine("Starting agent...");
       startTimeRef.current = Date.now();
       lastHeardRef.current = Date.now();
+      lastActivityRef.current = Date.now();
+      tokenCountRef.current = 0;
       setConnectionStale(false);
 
       const abort = new AbortController();
@@ -213,8 +224,23 @@ export const AgentActivityBar = forwardRef<AgentActivityHandle, AgentActivityBar
         let textAccumulator = "";
         let lastRefresh = 0;
 
+        // Read with a timeout — if no data for 60s, the connection is dead
+        const READ_TIMEOUT_MS = 60_000;
+        const readWithTimeout = async (): Promise<ReadableStreamReadResult<Uint8Array>> => {
+          return new Promise((resolve, reject) => {
+            const timer = setTimeout(() => {
+              reader.cancel().catch(() => {});
+              reject(new Error("Connection timed out — no data received for 60s"));
+            }, READ_TIMEOUT_MS);
+            reader.read().then(
+              (result) => { clearTimeout(timer); resolve(result); },
+              (err) => { clearTimeout(timer); reject(err); },
+            );
+          });
+        };
+
         while (true) {
-          const { done, value } = await reader.read();
+          const { done, value } = await readWithTimeout();
           if (done) break;
 
           buffer += decoder.decode(value, { stream: true });
@@ -230,19 +256,42 @@ export const AgentActivityBar = forwardRef<AgentActivityHandle, AgentActivityBar
               lastHeardRef.current = Date.now();
 
               switch (event.type) {
-                case "heartbeat":
-                  // Just keeps the connection alive — no UI update needed
+                case "heartbeat": {
+                  // Connection is alive — use server-side activity metadata for status
+                  const act = event.activity;
+                  if (act) {
+                    const agoSec = Math.round((act.lastEventAgoMs || 0) / 1000);
+                    if (act.phase === "generating") {
+                      const tokLabel = act.tokens && act.tokens > 100 ? ` (${Math.round(act.tokens / 4)} tokens)` : "";
+                      setStatusLine(`Generating${tokLabel}...`);
+                    } else if (act.phase === "tool_running" && act.tool) {
+                      const label = TOOL_LABELS[act.tool] || act.tool;
+                      setStatusLine(`${label}...`);
+                    } else if (act.phase === "thinking") {
+                      if (agoSec > 20) {
+                        setStatusLine(`Thinking... (${agoSec}s)`);
+                      } else {
+                        setStatusLine("Thinking...");
+                      }
+                    }
+                  } else if (Date.now() - lastActivityRef.current > 10_000) {
+                    setStatusLine("Thinking...");
+                  }
                   break;
+                }
 
                 case "text":
+                  lastActivityRef.current = Date.now();
                   setThinkingMsg(null);
                   textAccumulator += event.content || "";
+                  tokenCountRef.current += (event.content || "").length;
                   setCurrentText(textAccumulator);
                   // Update status with first ~80 chars
                   setStatusLine(textAccumulator.slice(0, 80).replace(/\n/g, " ") + (textAccumulator.length > 80 ? "..." : ""));
                   break;
 
                 case "tool_call": {
+                  lastActivityRef.current = Date.now();
                   setThinkingMsg(null);
                   const label = TOOL_LABELS[event.toolName || ""] || event.toolName || "Tool";
                   // For execution tools, extract and show the command
@@ -307,6 +356,7 @@ export const AgentActivityBar = forwardRef<AgentActivityHandle, AgentActivityBar
                 }
 
                 case "tool_result": {
+                  lastActivityRef.current = Date.now();
                   const resultStr = typeof event.result === "string"
                     ? event.result
                     : JSON.stringify(event.result, null, 2);
@@ -315,7 +365,8 @@ export const AgentActivityBar = forwardRef<AgentActivityHandle, AgentActivityBar
                       ? { ...item, type: "tool_result" as const, progress: undefined, args: item.args + "\n\n--- Result ---\n" + resultStr }
                       : item
                   ));
-                  setStatusLine("Deciding next step...");
+                  const toolLabel = TOOL_LABELS[event.toolName || ""] || event.toolName || "tool";
+                  setStatusLine(`${toolLabel} done — analyzing results...`);
                   // Refresh project data periodically after tool results
                   const now = Date.now();
                   if (now - lastRefresh > 5000) {
@@ -366,20 +417,14 @@ export const AgentActivityBar = forwardRef<AgentActivityHandle, AgentActivityBar
                     setCurrentText("");
                   }
 
-                  // Check if we should auto-continue
+                  // Always auto-continue unless user stopped or project is no longer active
                   const canAutoContinue =
                     projectStatusRef.current === "ACTIVE" &&
-                    !stoppedByUserRef.current &&
-                    restartCountRef.current < MAX_AUTO_RESTARTS;
+                    !stoppedByUserRef.current;
 
                   if (canAutoContinue) {
                     restartCountRef.current++;
-                    setFeed((f) => [...f, {
-                      id: `done-${++itemCounter.current}`,
-                      type: "done",
-                      content: `Session ${restartCountRef.current} finished. Auto-continuing...`,
-                    }]);
-                    setStatusLine("Auto-continuing...");
+                    setStatusLine(`Continuing (session ${restartCountRef.current + 1})...`);
                     // Flag that we need to auto-continue after the stream closes
                     shouldAutoContinueRef.current = true;
                   } else {
@@ -388,11 +433,9 @@ export const AgentActivityBar = forwardRef<AgentActivityHandle, AgentActivityBar
                       type: "done",
                       content: stoppedByUserRef.current
                         ? "Agent stopped by user."
-                        : restartCountRef.current >= MAX_AUTO_RESTARTS
-                          ? `Agent finished after ${restartCountRef.current + 1} sessions (limit reached).`
-                          : "Agent finished.",
+                        : "Agent finished.",
                     }]);
-                    setStatusLine("Agent finished");
+                    setStatusLine(stoppedByUserRef.current ? "Stopped by user" : "Finished — press Resume or send a message");
                   }
                   break;
                 }
@@ -404,22 +447,30 @@ export const AgentActivityBar = forwardRef<AgentActivityHandle, AgentActivityBar
         }
       } catch (err) {
         if ((err as Error).name !== "AbortError") {
+          const errMsg = (err as Error).message || "Connection lost";
           setFeed((f) => [...f, {
             id: `err-${++itemCounter.current}`,
             type: "error",
-            content: (err as Error).message || "Connection lost",
+            content: errMsg,
           }]);
-          setStatusLine("Connection lost");
+          // Auto-reconnect on unexpected disconnection (not user-initiated)
+          if (!stoppedByUserRef.current && projectStatusRef.current === "ACTIVE") {
+            setStatusLine("Reconnecting...");
+            shouldAutoContinueRef.current = true;
+          } else {
+            setStatusLine("Connection lost");
+          }
         }
       } finally {
-        setRunning(false);
-        setThinkingMsg(null);
         abortRef.current = null;
-        onRefresh();
 
-        // Auto-continue if flagged by the done handler
+        // Auto-continue if flagged by the done handler — keep "running" look
         if (shouldAutoContinueRef.current) {
           shouldAutoContinueRef.current = false;
+          // Don't set running=false — keep the spinner going during the gap
+          setThinkingMsg(null);
+          onRefresh();
+
           // Small delay to let state settle, then restart via the restart API
           setTimeout(async () => {
             try {
@@ -433,17 +484,25 @@ export const AgentActivityBar = forwardRef<AgentActivityHandle, AgentActivityBar
                 ? `You are automatically continuing the research. Here is a summary of all work so far — continue from where you left off, do NOT repeat completed steps:\n\n${priorWorkSummary}`
                 : "You are automatically continuing the research. Continue from where you left off.";
 
+              // Reset running state so startAgent's guard allows the call
+              setRunning(false);
+              runningRef.current = false;
               startAgent(continuationMessage);
             } catch (err) {
               console.error("[agent-activity-bar] Auto-continue failed:", err);
-              setStatusLine("Auto-continue failed — click to restart");
+              setRunning(false);
+              setStatusLine("Auto-continue failed — press Resume to restart");
               setFeed((f) => [...f, {
                 id: `err-${++itemCounter.current}`,
                 type: "error",
                 content: "Auto-continue failed. Use the input below to restart manually.",
               }]);
             }
-          }, 1500);
+          }, 500);
+        } else {
+          setRunning(false);
+          setThinkingMsg(null);
+          onRefresh();
         }
       }
     }, [projectId, onRefresh]);
@@ -455,7 +514,20 @@ export const AgentActivityBar = forwardRef<AgentActivityHandle, AgentActivityBar
       setRunning(false);
       setThinkingMsg(null);
       setStatusLine("Agent stopped");
-    }, []);
+
+      // Cancel any active remote jobs for this project
+      fetch(`/api/research/remote-jobs?projectId=${projectId}`)
+        .then((r) => r.json())
+        .then((jobs: { id: string; status: string }[]) => {
+          for (const job of jobs) {
+            if (["RUNNING", "SYNCING", "QUEUED"].includes(job.status)) {
+              fetch(`/api/research/remote-jobs/${job.id}`, { method: "DELETE" }).catch(() => {});
+            }
+          }
+          setActiveJob(null);
+        })
+        .catch(() => {});
+    }, [projectId]);
 
     // Expose handle to parent
     useImperativeHandle(ref, () => ({
@@ -523,7 +595,7 @@ export const AgentActivityBar = forwardRef<AgentActivityHandle, AgentActivityBar
             if (hasRunning) {
               setStatusLine("Agent is working...");
             } else if (lastStep) {
-              setStatusLine(`Last: ${lastStep.title.slice(0, 80)}`);
+              setStatusLine(`last: ${lastStep.title.slice(0, 70)}`);
             }
           }
         } catch {
@@ -575,14 +647,25 @@ export const AgentActivityBar = forwardRef<AgentActivityHandle, AgentActivityBar
             <Loader2 className="h-3.5 w-3.5 animate-spin text-blue-500 shrink-0" />
           ) : activeJob ? (
             <Loader2 className="h-3.5 w-3.5 animate-spin text-cyan-500 shrink-0" />
+          ) : projectStatus === "ACTIVE" && feed.length > 0 ? (
+            <CirclePause className="h-3.5 w-3.5 text-amber-500/70 shrink-0" />
           ) : feed.some((f) => f.type === "done") ? (
             <CheckCircle className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
           ) : (
             <Bot className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
           )}
 
-          <span className={`text-xs flex-1 truncate ${connectionStale && running ? "text-amber-500" : activeJob && !running ? "text-cyan-500" : "text-muted-foreground"}`}>
-            {connectionStale && running ? "Waiting for agent response..." : statusLine}
+          <span className={`text-xs flex-1 truncate ${
+            connectionStale && running ? "text-amber-500"
+            : !running && projectStatus === "ACTIVE" && feed.length > 0 ? "text-amber-500/70"
+            : activeJob && !running ? "text-cyan-500"
+            : "text-muted-foreground"
+          }`}>
+            {connectionStale && running
+              ? `No response for ${Math.floor((Date.now() - lastHeardRef.current) / 1000)}s — connection may be stale`
+              : !running && projectStatus === "ACTIVE" && feed.length > 0 && !activeJob
+                ? `Agent stopped — ${statusLine}`
+                : statusLine}
           </span>
 
           {/* Quick output preview when collapsed */}
@@ -609,13 +692,21 @@ export const AgentActivityBar = forwardRef<AgentActivityHandle, AgentActivityBar
             </span>
           )}
 
-          {running && (
+          {running ? (
             <button
               onClick={(e) => { e.stopPropagation(); stopAgent(); }}
               className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0"
             >
               <Square className="h-2.5 w-2.5" />
               Stop
+            </button>
+          ) : projectStatus === "ACTIVE" && !activeJob && (
+            <button
+              onClick={(e) => { e.stopPropagation(); startAgent(); }}
+              className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] bg-primary/10 text-primary hover:bg-primary/20 transition-colors shrink-0"
+            >
+              <Play className="h-2.5 w-2.5" />
+              Resume
             </button>
           )}
 

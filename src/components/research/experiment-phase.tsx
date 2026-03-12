@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Loader2, Sparkles, Server, FileCode, Check, AlertCircle, ChevronDown, Play, X } from "lucide-react";
+import { Loader2, Sparkles, Server, FileCode, Check, AlertCircle, ChevronDown, Play, X, RotateCcw, Monitor } from "lucide-react";
 import { useStepActions } from "./use-step-actions";
 import { toast } from "sonner";
 
@@ -28,6 +28,8 @@ interface RemoteJob {
   command: string;
   stdout: string | null;
   stderr: string | null;
+  localDir: string;
+  hostId: string;
   host: { alias: string; gpuType: string | null };
   createdAt: string;
   completedAt: string | null;
@@ -43,6 +45,60 @@ interface ExperimentPhaseProps {
 function parseOutput(output: string | null) {
   if (!output) return null;
   try { return JSON.parse(output); } catch { return null; }
+}
+
+function PendingStepRow({
+  step,
+  hosts,
+  loading,
+  disabled,
+  onExecute,
+}: {
+  step: Step;
+  hosts: RemoteHost[];
+  loading: boolean;
+  disabled: boolean;
+  onExecute: (stepId: string, resourcePreference?: string) => void;
+}) {
+  const [resourcePref, setResourcePref] = useState("auto");
+  const showSelector = hosts.length > 0;
+
+  return (
+    <div className="rounded-md border border-border/50 bg-muted/30 p-3">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-medium">{step.title}</span>
+          <span className="text-[10px] text-muted-foreground">{step.status === "APPROVED" ? "Queued" : "Up next"}</span>
+        </div>
+        <div className="flex items-center gap-1">
+          {showSelector && (
+            <select
+              value={resourcePref}
+              onChange={(e) => setResourcePref(e.target.value)}
+              className="h-6 rounded-md border border-border bg-background px-1 text-[10px] text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+              title="Where to run"
+            >
+              <option value="auto">Auto</option>
+              <option value="local">Local</option>
+              {hosts.map((h) => (
+                <option key={h.alias} value={`remote:${h.alias}`}>
+                  {h.alias}
+                </option>
+              ))}
+            </select>
+          )}
+          <button
+            onClick={() => onExecute(step.id, resourcePref !== "auto" ? resourcePref : undefined)}
+            disabled={disabled}
+            className="inline-flex h-6 items-center gap-1 rounded-md bg-primary text-primary-foreground px-2 text-[11px] hover:bg-primary/90 transition-colors disabled:opacity-50"
+          >
+            {loading ? <Loader2 className="h-3 w-3 animate-spin" /> : <Play className="h-3 w-3" />}
+            Run
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 export function ExperimentPhase({ projectId, steps, onRefresh }: ExperimentPhaseProps) {
@@ -101,6 +157,65 @@ export function ExperimentPhase({ projectId, steps, onRefresh }: ExperimentPhase
     }
   };
 
+  const handleRetryJob = async (job: RemoteJob) => {
+    setDeploying(true);
+    try {
+      const res = await fetch("/api/research/remote-jobs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          hostId: job.hostId,
+          localDir: job.localDir,
+          command: job.command,
+          projectId,
+        }),
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        toast.error(data.error || "Retry failed");
+        return;
+      }
+      toast.success(`Retrying on ${job.host.alias}...`);
+      const jobsRes = await fetch(`/api/research/remote-jobs?projectId=${projectId}`);
+      const jobs = await jobsRes.json();
+      if (Array.isArray(jobs)) setRemoteJobs(jobs);
+    } catch {
+      toast.error("Failed to retry job");
+    } finally {
+      setDeploying(false);
+    }
+  };
+
+  const [runningLocally, setRunningLocally] = useState<string | null>(null);
+
+  const handleRunLocally = async (job: RemoteJob) => {
+    setRunningLocally(job.id);
+    try {
+      const res = await fetch(`/api/research/${projectId}/run-local`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          command: job.command,
+          workDir: job.localDir,
+          cancelJobId: job.id,
+        }),
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        toast.error(data.error || "Failed to run locally");
+        return;
+      }
+      toast.success("Cancelled remote job — running locally now");
+      // Update local state: mark remote job as cancelled
+      setRemoteJobs((prev) => prev.map((j) => j.id === job.id ? { ...j, status: "CANCELLED" } : j));
+      onRefresh();
+    } catch {
+      toast.error("Failed to move to local");
+    } finally {
+      setRunningLocally(null);
+    }
+  };
+
   const handleDeploy = async (stepId: string) => {
     const host = hosts.find((h) => h.isDefault) || hosts[0];
     if (!host) {
@@ -145,7 +260,7 @@ export function ExperimentPhase({ projectId, steps, onRefresh }: ExperimentPhase
   const pendingSteps = steps.filter((s) => s.status === "PROPOSED" || s.status === "APPROVED");
   const runningSteps = steps.filter((s) => s.status === "RUNNING");
   const runningJobs = remoteJobs.filter((j) => ["SYNCING", "QUEUED", "RUNNING"].includes(j.status));
-  const completedJobs = remoteJobs.filter((j) => j.status === "COMPLETED" || j.status === "FAILED");
+  const completedJobs = remoteJobs.filter((j) => ["COMPLETED", "FAILED", "CANCELLED"].includes(j.status));
 
   return (
     <div className="space-y-4">
@@ -188,24 +303,14 @@ export function ExperimentPhase({ projectId, steps, onRefresh }: ExperimentPhase
       ))}
 
       {pendingSteps.map((step) => (
-        <div key={step.id} className="rounded-md border border-border/50 bg-muted/30 p-3">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-medium">{step.title}</span>
-              <span className="text-[10px] text-muted-foreground">{step.status === "APPROVED" ? "Queued" : "Up next"}</span>
-            </div>
-            <div className="flex items-center gap-0.5">
-              <button
-                onClick={() => handleExecute(step.id)}
-                disabled={!!loadingStep}
-                className="inline-flex h-6 items-center gap-1 rounded-md bg-primary text-primary-foreground px-2 text-[11px] hover:bg-primary/90 transition-colors disabled:opacity-50"
-              >
-                {loadingStep === step.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Play className="h-3 w-3" />}
-                Run
-              </button>
-            </div>
-          </div>
-        </div>
+        <PendingStepRow
+          key={step.id}
+          step={step}
+          hosts={hosts}
+          loading={loadingStep === step.id}
+          disabled={!!loadingStep}
+          onExecute={handleExecute}
+        />
       ))}
 
       {/* Generated Scripts */}
@@ -255,9 +360,20 @@ export function ExperimentPhase({ projectId, steps, onRefresh }: ExperimentPhase
                     {job.host.gpuType && <span className="text-[10px] text-muted-foreground">{job.host.gpuType}</span>}
                     <span className="text-[10px] text-blue-400">{job.status}</span>
                   </div>
-                  <button onClick={() => handleCancelJob(job.id)} className="text-[10px] text-muted-foreground hover:text-destructive transition-colors">
-                    Cancel
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => handleRunLocally(job)}
+                      disabled={runningLocally === job.id}
+                      className="inline-flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
+                      title="Cancel remote and run locally"
+                    >
+                      {runningLocally === job.id ? <Loader2 className="h-2.5 w-2.5 animate-spin" /> : <Monitor className="h-2.5 w-2.5" />}
+                      Run locally
+                    </button>
+                    <button onClick={() => handleCancelJob(job.id)} className="text-[10px] text-muted-foreground hover:text-destructive transition-colors">
+                      Cancel
+                    </button>
+                  </div>
                 </div>
                 <pre className="mt-1 text-[9px] text-muted-foreground/60 font-mono bg-background/30 rounded px-1.5 py-0.5 whitespace-pre-wrap break-all">
                   $ {job.command}
@@ -271,46 +387,64 @@ export function ExperimentPhase({ projectId, steps, onRefresh }: ExperimentPhase
             ))}
 
             {/* Completed runs — compact table */}
-            {completedJobs.map((job) => (
-              <div key={job.id}>
-                <button
-                  onClick={() => toggleJob(job.id)}
-                  className="flex items-center gap-2 w-full py-1 text-left group"
-                >
-                  {job.status === "COMPLETED"
-                    ? <Check className="h-3 w-3 text-emerald-500 shrink-0" />
-                    : <AlertCircle className="h-3 w-3 text-destructive shrink-0" />
-                  }
-                  <span className="text-[11px] flex-1 truncate">{job.host.alias}</span>
-                  <span className={`text-[10px] ${job.status === "COMPLETED" ? "text-emerald-500" : "text-destructive"}`}>
-                    {job.status.toLowerCase()}
-                  </span>
-                  {job.completedAt && (
-                    <span className="text-[9px] text-muted-foreground/50">
-                      {new Date(job.completedAt).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
-                    </span>
-                  )}
-                  <ChevronDown className={`h-2.5 w-2.5 text-muted-foreground/40 transition-transform ${expandedJobs.has(job.id) ? "rotate-180" : ""}`} />
-                </button>
-                {expandedJobs.has(job.id) && (
-                  <div className="ml-5 mb-1">
-                    <pre className="text-[9px] text-muted-foreground/60 font-mono bg-background/30 rounded px-1.5 py-0.5 mb-1 whitespace-pre-wrap break-all">
-                      $ {job.command}
-                    </pre>
-                    {job.stdout && (
-                      <pre className="text-[10px] text-muted-foreground bg-muted/50 rounded p-2 max-h-32 overflow-auto whitespace-pre-wrap font-mono">
-                        {job.stdout.split("\n").filter(Boolean).slice(-20).join("\n")}
-                      </pre>
-                    )}
-                    {job.stderr && job.status === "FAILED" && (
-                      <pre className="mt-1 text-[10px] text-destructive/70 bg-destructive/5 rounded p-2 max-h-16 overflow-auto whitespace-pre-wrap font-mono">
-                        {job.stderr.split("\n").filter(Boolean).slice(-10).join("\n")}
-                      </pre>
+            {completedJobs.map((job, idx) => {
+              // Auto-expand the most recent failed/cancelled job
+              const isLatestFailed = job.status !== "COMPLETED" && idx === completedJobs.findIndex((j) => j.status !== "COMPLETED");
+              const isExpanded = expandedJobs.has(job.id) || isLatestFailed;
+
+              return (
+                <div key={job.id}>
+                  <div className="flex items-center gap-2 w-full py-1 group">
+                    <button
+                      onClick={() => toggleJob(job.id)}
+                      className="flex items-center gap-2 flex-1 text-left min-w-0"
+                    >
+                      {job.status === "COMPLETED"
+                        ? <Check className="h-3 w-3 text-emerald-500 shrink-0" />
+                        : <AlertCircle className="h-3 w-3 text-destructive shrink-0" />
+                      }
+                      <span className="text-[11px] flex-1 truncate">{job.host.alias}</span>
+                      <span className={`text-[10px] ${job.status === "COMPLETED" ? "text-emerald-500" : "text-destructive"}`}>
+                        {job.status.toLowerCase()}
+                      </span>
+                      {job.completedAt && (
+                        <span className="text-[9px] text-muted-foreground/50">
+                          {new Date(job.completedAt).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+                        </span>
+                      )}
+                      <ChevronDown className={`h-2.5 w-2.5 text-muted-foreground/40 transition-transform ${isExpanded ? "rotate-180" : ""}`} />
+                    </button>
+                    {job.status === "FAILED" && (
+                      <button
+                        onClick={() => handleRetryJob(job)}
+                        disabled={deploying}
+                        className="inline-flex items-center gap-1 rounded text-[10px] text-muted-foreground hover:text-foreground px-1.5 py-0.5 hover:bg-muted transition-colors shrink-0"
+                        title="Retry this job"
+                      >
+                        <RotateCcw className="h-2.5 w-2.5" /> Retry
+                      </button>
                     )}
                   </div>
-                )}
-              </div>
-            ))}
+                  {isExpanded && (
+                    <div className="ml-5 mb-1">
+                      <pre className="text-[9px] text-muted-foreground/60 font-mono bg-background/30 rounded px-1.5 py-0.5 mb-1 whitespace-pre-wrap break-all">
+                        $ {job.command}
+                      </pre>
+                      {job.stdout && (
+                        <pre className="text-[10px] text-muted-foreground bg-muted/50 rounded p-2 max-h-32 overflow-auto whitespace-pre-wrap font-mono">
+                          {job.stdout.split("\n").filter(Boolean).slice(-20).join("\n")}
+                        </pre>
+                      )}
+                      {job.stderr && job.status !== "COMPLETED" && (
+                        <pre className="mt-1 text-[10px] text-destructive/70 bg-destructive/5 rounded p-2 max-h-24 overflow-auto whitespace-pre-wrap font-mono">
+                          {job.stderr.split("\n").filter(Boolean).slice(-10).join("\n")}
+                        </pre>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
 
             {/* Local run steps (no remote job) — compact list */}
             {runSteps

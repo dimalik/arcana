@@ -16,7 +16,9 @@ import {
   Loader2,
   Maximize2,
   X,
+  ChevronDown,
 } from "lucide-react";
+import { MarkdownRenderer } from "@/components/ui/markdown-renderer";
 
 const TYPE_CONFIG: Record<string, { icon: typeof Lightbulb; color: string }> = {
   breakthrough: { icon: Lightbulb, color: "text-amber-500" },
@@ -264,23 +266,50 @@ function ActivityTab({ entries, onAddNote }: { entries: LogEntry[]; onAddNote?: 
         {entries.length === 0 ? (
           <p className="text-[10px] text-muted-foreground/50 text-center py-4">No log entries yet</p>
         ) : (
-          entries.map((entry) => {
-            const config = TYPE_CONFIG[entry.type] || TYPE_CONFIG.observation;
-            const Icon = config.icon;
-            return (
-              <div key={entry.id} className="flex items-start gap-1.5 group">
-                <Icon className={`h-3 w-3 mt-0.5 shrink-0 ${config.color}`} />
-                <div className="min-w-0 flex-1">
-                  <p className="text-[11px] text-foreground/80 leading-snug line-clamp-2 group-hover:line-clamp-none">
-                    {entry.content}
-                  </p>
-                  <p className="text-[9px] text-muted-foreground/50 mt-0.5">
-                    {new Date(entry.createdAt).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
-                  </p>
-                </div>
-              </div>
-            );
-          })
+          entries.map((entry) => (
+            <LogEntryItem key={entry.id} entry={entry} />
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Log entry (expandable, markdown-rendered) ─────────────────
+
+function LogEntryItem({ entry }: { entry: LogEntry }) {
+  const [expanded, setExpanded] = useState(false);
+  const config = TYPE_CONFIG[entry.type] || TYPE_CONFIG.observation;
+  const Icon = config.icon;
+
+  // Multi-line content (e.g., dead_end with stderr) is expandable
+  const hasDetails = entry.content.includes("\n") || entry.content.length > 120;
+  const firstLine = entry.content.split("\n")[0];
+  const showContent = expanded ? entry.content : firstLine;
+
+  return (
+    <div className="group">
+      <div
+        className={`flex items-start gap-1.5 ${hasDetails ? "cursor-pointer" : ""}`}
+        onClick={hasDetails ? () => setExpanded((e) => !e) : undefined}
+      >
+        <Icon className={`h-3 w-3 mt-0.5 shrink-0 ${config.color}`} />
+        <div className="min-w-0 flex-1">
+          {expanded ? (
+            <div className="text-[11px] text-foreground/80 leading-snug [&_pre]:text-[10px] [&_pre]:bg-muted/50 [&_pre]:rounded [&_pre]:p-1.5 [&_pre]:my-1 [&_pre]:overflow-x-auto [&_code]:text-[10px]">
+              <MarkdownRenderer content={showContent} />
+            </div>
+          ) : (
+            <p className="text-[11px] text-foreground/80 leading-snug truncate">
+              {firstLine}
+            </p>
+          )}
+          <p className="text-[9px] text-muted-foreground/50 mt-0.5">
+            {new Date(entry.createdAt).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+          </p>
+        </div>
+        {hasDetails && (
+          <ChevronDown className={`h-2.5 w-2.5 text-muted-foreground/40 shrink-0 mt-1 transition-transform ${expanded ? "" : "-rotate-90"}`} />
         )}
       </div>
     </div>

@@ -21,6 +21,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     const data: Record<string, unknown> = {};
     if (body.status) data.status = body.status;
     if (body.output !== undefined) data.output = typeof body.output === "string" ? body.output : JSON.stringify(body.output);
+    if (body.input !== undefined) data.input = typeof body.input === "string" ? body.input : JSON.stringify(body.input);
     if (body.agentSessionId !== undefined) data.agentSessionId = body.agentSessionId;
     if (body.discoveryId !== undefined) data.discoveryId = body.discoveryId;
     if (body.synthesisId !== undefined) data.synthesisId = body.synthesisId;

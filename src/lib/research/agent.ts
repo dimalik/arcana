@@ -16,6 +16,8 @@ import { searchAllSources } from "@/lib/import/semantic-scholar";
 import { findAndDownloadPdf } from "@/lib/import/pdf-finder";
 import { processingQueue } from "@/lib/processing/queue";
 import { submitRemoteJob, probeGpus, quickRemoteCommand } from "./remote-executor";
+import { classifyTaskCategory } from "./task-classifier";
+import { getAllResourcePreferences, recordResourceChoice, CONFIDENCE_THRESHOLD } from "./resource-preferences";
 import { exec, spawn } from "child_process";
 import { promisify } from "util";
 import { writeFile, mkdir, readFile, readdir, stat, appendFile } from "fs/promises";
@@ -68,6 +70,14 @@ export interface AgentEvent {
   args?: unknown;
   result?: unknown;
   stepNumber?: number;
+  /** Heartbeat metadata — tells client what the server is actually doing */
+  activity?: {
+    phase: "generating" | "tool_running" | "thinking" | "idle";
+    tokens?: number;
+    tool?: string;
+    stepCount?: number;
+    lastEventAgoMs?: number;
+  };
 }
 
 // ── Agent entry point ────────────────────────────────────────────
@@ -82,8 +92,35 @@ export function startResearchAgent(
   return new ReadableStream({
     async start(controller) {
       let closed = false;
+
+      // Server-side activity tracking — shared with heartbeat
+      const activity = {
+        phase: "thinking" as "generating" | "tool_running" | "thinking" | "idle",
+        tokens: 0,
+        tool: undefined as string | undefined,
+        stepCount: 0,
+        lastEventAt: Date.now(),
+      };
+
       const emit = (event: AgentEvent) => {
         if (closed) return;
+        // Update activity tracker based on event type
+        activity.lastEventAt = Date.now();
+        if (event.type === "text") {
+          activity.phase = "generating";
+          activity.tokens += (event.content || "").length;
+        } else if (event.type === "tool_call") {
+          activity.phase = "tool_running";
+          activity.tool = event.toolName;
+        } else if (event.type === "tool_result") {
+          activity.phase = "thinking";
+          activity.tool = undefined;
+        } else if (event.type === "step_done") {
+          activity.stepCount = event.stepNumber || activity.stepCount + 1;
+          activity.phase = "thinking";
+        } else if (event.type === "thinking") {
+          activity.phase = "thinking";
+        }
         try {
           controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
         } catch {
@@ -91,16 +128,26 @@ export function startResearchAgent(
         }
       };
 
-      // Heartbeat every 15s so the client knows the connection is alive
+      // Heartbeat every 8s with activity metadata
       const heartbeat = setInterval(() => {
         if (closed) { clearInterval(heartbeat); return; }
         try {
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "heartbeat" })}\n\n`));
+          const hb: AgentEvent = {
+            type: "heartbeat",
+            activity: {
+              phase: activity.phase,
+              tokens: activity.tokens,
+              tool: activity.tool,
+              stepCount: activity.stepCount,
+              lastEventAgoMs: Date.now() - activity.lastEventAt,
+            },
+          };
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify(hb)}\n\n`));
         } catch {
           closed = true;
           clearInterval(heartbeat);
         }
-      }, 15_000);
+      }, 8_000);
 
       try {
         await runAgent(projectId, userId, userMessage || null, emit);
@@ -213,9 +260,17 @@ async function runAgent(
     console.warn("[research-agent] Could not load process memories:", (err as Error).message);
   }
 
+  // 5c. Load resource preferences
+  let resourcePreferences: { taskCategory: string; preference: string; usageCount: number }[] = [];
+  try {
+    resourcePreferences = await getAllResourcePreferences(userId);
+  } catch (err) {
+    console.warn("[research-agent] Could not load resource preferences:", (err as Error).message);
+  }
+
   // 6. Build context
   const papers = project.collection?.papers.map((cp) => cp.paper) || [];
-  const systemPrompt = buildSystemPrompt(project, papers, workDir, remoteHosts, capabilities, gpuInfo, processMemories);
+  const systemPrompt = buildSystemPrompt(project, papers, workDir, remoteHosts, capabilities, gpuInfo, processMemories, resourcePreferences);
   const messages = buildMessages(project, papers, userMessage, researchLog);
 
   // 6. Get model
@@ -257,6 +312,15 @@ async function runAgent(
   const MAX_STEPS = 80;
   let stepCount = 0;
 
+  // Track tool usage for literature consultation nudges
+  let experimentsSinceLastLitReview = 0;
+  let totalExperimentsRun = 0;
+  let totalPaperConsultations = 0;
+  const LIT_TOOLS = new Set(["search_papers", "read_paper", "search_library", "query_insights"]);
+  const EXPERIMENT_TOOLS = new Set(["execute_command", "execute_remote"]);
+
+  emit({ type: "thinking", content: "Analyzing project state and planning next steps..." });
+
   const result = streamText({
     model,
     system: systemPrompt,
@@ -265,6 +329,18 @@ async function runAgent(
     stopWhen: stepCountIs(MAX_STEPS),
     onStepFinish: async ({ text, toolCalls }) => {
       stepCount++;
+
+      // Track tool usage patterns for nudges
+      for (const tc of toolCalls || []) {
+        if (LIT_TOOLS.has(tc.toolName)) {
+          experimentsSinceLastLitReview = 0;
+          totalPaperConsultations++;
+        }
+        if (EXPERIMENT_TOOLS.has(tc.toolName)) {
+          experimentsSinceLastLitReview++;
+          totalExperimentsRun++;
+        }
+      }
 
       // Persist important events to research log
       if (text && text.length > 10) {
@@ -295,13 +371,20 @@ async function runAgent(
       // Inject step budget reminders at key thresholds
       const remaining = MAX_STEPS - stepCount;
       if (stepCount === 15 && remaining > 50) {
-        emit({ type: "text", content: "\n\n[System: 15 steps used, 65+ remaining. You have plenty of budget. If you've only run 1 experiment, that's not enough — you should be designing follow-ups, ablations, and alternative approaches. Keep going.]\n" });
-      } else if (remaining === 30) {
-        emit({ type: "text", content: "\n\n[System: 30 steps remaining. You should have multiple experiments completed by now. If not, focus on running more experiments rather than analysis. If yes, start thinking about what gaps remain.]\n" });
-      } else if (remaining === 15) {
-        emit({ type: "text", content: "\n\n[System: 15 steps remaining. Start wrapping up: run any final critical experiments, then update all hypotheses with evidence, log breakthroughs, and produce a synthesis.]\n" });
-      } else if (remaining === 5) {
-        emit({ type: "text", content: "\n\n[System: 5 steps remaining. Final wrap-up NOW: update_hypothesis for all hypotheses, log_finding for your key results, then summarize.]\n" });
+        emit({ type: "text", content: "\n\n[System: 15 steps used this session. If you've only run 1 experiment, that's not enough — you should be designing follow-ups, ablations, and alternative approaches. Keep going.]\n" });
+      } else if (remaining === 10) {
+        emit({ type: "text", content: "\n\n[System: 10 steps left in this session. Log your findings with log_finding and update hypotheses. The session will auto-continue so you won't lose progress — but save your key results now.]\n" });
+      } else if (remaining === 3) {
+        emit({ type: "text", content: "\n\n[System: 3 steps left in this session. Quickly log any unrecorded findings. The session will auto-restart and you'll continue from where you left off.]\n" });
+      }
+
+      // Literature consultation nudges — trigger when running many experiments without consulting papers
+      if (experimentsSinceLastLitReview >= 3) {
+        emit({ type: "text", content: `\n\n[System: You've run ${experimentsSinceLastLitReview} experiments without consulting the literature. Before designing another experiment, search for papers or check your library for relevant techniques. Use search_library or search_papers with a SPECIFIC question about what you're observing. Good research is literature-informed, not trial-and-error.]\n` });
+      }
+      // Nudge if low paper consultation ratio overall
+      if (totalExperimentsRun >= 4 && totalPaperConsultations === 0) {
+        emit({ type: "text", content: "\n\n[System: You have not consulted any papers during this session. Use search_library to check if existing papers in your collection address the patterns you're seeing. Use search_papers to find new papers on specific sub-problems. This is research, not blind experimentation.]\n" });
       }
 
       // Emit thinking indicator
@@ -311,35 +394,48 @@ async function runAgent(
 
   // 7. Forward stream events to SSE
   let lastToolName: string | undefined;
-  for await (const chunk of result.fullStream) {
-    switch (chunk.type) {
-      case "text-delta":
-        emit({ type: "text", content: chunk.text });
-        break;
-      case "tool-call":
-        lastToolName = chunk.toolName;
-        emit({
-          type: "tool_call",
-          toolName: chunk.toolName,
-          toolCallId: chunk.toolCallId,
-          args: chunk.input,
-        });
-        break;
-      case "tool-result":
-        emit({
-          type: "tool_result",
-          toolName: chunk.toolName,
-          toolCallId: chunk.toolCallId,
-          result: typeof chunk.output === "string"
-            ? chunk.output.slice(0, 2000)
-            : JSON.stringify(chunk.output).slice(0, 2000),
-        });
-        break;
+  try {
+    for await (const chunk of result.fullStream) {
+      switch (chunk.type) {
+        case "text-delta":
+          emit({ type: "text", content: chunk.text });
+          break;
+        case "tool-call":
+          lastToolName = chunk.toolName;
+          emit({
+            type: "tool_call",
+            toolName: chunk.toolName,
+            toolCallId: chunk.toolCallId,
+            args: chunk.input,
+          });
+          break;
+        case "tool-result":
+          emit({
+            type: "tool_result",
+            toolName: chunk.toolName,
+            toolCallId: chunk.toolCallId,
+            result: typeof chunk.output === "string"
+              ? chunk.output.slice(0, 2000)
+              : JSON.stringify(chunk.output).slice(0, 2000),
+          });
+          break;
+      }
     }
+  } catch (streamErr) {
+    // stopWhen termination throws "terminated" — this is normal, not an error
+    const msg = streamErr instanceof Error ? streamErr.message : String(streamErr);
+    if (msg !== "terminated") throw streamErr;
+    emit({ type: "text", content: `\n\n[Session reached ${stepCount} step limit. Auto-continuing...]` });
   }
 
   // 8. Final summary
-  const finalText = await result.text;
+  // result.text may throw "terminated" when stopWhen triggers — that's normal
+  let finalText = "";
+  try {
+    finalText = await result.text;
+  } catch {
+    // stopWhen termination — not an error
+  }
   if (finalText) {
     await prisma.researchLogEntry.create({
       data: {
@@ -361,6 +457,7 @@ function buildSystemPrompt(
   capabilities?: { name: string; description: string; instructions: string }[],
   gpuInfo?: { alias: string; gpuCount: number; gpus: { index: number; name: string; memoryTotal: string; memoryFree: string }[]; summary: string }[],
   processMemories?: { category: string; lesson: string; context: string | null }[],
+  resourcePreferences?: { taskCategory: string; preference: string; usageCount: number }[],
 ): string {
   // Build detailed GPU info section
   let gpuSection = "";
@@ -407,20 +504,35 @@ ${multiGpuHost ? `- On "${multiGpuHost.alias}" you have ${multiGpuHost.gpuCount}
 5. Try a smaller model variant`}`;
   }
 
+  // Build resource preference guidance
+  const prefSection = (() => {
+    if (!resourcePreferences || resourcePreferences.length === 0) return "";
+    const lines = resourcePreferences.map((p) => {
+      const label = p.preference === "local" ? "use execute_command (local)"
+        : p.preference.startsWith("remote:") ? `use execute_remote on "${p.preference.slice(7)}"`
+        : p.preference === "remote" ? "use execute_remote"
+        : "no preference yet";
+      const conf = p.usageCount >= CONFIDENCE_THRESHOLD ? `[${p.usageCount} uses — auto-apply]` : `[${p.usageCount} use${p.usageCount !== 1 ? "s" : ""} — not yet confirmed]`;
+      return `- ${p.taskCategory.replace(/_/g, " ")} tasks: ${label} ${conf}`;
+    });
+    return `\n### Resource Preferences (learned from user choices)
+${lines.join("\n")}
+
+Follow confirmed preferences (3+ uses) automatically. The user can still override per-step.\n`;
+  })();
+
   const remoteSection = remoteHosts.length > 0
     ? `\n## Remote GPU Servers (IMPORTANT)
 You have ${remoteHosts.length} remote server(s) configured:
 ${remoteHosts.map((h) => `- "${h.alias}"${h.gpuType ? ` (${h.gpuType})` : ""}`).join("\n")}
 ${gpuSection}
-
-**You MUST use execute_remote for running experiments** (training scripts, evaluation scripts). The remote servers have GPUs. But for quick checks — reading log files, listing results, checking file contents on the remote — use **check_remote** instead. It's a direct SSH command with no file sync, so it's instant. Only use execute_command for local-only tasks (editing files, etc.).
-
+${prefSection}
 **Tool selection guide:**
-- \`execute_remote\` → run experiments (syncs files, creates job, polls for completion)
+- \`execute_remote\` → run experiments on GPU servers (syncs files, creates job, polls for completion)
 - \`check_remote\` → read files/logs on remote, list results, check status (SSH only, instant)
-- \`execute_command\` → local-only tasks (should be rare when remotes are available)
+- \`execute_command\` → local tasks (editing files, data prep, lightweight compute)
 
-### Environment Setup (IMPORTANT — do this ONCE, not every run)
+${!resourcePreferences || resourcePreferences.length === 0 ? "**Default: use execute_remote for running experiments** (training, evaluation). Use execute_command for local-only tasks.\n" : ""}### Environment Setup (IMPORTANT — do this ONCE, not every run)
 On the FIRST experiment run, create a virtual environment and install dependencies:
 \`\`\`
 python3 -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt && python3 experiment.py
@@ -441,17 +553,17 @@ Do NOT reinstall packages every time — the venv persists.`;
 
   return `You are an autonomous research agent — a relentless, self-critical scientist. You don't just run one experiment and write it up. You run experiments, interrogate the results, find weaknesses, design better experiments, and iterate until you have genuine, novel findings backed by evidence.
 
-## CRITICAL: Do NOT stop early
-You have a budget of 80 steps. USE THEM. A single experiment is a first draft, not a result. Real research requires MANY experiments: baselines, ablations, parameter sweeps, alternative approaches, follow-ups. You should be running 5-10+ experiments per session, not 1-2.
+## CRITICAL: Do NOT stop — you run continuously
+You have a budget of 80 steps per session, but sessions auto-continue. You will NOT be stopped unless the user stops you. This means you should ALWAYS have a next action planned. Never "wrap up" or "conclude" — instead, keep pushing deeper: more experiments, more papers, more ablations, more hypotheses.
 
-**You are NOT done until:**
-- You have run at least 3 substantially different experiments (not just reruns with bug fixes)
-- Every hypothesis has been marked SUPPORTED or REFUTED with specific numerical evidence
-- You have compared your results against at least 2 literature baselines with specific numbers
-- You have identified and addressed at least one weakness in your approach
-- You have found at least one genuinely interesting insight (not just "our method works")
+**You are NEVER done on your own.** The user decides when to stop. Your job is to keep making progress:
+- Run experiments, analyze results, consult literature, design follow-ups — in a continuous loop
+- If all hypotheses are resolved, formulate NEW ones based on what you've learned
+- If results are solid, look for edge cases, failure modes, or generalization tests
+- If you've exhausted one direction, search for papers that suggest a new angle
+- Always narrate what you're doing and why — the user is watching your status. Say "Now I'll run experiment X to test Y because Z" before each major action.
 
-**NEVER say "let's run a final experiment" or "in conclusion" until you are past step 60.** If you catch yourself wanting to wrap up early, ask: "What would a skeptical reviewer say about these results?" Then design an experiment to address that criticism.
+**NEVER say "let's run a final experiment" or "in conclusion."** If you catch yourself wanting to wrap up, ask: "What would a skeptical reviewer say about these results?" Then design an experiment to address that criticism.
 
 ## Your Research Project
 Title: ${project.title}
@@ -504,6 +616,7 @@ ${(() => {
 - Identify what the literature DOESN'T answer. That's where you contribute.
 
 ### Phase 2: Experiment
+- **Before EVERY experiment, check the literature.** Use \`search_library\` to find relevant techniques in papers you already have. Use \`search_papers\` when you need new papers on a specific sub-problem. Use \`read_paper\` to extract exact methods, hyperparameters, and baselines from the most relevant papers. The experiment you design should cite at least one paper's approach. Never design an experiment from scratch when a paper has already solved part of the problem — build on their work.
 - **Before writing code, search the web for existing tools.** Use \`web_search\` to find libraries that already do what you need (e.g., \`trl\` for RLHF, \`peft\` for parameter-efficient fine-tuning, \`accelerate\` for distributed training). Read their documentation with \`fetch_webpage\`. Don't rewrite from scratch what a mature library already provides — use pip packages.
 - **USE REAL DATASETS.** When papers mention specific datasets (GLUE, SQuAD, MMLU, ImageNet, WMT, etc.), use those SAME datasets so your results are directly comparable. Download them via HuggingFace \`datasets\`, \`torchvision\`, or direct URLs. NEVER generate tiny synthetic toy data as a substitute for real benchmarks — the results would be scientifically meaningless.
 - If the real dataset is very large, use a well-known subset or split (e.g., validation set, first 1000 examples) and note this explicitly. A subset of real data is infinitely better than fake data.
@@ -601,8 +714,8 @@ When you've completed a full research cycle and have solid findings, use \`compl
 ## Critical Rules
 - Write COMPLETE, RUNNABLE Python code. No placeholders. Always include requirements.txt.
 - **NEVER move on after a failed experiment.** Read the error, fix the code, re-run. Only analyze results from successful (exit 0) runs.
-- **NEVER stop after one or two experiments.** One experiment is not research — it's a first draft. You must run ablations, parameter sweeps, alternative approaches, and follow-ups. Aim for 5-10+ experiments per session. If you find yourself writing a summary after 2 experiments, STOP and design more experiments instead.
-- **NEVER say "final experiment" before step 60.** You have 80 steps — use them. Early wrapping up wastes the user's compute budget and produces shallow results.
+- **NEVER stop after one or two experiments.** One experiment is not research — it's a first draft. You must run ablations, parameter sweeps, alternative approaches, and follow-ups. If you find yourself writing a summary after 2 experiments, STOP and design more experiments instead.
+- **NEVER say "final experiment" or "in conclusion".** You run continuously. Always have a next action planned.
 - **NEVER claim a result without comparing to a baseline.** "We got 92% accuracy" is meaningless without "compared to baseline X which gets Y%."
 - **NEVER accept results without statistical rigor.** Run experiments multiple times with different seeds. Report mean and standard deviation.
 - **NEVER generate synthetic toy data when a real dataset exists.** If a paper evaluates on GLUE, use GLUE. If on SQuAD, use SQuAD. Generating 50 random samples to "simulate" a dataset invalidates the entire experiment. Use \`datasets\` library, \`torchvision.datasets\`, or direct download URLs from the papers.
@@ -614,7 +727,8 @@ When you've completed a full research cycle and have solid findings, use \`compl
 - Use log_finding liberally: record hypotheses, findings, decisions, and breakthroughs. This is your lab notebook.
 - Use update_hypothesis to track evidence for/against each hypothesis as you go.
 - **NEVER design a follow-up experiment after failure without consulting literature first.** Use search_library + query_insights before retrying. Blind trial-and-error is not science.
-- Only start wrapping up when you have ~15 steps remaining (the system will remind you). Until then, keep experimenting.
+- **Consult papers CONTINUOUSLY, not just at the start.** Every 2-3 experiments, search your library or find new papers to inform your next steps. As results come in, the questions change — your literature review should evolve too. Use \`search_library\` with SPECIFIC questions about your current results (not the original broad topic). If a result surprises you, find a paper that explains why.
+- **NEVER wrap up or conclude on your own.** Sessions auto-continue. Always plan your next experiment. The user will stop you when they're satisfied.
 
 ## Current Knowledge
 ${papers.length > 0 ? `Papers in collection (${papers.length}):\n${papers.map((p) => `- "${p.title}"${p.abstract ? `: ${p.abstract.slice(0, 200)}` : ""}${p.summary ? `\n  Summary: ${p.summary.slice(0, 200)}` : ""}`).join("\n")}` : "No papers collected yet."}`;
@@ -1034,6 +1148,10 @@ function createTools(
                 { stdout: stdout.slice(-2000), stderr: stderr.slice(-500), exitCode: code, logFile },
                 "experiment",
               );
+              if (succeeded) {
+                const taskCat = classifyTaskCategory(command);
+                recordResourceChoice(userId, taskCat, "local", command.slice(0, 80), projectId).catch(() => {});
+              }
             }
 
             if (succeeded) {
@@ -1194,6 +1312,8 @@ function createTools(
             emit({ type: "tool_output", toolName: "execute_remote", content: `\n✓ Job completed (exit 0) on ${host.alias}` });
             const result = `Job completed successfully on ${host.alias}.\n\nstdout:\n${(job.stdout || "").slice(-5000)}\n\n${job.stderr ? `stderr:\n${job.stderr.slice(-1000)}` : ""}`;
             await recordStep("run_experiment", `Remote (${host.alias}): ${command.slice(0, 60)}`, "COMPLETED", { host: host.alias, stdout: (job.stdout || "").slice(-2000), stderr: (job.stderr || "").slice(-500) });
+            const taskCat = classifyTaskCategory(command);
+            recordResourceChoice(userId, taskCat, `remote:${host.alias}`, command.slice(0, 80), projectId).catch(() => {});
             return result;
           }
           if (job.status === "FAILED" || job.status === "CANCELLED") {

@@ -7,6 +7,11 @@ import {
 } from "lucide-react";
 import { MarkdownRenderer } from "@/components/ui/markdown-renderer";
 
+interface RemoteHostOption {
+  alias: string;
+  isDefault: boolean;
+}
+
 interface StepCardProps {
   step: {
     id: string;
@@ -15,9 +20,10 @@ interface StepCardProps {
     title: string;
     description: string | null;
     output: string | null;
+    input?: string | null;
   };
   onSkip?: (stepId: string) => void;
-  onExecute?: (stepId: string) => void;
+  onExecute?: (stepId: string, resourcePreference?: string) => void;
   onRestore?: (stepId: string) => void;
   onContinue?: () => void;
   onSearchMore?: () => void;
@@ -29,13 +35,23 @@ interface StepCardProps {
   /** Whether there's a next step to continue to */
   hasNextStep?: boolean;
   nextStepTitle?: string;
+  /** Available remote hosts for resource selector */
+  remoteHosts?: RemoteHostOption[];
 }
 
 export function StepCard({
   step, onSkip, onExecute, onRestore, onContinue, onSearchMore, onDeploy,
-  loading, compact, isLatestCompleted, hasNextStep, nextStepTitle,
+  loading, compact, isLatestCompleted, hasNextStep, nextStepTitle, remoteHosts,
 }: StepCardProps) {
   const [expanded, setExpanded] = useState(false);
+
+  // Parse any pre-filled resource preference from step input
+  const parsedInput = (() => {
+    if (!step.input) return null;
+    try { return JSON.parse(step.input); } catch { return null; }
+  })();
+  const defaultPref = parsedInput?.resourcePreference || "auto";
+  const [resourcePref, setResourcePref] = useState<string>(defaultPref);
 
   const parsedOutput = (() => {
     if (!step.output) return null;
@@ -256,6 +272,8 @@ export function StepCard({
   }
 
   // ── PROPOSED or APPROVED — waiting to run ──
+  const showResourceSelector = remoteHosts && remoteHosts.length > 0;
+
   return (
     <div className="rounded-md border border-border/50 bg-muted/30 p-3">
       <div className="flex items-center justify-between">
@@ -266,10 +284,26 @@ export function StepCard({
             {step.status === "APPROVED" ? "Queued" : "Up next"}
           </span>
         </div>
-        <div className="flex items-center gap-0.5">
+        <div className="flex items-center gap-1">
+          {showResourceSelector && (
+            <select
+              value={resourcePref}
+              onChange={(e) => setResourcePref(e.target.value)}
+              className="h-6 rounded-md border border-border bg-background px-1 text-[10px] text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+              title="Where to run"
+            >
+              <option value="auto">Auto</option>
+              <option value="local">Local</option>
+              {remoteHosts.map((h) => (
+                <option key={h.alias} value={`remote:${h.alias}`}>
+                  {h.alias}
+                </option>
+              ))}
+            </select>
+          )}
           {onExecute && (
             <button
-              onClick={() => onExecute(step.id)}
+              onClick={() => onExecute(step.id, resourcePref !== "auto" ? resourcePref : undefined)}
               disabled={loading}
               className="inline-flex h-6 items-center gap-1 rounded-md bg-primary text-primary-foreground px-2 text-[11px] hover:bg-primary/90 transition-colors disabled:opacity-50"
             >

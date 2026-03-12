@@ -39,6 +39,16 @@ function parseOutput(output: string | null) {
   try { return JSON.parse(output); } catch { return null; }
 }
 
+/** Extract the first experiment/number from text for sorting (e.g., "Experiment 14b" → 14) */
+function extractSortKey(text: string): number {
+  const m = text.match(/(?:exp(?:eriment)?)\s*(\d+)/i);
+  return m ? parseInt(m[1], 10) : Infinity;
+}
+
+function sortByExperimentNumber<T extends { content: string }>(items: T[]): T[] {
+  return [...items].sort((a, b) => extractSortKey(a.content) - extractSortKey(b.content));
+}
+
 export function ReflectionPhase({ projectId, steps, currentIteration, previousIterations, onRefresh }: ReflectionPhaseProps) {
   const { autoRunning, handleAutoRun } = useStepActions(projectId, onRefresh);
   const [reflection, setReflection] = useState(currentIteration?.reflection || "");
@@ -114,19 +124,21 @@ export function ReflectionPhase({ projectId, steps, currentIteration, previousIt
   const experimentsFailed = failedSteps.filter((s) => s.type === "run_experiment");
   const hypothesesFormed = completedSteps.filter((s) => s.type === "formulate_hypothesis");
 
-  const findings = completedSteps
-    .filter((s) => s.type === "analyze_results")
-    .map((s) => {
-      const out = parseOutput(s.output);
-      return {
-        content: out?.finding || s.title,
-        type: out?.type || "finding",
-        status: out?.status,
-      };
-    });
+  const findings = sortByExperimentNumber(
+    completedSteps
+      .filter((s) => s.type === "analyze_results")
+      .map((s) => {
+        const out = parseOutput(s.output);
+        return {
+          content: out?.finding || s.title,
+          type: out?.type || "finding",
+          status: out?.status,
+        };
+      }),
+  );
 
-  const breakthroughs = findings.filter((f) => f.type === "breakthrough");
-  const hypothesisResults = findings.filter((f) => f.status);
+  const breakthroughs = sortByExperimentNumber(findings.filter((f) => f.type === "breakthrough"));
+  const hypothesisResults = sortByExperimentNumber(findings.filter((f) => f.status));
 
   return (
     <div className="space-y-4">
