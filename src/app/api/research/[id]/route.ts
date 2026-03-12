@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireUserId } from "@/lib/paper-auth";
+import { cleanupStaleJobs } from "@/lib/research/remote-executor";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -9,6 +10,11 @@ export async function GET(_request: NextRequest, { params }: Params) {
   try {
     const userId = await requireUserId();
     const { id } = await params;
+
+    // Auto-cleanup stale remote jobs for this project (non-blocking)
+    cleanupStaleJobs(id).catch((err) =>
+      console.warn("[research/[id]] stale cleanup error:", err)
+    );
 
     const project = await prisma.researchProject.findFirst({
       where: { id, userId },

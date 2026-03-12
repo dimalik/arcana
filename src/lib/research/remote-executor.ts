@@ -67,7 +67,7 @@ async function sshExec(host: HostConfig, cmd: string): Promise<string> {
   const args = ["-T", ...sshArgs(host), sshTarget(host), "--", cmd];
 
   return new Promise((resolve, reject) => {
-    execFileCb("ssh", args, { timeout: 60_000, maxBuffer: 10 * 1024 * 1024 }, (err, stdout, stderr) => {
+    execFileCb("ssh", args, { timeout: 120_000, maxBuffer: 10 * 1024 * 1024 }, (err, stdout, stderr) => {
       const out = (stdout || "").trim();
       const errOut = (stderr || "").trim();
 
@@ -337,8 +337,11 @@ async function runAndPoll(
       data: { remotePid: pid },
     });
 
-    // 3. Poll until done
+    // 3. Poll until done (with SSH failure tolerance)
     let alive = true;
+    let consecutiveSshFailures = 0;
+    const MAX_SSH_FAILURES = 6; // ~60s of unreachability before giving up
+
     while (alive) {
       await new Promise((r) => setTimeout(r, 10_000)); // poll every 10s
 
@@ -349,14 +352,29 @@ async function runAndPoll(
         return;
       }
 
-      alive = await backend.isAlive(pid, config);
+      try {
+        alive = await backend.isAlive(pid, config);
+        consecutiveSshFailures = 0; // Reset on success
+      } catch (sshErr) {
+        consecutiveSshFailures++;
+        console.warn(`[remote-executor] Job ${jobId}: isAlive SSH failure #${consecutiveSshFailures}: ${sshErr}`);
+        if (consecutiveSshFailures >= MAX_SSH_FAILURES) {
+          console.error(`[remote-executor] Job ${jobId}: ${MAX_SSH_FAILURES} consecutive SSH failures, marking as failed`);
+          alive = false; // Exit loop, will be handled below
+        }
+        continue; // Skip log update this cycle
+      }
 
-      // Update logs
-      const logs = await backend.getLogs(remoteDir, config);
-      await prisma.remoteJob.update({
-        where: { id: jobId },
-        data: { stdout: logs.stdout, stderr: logs.stderr },
-      });
+      // Update logs (non-critical, don't let failures break the loop)
+      try {
+        const logs = await backend.getLogs(remoteDir, config);
+        await prisma.remoteJob.update({
+          where: { id: jobId },
+          data: { stdout: logs.stdout, stderr: logs.stderr },
+        });
+      } catch (logErr) {
+        console.warn(`[remote-executor] Job ${jobId}: getLogs failed:`, logErr);
+      }
     }
 
     // 4. Get exit code
@@ -449,6 +467,130 @@ async function runAndPoll(
       });
     }
   }
+}
+
+// ── Stale job cleanup ─────────────────────────────────────────────
+
+/**
+ * Detect and resolve jobs stuck in RUNNING/SYNCING/QUEUED state.
+ *
+ * This handles the case where `runAndPoll` background promise was lost
+ * (server restart, event loop GC, unhandled rejection, SSH hang).
+ *
+ * Called on:
+ *  - Research project page load (GET /api/research/[id])
+ *  - Remote jobs list endpoint
+ *  - Periodic cleanup if desired
+ */
+export async function cleanupStaleJobs(projectId?: string): Promise<number> {
+  const STALE_THRESHOLD_MS = 45 * 60 * 1000; // 45 minutes (command timeout is 2400s = 40min)
+  const now = new Date();
+
+  const where: Record<string, unknown> = {
+    status: { in: ["RUNNING", "SYNCING", "QUEUED"] },
+  };
+  if (projectId) where.projectId = projectId;
+
+  const staleJobs = await prisma.remoteJob.findMany({
+    where,
+    include: { host: true },
+  });
+
+  let cleaned = 0;
+
+  for (const job of staleJobs) {
+    const startTime = job.startedAt || job.createdAt;
+    const elapsed = now.getTime() - startTime.getTime();
+
+    if (elapsed < STALE_THRESHOLD_MS) continue; // Not stale yet
+
+    console.warn(`[remote-executor] Cleaning up stale job ${job.id} (${job.status} for ${Math.round(elapsed / 60000)}min)`);
+
+    // Check if the process is actually still running on the remote
+    let stillAlive = false;
+    if (job.remotePid && job.host) {
+      const config: HostConfig = {
+        host: job.host.host, port: job.host.port, user: job.host.user,
+        keyPath: job.host.keyPath, workDir: job.host.workDir,
+        conda: job.host.conda, setupCmd: job.host.setupCmd,
+      };
+      try {
+        stillAlive = await sshExecutor.isAlive(job.remotePid, config);
+      } catch {
+        // SSH failed — can't tell, assume dead
+      }
+    }
+
+    if (stillAlive) {
+      // Process genuinely still running — extend the grace period.
+      // But if it's been > 2 hours, kill it.
+      if (elapsed > 2 * 60 * 60 * 1000) {
+        console.warn(`[remote-executor] Job ${job.id} running for >2h, killing`);
+        if (job.remotePid && job.host) {
+          const config: HostConfig = {
+            host: job.host.host, port: job.host.port, user: job.host.user,
+            keyPath: job.host.keyPath, workDir: job.host.workDir,
+            conda: job.host.conda, setupCmd: job.host.setupCmd,
+          };
+          await sshExecutor.kill(job.remotePid, config).catch(() => {});
+        }
+      } else {
+        continue; // Still alive and within 2h — let it run
+      }
+    }
+
+    // Determine final status: if we have stdout, it likely completed
+    const hasOutput = job.stdout && job.stdout.trim().length > 0;
+    const finalStatus = hasOutput ? "COMPLETED" : "FAILED";
+
+    // Try to get final logs if we don't have them
+    let finalStdout = job.stdout || "";
+    let finalStderr = job.stderr || "";
+    if (job.host && job.remoteDir) {
+      const config: HostConfig = {
+        host: job.host.host, port: job.host.port, user: job.host.user,
+        keyPath: job.host.keyPath, workDir: job.host.workDir,
+        conda: job.host.conda, setupCmd: job.host.setupCmd,
+      };
+      try {
+        const logs = await sshExecutor.getLogs(job.remoteDir, config);
+        if (logs.stdout) finalStdout = logs.stdout;
+        if (logs.stderr) finalStderr = logs.stderr;
+      } catch {
+        // Can't reach host, use whatever we have
+      }
+    }
+
+    await prisma.remoteJob.update({
+      where: { id: job.id },
+      data: {
+        status: finalStatus,
+        stdout: finalStdout || null,
+        stderr: finalStderr ? `${finalStderr}\n[auto-cleaned: job was stale after ${Math.round(elapsed / 60000)}min]` : `[auto-cleaned: job was stale after ${Math.round(elapsed / 60000)}min]`,
+        completedAt: now,
+      },
+    });
+
+    // Update linked research step
+    if (job.stepId) {
+      await prisma.researchStep.update({
+        where: { id: job.stepId },
+        data: {
+          status: finalStatus,
+          completedAt: now,
+          output: JSON.stringify({
+            remoteJobId: job.id,
+            autoCleaned: true,
+            stdout: (finalStdout || "").slice(-500),
+          }),
+        },
+      }).catch(() => {}); // Step may not exist
+    }
+
+    cleaned++;
+  }
+
+  return cleaned;
 }
 
 // ── Utility ───────────────────────────────────────────────────────

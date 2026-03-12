@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireUserId } from "@/lib/paper-auth";
-import { submitRemoteJob } from "@/lib/research/remote-executor";
+import { submitRemoteJob, cleanupStaleJobs } from "@/lib/research/remote-executor";
 
 // GET — List remote jobs, optionally filtered by projectId or stepId
 export async function GET(request: NextRequest) {
@@ -10,6 +10,11 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const projectId = searchParams.get("projectId");
     const stepId = searchParams.get("stepId");
+
+    // Auto-cleanup stale jobs on list fetch (non-blocking)
+    cleanupStaleJobs(projectId || undefined).catch((err) =>
+      console.warn("[remote-jobs] stale cleanup error:", err)
+    );
 
     const where: Record<string, unknown> = {};
     if (projectId) where.projectId = projectId;

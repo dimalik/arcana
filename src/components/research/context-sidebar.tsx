@@ -181,26 +181,27 @@ export function ContextSidebar({ project, papers, hypotheses, iteration }: Conte
       <div className="flex-1 px-3 py-2 space-y-3">
         {/* Files */}
         <div>
-          <button
-            onClick={() => setFilesExpanded(!filesExpanded)}
-            className="flex items-center gap-1 text-[11px] font-medium text-muted-foreground hover:text-foreground w-full"
-          >
-            {filesExpanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
-            <FolderOpen className="h-3 w-3" />
-            Files {totalFiles > 0 && `(${totalFiles})`}
-          </button>
+          <div className="flex items-center w-full">
+            <button
+              onClick={() => setFilesExpanded(!filesExpanded)}
+              className="flex items-center gap-1 text-[11px] font-medium text-muted-foreground hover:text-foreground flex-1"
+            >
+              {filesExpanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+              <FolderOpen className="h-3 w-3" />
+              Files {totalFiles > 0 && `(${totalFiles})`}
+            </button>
+            {filesExpanded && (
+              <button
+                onClick={loadFiles}
+                disabled={filesLoading}
+                className="text-[9px] text-muted-foreground/50 hover:text-muted-foreground flex items-center gap-0.5 transition-colors shrink-0"
+              >
+                <RefreshCw className={`h-2.5 w-2.5 ${filesLoading ? "animate-spin" : ""}`} />
+              </button>
+            )}
+          </div>
           {filesExpanded && (
             <div className="mt-1">
-              <div className="flex items-center gap-1 mb-1">
-                <button
-                  onClick={loadFiles}
-                  disabled={filesLoading}
-                  className="text-[9px] text-muted-foreground/50 hover:text-muted-foreground flex items-center gap-0.5 transition-colors"
-                >
-                  <RefreshCw className={`h-2.5 w-2.5 ${filesLoading ? "animate-spin" : ""}`} />
-                  Refresh
-                </button>
-              </div>
               {files.length === 0 && !filesLoading && (
                 <p className="text-[10px] text-muted-foreground/40 pl-4">No files yet</p>
               )}
@@ -470,29 +471,23 @@ function FileTreeItem({
 
   const canPreview = isPreviewable(entry.name);
 
+  const handleClick = () => {
+    if (canPreview) {
+      onPreview(entry.path, entry.name);
+    } else {
+      onDownload(entry.path, entry.name, entry.size);
+    }
+  };
+
   return (
-    <div className="group flex items-center gap-1 py-0.5 text-[10px] text-muted-foreground">
-      {fileIcon(entry.name)}
-      <span className="truncate flex-1" title={entry.path}>{entry.name}</span>
-      <span className="text-[8px] text-muted-foreground/40 shrink-0">{formatSize(entry.size)}</span>
-      <div className="opacity-0 group-hover:opacity-100 flex items-center gap-0.5 shrink-0 transition-opacity">
-        {canPreview && (
-          <button
-            onClick={() => onPreview(entry.path, entry.name)}
-            className="p-0.5 hover:text-foreground transition-colors"
-            title="Preview"
-          >
-            <Eye className="h-2.5 w-2.5" />
-          </button>
-        )}
-        <button
-          onClick={() => onDownload(entry.path, entry.name, entry.size)}
-          className="p-0.5 hover:text-foreground transition-colors"
-          title="Download"
-        >
-          <Download className="h-2.5 w-2.5" />
-        </button>
-      </div>
-    </div>
+    <button
+      onClick={handleClick}
+      className="group grid grid-cols-[auto_1fr_auto] items-center gap-x-1.5 py-0.5 text-[10px] text-muted-foreground hover:text-foreground transition-colors w-full text-left"
+      title={canPreview ? `Preview ${entry.name}` : `Download ${entry.name}`}
+    >
+      <span className="shrink-0">{fileIcon(entry.name)}</span>
+      <span className="truncate min-w-0">{entry.name}</span>
+      <span className="text-[8px] text-muted-foreground/40 group-hover:text-muted-foreground/60 tabular-nums text-right w-[3.5rem]">{formatSize(entry.size)}</span>
+    </button>
   );
 }

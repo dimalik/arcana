@@ -25,6 +25,7 @@ interface RemoteHost {
 interface RemoteJob {
   id: string;
   status: string;
+  command: string;
   stdout: string | null;
   stderr: string | null;
   host: { alias: string; gpuType: string | null };
@@ -258,8 +259,11 @@ export function ExperimentPhase({ projectId, steps, onRefresh }: ExperimentPhase
                     Cancel
                   </button>
                 </div>
+                <pre className="mt-1 text-[9px] text-muted-foreground/60 font-mono bg-background/30 rounded px-1.5 py-0.5 whitespace-pre-wrap break-all">
+                  $ {job.command}
+                </pre>
                 {job.stdout && (
-                  <pre className="mt-1.5 text-[10px] text-muted-foreground bg-background/50 rounded p-2 max-h-24 overflow-auto whitespace-pre-wrap font-mono">
+                  <pre className="mt-1 text-[10px] text-muted-foreground bg-background/50 rounded p-2 max-h-24 overflow-auto whitespace-pre-wrap font-mono">
                     {job.stdout.split("\n").filter(Boolean).slice(-8).join("\n")}
                   </pre>
                 )}
@@ -290,6 +294,9 @@ export function ExperimentPhase({ projectId, steps, onRefresh }: ExperimentPhase
                 </button>
                 {expandedJobs.has(job.id) && (
                   <div className="ml-5 mb-1">
+                    <pre className="text-[9px] text-muted-foreground/60 font-mono bg-background/30 rounded px-1.5 py-0.5 mb-1 whitespace-pre-wrap break-all">
+                      $ {job.command}
+                    </pre>
                     {job.stdout && (
                       <pre className="text-[10px] text-muted-foreground bg-muted/50 rounded p-2 max-h-32 overflow-auto whitespace-pre-wrap font-mono">
                         {job.stdout.split("\n").filter(Boolean).slice(-20).join("\n")}

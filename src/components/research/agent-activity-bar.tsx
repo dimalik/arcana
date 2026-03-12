@@ -29,7 +29,7 @@ interface FeedItem {
   outputLines?: string[];
 }
 
-const EXECUTION_TOOLS = new Set(["execute_command", "execute_remote"]);
+const EXECUTION_TOOLS = new Set(["execute_command", "execute_remote", "check_remote"]);
 
 const TOOL_LABELS: Record<string, string> = {
   search_papers: "Searching papers",
@@ -94,7 +94,7 @@ export const AgentActivityBar = forwardRef<AgentActivityHandle, AgentActivityBar
 
     // Active remote job tracking (independent of SSE)
     const [activeJob, setActiveJob] = useState<{
-      id: string; status: string; host: string; gpu: string | null; stdout: string | null; updatedAt: string;
+      id: string; status: string; host: string; gpu: string | null; command: string | null; stdout: string | null; updatedAt: string;
     } | null>(null);
 
     // Keep ref in sync
@@ -128,6 +128,7 @@ export const AgentActivityBar = forwardRef<AgentActivityHandle, AgentActivityBar
               status: active.status,
               host: active.host?.alias || "remote",
               gpu: active.host?.gpuType || null,
+              command: active.command || null,
               stdout: active.stdout,
               updatedAt: active.updatedAt || active.createdAt,
             });
@@ -244,7 +245,14 @@ export const AgentActivityBar = forwardRef<AgentActivityHandle, AgentActivityBar
                 case "tool_call": {
                   setThinkingMsg(null);
                   const label = TOOL_LABELS[event.toolName || ""] || event.toolName || "Tool";
-                  setStatusLine(label + "...");
+                  // For execution tools, extract and show the command
+                  const argsObj = event.args as Record<string, unknown> | undefined;
+                  const command = argsObj?.command as string | undefined;
+                  const isExecTool = EXECUTION_TOOLS.has(event.toolName || "") || event.toolName === "check_remote";
+                  const displayLabel = isExecTool && command
+                    ? `${label}: ${command.slice(0, 80)}${command.length > 80 ? "..." : ""}`
+                    : label;
+                  setStatusLine(displayLabel + "...");
                   if (textAccumulator.trim()) {
                     setFeed((f) => [...f, {
                       id: `text-${++itemCounter.current}`,
@@ -259,7 +267,7 @@ export const AgentActivityBar = forwardRef<AgentActivityHandle, AgentActivityBar
                     type: "tool_call",
                     toolName: event.toolName,
                     toolCallId: event.toolCallId,
-                    content: label,
+                    content: displayLabel,
                     args: typeof event.args === "string" ? event.args : JSON.stringify(event.args, null, 2),
                   }]);
                   break;
@@ -307,6 +315,7 @@ export const AgentActivityBar = forwardRef<AgentActivityHandle, AgentActivityBar
                       ? { ...item, type: "tool_result" as const, progress: undefined, args: item.args + "\n\n--- Result ---\n" + resultStr }
                       : item
                   ));
+                  setStatusLine("Deciding next step...");
                   // Refresh project data periodically after tool results
                   const now = Date.now();
                   if (now - lastRefresh > 5000) {
@@ -658,6 +667,11 @@ export const AgentActivityBar = forwardRef<AgentActivityHandle, AgentActivityBar
                     {activeJob.gpu && <span className="text-[9px] text-muted-foreground">{activeJob.gpu}</span>}
                     <span className="text-[9px] text-cyan-400">{activeJob.status}</span>
                   </div>
+                  {activeJob.command && (
+                    <pre className="text-[9px] text-muted-foreground/60 font-mono bg-background/30 rounded px-1.5 py-0.5 mb-1 whitespace-pre-wrap break-all">
+                      $ {activeJob.command}
+                    </pre>
+                  )}
                   {activeJob.stdout && (
                     <pre className="text-[9px] text-muted-foreground bg-background/50 rounded p-1.5 max-h-28 overflow-auto whitespace-pre-wrap font-mono">
                       {activeJob.stdout.split("\n").filter(Boolean).slice(-15).join("\n")}
@@ -750,9 +764,23 @@ function CompactFeedItem({ item }: { item: FeedItem }) {
           )}
         </button>
 
-        {/* Terminal for execution tools */}
-        {showDetail && isExec && hasOutput && (
-          <TerminalOutput lines={item.outputLines!} isRunning={!isDone} progress={item.progress} />
+        {/* Command + terminal for execution tools */}
+        {showDetail && isExec && (
+          <>
+            {item.args && (
+              <pre className="mt-1 text-[9px] text-muted-foreground/70 font-mono bg-background/50 rounded px-1.5 py-1 whitespace-pre-wrap break-all">
+                {(() => {
+                  try {
+                    const parsed = JSON.parse(item.args);
+                    return parsed.command || item.args;
+                  } catch { return item.args; }
+                })()}
+              </pre>
+            )}
+            {hasOutput && (
+              <TerminalOutput lines={item.outputLines!} isRunning={!isDone} progress={item.progress} />
+            )}
+          </>
         )}
 
         {/* Args/result for non-execution tools */}

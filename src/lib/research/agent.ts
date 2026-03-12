@@ -1068,14 +1068,17 @@ function createTools(
         if (!host) host = await prisma.remoteHost.findFirst();
         if (!host) return "No remote hosts configured.";
 
-        emit({ type: "tool_progress", toolName: "check_remote", content: `$ [${host.alias}] ${command.slice(0, 80)}` });
+        // Strip unnecessary timeout wrapper — check_remote has its own SSH timeout
+        const cleanCmd = command.replace(/^timeout\s+\d+\s+/, "");
+
+        emit({ type: "tool_progress", toolName: "check_remote", content: `$ [${host.alias}] ${cleanCmd.slice(0, 80)}` });
 
         // Build the full path to the experiment directory on the remote
         const slug = workDir.split("/").filter(Boolean).pop() || "experiment";
         const remoteDir = `${host.workDir}/${slug}`;
 
         // Wrap with cd to experiment dir + venv activation
-        const fullCmd = `cd ${remoteDir} 2>/dev/null && [ -f .venv/bin/activate ] && source .venv/bin/activate 2>/dev/null; ${command}`;
+        const fullCmd = `cd ${remoteDir} 2>/dev/null && [ -f .venv/bin/activate ] && source .venv/bin/activate 2>/dev/null; ${cleanCmd}`;
 
         const result = await quickRemoteCommand(host.id, fullCmd);
 
@@ -1218,8 +1221,16 @@ function createTools(
           }
         }
 
-        emit({ type: "tool_output", toolName: "execute_remote", content: `\n⚠ Job still running after 30 minutes. ID: ${jobId}` });
-        return `Job still running after 30 minutes. Job ID: ${jobId}. Check back later.`;
+        // Timeout — try to get current state and return what we have
+        emit({ type: "tool_output", toolName: "execute_remote", content: `\n⚠ Job polling timeout after 30 minutes. ID: ${jobId}` });
+        const finalJob = await prisma.remoteJob.findUnique({ where: { id: jobId } });
+        const hasOutput = finalJob?.stdout && finalJob.stdout.trim().length > 0;
+        if (hasOutput) {
+          emit({ type: "tool_output", toolName: "execute_remote", content: `Job has output — treating as completed.` });
+          await recordStep("run_experiment", `Remote (${host.alias}): ${command.slice(0, 60)}`, "COMPLETED", { host: host.alias, stdout: (finalJob!.stdout || "").slice(-2000), timedOut: true });
+          return `Job polling timed out after 30 minutes but has output. The background poller will update the final status.\n\nstdout so far:\n${(finalJob!.stdout || "").slice(-5000)}`;
+        }
+        return `Job still running after 30 minutes on ${host.alias}. Job ID: ${jobId}. The stale job cleanup will auto-resolve this. Use check_remote to inspect the remote host directly.`;
       },
     }),
 
