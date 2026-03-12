@@ -720,7 +720,7 @@ When you've completed a full research cycle and have solid findings, use \`compl
 - **NEVER accept results without statistical rigor.** Run experiments multiple times with different seeds. Report mean and standard deviation.
 - **NEVER generate synthetic toy data when a real dataset exists.** If a paper evaluates on GLUE, use GLUE. If on SQuAD, use SQuAD. Generating 50 random samples to "simulate" a dataset invalidates the entire experiment. Use \`datasets\` library, \`torchvision.datasets\`, or direct download URLs from the papers.
 - **NEVER reinstall packages on every run.** Create a venv ONCE with \`python3 -m venv .venv\`, install requirements into it, then reuse it. On subsequent runs just \`source .venv/bin/activate && python3 script.py\`. Only reinstall if requirements.txt has changed.
-- **execute_remote handles job management automatically.** Do NOT manually nohup, background, sleep, or poll. Just pass the command.
+- **execute_remote handles EVERYTHING automatically.** The remote wrapper: (1) cds into the experiment directory, (2) activates .venv, (3) runs your command, (4) captures exit code. So your command should be JUST the experiment, e.g. \`python3 experiment.py\`. NEVER include: \`cd\`, \`source .venv/bin/activate\`, \`bash -c\`, \`timeout\`, \`nohup\`, absolute paths to python or .venv/bin/python3. These WILL break the command.
 - **NEVER use execute_remote for checking files, reading logs, or listing results.** Use check_remote for that — it's a direct SSH command with no sync overhead. execute_remote does a full rsync which is slow and can fail.
 - **ALWAYS use flush=True in print() and save results incrementally.** Remote jobs buffer stdout — without flushing you won't see progress. Without incremental saves, a crash after training means zero results.
 - **Save lessons with save_lesson whenever you fix a non-obvious bug or discover a practical trick.** Future you (and other projects) will benefit. Don't save obvious things — save things that cost you time to figure out.
@@ -1219,9 +1219,9 @@ function createTools(
     }),
 
     execute_remote: tool({
-      description: "Run an experiment on a remote GPU server. Syncs the experiment directory, runs the command, and syncs results back. ONLY use for actually running experiments (python scripts). For checking files, reading logs, or listing results, use check_remote instead — it's much faster.",
+      description: "Run an experiment on a remote GPU server. Syncs the experiment directory, runs the command, and syncs results back. ONLY use for actually running experiments (python scripts). For checking files, reading logs, or listing results, use check_remote instead — it's much faster. The remote environment automatically activates .venv and cds into the experiment directory — do NOT include those in your command.",
       inputSchema: z.object({
-        command: z.string().describe("Shell command to run on the remote host. Use python3, not python. Use relative file paths only (e.g., 'python3 experiment.py')."),
+        command: z.string().describe("The experiment command ONLY — e.g. 'python3 experiment.py'. Do NOT include: cd, source .venv/bin/activate, bash -c wrappers, timeout, absolute paths, or nohup. The system handles all of that automatically."),
         host_alias: z.string().optional().describe("Remote host alias. Omit to use the default host."),
       }),
       execute: async ({ command, host_alias }: { command: string; host_alias?: string }) => {
@@ -1235,15 +1235,42 @@ function createTools(
         }
         if (!host) return "No remote hosts configured. Use execute_command to run locally, or ask the user to configure a remote host.";
 
-        // Sanitize command for remote execution
+        // Sanitize command — the .run.sh wrapper already handles cd, venv activation,
+        // conda, and setup. Strip all that so the command is just the actual work.
         let sanitized = command;
-        // Replace 'python ' with 'python3 ' (many servers only have python3)
+
+        // Unwrap bash -c "..." wrappers the agent sometimes adds
+        sanitized = sanitized.replace(/^bash\s+-c\s+["'](.+?)["']\s*$/, "$1");
+
+        // Strip existing timeout wrappers (we'll re-add cleanly)
+        sanitized = sanitized.replace(/^timeout\s+\d+[smh]?\s+/, "");
+
+        // Strip redirect guards early so subsequent patterns match cleanly
+        sanitized = sanitized.replace(/\s*2>\/dev\/null\s*\|\|\s*true\s*/g, " ");
+
+        // Strip venv activation — .run.sh already does this
+        sanitized = sanitized.replace(/(?:source\s+)?\.venv\/bin\/activate\s*(?:&&|;)\s*/g, "");
+        sanitized = sanitized.replace(/source\s+activate\s*(?:&&|;)\s*/g, "");
+
+        // Strip cd to project/experiment dirs — .run.sh already cds
+        sanitized = sanitized.replace(/cd\s+\S+\s*(?:&&|;)\s*/g, "");
+
+        // Strip absolute paths to .venv python/pip — just use python3/pip3
+        sanitized = sanitized.replace(/(?:\/\S+)?\.venv\/bin\/python3?\s/g, "python3 ");
+        sanitized = sanitized.replace(/(?:\/\S+)?\.venv\/bin\/pip3?\s/g, "pip3 ");
+
+        // Replace 'python ' with 'python3 '
         sanitized = sanitized.replace(/\bpython\b(?!3)/g, "python3");
-        // Replace 'pip ' with 'pip3 ' for consistency
+        // Replace 'pip ' with 'pip3 '
         sanitized = sanitized.replace(/\bpip\b(?!3)/g, "pip3");
-        // Strip absolute local paths — only filenames should be used since we cd into the remote dir
+
+        // Strip absolute local paths
         sanitized = sanitized.replace(new RegExp(workDir + "/", "g"), "");
-        // Add timeout wrapper for safety (40 min max) — skip if command already has timeout
+
+        // Clean up whitespace
+        sanitized = sanitized.replace(/\s+/g, " ").trim();
+
+        // Add timeout wrapper for safety (40 min max)
         if (!sanitized.includes("timeout ")) {
           sanitized = `timeout 2400 ${sanitized}`;
         }

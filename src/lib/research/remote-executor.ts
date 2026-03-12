@@ -168,7 +168,20 @@ export const sshExecutor: ExecutorBackend = {
     if (host.conda) scriptLines.push(`conda activate ${host.conda} 2>/dev/null || source activate ${host.conda} 2>/dev/null || true`);
     if (host.setupCmd) scriptLines.push(host.setupCmd);
     scriptLines.push("set +e"); // Don't exit on command failure — capture exit code
-    scriptLines.push(command);
+
+    // Sanitize command — strip redundant cd/venv activation since the script
+    // already handles those. This catches cases where the agent adds them anyway.
+    let cleanCmd = command;
+    cleanCmd = cleanCmd.replace(/^bash\s+-c\s+["'](.+?)["']\s*$/, "$1");
+    cleanCmd = cleanCmd.replace(/\s*2>\/dev\/null\s*\|\|\s*true\s*/g, " ");
+    cleanCmd = cleanCmd.replace(/(?:source\s+)?\.venv\/bin\/activate\s*(?:&&|;)\s*/g, "");
+    cleanCmd = cleanCmd.replace(/source\s+activate\s*(?:&&|;)\s*/g, "");
+    cleanCmd = cleanCmd.replace(/cd\s+\S+\s*(?:&&|;)\s*/g, "");
+    cleanCmd = cleanCmd.replace(/(?:\/\S+)?\.venv\/bin\/python3?\s/g, "python3 ");
+    cleanCmd = cleanCmd.replace(/(?:\/\S+)?\.venv\/bin\/pip3?\s/g, "pip3 ");
+    cleanCmd = cleanCmd.replace(/\s+/g, " ").trim();
+
+    scriptLines.push(cleanCmd);
     scriptLines.push("echo $? > .exit_code");
 
     const scriptContent = scriptLines.join("\n");
