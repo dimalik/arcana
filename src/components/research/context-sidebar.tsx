@@ -4,9 +4,10 @@ import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import {
   ChevronDown, ChevronUp, FileText, Brain, Trash2,
-  FolderOpen, File, Download, Eye, X, RefreshCw,
+  FolderOpen, File, Download, X, RefreshCw,
   Image, FileCode, FileSpreadsheet, FileType,
 } from "lucide-react";
+import { FilePreview } from "./file-preview";
 
 interface ContextSidebarProps {
   project: {
@@ -77,9 +78,6 @@ export function ContextSidebar({ project, papers, hypotheses, iteration }: Conte
   const [files, setFiles] = useState<FileEntry[]>([]);
   const [filesLoading, setFilesLoading] = useState(false);
   const [previewFile, setPreviewFile] = useState<{ path: string; name: string } | null>(null);
-  const [previewContent, setPreviewContent] = useState<string | null>(null);
-  const [previewLoading, setPreviewLoading] = useState(false);
-  const [previewTruncated, setPreviewTruncated] = useState(false);
   const [downloadConfirm, setDownloadConfirm] = useState<{ path: string; name: string; size: number } | null>(null);
 
   useEffect(() => {
@@ -120,27 +118,8 @@ export function ContextSidebar({ project, papers, hypotheses, iteration }: Conte
     setMemories((m) => m.filter((mem) => mem.id !== id));
   };
 
-  const openPreview = async (filePath: string, fileName: string) => {
+  const openPreview = (filePath: string, fileName: string) => {
     setPreviewFile({ path: filePath, name: fileName });
-    setPreviewLoading(true);
-    setPreviewContent(null);
-    setPreviewTruncated(false);
-    try {
-      const res = await fetch(
-        `/api/research/${project.id}/files/download?path=${encodeURIComponent(filePath)}&preview=true`
-      );
-      if (res.ok) {
-        const data = await res.json();
-        setPreviewContent(data.content);
-        setPreviewTruncated(data.truncated);
-      } else {
-        setPreviewContent("Failed to load file.");
-      }
-    } catch {
-      setPreviewContent("Failed to load file.");
-    } finally {
-      setPreviewLoading(false);
-    }
   };
 
   const downloadFile = (filePath: string, fileName: string, size: number) => {
@@ -345,43 +324,12 @@ export function ContextSidebar({ project, papers, hypotheses, iteration }: Conte
 
       {/* File Preview Modal */}
       {previewFile && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => setPreviewFile(null)}>
-          <div
-            className="bg-card border border-border rounded-lg shadow-lg w-[90vw] max-w-2xl max-h-[80vh] flex flex-col"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center gap-2 px-3 py-2 border-b border-border">
-              <FileCode className="h-3.5 w-3.5 text-muted-foreground" />
-              <span className="text-xs font-medium flex-1 truncate">{previewFile.name}</span>
-              <span className="text-[9px] text-muted-foreground">{previewFile.path}</span>
-              <button
-                onClick={() => doDownload(previewFile.path, previewFile.name)}
-                className="text-muted-foreground hover:text-foreground transition-colors"
-                title="Download"
-              >
-                <Download className="h-3.5 w-3.5" />
-              </button>
-              <button
-                onClick={() => setPreviewFile(null)}
-                className="text-muted-foreground hover:text-foreground transition-colors"
-              >
-                <X className="h-3.5 w-3.5" />
-              </button>
-            </div>
-            <div className="flex-1 overflow-auto p-0">
-              {previewLoading ? (
-                <div className="flex items-center justify-center py-8 text-xs text-muted-foreground">Loading...</div>
-              ) : (
-                <pre className="text-[11px] font-mono leading-relaxed p-3 whitespace-pre-wrap break-all text-foreground/90">
-                  {previewContent}
-                  {previewTruncated && (
-                    <span className="text-amber-500 block mt-2">[File truncated — download for full content]</span>
-                  )}
-                </pre>
-              )}
-            </div>
-          </div>
-        </div>
+        <FilePreview
+          projectId={project.id}
+          file={previewFile}
+          onClose={() => setPreviewFile(null)}
+          onDownload={doDownload}
+        />
       )}
 
       {/* Download Confirmation */}

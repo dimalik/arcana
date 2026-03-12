@@ -11,10 +11,12 @@ export async function GET(request: NextRequest) {
     const projectId = searchParams.get("projectId");
     const stepId = searchParams.get("stepId");
 
-    // Auto-cleanup stale jobs on list fetch (non-blocking)
-    cleanupStaleJobs(projectId || undefined).catch((err) =>
-      console.warn("[remote-jobs] stale cleanup error:", err)
-    );
+    // Auto-cleanup stale jobs before returning results — blocking so UI reflects fixed state
+    try {
+      await cleanupStaleJobs(projectId || undefined);
+    } catch (err) {
+      console.warn("[remote-jobs] stale cleanup error:", err);
+    }
 
     const where: Record<string, unknown> = {};
     if (projectId) where.projectId = projectId;

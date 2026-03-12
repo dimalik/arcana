@@ -187,12 +187,9 @@ export const sshExecutor: ExecutorBackend = {
   },
 
   async isAlive(pid: number, host: HostConfig): Promise<boolean> {
-    try {
-      const result = await sshExec(host, `kill -0 ${pid} 2>/dev/null && echo alive || echo dead`);
-      return result === "alive";
-    } catch {
-      return false;
-    }
+    // Throws on SSH failure so callers can distinguish "dead" from "unreachable"
+    const result = await sshExec(host, `kill -0 ${pid} 2>/dev/null && echo alive || echo dead`);
+    return result.trim() === "alive";
   },
 
   async getLogs(remoteDir: string, host: HostConfig): Promise<{ stdout: string; stderr: string }> {
@@ -483,7 +480,7 @@ async function runAndPoll(
  *  - Periodic cleanup if desired
  */
 export async function cleanupStaleJobs(projectId?: string): Promise<number> {
-  const STALE_THRESHOLD_MS = 45 * 60 * 1000; // 45 minutes (command timeout is 2400s = 40min)
+  const MIN_AGE_MS = 5 * 60 * 1000; // Don't touch jobs younger than 5 minutes
   const now = new Date();
 
   const where: Record<string, unknown> = {
@@ -502,74 +499,93 @@ export async function cleanupStaleJobs(projectId?: string): Promise<number> {
     const startTime = job.startedAt || job.createdAt;
     const elapsed = now.getTime() - startTime.getTime();
 
-    if (elapsed < STALE_THRESHOLD_MS) continue; // Not stale yet
+    if (elapsed < MIN_AGE_MS) continue; // Too fresh, skip
 
-    console.warn(`[remote-executor] Cleaning up stale job ${job.id} (${job.status} for ${Math.round(elapsed / 60000)}min)`);
+    // Build SSH config if host is available
+    const config: HostConfig | null = job.host ? {
+      host: job.host.host, port: job.host.port, user: job.host.user,
+      keyPath: job.host.keyPath, workDir: job.host.workDir,
+      conda: job.host.conda, setupCmd: job.host.setupCmd,
+    } : null;
 
-    // Check if the process is actually still running on the remote
-    let stillAlive = false;
-    if (job.remotePid && job.host) {
-      const config: HostConfig = {
-        host: job.host.host, port: job.host.port, user: job.host.user,
-        keyPath: job.host.keyPath, workDir: job.host.workDir,
-        conda: job.host.conda, setupCmd: job.host.setupCmd,
-      };
+    // Primary check: does .exit_code exist on remote? If so, process is done
+    // regardless of what kill -0 says or how long it's been running.
+    let exitCodeFromRemote: number | null = null;
+    if (config && job.remoteDir) {
       try {
-        stillAlive = await sshExecutor.isAlive(job.remotePid, config);
-      } catch {
-        // SSH failed — can't tell, assume dead
-      }
-    }
-
-    if (stillAlive) {
-      // Process genuinely still running — extend the grace period.
-      // But if it's been > 2 hours, kill it.
-      if (elapsed > 2 * 60 * 60 * 1000) {
-        console.warn(`[remote-executor] Job ${job.id} running for >2h, killing`);
-        if (job.remotePid && job.host) {
-          const config: HostConfig = {
-            host: job.host.host, port: job.host.port, user: job.host.user,
-            keyPath: job.host.keyPath, workDir: job.host.workDir,
-            conda: job.host.conda, setupCmd: job.host.setupCmd,
-          };
-          await sshExecutor.kill(job.remotePid, config).catch(() => {});
+        const exitStr = await sshExec(config, `cat ${job.remoteDir}/.exit_code 2>/dev/null || echo __NONE__`);
+        if (exitStr.trim() !== "__NONE__") {
+          exitCodeFromRemote = parseInt(exitStr.trim(), 10);
+          if (isNaN(exitCodeFromRemote)) exitCodeFromRemote = null;
         }
-      } else {
-        continue; // Still alive and within 2h — let it run
+      } catch {
+        // SSH failed — fall through to time-based checks
       }
     }
 
-    // Determine final status: if we have stdout, it likely completed
-    const hasOutput = job.stdout && job.stdout.trim().length > 0;
-    const finalStatus = hasOutput ? "COMPLETED" : "FAILED";
+    // If no exit code file found, check if process is still alive
+    if (exitCodeFromRemote === null) {
+      if (config && job.remotePid) {
+        try {
+          const stillAlive = await sshExecutor.isAlive(job.remotePid, config);
+          if (stillAlive) {
+            // Genuinely still running — only kill if > 3 hours
+            if (elapsed > 3 * 60 * 60 * 1000) {
+              console.warn(`[remote-executor] Job ${job.id} running for >3h, killing`);
+              await sshExecutor.kill(job.remotePid, config).catch(() => {});
+            } else {
+              continue; // Still alive, let it run
+            }
+          }
+          // Process dead but no .exit_code — crashed or was killed externally
+        } catch {
+          // SSH unreachable — if > 45 min, clean up; otherwise skip
+          if (elapsed < 45 * 60 * 1000) continue;
+        }
+      } else if (elapsed < 45 * 60 * 1000) {
+        continue; // No way to check, use time-based threshold
+      }
+    }
 
-    // Try to get final logs if we don't have them
+    console.warn(`[remote-executor] Cleaning up job ${job.id} (${job.status} for ${Math.round(elapsed / 60000)}min, exit=${exitCodeFromRemote})`);
+
+    // Fetch final logs from remote
     let finalStdout = job.stdout || "";
     let finalStderr = job.stderr || "";
-    if (job.host && job.remoteDir) {
-      const config: HostConfig = {
-        host: job.host.host, port: job.host.port, user: job.host.user,
-        keyPath: job.host.keyPath, workDir: job.host.workDir,
-        conda: job.host.conda, setupCmd: job.host.setupCmd,
-      };
+    if (config && job.remoteDir) {
       try {
         const logs = await sshExecutor.getLogs(job.remoteDir, config);
         if (logs.stdout) finalStdout = logs.stdout;
         if (logs.stderr) finalStderr = logs.stderr;
       } catch {
-        // Can't reach host, use whatever we have
+        // Use whatever we have in DB
       }
     }
+
+    // Determine status: exit code 0 or has substantial output → completed
+    const failed = exitCodeFromRemote !== null ? exitCodeFromRemote !== 0
+      : !finalStdout || finalStdout.trim().length === 0;
+    const finalStatus = failed ? "FAILED" : "COMPLETED";
 
     await prisma.remoteJob.update({
       where: { id: job.id },
       data: {
         status: finalStatus,
+        exitCode: exitCodeFromRemote,
         stdout: finalStdout || null,
-        stderr: finalStderr ? `${finalStderr}\n[auto-cleaned: job was stale after ${Math.round(elapsed / 60000)}min]` : `[auto-cleaned: job was stale after ${Math.round(elapsed / 60000)}min]`,
+        stderr: finalStderr || null,
         completedAt: now,
       },
     });
+
+    // Sync results back if possible
+    if (config && job.remoteDir && job.localDir) {
+      try {
+        await sshExecutor.syncDown(job.remoteDir, job.localDir, config);
+      } catch {
+        // Non-critical
+      }
+    }
 
     // Update linked research step
     if (job.stepId) {
@@ -580,11 +596,12 @@ export async function cleanupStaleJobs(projectId?: string): Promise<number> {
           completedAt: now,
           output: JSON.stringify({
             remoteJobId: job.id,
+            exitCode: exitCodeFromRemote,
             autoCleaned: true,
             stdout: (finalStdout || "").slice(-500),
           }),
         },
-      }).catch(() => {}); // Step may not exist
+      }).catch(() => {});
     }
 
     cleaned++;

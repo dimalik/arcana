@@ -29,6 +29,9 @@ export function CleanTopbar() {
     )?.label ?? "Arcana";
 
   const isDashboard = pathname === "/";
+  // Paper detail pages (/papers/[id]) get compact search; everything else gets wide centered search
+  const isPaperDetail = /^\/papers\/[^/]+$/.test(pathname);
+  const wideSearch = !isPaperDetail;
 
   return (
     <TooltipProvider delayDuration={0}>
@@ -73,11 +76,12 @@ export function CleanTopbar() {
           </>
         )}
 
-        {isDashboard ? (
+        {wideSearch ? (
           <>
             <div className="flex-1" />
             <TopbarSearch wide />
             <div className="flex-1" />
+            {pageInfo?.actions}
           </>
         ) : (
           <>
