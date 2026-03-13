@@ -51,29 +51,27 @@ export function CleanTopbar() {
           </TooltipContent>
         </Tooltip>
 
-        {!isDashboard && (
-          <>
-            {/* Home */}
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Link
-                  href="/"
-                  className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
-                >
-                  <Home className="h-4 w-4" />
-                </Link>
-              </TooltipTrigger>
-              <TooltipContent>Dashboard</TooltipContent>
-            </Tooltip>
+        {/* Home */}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Link
+              href="/"
+              className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+            >
+              <Home className="h-4 w-4" />
+            </Link>
+          </TooltipTrigger>
+          <TooltipContent>Dashboard</TooltipContent>
+        </Tooltip>
 
-            {/* Page title + optional metadata */}
-            <div className="flex items-center gap-2 min-w-0 overflow-hidden">
-              <span className="text-sm font-medium truncate">
-                {pageInfo?.title ?? navLabel}
-              </span>
-              {pageInfo?.meta}
-            </div>
-          </>
+        {/* Page-specific title and metadata (no section nav labels) */}
+        {!isDashboard && (pageInfo?.title || pageInfo?.meta) && (
+          <div className="flex items-center gap-2 min-w-0 overflow-hidden">
+            {pageInfo?.title && (
+              <span className="text-sm font-medium truncate">{pageInfo.title}</span>
+            )}
+            {pageInfo?.meta}
+          </div>
         )}
 
         {wideSearch ? (

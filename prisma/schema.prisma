@@ -454,6 +454,7 @@ model Insight {
   significance    String
   applications    String?
   userNotes       String?
+  usageCount      Int       @default(0)  // Incremented when referenced by Research agent
   easeFactor      Float     @default(2.5)
   interval        Int       @default(0)
   repetitions     Int       @default(0)

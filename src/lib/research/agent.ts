@@ -1913,6 +1913,22 @@ function createTools(
           return parts.join("\n");
         }).join("\n\n");
 
+        // Bump usageCount for insights surfaced in search results
+        const surfacedInsightIds = scored.flatMap((s) =>
+          s.paper.insights
+            .filter((ins) => {
+              const text = `${ins.learning} ${ins.significance} ${ins.applications || ""}`.toLowerCase();
+              return queryTerms.some((t) => text.includes(t));
+            })
+            .map((ins) => ins.id)
+        );
+        if (surfacedInsightIds.length > 0) {
+          prisma.insight.updateMany({
+            where: { id: { in: surfacedInsightIds } },
+            data: { usageCount: { increment: 1 } },
+          }).catch(() => {}); // non-blocking
+        }
+
         await recordStep("search_papers", `Library search: "${query.slice(0, 60)}"`, "COMPLETED", { query, matches: scored.length }, "literature");
         return `Found ${scored.length} relevant papers in your library:\n\n${results}\n\nUse read_paper to get full details on any of these.`;
       },
@@ -1965,6 +1981,13 @@ function createTools(
         if (scored.length === 0) {
           return `No insights match "${query}". Try search_library to search paper full texts, or search_papers for new papers.`;
         }
+
+        // Bump usageCount for returned insights (strength grows with research usage)
+        const matchedIds = scored.map((s) => s.insight.id);
+        prisma.insight.updateMany({
+          where: { id: { in: matchedIds } },
+          data: { usageCount: { increment: 1 } },
+        }).catch(() => {}); // non-blocking
 
         const results = scored.map((s, i) => {
           const ins = s.insight;

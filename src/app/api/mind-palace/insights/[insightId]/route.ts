@@ -16,11 +16,14 @@ export async function PATCH(
     return NextResponse.json({ error: "Insight not found" }, { status: 404 });
   }
   const body = await req.json();
-  const { userNotes, roomId } = body;
+  const { userNotes, roomId, learning, significance, applications } = body;
 
   const data: Record<string, unknown> = {};
   if (userNotes !== undefined) data.userNotes = userNotes;
   if (roomId !== undefined) data.roomId = roomId;
+  if (learning !== undefined) data.learning = learning;
+  if (significance !== undefined) data.significance = significance;
+  if (applications !== undefined) data.applications = applications;
 
   const insight = await prisma.insight.update({
     where: { id: insightId },

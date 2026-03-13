@@ -49,6 +49,13 @@ export async function GET(
     return NextResponse.json({ error: "Paper not found" }, { status: 404 });
   }
 
+  // If paper is batch-processing, trigger a non-blocking poll to check if batch is done
+  if (paper.processingStatus === "BATCH_PROCESSING") {
+    import("@/lib/processing/batch").then(({ pollAllActiveBatches }) => {
+      pollAllActiveBatches().catch(() => {});
+    }).catch(() => {});
+  }
+
   return NextResponse.json(paper);
 }
 

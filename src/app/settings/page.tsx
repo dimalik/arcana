@@ -15,11 +15,19 @@ import {
 } from "@/components/ui/select";
 import { ModelSelector } from "@/components/llm/model-selector";
 import { RemoteHostsManager } from "@/components/research/remote-hosts-manager";
+import { InsightCard, type InsightData } from "@/components/mind-palace/insight-card";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Save, Loader2, Zap, CheckCircle2, XCircle, Sun, Moon, Monitor,
   Plus, Trash2, Merge, Check, Tags, Sparkles, Grid3X3, Settings2,
   BrainCircuit, Server, Bot, Pencil, Power, PowerOff,
-  Download, Upload,
+  Download, Upload, Lightbulb, Brain, ChevronRight,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useTheme } from "next-themes";
@@ -56,13 +64,14 @@ const VENDOR_PRESETS: Record<ProxyVendor, { label: string; baseUrl: string; head
   custom: { label: "Custom", baseUrl: "", headerName: "Authorization", prefix: "Bearer " },
 };
 
-type Section = "general" | "llm" | "tags" | "remote" | "agent";
+type Section = "general" | "llm" | "tags" | "remote" | "agent" | "insights";
 
 const SECTIONS: { id: Section; label: string; icon: typeof Settings2 }[] = [
   { id: "general", label: "General", icon: Settings2 },
   { id: "llm", label: "LLM", icon: BrainCircuit },
   { id: "agent", label: "Agent", icon: Bot },
   { id: "tags", label: "Tags", icon: Tags },
+  { id: "insights", label: "Insights", icon: Lightbulb },
   { id: "remote", label: "Remote", icon: Server },
 ];
 
@@ -108,6 +117,7 @@ export default function SettingsPage() {
         {section === "llm" && <LLMSection />}
         {section === "agent" && <AgentCapabilitiesSection />}
         {section === "tags" && <TagsSection />}
+        {section === "insights" && <InsightsSection />}
         {section === "remote" && <RemoteSection />}
       </div>
     </div>
@@ -1253,6 +1263,271 @@ function CapabilityForm({
         </Button>
       </div>
     </div>
+  );
+}
+
+// ── Insights ──────────────────────────────────────────────────────
+
+interface InsightRoom {
+  id: string;
+  name: string;
+  description: string | null;
+  color: string;
+  icon: string;
+  _count: { insights: number };
+}
+
+interface InsightStats {
+  totalInsights: number;
+  totalRooms: number;
+}
+
+function InsightsSection() {
+  const [rooms, setRooms] = useState<InsightRoom[]>([]);
+  const [stats, setStats] = useState<InsightStats | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [deletingRoom, setDeletingRoom] = useState<string | null>(null);
+  const [expandedRoom, setExpandedRoom] = useState<string | null>(null);
+  const [roomInsights, setRoomInsights] = useState<InsightData[]>([]);
+  const [loadingInsights, setLoadingInsights] = useState(false);
+  const [editingInsight, setEditingInsight] = useState<InsightData | null>(null);
+  const [editForm, setEditForm] = useState({ learning: "", significance: "", applications: "" });
+  const [editSaving, setEditSaving] = useState(false);
+
+  const fetchData = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [roomsRes, statsRes] = await Promise.all([
+        fetch("/api/mind-palace/rooms"),
+        fetch("/api/mind-palace/stats"),
+      ]);
+      setRooms(await roomsRes.json());
+      setStats(await statsRes.json());
+    } catch {
+      toast.error("Failed to load insights data");
+    }
+    setLoading(false);
+  }, []);
+
+  useEffect(() => { fetchData(); }, [fetchData]);
+
+  const fetchRoomInsights = async (roomId: string) => {
+    setLoadingInsights(true);
+    try {
+      const res = await fetch(`/api/mind-palace/rooms/${roomId}`);
+      if (res.ok) {
+        const data = await res.json();
+        setRoomInsights(data.insights || []);
+      }
+    } catch {
+      toast.error("Failed to load insights");
+    }
+    setLoadingInsights(false);
+  };
+
+  const toggleRoom = async (roomId: string) => {
+    if (expandedRoom === roomId) {
+      setExpandedRoom(null);
+      setRoomInsights([]);
+      return;
+    }
+    setExpandedRoom(roomId);
+    fetchRoomInsights(roomId);
+  };
+
+  const deleteRoom = async (roomId: string) => {
+    if (!confirm("Delete this room and all its insights?")) return;
+    setDeletingRoom(roomId);
+    const res = await fetch(`/api/mind-palace/rooms/${roomId}`, { method: "DELETE" });
+    if (res.ok) {
+      toast.success("Room deleted");
+      if (expandedRoom === roomId) {
+        setExpandedRoom(null);
+        setRoomInsights([]);
+      }
+      fetchData();
+    } else {
+      toast.error("Failed to delete room");
+    }
+    setDeletingRoom(null);
+  };
+
+  const handleEdit = (insight: InsightData) => {
+    setEditingInsight(insight);
+    setEditForm({
+      learning: insight.learning,
+      significance: insight.significance,
+      applications: insight.applications || "",
+    });
+  };
+
+  const saveEdit = async () => {
+    if (!editingInsight) return;
+    setEditSaving(true);
+    const res = await fetch(`/api/mind-palace/insights/${editingInsight.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        learning: editForm.learning,
+        significance: editForm.significance,
+        applications: editForm.applications || null,
+      }),
+    });
+    if (res.ok) {
+      toast.success("Insight updated");
+      setEditingInsight(null);
+      if (expandedRoom) fetchRoomInsights(expandedRoom);
+    } else {
+      toast.error("Failed to update insight");
+    }
+    setEditSaving(false);
+  };
+
+  const handleDelete = (insightId: string) => {
+    setRoomInsights((prev) => prev.filter((i) => i.id !== insightId));
+    fetchData();
+  };
+
+  return (
+    <>
+      <SectionHeader title="Insights" description="Knowledge distilled from your papers. Strength grows as the Research agent references them." />
+
+      {loading ? (
+        <div className="text-sm text-muted-foreground">Loading...</div>
+      ) : (
+        <>
+          {/* Stats */}
+          {stats && (
+            <div className="grid grid-cols-2 gap-3">
+              <div className="rounded-md border p-3">
+                <div className="flex items-center gap-2">
+                  <Lightbulb className="h-4 w-4 text-amber-500" />
+                  <span className="text-2xl font-bold">{stats.totalInsights}</span>
+                </div>
+                <p className="text-xs text-muted-foreground mt-0.5">Total insights</p>
+              </div>
+              <div className="rounded-md border p-3">
+                <div className="flex items-center gap-2">
+                  <Brain className="h-4 w-4 text-indigo-500" />
+                  <span className="text-2xl font-bold">{stats.totalRooms}</span>
+                </div>
+                <p className="text-xs text-muted-foreground mt-0.5">Rooms</p>
+              </div>
+            </div>
+          )}
+
+          {/* Rooms */}
+          <div className="space-y-1 pt-4 border-t border-border">
+            <Label className="text-sm font-medium mb-2 block">Rooms ({rooms.length})</Label>
+            {rooms.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No rooms yet. Distill insights from papers to auto-create rooms.</p>
+            ) : (
+              rooms.map((room) => {
+                const isOpen = expandedRoom === room.id;
+                return (
+                  <div key={room.id}>
+                    {/* Room row */}
+                    <div className={`flex items-center gap-2 rounded-md px-3 py-2 cursor-pointer transition-colors ${
+                      isOpen ? "bg-accent/50" : "hover:bg-accent/30"
+                    }`}>
+                      <button
+                        className="flex items-center gap-2 flex-1 text-left"
+                        onClick={() => toggleRoom(room.id)}
+                      >
+                        <ChevronRight className={`h-3 w-3 text-muted-foreground transition-transform duration-150 ${isOpen ? "rotate-90" : ""}`} />
+                        <span className="h-2.5 w-2.5 rounded-full shrink-0" style={{ backgroundColor: room.color }} />
+                        <span className="text-sm font-medium">{room.name}</span>
+                        <span className="text-xs text-muted-foreground tabular-nums">
+                          {room._count.insights}
+                        </span>
+                      </button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6 opacity-0 group-hover:opacity-100 hover:!opacity-100"
+                        style={{ opacity: isOpen ? 1 : undefined }}
+                        disabled={deletingRoom === room.id}
+                        onClick={(e) => { e.stopPropagation(); deleteRoom(room.id); }}
+                      >
+                        <Trash2 className="h-3 w-3" />
+                      </Button>
+                    </div>
+
+                    {/* Expanded: full InsightCards */}
+                    {isOpen && (
+                      <div className="pl-5 pr-1 pt-1 pb-3 space-y-2">
+                        {loadingInsights ? (
+                          <p className="text-xs text-muted-foreground py-3 pl-3">Loading...</p>
+                        ) : roomInsights.length === 0 ? (
+                          <p className="text-xs text-muted-foreground py-3 pl-3">No insights in this room.</p>
+                        ) : (
+                          roomInsights.map((insight) => (
+                            <InsightCard
+                              key={insight.id}
+                              insight={insight}
+                              compact
+                              onEdit={handleEdit}
+                              onDelete={handleDelete}
+                              onUpdate={() => { if (expandedRoom) fetchRoomInsights(expandedRoom); }}
+                            />
+                          ))
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </>
+      )}
+
+      {/* Edit dialog */}
+      <Dialog open={!!editingInsight} onOpenChange={(open) => { if (!open) setEditingInsight(null); }}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Edit Insight</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground/60">What I learned</Label>
+              <Textarea
+                value={editForm.learning}
+                onChange={(e) => setEditForm({ ...editForm, learning: e.target.value })}
+                rows={3}
+                className="mt-1 text-sm"
+              />
+            </div>
+            <div>
+              <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground/60">Why it matters</Label>
+              <Textarea
+                value={editForm.significance}
+                onChange={(e) => setEditForm({ ...editForm, significance: e.target.value })}
+                rows={2}
+                className="mt-1 text-sm"
+              />
+            </div>
+            <div>
+              <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground/60">How to apply</Label>
+              <Textarea
+                value={editForm.applications}
+                onChange={(e) => setEditForm({ ...editForm, applications: e.target.value })}
+                rows={2}
+                className="mt-1 text-sm"
+                placeholder="Optional"
+              />
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button variant="ghost" size="sm" onClick={() => setEditingInsight(null)}>Cancel</Button>
+              <Button size="sm" onClick={saveEdit} disabled={editSaving || !editForm.learning.trim()}>
+                {editSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : <Save className="h-3.5 w-3.5 mr-1.5" />}
+                Save
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
 

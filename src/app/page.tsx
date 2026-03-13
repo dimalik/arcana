@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -13,14 +13,19 @@ import {
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
 import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import {
   FileText,
-  ChevronRight,
   ArrowUpDown,
   MoreHorizontal,
   Plus,
   Tags,
   Trash2,
   Check,
+  X,
 } from "lucide-react";
 import { PaperCard, PaperCardData } from "@/components/paper-card";
 import { DiscoveriesPanel } from "@/components/recommendations/discoveries-panel";
@@ -33,6 +38,135 @@ interface TagCluster {
   color: string;
   tags: { id: string; name: string; color: string; _count: { papers: number } }[];
 }
+
+// ── Tag Filter Strip ──────────────────────────────────────────────
+
+function TagFilterStrip({
+  clusters,
+  selectedTagIds,
+  onToggleTag,
+  onClear,
+}: {
+  clusters: TagCluster[];
+  selectedTagIds: Set<string>;
+  onToggleTag: (tagId: string) => void;
+  onClear: () => void;
+}) {
+  const [openCluster, setOpenCluster] = useState<string | null>(null);
+
+  // Build a flat tag list for resolving selected tags
+  const allTags = clusters.flatMap((c) =>
+    c.tags
+      .filter((t) => t._count.papers >= 1)
+      .map((t) => ({ ...t, cluster: c }))
+  );
+
+  const selectedTags = allTags.filter((t) => selectedTagIds.has(t.id));
+
+  if (clusters.length === 0) return null;
+
+  return (
+    <div className="space-y-2">
+      {/* Cluster chips */}
+      <div className="flex items-center gap-1.5 flex-wrap">
+        {clusters.map((cluster) => {
+          const visibleTags = cluster.tags.filter((t) => t._count.papers >= 1);
+          if (visibleTags.length === 0) return null;
+          const activeInCluster = visibleTags.filter((t) => selectedTagIds.has(t.id)).length;
+
+          return (
+            <Popover
+              key={cluster.id}
+              open={openCluster === cluster.id}
+              onOpenChange={(open) => setOpenCluster(open ? cluster.id : null)}
+            >
+              <PopoverTrigger asChild>
+                <button
+                  className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-all hover:ring-1 hover:ring-border/60"
+                  style={{
+                    backgroundColor: cluster.color + "12",
+                    color: cluster.color,
+                  }}
+                >
+                  <span
+                    className="h-1.5 w-1.5 rounded-full"
+                    style={{ backgroundColor: cluster.color }}
+                  />
+                  {cluster.name}
+                  {activeInCluster > 0 && (
+                    <span
+                      className="ml-0.5 h-4 min-w-4 inline-flex items-center justify-center rounded-full text-[10px] font-bold text-white"
+                      style={{ backgroundColor: cluster.color }}
+                    >
+                      {activeInCluster}
+                    </span>
+                  )}
+                </button>
+              </PopoverTrigger>
+              <PopoverContent
+                align="start"
+                className="w-52 p-1.5"
+                onOpenAutoFocus={(e) => e.preventDefault()}
+              >
+                <div className="space-y-0.5 max-h-64 overflow-y-auto">
+                  {visibleTags.map((tag) => {
+                    const isSelected = selectedTagIds.has(tag.id);
+                    return (
+                      <button
+                        key={tag.id}
+                        onClick={() => onToggleTag(tag.id)}
+                        className={`flex items-center justify-between w-full rounded-sm px-2 py-1.5 text-xs transition-colors ${
+                          isSelected ? "bg-accent font-medium" : "hover:bg-accent/50"
+                        }`}
+                      >
+                        <span className="truncate">{tag.name}</span>
+                        <span className="flex items-center gap-1.5 ml-2 shrink-0">
+                          <span className="text-[10px] text-muted-foreground/50 tabular-nums">
+                            {tag._count.papers}
+                          </span>
+                          {isSelected && <Check className="h-3 w-3 text-primary" />}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </PopoverContent>
+            </Popover>
+          );
+        })}
+      </div>
+
+      {/* Active filter pills */}
+      {selectedTags.length > 0 && (
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <span className="text-[10px] text-muted-foreground/50 uppercase tracking-wider mr-0.5">Filtered</span>
+          {selectedTags.map((tag) => (
+            <button
+              key={tag.id}
+              onClick={() => onToggleTag(tag.id)}
+              className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium transition-colors hover:opacity-80"
+              style={{
+                backgroundColor: tag.color + "20",
+                color: tag.color,
+              }}
+            >
+              {tag.name}
+              <X className="h-2.5 w-2.5 opacity-60" />
+            </button>
+          ))}
+          <button
+            onClick={onClear}
+            className="text-[10px] text-muted-foreground/40 hover:text-muted-foreground ml-1 transition-colors"
+          >
+            Clear all
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Main Page ─────────────────────────────────────────────────────
 
 export default function HomePage() {
   const [clusters, setClusters] = useState<TagCluster[]>([]);
@@ -48,11 +182,6 @@ export default function HomePage() {
   const [addDialogOpen, setAddDialogOpen] = useState(false);
   const [addDialogTab, setAddDialogTab] = useState<"pdf" | "arxiv" | "anthology" | "url">("pdf");
 
-  // Topics sidebar
-  const [expandedClusters, setExpandedClusters] = useState<Set<string>>(new Set());
-  const [sidebarOpen, setSidebarOpen] = useState(false);
-  const sidebarRef = useRef<HTMLDivElement>(null);
-
   // Fetch clusters once
   useEffect(() => {
     fetch("/api/tags/clusters")
@@ -60,7 +189,6 @@ export default function HomePage() {
       .then((data) => {
         if (Array.isArray(data)) {
           setClusters(data);
-          setExpandedClusters(new Set(data.map((c: TagCluster) => c.id)));
         }
       })
       .catch(() => {});
@@ -100,18 +228,6 @@ export default function HomePage() {
     return () => window.removeEventListener("paper-imported", handler);
   }, [fetchPapers]);
 
-  // Sidebar click-outside
-  useEffect(() => {
-    if (!sidebarOpen) return;
-    const handler = (e: MouseEvent) => {
-      if (sidebarRef.current && !sidebarRef.current.contains(e.target as Node)) {
-        setSidebarOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [sidebarOpen]);
-
   const toggleTag = (tagId: string) => {
     setSelectedTagIds((prev) => {
       const next = new Set(prev);
@@ -120,15 +236,6 @@ export default function HomePage() {
       return next;
     });
     setPage(1);
-  };
-
-  const toggleCluster = (id: string) => {
-    setExpandedClusters((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
   };
 
   const clearFilters = () => {
@@ -159,7 +266,7 @@ export default function HomePage() {
     <div className="flex gap-6">
       {/* Papers list — 3/4 */}
       <div className="flex-1 min-w-0 space-y-4">
-        <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center justify-between mb-1">
           <div className="flex items-center gap-2">
             <h3 className="text-sm font-medium">Library</h3>
             <span className="text-[11px] font-medium rounded-full bg-muted px-1.5 py-0.5 text-muted-foreground">
@@ -216,7 +323,7 @@ export default function HomePage() {
                   Add paper
                 </DropdownMenuItem>
                 <DropdownMenuItem asChild>
-                  <Link href="/tags" className="flex items-center gap-2">
+                  <Link href="/settings?tab=tags" className="flex items-center gap-2">
                     <Tags className="h-3.5 w-3.5" />
                     Manage tags
                   </Link>
@@ -234,6 +341,14 @@ export default function HomePage() {
             </DropdownMenu>
           </div>
         </div>
+
+        {/* Tag filter strip */}
+        <TagFilterStrip
+          clusters={clusters}
+          selectedTagIds={selectedTagIds}
+          onToggleTag={toggleTag}
+          onClear={clearFilters}
+        />
 
         {loading ? (
           <div className="space-y-3">
@@ -315,77 +430,6 @@ export default function HomePage() {
           <DiscoveriesPanel tagIds={Array.from(selectedTagIds)} />
         </div>
       </div>
-
-      {/* Topics sidebar toggle */}
-      {clusters.length > 0 && (
-        <div ref={sidebarRef}>
-          <button
-            onClick={() => setSidebarOpen((prev) => !prev)}
-            className={`fixed top-1/2 -translate-y-1/2 z-40 flex items-center justify-center h-8 w-4 rounded-r-md bg-muted/60 hover:bg-muted text-muted-foreground/40 hover:text-muted-foreground transition-all ${
-              sidebarOpen ? "left-56" : "left-0"
-            }`}
-            title="Topics"
-          >
-            <ChevronRight className={`h-3.5 w-3.5 transition-transform ${sidebarOpen ? "rotate-180" : ""}`} />
-          </button>
-
-          {sidebarOpen && (
-            <div className="fixed left-0 top-12 bottom-0 z-30 w-56 bg-background/95 backdrop-blur-sm border-r border-border/30 overflow-y-auto scrollbar-thin p-4 space-y-3">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-medium text-muted-foreground">Topics</span>
-                {selectedTagIds.size > 0 && (
-                  <button
-                    onClick={clearFilters}
-                    className="text-[11px] text-muted-foreground/50 hover:text-muted-foreground transition-colors"
-                  >
-                    Clear
-                  </button>
-                )}
-              </div>
-              {clusters.map((cluster) => {
-                const isExpanded = expandedClusters.has(cluster.id);
-                const visibleTags = cluster.tags.filter((t) => t._count.papers >= 1);
-                if (visibleTags.length === 0) return null;
-                return (
-                  <div key={cluster.id}>
-                    <button
-                      onClick={() => toggleCluster(cluster.id)}
-                      className="flex items-center gap-1 w-full text-left text-[11px] font-medium uppercase tracking-wider px-0 py-0.5 hover:opacity-80 transition-opacity"
-                      style={{ color: cluster.color }}
-                    >
-                      <ChevronRight className={`h-3 w-3 transition-transform ${isExpanded ? "rotate-90" : ""}`} />
-                      {cluster.name}
-                    </button>
-                    {isExpanded && (
-                      <div className="space-y-0.5 mt-0.5">
-                        {visibleTags.map((tag) => {
-                          const isSelected = selectedTagIds.has(tag.id);
-                          return (
-                            <button
-                              key={tag.id}
-                              onClick={() => toggleTag(tag.id)}
-                              className={`flex items-center justify-between w-full rounded-md px-2.5 py-1 text-sm transition-colors ${
-                                isSelected
-                                  ? "bg-accent font-medium"
-                                  : "hover:bg-accent/50"
-                              }`}
-                            >
-                              <span className="truncate">{tag.name}</span>
-                              <span className="text-[11px] text-muted-foreground/60 ml-2 shrink-0">
-                                {tag._count.papers}
-                              </span>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      )}
     </div>
   );
 }

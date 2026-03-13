@@ -902,5 +902,12 @@ export async function pollAllActiveBatches(): Promise<{ checked: number; complet
     }
   }
 
+  // After batch completions, run tag maintenance if threshold reached
+  if (completed > 0) {
+    import("@/lib/tags/maintenance").then(({ maybeRunTagMaintenance }) => {
+      maybeRunTagMaintenance().catch(() => {});
+    }).catch(() => {});
+  }
+
   return { checked: active.length, completed };
 }

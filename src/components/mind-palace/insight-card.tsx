@@ -9,53 +9,39 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { FileText, Check, MoreVertical, Trash2 } from "lucide-react";
+import { FileText, Check, MoreVertical, Pencil, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
+export interface InsightData {
+  id: string;
+  learning: string;
+  significance: string;
+  applications?: string | null;
+  userNotes?: string | null;
+  usageCount?: number;
+  source?: string;
+  paper: { id: string; title: string };
+  room?: { id: string; name: string; color: string };
+}
+
 interface InsightCardProps {
-  insight: {
-    id: string;
-    learning: string;
-    significance: string;
-    applications?: string | null;
-    userNotes?: string | null;
-    nextReviewAt: string;
-    interval: number;
-    repetitions: number;
-    easeFactor?: number;
-    source?: string;
-    paper: { id: string; title: string };
-    room?: { id: string; name: string; color: string };
-  };
+  insight: InsightData;
   showRoom?: boolean;
-  onReview?: (insightId: string, rating: number) => void;
+  compact?: boolean;
+  onEdit?: (insight: InsightData) => void;
   onDelete?: (insightId: string) => void;
   onUpdate?: () => void;
 }
 
-const RATING_LABELS = [
-  { value: 1, label: "Forgot", color: "text-red-500" },
-  { value: 2, label: "Hard", color: "text-orange-500" },
-  { value: 3, label: "OK", color: "text-yellow-500" },
-  { value: 4, label: "Good", color: "text-green-500" },
-  { value: 5, label: "Easy", color: "text-emerald-600" },
-];
-
-function StrengthMeter({
-  repetitions,
-  easeFactor,
-}: {
-  repetitions: number;
-  easeFactor?: number;
-}) {
-  // Determine how many bars to fill (0-4) based on SM-2 state
+function StrengthMeter({ usageCount }: { usageCount: number }) {
   let filledBars = 0;
-  if (repetitions >= 1) filledBars = 1;
-  if (repetitions >= 2) filledBars = 2;
-  if (repetitions >= 3 && (easeFactor ?? 2.5) >= 2.2) filledBars = 3;
-  if (repetitions >= 3 && (easeFactor ?? 2.5) >= 2.5) filledBars = 4;
+  if (usageCount >= 1) filledBars = 1;
+  if (usageCount >= 2) filledBars = 2;
+  if (usageCount >= 4) filledBars = 3;
+  if (usageCount >= 8) filledBars = 4;
 
   const barColors = [
     "bg-orange-500",
@@ -65,8 +51,12 @@ function StrengthMeter({
   ];
   const heights = [8, 10, 12, 14];
 
+  const label = usageCount === 0
+    ? "Not yet used by Research"
+    : `Used ${usageCount} time${usageCount !== 1 ? "s" : ""} by Research`;
+
   return (
-    <div className="flex items-end gap-[2px]" title={`${filledBars}/4 strength`}>
+    <div className="flex items-end gap-[2px]" title={label}>
       {heights.map((h, i) => (
         <div
           key={i}
@@ -83,13 +73,13 @@ function StrengthMeter({
 export function InsightCard({
   insight,
   showRoom,
-  onReview,
+  compact,
+  onEdit,
   onDelete,
   onUpdate,
 }: InsightCardProps) {
   const [editingNotes, setEditingNotes] = useState(false);
   const [notes, setNotes] = useState(insight.userNotes || "");
-  const isDue = new Date(insight.nextReviewAt) <= new Date();
 
   const saveNotes = async () => {
     const res = await fetch(`/api/mind-palace/insights/${insight.id}`, {
@@ -118,14 +108,11 @@ export function InsightCard({
   };
 
   return (
-    <Card className={isDue ? "border-primary/30" : ""}>
-      <CardContent className="p-4 space-y-3">
+    <Card className={compact ? "border-muted/60" : ""}>
+      <CardContent className={compact ? "p-3 space-y-2" : "p-4 space-y-3"}>
         {/* Header: strength meter · paper · room · overflow */}
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          <StrengthMeter
-            repetitions={insight.repetitions}
-            easeFactor={insight.easeFactor}
-          />
+          <StrengthMeter usageCount={insight.usageCount ?? 0} />
           <span className="text-muted-foreground/40">·</span>
           <Link
             href={`/papers/${insight.paper.id}`}
@@ -138,8 +125,8 @@ export function InsightCard({
             <>
               <span className="text-muted-foreground/40">·</span>
               <Link
-                href={`/mind-palace/${insight.room.id}`}
-                className="inline-flex items-center gap-1 shrink-0"
+                href="/settings?tab=insights"
+                className="inline-flex items-center gap-1 shrink-0 hover:text-primary"
               >
                 <span
                   className="h-2 w-2 rounded-full"
@@ -169,6 +156,15 @@ export function InsightCard({
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-36">
+              {onEdit && (
+                <>
+                  <DropdownMenuItem onClick={() => onEdit(insight)}>
+                    <Pencil className="h-4 w-4" />
+                    Edit
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                </>
+              )}
               <DropdownMenuItem
                 onClick={handleDelete}
                 className="text-destructive focus:text-destructive"
@@ -185,7 +181,7 @@ export function InsightCard({
           <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60 mb-0.5">
             What I learned
           </p>
-          <p className="text-sm leading-relaxed">{insight.learning}</p>
+          <p className={`${compact ? "text-xs" : "text-sm"} leading-relaxed`}>{insight.learning}</p>
         </div>
 
         {/* WHY IT MATTERS */}
@@ -193,7 +189,7 @@ export function InsightCard({
           <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60 mb-0.5">
             Why it matters
           </p>
-          <p className="text-sm text-muted-foreground leading-relaxed">
+          <p className={`${compact ? "text-xs" : "text-sm"} text-muted-foreground leading-relaxed`}>
             {insight.significance}
           </p>
         </div>
@@ -204,7 +200,7 @@ export function InsightCard({
             <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60 mb-0.5">
               How to apply
             </p>
-            <p className="text-sm text-muted-foreground leading-relaxed">
+            <p className={`${compact ? "text-xs" : "text-sm"} text-muted-foreground leading-relaxed`}>
               {insight.applications}
             </p>
           </div>
@@ -249,23 +245,6 @@ export function InsightCard({
             onClick={() => setEditingNotes(true)}
           >
             {insight.userNotes || "Add your notes..."}
-          </div>
-        )}
-
-        {/* Rating buttons (only when due) */}
-        {onReview && isDue && (
-          <div className="flex gap-1 pt-0.5">
-            {RATING_LABELS.map((r) => (
-              <Button
-                key={r.value}
-                size="sm"
-                variant="outline"
-                className={`h-7 text-xs px-2 ${r.color}`}
-                onClick={() => onReview(insight.id, r.value)}
-              >
-                {r.label}
-              </Button>
-            ))}
           </div>
         )}
       </CardContent>

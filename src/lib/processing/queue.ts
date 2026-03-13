@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { runTextExtraction, runAutoProcessPipeline, runDeferredSteps } from "@/lib/llm/auto-process";
+import { notifyPaperProcessed, maybeRunTagMaintenance } from "@/lib/tags/maintenance";
 
 const STALL_THRESHOLD_MS = 5 * 60 * 1000; // 5 minutes
 const MAX_CONCURRENT = 3; // Process up to N papers simultaneously
@@ -83,14 +84,16 @@ class ProcessingQueue {
       this.startProcessing(paperId);
     }
 
-    // When queue is empty and no active processing, run deferred steps
+    // When queue is empty and no active processing, run deferred steps then tag maintenance
     if (this.queue.length === 0 && this.processing.size === 0 && !this.runningDeferred) {
       this.runningDeferred = true;
       runDeferredSteps()
-        .then((count) => {
+        .then(async (count) => {
           if (count > 0) {
             console.log(`[queue] Completed deferred processing for ${count} papers`);
           }
+          // After all processing completes, run tag maintenance if threshold reached
+          await maybeRunTagMaintenance();
         })
         .catch((e) => console.error("[queue] Deferred processing failed:", e))
         .finally(() => { this.runningDeferred = false; });
@@ -180,6 +183,7 @@ class ProcessingQueue {
         console.log(`[queue] Large backlog (${backlogSize}), running essential-only for ${paperId}`);
       }
       await runAutoProcessPipeline({ paperId, skipExtract, signal, essentialOnly });
+      notifyPaperProcessed();
 
     } catch (e) {
       const cancelled = signal.aborted || e instanceof CancelledError;
@@ -275,6 +279,7 @@ class ProcessingQueue {
 // Singleton — survives HMR in development via globalThis
 const globalForQueue = globalThis as unknown as {
   processingQueue: ProcessingQueue | undefined;
+  batchPollInterval: ReturnType<typeof setInterval> | undefined;
 };
 
 export const processingQueue =
@@ -282,4 +287,19 @@ export const processingQueue =
 
 if (process.env.NODE_ENV !== "production") {
   globalForQueue.processingQueue = processingQueue;
+}
+
+// Auto-poll active batches every 5 minutes
+if (!globalForQueue.batchPollInterval) {
+  globalForQueue.batchPollInterval = setInterval(async () => {
+    try {
+      const { pollAllActiveBatches } = await import("./batch");
+      const result = await pollAllActiveBatches();
+      if (result.completed > 0) {
+        console.log(`[batch-poll] Auto-polled: ${result.completed} batches completed`);
+      }
+    } catch {
+      // Batch module may not be initialized yet
+    }
+  }, 5 * 60 * 1000);
 }
