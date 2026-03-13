@@ -859,30 +859,39 @@ export async function runAutoProcessPipeline(opts: {
  * Called automatically when the processing queue drains.
  */
 export async function runDeferredSteps(): Promise<number> {
-  const papers = await prisma.paper.findMany({
-    where: { processingStatus: "NEEDS_DEFERRED" },
-    select: { id: true, sourceType: true },
-    take: 10,
-  });
+  let totalCompleted = 0;
 
-  if (papers.length === 0) return 0;
+  // Process in batches until no more NEEDS_DEFERRED papers remain
+  while (true) {
+    const papers = await prisma.paper.findMany({
+      where: { processingStatus: "NEEDS_DEFERRED" },
+      select: { id: true, sourceType: true },
+      take: 10,
+    });
 
-  console.log(`[auto-process] Running deferred steps for ${papers.length} papers`);
+    if (papers.length === 0) break;
 
-  let completed = 0;
-  for (const paper of papers) {
-    try {
-      const skipExtract = paper.sourceType === "ARXIV" || paper.sourceType === "OPENREVIEW";
-      await runAutoProcessPipeline({
-        paperId: paper.id,
-        skipExtract,
-        deferredOnly: true,
-      });
-      completed++;
-    } catch (e) {
-      console.error(`[auto-process] Deferred processing failed for ${paper.id}:`, e);
+    console.log(`[auto-process] Running deferred steps for ${papers.length} papers (${totalCompleted} done so far)`);
+
+    for (const paper of papers) {
+      try {
+        const skipExtract = paper.sourceType === "ARXIV" || paper.sourceType === "OPENREVIEW";
+        await runAutoProcessPipeline({
+          paperId: paper.id,
+          skipExtract,
+          deferredOnly: true,
+        });
+        totalCompleted++;
+      } catch (e) {
+        console.error(`[auto-process] Deferred processing failed for ${paper.id}:`, e);
+        // Mark as failed so we don't loop forever
+        await prisma.paper.update({
+          where: { id: paper.id },
+          data: { processingStatus: "FAILED", processingStep: null, processingStartedAt: null },
+        }).catch(() => {});
+      }
     }
   }
 
-  return completed;
+  return totalCompleted;
 }

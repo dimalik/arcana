@@ -124,6 +124,8 @@ const STATUS_LABELS: Record<string, string> = {
   PENDING: "Queued for processing...",
   EXTRACTING_TEXT: "Extracting text...",
   TEXT_EXTRACTED: "Waiting to process...",
+  NO_PDF: "No PDF available",
+  BATCH_PROCESSING: "Batch processing...",
 };
 
 function getProcessingLabel(paper: Paper): string {
@@ -271,7 +273,7 @@ export default function PaperDetailPage() {
 
   useEffect(() => {
     if (!paper) return;
-    if (paper.processingStatus === "COMPLETED" || paper.processingStatus === "FAILED") {
+    if (paper.processingStatus === "COMPLETED" || paper.processingStatus === "FAILED" || paper.processingStatus === "NO_PDF") {
       return;
     }
 
@@ -462,7 +464,7 @@ export default function PaperDetailPage() {
             </div>
           )}
           {/* Processing status — minimal inline */}
-          {paper.processingStatus !== "COMPLETED" && paper.processingStatus !== "FAILED" && (
+          {paper.processingStatus !== "COMPLETED" && paper.processingStatus !== "FAILED" && paper.processingStatus !== "NO_PDF" && (
             <span className="ml-1 flex items-center gap-1 text-xs text-muted-foreground">
               <Loader2 className="h-3 w-3 animate-spin" />
               {getProcessingLabel(paper)}
@@ -470,6 +472,9 @@ export default function PaperDetailPage() {
           )}
           {paper.processingStatus === "FAILED" && (
             <span className="ml-1 text-xs text-destructive">Failed</span>
+          )}
+          {paper.processingStatus === "NO_PDF" && (
+            <span className="ml-1 text-xs text-amber-500">No PDF</span>
           )}
         </div>
       ),
@@ -567,7 +572,8 @@ export default function PaperDetailPage() {
 
   const isProcessing =
     paper.processingStatus !== "COMPLETED" &&
-    paper.processingStatus !== "FAILED";
+    paper.processingStatus !== "FAILED" &&
+    paper.processingStatus !== "NO_PDF";
 
   const authors: string[] = paper.authors
     ? JSON.parse(paper.authors)

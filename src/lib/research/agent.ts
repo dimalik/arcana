@@ -1035,7 +1035,7 @@ function createTools(
     }),
 
     read_paper: tool({
-      description: "Read a paper's full text, abstract, and metadata. Use the paper title to find it.",
+      description: "Read a paper with all processed intelligence: metadata, key findings, insights from the Mind Palace, relationships to other papers, contradictions, citation contexts, and full text. This is your primary tool for deeply understanding a paper.",
       inputSchema: z.object({
         title: z.string().describe("Title (or partial title) of the paper to read"),
       }),
@@ -1049,7 +1049,32 @@ function createTools(
           select: {
             id: true, title: true, abstract: true, authors: true,
             year: true, venue: true, summary: true, fullText: true,
+            keyFindings: true, categories: true,
             processingStatus: true,
+            tags: { include: { tag: true } },
+            insights: {
+              include: { room: { select: { name: true } } },
+            },
+            sourceRelations: {
+              include: { targetPaper: { select: { title: true, year: true } } },
+            },
+            targetRelations: {
+              include: { sourcePaper: { select: { title: true, year: true } } },
+            },
+            references: {
+              where: { citationContext: { not: null } },
+              select: { title: true, year: true, citationContext: true, matchedPaper: { select: { title: true } } },
+              take: 20,
+            },
+            promptResults: {
+              where: { promptType: "detectContradictions" },
+              select: { result: true },
+              take: 1,
+            },
+            figures: {
+              select: { type: true, caption: true, description: true, page: true },
+              take: 10,
+            },
           },
         });
         if (!paper) return `Paper "${title}" not found in library. Try searching first.`;
@@ -1058,20 +1083,101 @@ function createTools(
         }
 
         const parts: string[] = [];
-        parts.push(`Title: ${paper.title}`);
+
+        // ── Metadata ──
+        parts.push(`# ${paper.title}`);
         if (paper.authors) {
           try { parts.push(`Authors: ${JSON.parse(paper.authors).join(", ")}`); } catch { parts.push(`Authors: ${paper.authors}`); }
         }
         if (paper.year) parts.push(`Year: ${paper.year}`);
         if (paper.venue) parts.push(`Venue: ${paper.venue}`);
-        if (paper.abstract) parts.push(`\nAbstract:\n${paper.abstract}`);
-        if (paper.summary) parts.push(`\nSummary:\n${paper.summary}`);
+        if (paper.tags.length > 0) parts.push(`Tags: ${paper.tags.map((t) => t.tag.name).join(", ")}`);
+
+        // ── Abstract & Summary ──
+        if (paper.abstract) parts.push(`\n## Abstract\n${paper.abstract}`);
+        if (paper.summary) parts.push(`\n## Summary\n${paper.summary}`);
+
+        // ── Key Findings ──
+        if (paper.keyFindings) {
+          try {
+            const findings = JSON.parse(paper.keyFindings);
+            if (Array.isArray(findings) && findings.length > 0) {
+              parts.push(`\n## Key Findings\n${findings.map((f: string) => `- ${f}`).join("\n")}`);
+            }
+          } catch { /* not JSON */ }
+        }
+
+        // ── Mind Palace Insights ──
+        if (paper.insights.length > 0) {
+          const insightLines = paper.insights.map((ins) => {
+            let line = `- [${ins.room.name}] ${ins.learning}`;
+            if (ins.significance) line += `\n  Significance: ${ins.significance}`;
+            if (ins.applications) line += `\n  Applications: ${ins.applications}`;
+            return line;
+          });
+          parts.push(`\n## Insights (Mind Palace)\n${insightLines.join("\n")}`);
+        }
+
+        // ── Relationships to Other Papers ──
+        const allRelations = [
+          ...paper.sourceRelations.map((r) => ({
+            paper: r.targetPaper.title,
+            year: r.targetPaper.year,
+            type: r.relationType,
+            desc: r.description,
+            direction: "this paper →" as const,
+          })),
+          ...paper.targetRelations.map((r) => ({
+            paper: r.sourcePaper.title,
+            year: r.sourcePaper.year,
+            type: r.relationType,
+            desc: r.description,
+            direction: "→ this paper" as const,
+          })),
+        ];
+        if (allRelations.length > 0) {
+          const relLines = allRelations.map((r) =>
+            `- ${r.type}: "${r.paper}" (${r.year || "?"})${r.desc ? ` — ${r.desc}` : ""}`
+          );
+          parts.push(`\n## Relationships to Other Papers\n${relLines.join("\n")}`);
+        }
+
+        // ── Contradictions ──
+        if (paper.promptResults.length > 0) {
+          try {
+            const contradictions = JSON.parse(paper.promptResults[0].result);
+            if (Array.isArray(contradictions) && contradictions.length > 0) {
+              const cLines = contradictions.map((c: { claim?: string; otherPaper?: string; contradiction?: string; severity?: string }) =>
+                `- [${c.severity || "?"}] ${c.claim || ""} vs "${c.otherPaper || "?"}" — ${c.contradiction || ""}`
+              );
+              parts.push(`\n## Contradictions with Other Papers\n${cLines.join("\n")}`);
+            }
+          } catch { /* not valid JSON */ }
+        }
+
+        // ── Citation Contexts (why this paper cites others) ──
+        const citedWithContext = paper.references.filter((r) => r.citationContext);
+        if (citedWithContext.length > 0) {
+          const ctxLines = citedWithContext.map((r) =>
+            `- "${r.matchedPaper?.title || r.title}" (${r.year || "?"}): ${r.citationContext}`
+          );
+          parts.push(`\n## Key Citations & Why They Matter\n${ctxLines.join("\n")}`);
+        }
+
+        // ── Figures & Tables ──
+        if (paper.figures.length > 0) {
+          const figLines = paper.figures.map((f) =>
+            `- [${f.type}, p.${f.page}] ${f.caption || ""}${f.description ? ` — ${f.description}` : ""}`
+          );
+          parts.push(`\n## Figures & Tables\n${figLines.join("\n")}`);
+        }
+
+        // ── Full Text (last, truncated) ──
         if (paper.fullText) {
-          // Truncate to ~15K chars to avoid blowing context
-          const text = paper.fullText.length > 15000
-            ? paper.fullText.slice(0, 12000) + "\n\n[...truncated...]\n\n" + paper.fullText.slice(-3000)
+          const text = paper.fullText.length > 12000
+            ? paper.fullText.slice(0, 9000) + "\n\n[...truncated...]\n\n" + paper.fullText.slice(-3000)
             : paper.fullText;
-          parts.push(`\nFull Text:\n${text}`);
+          parts.push(`\n## Full Text\n${text}`);
         } else if (!paper.abstract && !paper.summary) {
           parts.push("\n(No text available — PDF may still be processing)");
         }
@@ -1623,7 +1729,7 @@ function createTools(
     }),
 
     search_library: tool({
-      description: "Search your existing paper collection for content relevant to a specific question or problem. Unlike search_papers (which searches external databases), this searches papers you ALREADY HAVE — their full text, abstracts, summaries, and insights. Use this when you need to understand WHY something happened, find a technique to solve a problem, or check if any paper in your library addresses a specific issue. Returns ranked results with relevant excerpts.",
+      description: "Search your existing paper collection for content relevant to a specific question or problem. Unlike search_papers (which searches external databases), this searches papers you ALREADY HAVE — their full text, abstracts, summaries, key findings, Mind Palace insights, paper relationships, contradictions, and citation contexts. Use this when you need to understand WHY something happened, find a technique to solve a problem, or check if any paper in your library addresses a specific issue. Returns ranked results with the most relevant intelligence from each paper.",
       inputSchema: z.object({
         query: z.string().describe("Specific question or problem to search for (e.g., 'why does attention fail on long sequences', 'techniques for handling class imbalance')"),
         max_results: z.number().min(1).max(10).default(5).optional(),
@@ -1632,13 +1738,12 @@ function createTools(
         const maxResults = max_results || 5;
         emit({ type: "tool_progress", toolName: "search_library", content: `Searching library for: "${query.slice(0, 60)}..."` });
 
-        // Get all project papers (and all user papers if project has few)
+        // Get all project papers
         const proj = await prisma.researchProject.findUnique({
           where: { id: projectId },
           select: { collectionId: true },
         });
 
-        // Search project papers first, then broader library
         const paperIds = new Set<string>();
         if (proj?.collectionId) {
           const collPapers = await prisma.collectionPaper.findMany({
@@ -1648,62 +1753,84 @@ function createTools(
           collPapers.forEach((cp) => paperIds.add(cp.paperId));
         }
 
-        // Also search all user papers if collection is small
+        // Fetch all user papers with full processed intelligence
         const allPapers = await prisma.paper.findMany({
           where: { userId },
           select: {
             id: true, title: true, abstract: true, summary: true, fullText: true,
-            year: true, venue: true, authors: true,
+            year: true, venue: true, authors: true, keyFindings: true,
+            tags: { include: { tag: true } },
+            insights: {
+              include: { room: { select: { name: true } } },
+            },
+            sourceRelations: {
+              include: { targetPaper: { select: { title: true, year: true } } },
+            },
+            targetRelations: {
+              include: { sourcePaper: { select: { title: true, year: true } } },
+            },
+            references: {
+              where: { citationContext: { not: null } },
+              select: { title: true, year: true, citationContext: true, matchedPaper: { select: { title: true } } },
+              take: 20,
+            },
+            promptResults: {
+              where: { promptType: "detectContradictions" },
+              select: { result: true },
+              take: 1,
+            },
           },
         });
 
-        // Score each paper by relevance to the query
+        // Build searchable text per paper including all intelligence
         const queryTerms = query.toLowerCase().split(/\s+/).filter((t) => t.length > 2);
         const scored = allPapers.map((paper) => {
-          let score = 0;
-          const searchable = [
-            paper.title || "",
-            paper.abstract || "",
-            paper.summary || "",
-            (paper.fullText || "").slice(0, 30000), // limit full text search
-          ].join(" ").toLowerCase();
+          // Gather all searchable text with weight multipliers
+          const weighted: { text: string; weight: number }[] = [
+            { text: paper.title || "", weight: 3 },
+            { text: paper.abstract || "", weight: 2 },
+            { text: paper.summary || "", weight: 2 },
+            { text: paper.keyFindings || "", weight: 2.5 },
+            { text: paper.tags.map((t) => t.tag.name).join(" "), weight: 1.5 },
+            { text: (paper.fullText || "").slice(0, 30000), weight: 1 },
+          ];
 
-          // Count term matches
-          for (const term of queryTerms) {
-            const matches = (searchable.match(new RegExp(term, "g")) || []).length;
-            score += matches;
+          // Add insights (high value — distilled knowledge)
+          for (const ins of paper.insights) {
+            weighted.push({ text: `${ins.learning} ${ins.significance} ${ins.applications || ""}`, weight: 2.5 });
+          }
+
+          // Add relation descriptions
+          for (const rel of paper.sourceRelations) {
+            weighted.push({ text: `${rel.description || ""} ${rel.targetPaper.title}`, weight: 1.5 });
+          }
+          for (const rel of paper.targetRelations) {
+            weighted.push({ text: `${rel.description || ""} ${rel.sourcePaper.title}`, weight: 1.5 });
+          }
+
+          // Add citation contexts
+          for (const ref of paper.references) {
+            weighted.push({ text: ref.citationContext || "", weight: 2 });
+          }
+
+          // Add contradictions
+          if (paper.promptResults[0]?.result) {
+            weighted.push({ text: typeof paper.promptResults[0].result === "string" ? paper.promptResults[0].result : JSON.stringify(paper.promptResults[0].result), weight: 2 });
+          }
+
+          // Score with weights
+          let score = 0;
+          for (const { text, weight } of weighted) {
+            const lower = text.toLowerCase();
+            for (const term of queryTerms) {
+              score += (lower.match(new RegExp(term, "g")) || []).length * weight;
+            }
           }
 
           // Boost project papers
           if (paperIds.has(paper.id)) score *= 1.5;
 
-          // Find the most relevant excerpt
-          let bestExcerpt = "";
-          if (score > 0 && paper.fullText) {
-            const text = paper.fullText;
-            let bestPos = -1;
-            let bestDensity = 0;
-            // Sliding window to find densest region of query term matches
-            const windowSize = 500;
-            for (let i = 0; i < text.length - windowSize; i += 100) {
-              const window = text.slice(i, i + windowSize).toLowerCase();
-              let density = 0;
-              for (const term of queryTerms) {
-                density += (window.match(new RegExp(term, "g")) || []).length;
-              }
-              if (density > bestDensity) {
-                bestDensity = density;
-                bestPos = i;
-              }
-            }
-            if (bestPos >= 0) {
-              bestExcerpt = text.slice(Math.max(0, bestPos - 50), bestPos + windowSize + 50).trim();
-            }
-          }
-          if (!bestExcerpt && paper.abstract) bestExcerpt = paper.abstract;
-          if (!bestExcerpt && paper.summary) bestExcerpt = paper.summary;
-
-          return { paper, score, excerpt: bestExcerpt };
+          return { paper, score };
         })
           .filter((s) => s.score > 0)
           .sort((a, b) => b.score - a.score)
@@ -1716,14 +1843,74 @@ function createTools(
         const results = scored.map((s, i) => {
           const p = s.paper;
           const inProject = paperIds.has(p.id) ? " [in project]" : "";
-          let entry = `${i + 1}. "${p.title}" (${p.year || "?"}${p.venue ? `, ${p.venue}` : ""})${inProject}`;
-          if (s.excerpt) {
-            entry += `\n   Relevant excerpt: ...${s.excerpt.slice(0, 400)}...`;
+          const parts: string[] = [];
+          parts.push(`${i + 1}. "${p.title}" (${p.year || "?"}${p.venue ? `, ${p.venue}` : ""})${inProject}`);
+
+          if (p.summary) parts.push(`   Summary: ${p.summary.slice(0, 250)}`);
+
+          // Key findings
+          if (p.keyFindings) {
+            parts.push(`   Key Findings: ${p.keyFindings.slice(0, 300)}`);
           }
-          if (p.summary && !s.excerpt.includes(p.summary.slice(0, 50))) {
-            entry += `\n   Summary: ${p.summary.slice(0, 200)}`;
+
+          // Matching insights
+          if (p.insights.length > 0) {
+            const matchingInsights = p.insights
+              .filter((ins) => {
+                const text = `${ins.learning} ${ins.significance} ${ins.applications || ""}`.toLowerCase();
+                return queryTerms.some((t) => text.includes(t));
+              })
+              .slice(0, 3);
+            if (matchingInsights.length > 0) {
+              parts.push(`   Relevant Insights:`);
+              for (const ins of matchingInsights) {
+                parts.push(`   - [${ins.room.name}] ${ins.learning.slice(0, 200)}`);
+                if (ins.applications) parts.push(`     Applications: ${ins.applications.slice(0, 150)}`);
+              }
+            }
           }
-          return entry;
+
+          // Matching relations
+          const allRelations = [
+            ...p.sourceRelations.map((r) => ({ desc: r.description, type: r.relationType, other: r.targetPaper.title })),
+            ...p.targetRelations.map((r) => ({ desc: r.description, type: r.relationType, other: r.sourcePaper.title })),
+          ];
+          const matchingRels = allRelations
+            .filter((r) => {
+              const text = `${r.desc || ""} ${r.other}`.toLowerCase();
+              return queryTerms.some((t) => text.includes(t));
+            })
+            .slice(0, 3);
+          if (matchingRels.length > 0) {
+            parts.push(`   Related Papers:`);
+            for (const r of matchingRels) {
+              parts.push(`   - [${r.type}] ${r.other}${r.desc ? `: ${r.desc.slice(0, 150)}` : ""}`);
+            }
+          }
+
+          // Matching citation contexts
+          const matchingCites = p.references
+            .filter((ref) => {
+              const text = (ref.citationContext || "").toLowerCase();
+              return queryTerms.some((t) => text.includes(t));
+            })
+            .slice(0, 2);
+          if (matchingCites.length > 0) {
+            parts.push(`   Relevant Citations:`);
+            for (const c of matchingCites) {
+              parts.push(`   - ${c.title || "Unknown"}: ${(c.citationContext || "").slice(0, 200)}`);
+            }
+          }
+
+          // Contradictions snippet if relevant
+          if (p.promptResults[0]?.result) {
+            const contradText = typeof p.promptResults[0].result === "string" ? p.promptResults[0].result : JSON.stringify(p.promptResults[0].result);
+            if (queryTerms.some((t) => contradText.toLowerCase().includes(t))) {
+              parts.push(`   Contradictions: ${contradText.slice(0, 250)}`);
+            }
+          }
+
+          return parts.join("\n");
         }).join("\n\n");
 
         await recordStep("search_papers", `Library search: "${query.slice(0, 60)}"`, "COMPLETED", { query, matches: scored.length }, "literature");

@@ -213,7 +213,7 @@ class ProcessingQueue {
     const stalledPapers = await prisma.paper.findMany({
       where: {
         processingStatus: {
-          notIn: ["COMPLETED", "FAILED", "PENDING", "NEEDS_DEFERRED"],
+          notIn: ["COMPLETED", "FAILED", "PENDING", "NEEDS_DEFERRED", "NO_PDF", "BATCH_PROCESSING"],
         },
         processingStartedAt: {
           lt: stallCutoff,
@@ -225,7 +225,7 @@ class ProcessingQueue {
     const legacyStuck = await prisma.paper.findMany({
       where: {
         processingStatus: {
-          notIn: ["COMPLETED", "FAILED", "PENDING", "NEEDS_DEFERRED"],
+          notIn: ["COMPLETED", "FAILED", "PENDING", "NEEDS_DEFERRED", "NO_PDF", "BATCH_PROCESSING"],
         },
         processingStartedAt: null,
       },

@@ -32,6 +32,7 @@ export interface PaperCardData {
   engagementScore: number;
   tags: { tag: Tag }[];
   matchFields?: string[];
+  processingStatus?: string;
 }
 
 interface PaperCardProps {
@@ -81,6 +82,15 @@ export function PaperCard({
           <div className="flex items-start justify-between gap-2">
             <h3 className="text-lg font-semibold leading-tight">
               {paper.title}
+              {paper.processingStatus === "NO_PDF" && (
+                <span className="ml-2 inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium bg-amber-500/10 text-amber-500 align-middle">No PDF</span>
+              )}
+              {paper.processingStatus === "PENDING" && (
+                <span className="ml-2 inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium bg-muted text-muted-foreground align-middle">Pending</span>
+              )}
+              {paper.processingStatus === "FAILED" && (
+                <span className="ml-2 inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium bg-destructive/10 text-destructive align-middle">Failed</span>
+              )}
             </h3>
             <div className="flex items-center gap-1 shrink-0 mt-0.5">
               {heat > 0 && (

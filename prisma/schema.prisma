@@ -698,3 +698,26 @@ model AgentMemory {
 
   @@index([userId])
 }
+
+// ── Batch Processing ───────────────────────────────────────────────
+
+model ProcessingBatch {
+  id               String    @id @default(uuid())
+  anthropicBatchId String?   @unique  // Batch ID from Anthropic API
+  groupId          String               // Links phases of the same job
+  phase            Int                   // 1, 2, or 3
+  status           String    @default("BUILDING") // BUILDING, SUBMITTED, PROCESSING, COMPLETED, FAILED, CANCELED
+  modelId          String
+  paperIds         String               // JSON array of paper IDs
+  stepTypes        String               // JSON array of step types in this phase
+  requestCount     Int       @default(0)
+  completedCount   Int       @default(0)
+  failedCount      Int       @default(0)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  completedAt      DateTime?
+  error            String?
+
+  @@index([groupId])
+  @@index([status])
+}
