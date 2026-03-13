@@ -68,7 +68,7 @@ export function LiteraturePhase({ projectId, papers, steps, onRefresh }: Literat
   const nextPending = pendingSteps[0];
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 pr-2">
       {/* Action bar */}
       <div className="flex items-center gap-3">
         <button

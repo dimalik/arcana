@@ -138,14 +138,11 @@ export async function POST(_request: NextRequest, { params }: Params) {
 
     const priorWorkSummary = summaryParts.join("\n\n");
 
-    // Reset project state
+    // Reset project state — keep the current phase (don't reset to literature)
     await prisma.researchProject.update({
       where: { id },
       data: {
         status: "ACTIVE",
-        // Keep phase at "literature" so the agent starts from the beginning
-        // but with all the context of prior work
-        currentPhase: "literature",
       },
     });
 

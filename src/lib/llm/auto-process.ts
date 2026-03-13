@@ -235,10 +235,13 @@ export async function runAutoProcessPipeline(opts: {
   signal?: AbortSignal;
   /** When true, only run essential steps (metadata + summarize + categorize) and skip
    *  cross-paper linking, references, contradictions, contexts, and distill.
-   *  The deferred steps run later via runDeferredProcessing(). */
+   *  The deferred steps run later via runDeferredSteps(). */
   essentialOnly?: boolean;
+  /** When true, skip essential steps and only run deferred steps (linking, contradictions,
+   *  references, contexts, distill). Used when picking up NEEDS_DEFERRED papers. */
+  deferredOnly?: boolean;
 }) {
-  const { paperId, skipExtract, signal, essentialOnly } = opts;
+  const { paperId, skipExtract, signal, essentialOnly, deferredOnly } = opts;
 
   function checkCancelled() {
     if (signal?.aborted) {
@@ -285,8 +288,14 @@ export async function runAutoProcessPipeline(opts: {
     userContextPreamble = buildUserContextPreamble(userCtx);
   }
 
+  // Steps 1-3: Essential steps (metadata, summarize, categorize)
+  // Skipped when running deferred-only (paper already has these)
+  if (deferredOnly) {
+    console.log("[auto-process] Running deferred steps only for", paperId);
+  }
+
   // Step 1: Extract metadata
-  if (!skipExtract) {
+  if (!skipExtract && !deferredOnly) {
     try {
       checkCancelled();
       await setStep(paperId, "metadata");
@@ -333,7 +342,7 @@ export async function runAutoProcessPipeline(opts: {
   }
 
   // Step 2: Summarize (uses chunked map-reduce for long papers)
-  try {
+  if (!deferredOnly) try {
     checkCancelled();
     await setStep(paperId, "summarize");
     console.log("[auto-process] Summarizing", paperId);
@@ -366,7 +375,7 @@ export async function runAutoProcessPipeline(opts: {
   }
 
   // Step 3: Categorize + auto-tag (with duplicate prevention + score-aware hints)
-  try {
+  if (!deferredOnly) try {
     checkCancelled();
     await setStep(paperId, "categorize");
     console.log("[auto-process] Categorizing", paperId);
@@ -409,13 +418,14 @@ export async function runAutoProcessPipeline(opts: {
     console.error("[auto-process] Categorize failed for", paperId, ":", e instanceof Error ? e.message : e);
   }
 
-  // If essentialOnly mode, mark as completed and stop here.
-  // Deferred steps (linking, contradictions, references, contexts, distill) run later.
+  // If essentialOnly mode, mark as NEEDS_DEFERRED and stop here.
+  // Deferred steps (linking, contradictions, references, contexts, distill) run later
+  // when the queue drains via runDeferredSteps().
   if (essentialOnly) {
     await prisma.paper.update({
       where: { id: paperId },
       data: {
-        processingStatus: "COMPLETED",
+        processingStatus: "NEEDS_DEFERRED",
         processingStep: null,
         processingStartedAt: null,
       },
@@ -841,4 +851,38 @@ export async function runAutoProcessPipeline(opts: {
   });
 
   console.log("[auto-process] Pipeline completed for", paperId);
+}
+
+/**
+ * Find papers that completed essential-only processing (NEEDS_DEFERRED)
+ * and run the remaining steps (linking, contradictions, references, distill).
+ * Called automatically when the processing queue drains.
+ */
+export async function runDeferredSteps(): Promise<number> {
+  const papers = await prisma.paper.findMany({
+    where: { processingStatus: "NEEDS_DEFERRED" },
+    select: { id: true, sourceType: true },
+    take: 10,
+  });
+
+  if (papers.length === 0) return 0;
+
+  console.log(`[auto-process] Running deferred steps for ${papers.length} papers`);
+
+  let completed = 0;
+  for (const paper of papers) {
+    try {
+      const skipExtract = paper.sourceType === "ARXIV" || paper.sourceType === "OPENREVIEW";
+      await runAutoProcessPipeline({
+        paperId: paper.id,
+        skipExtract,
+        deferredOnly: true,
+      });
+      completed++;
+    } catch (e) {
+      console.error(`[auto-process] Deferred processing failed for ${paper.id}:`, e);
+    }
+  }
+
+  return completed;
 }

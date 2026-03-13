@@ -97,7 +97,7 @@ export function AnalysisPhase({ projectId, steps, hypotheses, onRefresh }: Analy
   const activeHypotheses = hypotheses.filter((h) => h.status === "TESTING" || h.status === "PROPOSED");
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 pr-2">
       {/* Action bar */}
       <div className="flex items-center gap-2">
         <button

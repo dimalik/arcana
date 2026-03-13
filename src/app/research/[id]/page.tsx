@@ -2,15 +2,21 @@
 
 import { useEffect, useState, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Pause, Play, MoreVertical, Loader2, RotateCcw } from "lucide-react";
+import { ArrowLeft, Pause, Play, MoreVertical, Loader2, RotateCcw, Download, FileText, FolderArchive, Check } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { PhaseTabs } from "@/components/research/phase-tabs";
-import { ResearchLog } from "@/components/research/research-log";
 import { ContextSidebar } from "@/components/research/context-sidebar";
 import { LiteraturePhase } from "@/components/research/literature-phase";
 import { HypothesisPhase } from "@/components/research/hypothesis-phase";
@@ -213,16 +219,39 @@ export default function ResearchWorkspacePage({ params }: { params: { id: string
     }
   };
 
-  const handleAddNote = async (content: string) => {
+  const [exportOpen, setExportOpen] = useState(false);
+  const [exportResearch, setExportResearch] = useState(true);
+  const [exportPapers, setExportPapers] = useState(true);
+  const [exportCode, setExportCode] = useState(true);
+  const [exportArtifacts, setExportArtifacts] = useState(false);
+  const [exporting, setExporting] = useState(false);
+
+  const handleExport = async () => {
+    setExporting(true);
     try {
-      await fetch(`/api/research/${id}/log`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ type: "user_note", content }),
-      });
-      fetchProject();
+      const params = new URLSearchParams();
+      if (!exportResearch) params.set("noResearch", "true");
+      if (!exportPapers) params.set("noPapers", "true");
+      if (exportPapers) params.set("fullText", "true");
+      if (exportCode) params.set("code", "true");
+      if (exportArtifacts) params.set("artifacts", "true");
+      const url = `/api/research/${id}/export?${params.toString()}`;
+      const res = await fetch(url);
+      if (!res.ok) throw new Error("Failed to export");
+      const blob = await res.blob();
+      const disposition = res.headers.get("Content-Disposition");
+      const filename = disposition?.match(/filename="(.+)"/)?.[1] || "research_export.json";
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(a.href);
+      toast.success("Exported project");
+      setExportOpen(false);
     } catch {
-      toast.error("Failed to add note");
+      toast.error("Failed to export project");
+    } finally {
+      setExporting(false);
     }
   };
 
@@ -232,7 +261,6 @@ export default function ResearchWorkspacePage({ params }: { params: { id: string
         <Skeleton className="h-8 w-64" />
         <Skeleton className="h-10 w-full" />
         <div className="flex gap-4">
-          <Skeleton className="h-96 w-48" />
           <Skeleton className="h-96 flex-1" />
           <Skeleton className="h-96 w-56" />
         </div>
@@ -301,6 +329,11 @@ export default function ResearchWorkspacePage({ params }: { params: { id: string
                   <><RotateCcw className="h-3 w-3 mr-1.5" /> Restart Agent</>
                 )}
               </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={() => setExportOpen(true)}>
+                <Download className="h-3 w-3 mr-1.5" /> Export
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
               <DropdownMenuItem onClick={handleArchive} className="text-destructive focus:text-destructive">
                 Archive Project
               </DropdownMenuItem>
@@ -323,17 +356,8 @@ export default function ResearchWorkspacePage({ params }: { params: { id: string
         />
       </div>
 
-      {/* Main layout: Log | Content | Context */}
+      {/* Main layout: Content | Context */}
       <div className="flex gap-3 flex-1 min-h-0">
-        {/* Left: Research Log */}
-        <div className="w-48 shrink-0 rounded-md border border-border overflow-hidden">
-          <ResearchLog
-            entries={project.log}
-            projectId={project.id}
-            onAddNote={handleAddNote}
-          />
-        </div>
-
         {/* Center: Phase content */}
         <div className="flex-1 min-w-0 overflow-auto">
           {project.currentPhase === "literature" && (
@@ -380,7 +404,7 @@ export default function ResearchWorkspacePage({ params }: { params: { id: string
         </div>
 
         {/* Right: Context sidebar */}
-        <div className="w-56 shrink-0 rounded-md border border-border overflow-hidden">
+        <div className="w-56 shrink-0 overflow-hidden">
           <ContextSidebar
             project={project}
             papers={papers.map((p) => ({ id: p.id, title: p.title }))}
@@ -404,6 +428,51 @@ export default function ResearchWorkspacePage({ params }: { params: { id: string
           autoStart={shouldAutoStart}
         />
       </div>
+
+      {/* Export dialog */}
+      <Dialog open={exportOpen} onOpenChange={setExportOpen}>
+        <DialogContent className="sm:max-w-xs">
+          <DialogHeader>
+            <DialogTitle className="text-sm">Export Project</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <div className="space-y-1.5">
+              {([
+                { key: "research", checked: exportResearch, toggle: () => setExportResearch(!exportResearch), label: "Research", desc: "Iterations, hypotheses, findings, and agent memories" },
+                { key: "papers", checked: exportPapers, toggle: () => setExportPapers(!exportPapers), label: "Papers", desc: `${papers.length} papers with full text` },
+                { key: "code", checked: exportCode, toggle: () => setExportCode(!exportCode), label: "Code", desc: "Experiment scripts and configs" },
+                { key: "artifacts", checked: exportArtifacts, toggle: () => setExportArtifacts(!exportArtifacts), label: "Artifacts", desc: "Output files, logs, and results" },
+              ] as const).map((opt) => (
+                <button
+                  key={opt.key}
+                  type="button"
+                  onClick={opt.toggle}
+                  className="flex items-center gap-2.5 w-full rounded-md border border-border/60 px-3 py-2 text-left hover:bg-muted/30 transition-colors"
+                >
+                  <div className={`h-3.5 w-3.5 rounded border flex items-center justify-center shrink-0 transition-colors ${
+                    opt.checked ? "bg-primary border-primary" : "border-muted-foreground/30"
+                  }`}>
+                    {opt.checked && <Check className="h-2.5 w-2.5 text-primary-foreground" />}
+                  </div>
+                  <div className="min-w-0">
+                    <span className="text-xs">{opt.label}</span>
+                    <p className="text-[10px] text-muted-foreground/50">{opt.desc}</p>
+                  </div>
+                </button>
+              ))}
+            </div>
+
+            <button
+              onClick={handleExport}
+              disabled={exporting || (!exportResearch && !exportPapers && !exportCode && !exportArtifacts)}
+              className="w-full inline-flex items-center justify-center gap-1.5 rounded-md bg-foreground text-background px-3 py-2 text-xs font-medium hover:bg-foreground/90 transition-colors disabled:opacity-50"
+            >
+              {exporting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
+              Export
+            </button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

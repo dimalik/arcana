@@ -4,8 +4,11 @@ import { useState, useRef, useEffect, useCallback, useImperativeHandle, forwardR
 import {
   Bot, Square, Send, Loader2, Wrench, CheckCircle,
   AlertCircle, ChevronDown, ChevronUp, Terminal,
-  Play, CirclePause,
+  Play, CirclePause, FileText, Save, Maximize2, X, Pencil,
 } from "lucide-react";
+import { MarkdownRenderer } from "@/components/ui/markdown-renderer";
+
+type BottomTab = "console" | "notebook";
 
 // ── Types ────────────────────────────────────────────────
 
@@ -122,6 +125,8 @@ export const AgentActivityBar = forwardRef<AgentActivityHandle, AgentActivityBar
     const [elapsed, setElapsed] = useState(0);
     const [expanded, setExpanded] = useState(false);
     const [statusLine, setStatusLine] = useState<string>("Ready");
+    const [activeTab, setActiveTab] = useState<BottomTab>("console");
+    const [fullscreen, setFullscreen] = useState(false);
     const feedEndRef = useRef<HTMLDivElement>(null);
     const abortRef = useRef<AbortController | null>(null);
     const itemCounter = useRef(0);
@@ -828,94 +833,158 @@ export const AgentActivityBar = forwardRef<AgentActivityHandle, AgentActivityBar
           )}
         </div>
 
-        {/* Expanded detail feed */}
+        {/* Expanded detail section */}
         {expanded && (
           <>
-            <div className="border-t border-border max-h-80 overflow-auto space-y-1.5 p-2">
-              {feed.length === 0 && !running && (
-                <p className="text-[11px] text-muted-foreground text-center py-4">
-                  No agent activity yet.
-                </p>
-              )}
-
-              {feed.map((item) => (
-                <CompactFeedItem key={item.id} item={item} />
-              ))}
-
-              {/* Streaming text */}
-              {currentText && (
-                <div className="flex gap-2">
-                  <Bot className="h-3 w-3 mt-0.5 text-blue-500 shrink-0" />
-                  <div className="text-[11px] text-foreground/90 whitespace-pre-wrap leading-relaxed">
-                    {currentText.slice(-300)}
-                    <span className="inline-block w-1 h-3 bg-blue-500/50 animate-pulse ml-0.5" />
-                  </div>
-                </div>
-              )}
-
-              {running && !currentText && thinkingMsg && (
-                <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
-                  <Loader2 className="h-3 w-3 animate-spin text-blue-500" />
-                  {thinkingMsg}
-                </div>
-              )}
-
-              {/* Live remote job panel — visible even without SSE */}
-              {activeJob && (
-                <div className="rounded border border-cyan-500/20 bg-cyan-500/5 px-2 py-1.5">
-                  <div className="flex items-center gap-1.5 mb-1">
-                    <Loader2 className="h-2.5 w-2.5 text-cyan-500 animate-spin" />
-                    <span className="text-[10px] font-medium">{activeJob.host}</span>
-                    {activeJob.gpu && <span className="text-[9px] text-muted-foreground">{activeJob.gpu}</span>}
-                    <span className="text-[9px] text-cyan-400">{activeJob.status}</span>
-                  </div>
-                  {activeJob.command && (
-                    <pre className="text-[9px] text-muted-foreground/60 font-mono bg-background/30 rounded px-1.5 py-0.5 mb-1 whitespace-pre-wrap break-all">
-                      $ {activeJob.command}
-                    </pre>
-                  )}
-                  {activeJob.stdout && (
-                    <pre className="text-[9px] text-muted-foreground bg-background/50 rounded p-1.5 max-h-28 overflow-auto whitespace-pre-wrap font-mono">
-                      {activeJob.stdout.split("\n").filter(Boolean).slice(-15).join("\n")}
-                    </pre>
-                  )}
-                </div>
-              )}
-
-              <div ref={feedEndRef} />
+            {/* Tab switcher + expand button */}
+            <div className="border-t border-border flex items-center">
+              <button
+                onClick={() => setActiveTab("console")}
+                className={`flex items-center gap-1 px-3 py-1.5 text-[10px] font-medium transition-colors border-b-2 ${
+                  activeTab === "console"
+                    ? "text-foreground border-foreground"
+                    : "text-muted-foreground hover:text-foreground border-transparent"
+                }`}
+              >
+                <Terminal className="h-3 w-3" />
+                Console
+              </button>
+              <button
+                onClick={() => setActiveTab("notebook")}
+                className={`flex items-center gap-1 px-3 py-1.5 text-[10px] font-medium transition-colors border-b-2 ${
+                  activeTab === "notebook"
+                    ? "text-foreground border-foreground"
+                    : "text-muted-foreground hover:text-foreground border-transparent"
+                }`}
+              >
+                <FileText className="h-3 w-3" />
+                Notebook
+              </button>
+              <div className="flex-1" />
+              <button
+                onClick={() => setFullscreen(true)}
+                className="inline-flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-muted transition-colors mr-1"
+                title="Expand"
+              >
+                <Maximize2 className="h-3 w-3" />
+              </button>
             </div>
 
-            {/* Input bar */}
-            <div className="border-t border-border px-2 py-1.5 flex items-center gap-2">
-              {!running ? (
+            {/* Fixed-height content area — same for both tabs */}
+            <div className="h-80 flex flex-col">
+              {activeTab === "console" ? (
                 <>
-                  <input
-                    value={userInput}
-                    onChange={(e) => setUserInput(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" && !e.shiftKey) {
-                        e.preventDefault();
-                        userInput.trim() ? handleSend() : startAgent();
-                      }
-                    }}
-                    placeholder="Guide the agent or press Enter to restart..."
-                    className="flex-1 rounded border border-input bg-background px-2 py-1 text-[11px] focus:outline-none focus:ring-1 focus:ring-ring"
-                  />
-                  <button
-                    onClick={() => userInput.trim() ? handleSend() : startAgent()}
-                    className="inline-flex h-6 w-6 items-center justify-center rounded bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
-                  >
-                    <Send className="h-3 w-3" />
-                  </button>
+                  <div className="flex-1 overflow-auto space-y-1.5 p-2">
+                    {feed.length === 0 && !running && (
+                      <p className="text-[11px] text-muted-foreground text-center py-4">
+                        No agent activity yet.
+                      </p>
+                    )}
+
+                    {feed.map((item) => (
+                      <CompactFeedItem key={item.id} item={item} />
+                    ))}
+
+                    {/* Streaming text */}
+                    {currentText && (
+                      <div className="flex gap-2">
+                        <Bot className="h-3 w-3 mt-0.5 text-blue-500 shrink-0" />
+                        <div className="text-[11px] text-foreground/90 whitespace-pre-wrap leading-relaxed">
+                          {currentText.slice(-300)}
+                          <span className="inline-block w-1 h-3 bg-blue-500/50 animate-pulse ml-0.5" />
+                        </div>
+                      </div>
+                    )}
+
+                    {running && !currentText && thinkingMsg && (
+                      <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                        <Loader2 className="h-3 w-3 animate-spin text-blue-500" />
+                        {thinkingMsg}
+                      </div>
+                    )}
+
+                    {/* Live remote job panel — visible even without SSE */}
+                    {activeJob && (
+                      <div className="rounded border border-cyan-500/20 bg-cyan-500/5 px-2 py-1.5">
+                        <div className="flex items-center gap-1.5 mb-1">
+                          <Loader2 className="h-2.5 w-2.5 text-cyan-500 animate-spin" />
+                          <span className="text-[10px] font-medium">{activeJob.host}</span>
+                          {activeJob.gpu && <span className="text-[9px] text-muted-foreground">{activeJob.gpu}</span>}
+                          <span className="text-[9px] text-cyan-400">{activeJob.status}</span>
+                        </div>
+                        {activeJob.command && (
+                          <pre className="text-[9px] text-muted-foreground/60 font-mono bg-background/30 rounded px-1.5 py-0.5 mb-1 whitespace-pre-wrap break-all">
+                            $ {activeJob.command}
+                          </pre>
+                        )}
+                        {activeJob.stdout && (
+                          <pre className="text-[9px] text-muted-foreground bg-background/50 rounded p-1.5 max-h-28 overflow-auto whitespace-pre-wrap font-mono">
+                            {activeJob.stdout.split("\n").filter(Boolean).slice(-15).join("\n")}
+                          </pre>
+                        )}
+                      </div>
+                    )}
+
+                    <div ref={feedEndRef} />
+                  </div>
+
+                  {/* Input bar */}
+                  <div className="shrink-0 border-t border-border px-2 py-1.5 flex items-center gap-2">
+                    {!running ? (
+                      <>
+                        <input
+                          value={userInput}
+                          onChange={(e) => setUserInput(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" && !e.shiftKey) {
+                              e.preventDefault();
+                              userInput.trim() ? handleSend() : startAgent();
+                            }
+                          }}
+                          placeholder="Guide the agent or press Enter to restart..."
+                          className="flex-1 rounded border border-input bg-background px-2 py-1 text-[11px] focus:outline-none focus:ring-1 focus:ring-ring"
+                        />
+                        <button
+                          onClick={() => userInput.trim() ? handleSend() : startAgent()}
+                          className="inline-flex h-6 w-6 items-center justify-center rounded bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
+                        >
+                          <Send className="h-3 w-3" />
+                        </button>
+                      </>
+                    ) : (
+                      <span className="flex-1 text-[11px] text-muted-foreground flex items-center gap-1.5">
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                        Agent is working... {elapsed > 0 && <span className="text-[10px] tabular-nums">{elapsedStr}</span>}
+                      </span>
+                    )}
+                  </div>
                 </>
               ) : (
-                <span className="flex-1 text-[11px] text-muted-foreground flex items-center gap-1.5">
-                  <Loader2 className="h-3 w-3 animate-spin" />
-                  Agent is working... {elapsed > 0 && <span className="text-[10px] tabular-nums">{elapsedStr}</span>}
-                </span>
+                <NotebookTab projectId={projectId} />
               )}
             </div>
           </>
+        )}
+
+        {/* Fullscreen overlay */}
+        {fullscreen && (
+          <FullscreenPanel
+            activeTab={activeTab}
+            onTabChange={setActiveTab}
+            onClose={() => setFullscreen(false)}
+            projectId={projectId}
+            feed={feed}
+            currentText={currentText}
+            thinkingMsg={thinkingMsg}
+            running={running}
+            activeJob={activeJob}
+            userInput={userInput}
+            setUserInput={setUserInput}
+            onSend={handleSend}
+            onStart={startAgent}
+            elapsed={elapsed}
+            elapsedStr={elapsedStr}
+          />
         )}
       </div>
     );
@@ -1032,6 +1101,443 @@ function CompactFeedItem({ item }: { item: FeedItem }) {
   }
 
   return null;
+}
+
+// ── Notebook tab: editable RESEARCH_LOG.md ──────────────
+
+function NotebookTab({ projectId }: { projectId: string }) {
+  const [content, setContent] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [dirty, setDirty] = useState(false);
+  const lastSaved = useRef("");
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  const fetchLog = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/research/${projectId}/log-file`);
+      if (res.ok) {
+        const data = await res.json();
+        const newContent = data.content || "";
+        if (!dirty) {
+          setContent(newContent);
+          lastSaved.current = newContent;
+          // Auto-scroll textarea to bottom after fetching new content
+          requestAnimationFrame(() => {
+            if (textareaRef.current) {
+              textareaRef.current.scrollTop = textareaRef.current.scrollHeight;
+            }
+          });
+        }
+      }
+    } catch { /* ignore */ }
+    setLoading(false);
+  }, [projectId, dirty]);
+
+  useEffect(() => { fetchLog(); }, [fetchLog]);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (!dirty) fetchLog();
+    }, 10_000);
+    return () => clearInterval(interval);
+  }, [dirty, fetchLog]);
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/research/${projectId}/log-file`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content }),
+      });
+      if (res.ok) {
+        lastSaved.current = content;
+        setDirty(false);
+      }
+    } catch { /* ignore */ }
+    setSaving(false);
+  };
+
+  const handleChange = (value: string) => {
+    setContent(value);
+    setDirty(value !== lastSaved.current);
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if ((e.metaKey || e.ctrlKey) && e.key === "s") {
+      e.preventDefault();
+      if (dirty) handleSave();
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="flex-1 flex items-center justify-center">
+        <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex-1 flex flex-col min-h-0">
+      <textarea
+        ref={textareaRef}
+        value={content}
+        onChange={(e) => handleChange(e.target.value)}
+        onKeyDown={handleKeyDown}
+        className="flex-1 w-full resize-none bg-transparent px-3 py-2 text-[11px] font-mono leading-relaxed text-foreground/80 focus:outline-none placeholder:text-muted-foreground/40"
+        placeholder="Research notebook — add notes, papers to consult, directions to explore. The agent reads this at the start of every session."
+        spellCheck={false}
+      />
+      {dirty && (
+        <div className="shrink-0 flex items-center justify-between px-3 py-1.5 border-t border-border bg-muted/30">
+          <span className="text-[9px] text-muted-foreground">Unsaved changes (Ctrl+S)</span>
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            className="inline-flex items-center gap-1 rounded px-2 py-0.5 text-[10px] font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"
+          >
+            {saving ? <Loader2 className="h-2.5 w-2.5 animate-spin" /> : <Save className="h-2.5 w-2.5" />}
+            Save
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Fullscreen panel overlay ────────────────────────────
+
+interface FullscreenPanelProps {
+  activeTab: BottomTab;
+  onTabChange: (tab: BottomTab) => void;
+  onClose: () => void;
+  projectId: string;
+  feed: FeedItem[];
+  currentText: string;
+  thinkingMsg: string | null;
+  running: boolean;
+  activeJob: { id: string; status: string; host: string; gpu: string | null; command: string | null; stdout: string | null; updatedAt: string } | null;
+  userInput: string;
+  setUserInput: (v: string) => void;
+  onSend: () => void;
+  onStart: (msg?: string) => void;
+  elapsed: number;
+  elapsedStr: string;
+}
+
+function FullscreenPanel({
+  activeTab, onTabChange, onClose, projectId,
+  feed, currentText, thinkingMsg, running, activeJob,
+  userInput, setUserInput, onSend, onStart, elapsed, elapsedStr,
+}: FullscreenPanelProps) {
+  const feedEndRef = useRef<HTMLDivElement>(null);
+  const markdownRef = useRef<HTMLDivElement>(null);
+  const nbScrollRef = useRef<HTMLDivElement>(null);
+  const nbTextareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Notebook state
+  const [nbContent, setNbContent] = useState("");
+  const [nbLoading, setNbLoading] = useState(true);
+  const [nbSaving, setNbSaving] = useState(false);
+  const [nbDirty, setNbDirty] = useState(false);
+  const [nbEditing, setNbEditing] = useState(false);
+  const nbLastSaved = useRef("");
+
+  const fetchLog = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/research/${projectId}/log-file`);
+      if (res.ok) {
+        const data = await res.json();
+        const newContent = data.content || "";
+        if (!nbDirty) {
+          setNbContent(newContent);
+          nbLastSaved.current = newContent;
+          // Auto-scroll to bottom after content loads
+          requestAnimationFrame(() => {
+            if (nbScrollRef.current) nbScrollRef.current.scrollTop = nbScrollRef.current.scrollHeight;
+            if (nbTextareaRef.current) nbTextareaRef.current.scrollTop = nbTextareaRef.current.scrollHeight;
+          });
+        }
+      }
+    } catch { /* ignore */ }
+    setNbLoading(false);
+  }, [projectId, nbDirty]);
+
+  useEffect(() => { fetchLog(); }, [fetchLog]);
+
+  const handleNbSave = async () => {
+    setNbSaving(true);
+    try {
+      const res = await fetch(`/api/research/${projectId}/log-file`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: nbContent }),
+      });
+      if (res.ok) {
+        nbLastSaved.current = nbContent;
+        setNbDirty(false);
+      }
+    } catch { /* ignore */ }
+    setNbSaving(false);
+  };
+
+  const handleNbKeyDown = (e: React.KeyboardEvent) => {
+    if ((e.metaKey || e.ctrlKey) && e.key === "s") {
+      e.preventDefault();
+      if (nbDirty) handleNbSave();
+    }
+  };
+
+  // Extract headings for table of contents
+  const toc = nbContent.split("\n")
+    .map((line, i) => {
+      const match = line.match(/^(#{1,3})\s+(.+)/);
+      if (!match) return null;
+      return { level: match[1].length, text: match[2], line: i };
+    })
+    .filter(Boolean) as { level: number; text: string; line: number }[];
+
+  // Auto-scroll console feed and notebook content
+  useEffect(() => {
+    if (activeTab === "console") {
+      feedEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [feed, currentText, activeTab]);
+
+  useEffect(() => {
+    if (activeTab === "notebook" && !nbEditing) {
+      requestAnimationFrame(() => {
+        if (nbScrollRef.current) nbScrollRef.current.scrollTop = nbScrollRef.current.scrollHeight;
+      });
+    } else if (activeTab === "notebook" && nbEditing) {
+      requestAnimationFrame(() => {
+        if (nbTextareaRef.current) nbTextareaRef.current.scrollTop = nbTextareaRef.current.scrollHeight;
+      });
+    }
+  }, [activeTab, nbContent, nbEditing]);
+
+  // Close on Escape
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [onClose]);
+
+  return (
+    <>
+      <div className="fixed inset-0 bg-black/50 z-40" onClick={onClose} />
+      <div className="fixed inset-6 z-50 rounded-lg border border-border bg-card shadow-2xl flex flex-col overflow-hidden">
+        {/* Header with tabs */}
+        <div className="flex items-center border-b border-border bg-muted/30 px-2">
+          <button
+            onClick={() => onTabChange("console")}
+            className={`flex items-center gap-1 px-3 py-2 text-xs font-medium transition-colors border-b-2 ${
+              activeTab === "console"
+                ? "text-foreground border-foreground"
+                : "text-muted-foreground hover:text-foreground border-transparent"
+            }`}
+          >
+            <Terminal className="h-3.5 w-3.5" />
+            Console
+          </button>
+          <button
+            onClick={() => onTabChange("notebook")}
+            className={`flex items-center gap-1 px-3 py-2 text-xs font-medium transition-colors border-b-2 ${
+              activeTab === "notebook"
+                ? "text-foreground border-foreground"
+                : "text-muted-foreground hover:text-foreground border-transparent"
+            }`}
+          >
+            <FileText className="h-3.5 w-3.5" />
+            Notebook
+            {nbDirty && <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />}
+          </button>
+          <div className="flex-1" />
+          {/* Notebook-specific controls */}
+          {activeTab === "notebook" && (
+            <div className="flex items-center gap-1 mr-2">
+              {nbEditing ? (
+                <button
+                  onClick={() => setNbEditing(false)}
+                  className="inline-flex items-center gap-1 rounded px-2 py-1 text-[11px] text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                >
+                  <FileText className="h-3 w-3" />
+                  Preview
+                </button>
+              ) : (
+                <button
+                  onClick={() => setNbEditing(true)}
+                  className="inline-flex items-center gap-1 rounded px-2 py-1 text-[11px] text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                >
+                  <Pencil className="h-3 w-3" />
+                  Edit
+                </button>
+              )}
+              {nbDirty && (
+                <button
+                  onClick={handleNbSave}
+                  disabled={nbSaving}
+                  className="inline-flex items-center gap-1 rounded px-2 py-1 text-[11px] font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"
+                >
+                  {nbSaving ? <Loader2 className="h-3 w-3 animate-spin" /> : <Save className="h-3 w-3" />}
+                  Save
+                </button>
+              )}
+            </div>
+          )}
+          <button
+            onClick={onClose}
+            className="inline-flex h-7 w-7 items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        {/* Body */}
+        {activeTab === "console" ? (
+          <div className="flex-1 flex flex-col min-h-0">
+            <div className="flex-1 overflow-auto space-y-1.5 p-3">
+              {feed.length === 0 && !running && (
+                <p className="text-xs text-muted-foreground text-center py-8">No agent activity yet.</p>
+              )}
+              {feed.map((item) => (
+                <CompactFeedItem key={item.id} item={item} />
+              ))}
+              {currentText && (
+                <div className="flex gap-2">
+                  <Bot className="h-3.5 w-3.5 mt-0.5 text-blue-500 shrink-0" />
+                  <div className="text-xs text-foreground/90 whitespace-pre-wrap leading-relaxed">
+                    {currentText.slice(-500)}
+                    <span className="inline-block w-1 h-3 bg-blue-500/50 animate-pulse ml-0.5" />
+                  </div>
+                </div>
+              )}
+              {running && !currentText && thinkingMsg && (
+                <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin text-blue-500" />
+                  {thinkingMsg}
+                </div>
+              )}
+              {activeJob && (
+                <div className="rounded border border-cyan-500/20 bg-cyan-500/5 px-3 py-2">
+                  <div className="flex items-center gap-1.5 mb-1">
+                    <Loader2 className="h-3 w-3 text-cyan-500 animate-spin" />
+                    <span className="text-xs font-medium">{activeJob.host}</span>
+                    {activeJob.gpu && <span className="text-[10px] text-muted-foreground">{activeJob.gpu}</span>}
+                    <span className="text-[10px] text-cyan-400">{activeJob.status}</span>
+                  </div>
+                  {activeJob.command && (
+                    <pre className="text-[10px] text-muted-foreground/60 font-mono bg-background/30 rounded px-2 py-1 mb-1 whitespace-pre-wrap break-all">
+                      $ {activeJob.command}
+                    </pre>
+                  )}
+                  {activeJob.stdout && (
+                    <pre className="text-[10px] text-muted-foreground bg-background/50 rounded p-2 max-h-60 overflow-auto whitespace-pre-wrap font-mono">
+                      {activeJob.stdout.split("\n").filter(Boolean).slice(-30).join("\n")}
+                    </pre>
+                  )}
+                </div>
+              )}
+              <div ref={feedEndRef} />
+            </div>
+            {/* Input bar */}
+            <div className="shrink-0 border-t border-border px-3 py-2 flex items-center gap-2">
+              {!running ? (
+                <>
+                  <input
+                    value={userInput}
+                    onChange={(e) => setUserInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && !e.shiftKey) {
+                        e.preventDefault();
+                        userInput.trim() ? onSend() : onStart();
+                      }
+                    }}
+                    placeholder="Guide the agent or press Enter to restart..."
+                    className="flex-1 rounded border border-input bg-background px-2.5 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-ring"
+                  />
+                  <button
+                    onClick={() => userInput.trim() ? onSend() : onStart()}
+                    className="inline-flex h-7 w-7 items-center justify-center rounded bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
+                  >
+                    <Send className="h-3.5 w-3.5" />
+                  </button>
+                </>
+              ) : (
+                <span className="flex-1 text-xs text-muted-foreground flex items-center gap-1.5">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  Agent is working... {elapsed > 0 && <span className="text-[11px] tabular-nums">{elapsedStr}</span>}
+                </span>
+              )}
+            </div>
+          </div>
+        ) : (
+          <div className="flex-1 flex min-h-0">
+            {/* Table of contents */}
+            {toc.length > 0 && !nbEditing && (
+              <div className="w-52 shrink-0 border-r border-border overflow-auto py-3 px-3">
+                <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide mb-2">Contents</p>
+                <nav className="space-y-0.5">
+                  {toc.map((item, i) => (
+                    <button
+                      key={i}
+                      onClick={() => {
+                        if (!markdownRef.current) return;
+                        const tag = `h${item.level}`;
+                        const headings = Array.from(markdownRef.current.querySelectorAll(tag));
+                        for (const el of headings) {
+                          if (el.textContent?.trim() === item.text.trim()) {
+                            el.scrollIntoView({ behavior: "smooth", block: "start" });
+                            break;
+                          }
+                        }
+                      }}
+                      className={`block w-full text-left text-[11px] leading-snug py-0.5 text-muted-foreground hover:text-foreground transition-colors truncate ${
+                        item.level === 1 ? "font-medium" : item.level === 2 ? "pl-3" : "pl-6 text-[10px]"
+                      }`}
+                    >
+                      {item.text}
+                    </button>
+                  ))}
+                </nav>
+              </div>
+            )}
+
+            {/* Content */}
+            {nbLoading ? (
+              <div className="flex-1 flex items-center justify-center">
+                <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+              </div>
+            ) : nbEditing ? (
+              <textarea
+                ref={nbTextareaRef}
+                value={nbContent}
+                onChange={(e) => {
+                  setNbContent(e.target.value);
+                  setNbDirty(e.target.value !== nbLastSaved.current);
+                }}
+                onKeyDown={handleNbKeyDown}
+                className="flex-1 w-full resize-none bg-transparent px-6 py-4 text-sm font-mono leading-relaxed text-foreground/80 focus:outline-none placeholder:text-muted-foreground/40"
+                placeholder="Research notebook — add notes, papers to consult, directions to explore..."
+                spellCheck={false}
+                autoFocus
+              />
+            ) : (
+              <div ref={nbScrollRef} className="flex-1 overflow-auto px-6 py-4">
+                <div className="prose-sm max-w-none text-[13px] leading-relaxed" ref={markdownRef}>
+                  <MarkdownRenderer content={nbContent} />
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </>
+  );
 }
 
 // ── Terminal output renderer ────────────────────────────

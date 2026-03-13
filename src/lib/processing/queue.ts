@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { runTextExtraction, runAutoProcessPipeline } from "@/lib/llm/auto-process";
+import { runTextExtraction, runAutoProcessPipeline, runDeferredSteps } from "@/lib/llm/auto-process";
 
 const STALL_THRESHOLD_MS = 5 * 60 * 1000; // 5 minutes
 const MAX_CONCURRENT = 3; // Process up to N papers simultaneously
@@ -15,6 +15,7 @@ class ProcessingQueue {
   private queue: string[] = [];
   private processing = new Map<string, AbortController>();
   private initialized = false;
+  private runningDeferred = false;
 
   /**
    * Add a paper to the processing queue (deduped).
@@ -74,11 +75,25 @@ class ProcessingQueue {
 
   /**
    * Start processing papers up to MAX_CONCURRENT slots.
+   * When the queue drains, pick up NEEDS_DEFERRED papers automatically.
    */
   private fillSlots(): void {
     while (this.queue.length > 0 && this.processing.size < MAX_CONCURRENT) {
       const paperId = this.queue.shift()!;
       this.startProcessing(paperId);
+    }
+
+    // When queue is empty and no active processing, run deferred steps
+    if (this.queue.length === 0 && this.processing.size === 0 && !this.runningDeferred) {
+      this.runningDeferred = true;
+      runDeferredSteps()
+        .then((count) => {
+          if (count > 0) {
+            console.log(`[queue] Completed deferred processing for ${count} papers`);
+          }
+        })
+        .catch((e) => console.error("[queue] Deferred processing failed:", e))
+        .finally(() => { this.runningDeferred = false; });
     }
   }
 
@@ -198,7 +213,7 @@ class ProcessingQueue {
     const stalledPapers = await prisma.paper.findMany({
       where: {
         processingStatus: {
-          notIn: ["COMPLETED", "FAILED", "PENDING"],
+          notIn: ["COMPLETED", "FAILED", "PENDING", "NEEDS_DEFERRED"],
         },
         processingStartedAt: {
           lt: stallCutoff,
@@ -210,7 +225,7 @@ class ProcessingQueue {
     const legacyStuck = await prisma.paper.findMany({
       where: {
         processingStatus: {
-          notIn: ["COMPLETED", "FAILED", "PENDING"],
+          notIn: ["COMPLETED", "FAILED", "PENDING", "NEEDS_DEFERRED"],
         },
         processingStartedAt: null,
       },

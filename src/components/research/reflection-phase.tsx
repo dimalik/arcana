@@ -141,7 +141,7 @@ export function ReflectionPhase({ projectId, steps, currentIteration, previousIt
   const hypothesisResults = sortByExperimentNumber(findings.filter((f) => f.status));
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 pr-2">
       <div className="flex items-center gap-2">
         <button
           onClick={handleAutoRun}

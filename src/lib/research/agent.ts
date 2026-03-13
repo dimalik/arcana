@@ -203,7 +203,8 @@ async function runAgent(
       include: { steps: true },
     });
   }
-  const iterationId = iteration.id;
+  let iterationId = iteration.id;
+  let iterationNumber = iteration.number;
   let stepSortOrder = iteration.steps?.length || 0;
 
   // 4. Detect remote hosts and probe GPUs
@@ -226,6 +227,24 @@ async function runAgent(
     });
   } catch (err) {
     console.warn("[research-agent] Could not load agent capabilities (restart dev server after schema change):", (err as Error).message);
+  }
+
+  // 4c. Scan shared utilities directory
+  const sharedDir = path.join(process.cwd(), "output", "shared");
+  await mkdir(sharedDir, { recursive: true });
+  let sharedUtilities: { filename: string; description: string }[] = [];
+  try {
+    const files = await readdir(sharedDir);
+    for (const f of files) {
+      if (!f.endsWith(".py")) continue;
+      // Read first docstring or comment line as description
+      const content = await readFile(path.join(sharedDir, f), "utf-8");
+      const docMatch = content.match(/^"""([\s\S]*?)"""/m) || content.match(/^# (.+)/m);
+      const desc = docMatch ? docMatch[1].trim().split("\n")[0] : "";
+      sharedUtilities.push({ filename: f, description: desc });
+    }
+  } catch {
+    // Directory may not exist yet
   }
 
   // 5. Read persistent research log (user-editable file)
@@ -270,7 +289,7 @@ async function runAgent(
 
   // 6. Build context
   const papers = project.collection?.papers.map((cp) => cp.paper) || [];
-  const systemPrompt = buildSystemPrompt(project, papers, workDir, remoteHosts, capabilities, gpuInfo, processMemories, resourcePreferences);
+  const systemPrompt = buildSystemPrompt(project, papers, workDir, remoteHosts, capabilities, gpuInfo, processMemories, resourcePreferences, sharedUtilities, sharedDir);
   const messages = buildMessages(project, papers, userMessage, researchLog);
 
   // 6. Get model
@@ -306,18 +325,25 @@ async function runAgent(
   };
 
   // 7. Create tools
-  const tools = createTools(projectId, userId, workDir, emit, remoteHosts, recordStep, { id: iterationId, number: iteration.number });
+  const onIterationAdvance = (newId: string, newNumber: number) => {
+    iterationId = newId;
+    iterationNumber = newNumber;
+    stepSortOrder = 0;
+  };
+  const tools = createTools(projectId, userId, workDir, emit, remoteHosts, recordStep, { id: iterationId, number: iteration.number }, sharedDir, onIterationAdvance);
 
   // 6. Stream with tool use
   const MAX_STEPS = 80;
   let stepCount = 0;
 
-  // Track tool usage for literature consultation nudges
+  // Track tool usage for nudges
   let experimentsSinceLastLitReview = 0;
   let totalExperimentsRun = 0;
   let totalPaperConsultations = 0;
   const LIT_TOOLS = new Set(["search_papers", "read_paper", "search_library", "query_insights"]);
   const EXPERIMENT_TOOLS = new Set(["execute_command", "execute_remote"]);
+  let iterationNudged = false;
+  const iterationStepsAtStart = stepSortOrder; // total steps already in this iteration
 
   emit({ type: "thinking", content: "Analyzing project state and planning next steps..." });
 
@@ -385,6 +411,13 @@ async function runAgent(
       // Nudge if low paper consultation ratio overall
       if (totalExperimentsRun >= 4 && totalPaperConsultations === 0) {
         emit({ type: "text", content: "\n\n[System: You have not consulted any papers during this session. Use search_library to check if existing papers in your collection address the patterns you're seeing. Use search_papers to find new papers on specific sub-problems. This is research, not blind experimentation.]\n" });
+      }
+
+      // Iteration advancement nudge — if this iteration has accumulated many steps, prompt to advance
+      const totalIterationSteps = iterationStepsAtStart + stepCount;
+      if (!iterationNudged && totalIterationSteps >= 50 && stepCount >= 10) {
+        iterationNudged = true;
+        emit({ type: "text", content: `\n\n[System: This iteration (#${iteration.number}) has ${totalIterationSteps} steps. If you have solid findings and see a new direction, use \`complete_iteration\` to record what was learned and start a fresh iteration with a new goal. Good research has clear iterations — each with a focused question, experiments, and conclusions. Don't stuff everything into one iteration forever.]\n` });
       }
 
       // Emit thinking indicator
@@ -458,6 +491,8 @@ function buildSystemPrompt(
   gpuInfo?: { alias: string; gpuCount: number; gpus: { index: number; name: string; memoryTotal: string; memoryFree: string }[]; summary: string }[],
   processMemories?: { category: string; lesson: string; context: string | null }[],
   resourcePreferences?: { taskCategory: string; preference: string; usageCount: number }[],
+  sharedUtilities?: { filename: string; description: string }[],
+  sharedDir?: string,
 ): string {
   // Build detailed GPU info section
   let gpuSection = "";
@@ -584,6 +619,32 @@ The user has configured the following capabilities. USE THEM when relevant — t
 ${capabilities.map((c) => `### ${c.name}
 ${c.description ? c.description + "\n" : ""}**How to use:**
 ${c.instructions}`).join("\n\n")}
+
+### IMPORTANT: Shared Utilities
+When a capability involves reusable logic (API clients, data processing helpers, evaluation harnesses, etc.), **do NOT inline that logic into every experiment script.** Instead:
+
+1. Check if a shared utility already exists (see below).
+2. If not, use \`write_shared_utility\` to create a well-documented, reusable Python module in the shared directory.
+3. Import it in your experiment scripts with:
+\`\`\`python
+import sys, os
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'shared'))
+from <module_name> import ...
+\`\`\`
+
+Write the shared utility **once**, the first time you need the capability. Make it robust — with error handling, retries, docstrings, and sensible defaults — since all future experiments will depend on it.
+` : ""}${sharedUtilities && sharedUtilities.length > 0 ? `
+## Shared Utilities (reusable across all projects)
+Directory: \`${sharedDir}\`
+These Python modules are already available. Import them in your experiment scripts — do NOT rewrite this logic.
+
+${sharedUtilities.map((u) => `- **${u.filename}**: ${u.description}`).join("\n")}
+
+**Import pattern:**
+\`\`\`python
+import sys, os
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'shared'))
+\`\`\`
 ` : ""}${processMemories && processMemories.length > 0 ? `
 ## Process Memory (lessons from previous experiments)
 These are practical lessons learned from trial and error in past experiments. **Follow these — they will save you from repeating mistakes.**
@@ -704,12 +765,15 @@ When you've accumulated enough evidence across multiple experiments:
 - Identify what was genuinely novel — what did we learn that wasn't already in the literature?
 - Suggest concrete next steps that would extend this work.
 
-### Phase 6: Iteration Advancement
-When you've completed a full research cycle and have solid findings, use \`complete_iteration\` to:
-- Record what was learned in this iteration
-- Start a new iteration with a fresh goal (e.g., deeper investigation, different approach, follow-up question)
-- You should advance iterations naturally as you complete research cycles — don't keep stuffing everything into iteration #1
-- A good time to advance: you've tested all current hypotheses, have clear findings, and see a new direction to explore
+### Phase 6: Iteration Advancement (IMPORTANT)
+**You MUST use \`complete_iteration\` regularly.** Each iteration should be a focused research cycle with a clear question, experiments, and conclusions. When you've:
+- Tested the hypotheses you set out to test
+- Run experiments and analyzed results
+- Identified what worked and what didn't
+
+...then call \`complete_iteration\` with a reflection and set a new goal. **Do NOT accumulate hundreds of steps in a single iteration.** A good iteration is 30-80 steps. If you've been running for 50+ steps without advancing, you're overdue.
+
+Think of iterations like chapters — each should have a coherent narrative. Starting a new iteration does NOT mean stopping research — it means organizing your work into digestible chunks and pivoting to the next question.
 
 ## Critical Rules
 - Write COMPLETE, RUNNABLE Python code. No placeholders. Always include requirements.txt.
@@ -862,6 +926,8 @@ function createTools(
   remoteHosts: { id: string; alias: string; isDefault: boolean }[],
   recordStep: (type: string, title: string, status: "COMPLETED" | "FAILED", output: unknown, phase?: string) => Promise<void>,
   currentIteration: { id: string; number: number },
+  sharedDir: string,
+  onIterationAdvance?: (newId: string, newNumber: number) => void,
 ) {
   return {
     search_papers: tool({
@@ -987,7 +1053,7 @@ function createTools(
           },
         });
         if (!paper) return `Paper "${title}" not found in library. Try searching first.`;
-        if (paper.processingStatus && !["COMPLETED", "FAILED"].includes(paper.processingStatus)) {
+        if (paper.processingStatus && !["COMPLETED", "FAILED", "NEEDS_DEFERRED"].includes(paper.processingStatus)) {
           emit({ type: "tool_progress", toolName: "read_paper", content: `Paper is still being processed (${paper.processingStatus}). Reading what's available...` });
         }
 
@@ -1030,6 +1096,21 @@ function createTools(
           await recordStep("generate_code", `Write: ${safeName}`, "COMPLETED", { filename: safeName, bytes: content.length }, "experiment");
         }
         return `Written ${safeName} (${content.length} bytes) to ${workDir}`;
+      },
+    }),
+
+    write_shared_utility: tool({
+      description: "Write a reusable Python utility to the shared directory. Use this when a capability involves logic that should be reused across experiments (API clients, data helpers, evaluation harnesses). These utilities are available to ALL research projects.",
+      inputSchema: z.object({
+        filename: z.string().describe("Module filename (e.g., llm_client.py, eval_utils.py)"),
+        content: z.string().describe("Full Python module content — include docstrings, error handling, and sensible defaults"),
+      }),
+      execute: async ({ filename, content }: { filename: string; content: string }) => {
+        const safeName = path.basename(filename);
+        if (!safeName.endsWith(".py")) return "Shared utilities must be Python files (.py)";
+        const filePath = path.join(sharedDir, safeName);
+        await writeFile(filePath, content, "utf-8");
+        return `Written shared utility ${safeName} (${content.length} bytes) to ${sharedDir}. All research projects can now import it with:\nimport sys, os\nsys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'shared'))\nfrom ${safeName.replace(".py", "")} import ...`;
       },
     }),
 
@@ -1907,7 +1988,13 @@ function createTools(
         const logEntry = `\n---\n## Iteration #${currentIteration.number} Complete (${timestamp})\n**Reflection:** ${reflection}\n\n## Iteration #${newIteration.number}: ${next_goal}\n`;
         await appendFile(path.join(workDir, "RESEARCH_LOG.md"), logEntry).catch(() => {});
 
-        return `Iteration #${currentIteration.number} completed. Starting iteration #${newIteration.number}: "${next_goal}". Phase set to ${start_phase}.`;
+        // Update mutable refs so subsequent steps in this session go to the new iteration
+        const prevNumber = currentIteration.number;
+        currentIteration.id = newIteration.id;
+        currentIteration.number = newIteration.number;
+        onIterationAdvance?.(newIteration.id, newIteration.number);
+
+        return `Iteration #${prevNumber} completed. Starting iteration #${newIteration.number}: "${next_goal}". Phase set to ${start_phase}.`;
       },
     }),
 

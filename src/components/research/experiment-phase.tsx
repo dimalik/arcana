@@ -47,6 +47,28 @@ function parseOutput(output: string | null) {
   try { return JSON.parse(output); } catch { return null; }
 }
 
+/** Extract the primary script name from a step title or job command */
+function extractScriptName(text: string): string | null {
+  // "Write: train_model.py" → "train_model.py"
+  const writeMatch = text.match(/^Write:\s*(.+\.py)$/i);
+  if (writeMatch) return writeMatch[1].trim();
+  // "python3 train_model.py ..." → "train_model.py"
+  const pyMatch = text.match(/python3?\s+(\S+\.py)/);
+  if (pyMatch) return pyMatch[1];
+  // "Remote (host): python3 ..." or "Local: python3 ..."
+  const prefixed = text.replace(/^(?:Remote\s*\([^)]+\)|Local):\s*/i, "");
+  const pyMatch2 = prefixed.match(/python3?\s+(\S+\.py)/);
+  if (pyMatch2) return pyMatch2[1];
+  return null;
+}
+
+interface ExperimentGroup {
+  name: string;
+  scripts: Step[];
+  runs: Step[];
+  jobs: RemoteJob[];
+}
+
 function PendingStepRow({
   step,
   hosts,
@@ -254,16 +276,101 @@ export function ExperimentPhase({ projectId, steps, onRefresh }: ExperimentPhase
     });
   };
 
-  // Separate steps by type
+  // Separate steps
   const codeSteps = steps.filter((s) => s.type === "generate_code");
   const runSteps = steps.filter((s) => s.type === "run_experiment");
   const pendingSteps = steps.filter((s) => s.status === "PROPOSED" || s.status === "APPROVED");
   const runningSteps = steps.filter((s) => s.status === "RUNNING");
-  const runningJobs = remoteJobs.filter((j) => ["SYNCING", "QUEUED", "RUNNING"].includes(j.status));
-  const completedJobs = remoteJobs.filter((j) => ["COMPLETED", "FAILED", "CANCELLED"].includes(j.status));
+
+  // Build experiment groups by experiment number in filename
+  // e.g., experiment1_xlmr_baseline.py and experiment1_xlmr_v2.py → "Experiment 1"
+  const groups: ExperimentGroup[] = [];
+  const numToGroup = new Map<number, ExperimentGroup>();
+  const scriptToGroup = new Map<string, ExperimentGroup>();
+  let utilityGroup: ExperimentGroup | null = null;
+
+  function getExpNumber(filename: string): number | null {
+    const m = filename.match(/experiment(\d+)/i);
+    return m ? parseInt(m[1], 10) : null;
+  }
+
+  function getOrCreateGroup(num: number): ExperimentGroup {
+    let g = numToGroup.get(num);
+    if (!g) {
+      g = { name: `Experiment ${num}`, scripts: [], runs: [], jobs: [] };
+      numToGroup.set(num, g);
+      groups.push(g);
+    }
+    return g;
+  }
+
+  // Group code generation steps by experiment number in filename
+  for (const step of codeSteps) {
+    const out = parseOutput(step.output);
+    const filename = out?.filename || step.title.replace("Write: ", "");
+    const num = getExpNumber(filename);
+    if (num !== null) {
+      const g = getOrCreateGroup(num);
+      g.scripts.push(step);
+      scriptToGroup.set(filename, g);
+    } else {
+      // Utility scripts (run_experiments.py, etc.)
+      if (!utilityGroup) {
+        utilityGroup = { name: "Utilities", scripts: [], runs: [], jobs: [] };
+        groups.push(utilityGroup);
+      }
+      utilityGroup.scripts.push(step);
+      scriptToGroup.set(filename, utilityGroup);
+    }
+  }
+
+  // Match run steps to experiments by script name
+  for (const step of runSteps) {
+    const script = extractScriptName(step.title);
+    const g = script ? scriptToGroup.get(script) : undefined;
+    if (g) {
+      g.runs.push(step);
+    } else {
+      // Try matching by experiment number in step title
+      const num = getExpNumber(step.title);
+      if (num !== null) {
+        getOrCreateGroup(num).runs.push(step);
+      } else if (groups.length > 0) {
+        groups[groups.length - 1].runs.push(step);
+      }
+    }
+  }
+
+  // Match remote jobs to experiments by script name
+  for (const job of remoteJobs) {
+    const script = extractScriptName(job.command);
+    const g = script ? scriptToGroup.get(script) : undefined;
+    if (g) {
+      g.jobs.push(job);
+    } else {
+      const num = getExpNumber(job.command);
+      if (num !== null) {
+        getOrCreateGroup(num).jobs.push(job);
+      } else if (groups.length > 0) {
+        groups[groups.length - 1].jobs.push(job);
+      }
+    }
+  }
+
+  // Sort groups: numbered experiments first (by number), utilities last
+  groups.sort((a, b) => {
+    const aNum = a.name.match(/Experiment (\d+)/);
+    const bNum = b.name.match(/Experiment (\d+)/);
+    if (aNum && bNum) return parseInt(aNum[1]) - parseInt(bNum[1]);
+    if (aNum) return -1;
+    if (bNum) return 1;
+    return 0;
+  });
+
+  const hasContent = groups.length > 0 || pendingSteps.length > 0 || runningSteps.length > 0;
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 pr-2">
       {/* Action bar */}
       <div className="flex items-center gap-3">
         <button
@@ -313,165 +420,260 @@ export function ExperimentPhase({ projectId, steps, onRefresh }: ExperimentPhase
         />
       ))}
 
-      {/* Generated Scripts */}
-      {codeSteps.length > 0 && (
-        <div>
-          <h3 className="text-xs font-medium text-muted-foreground mb-2">Generated Scripts</h3>
-          <div className="space-y-1">
-            {codeSteps.map((step) => {
-              const out = parseOutput(step.output);
-              const filename = out?.filename || step.title.replace("Write: ", "");
-              const canDeploy = step.status === "COMPLETED" && hosts.length > 0;
-              return (
-                <div key={step.id} className="flex items-center gap-2 py-1 group">
-                  <FileCode className="h-3 w-3 text-blue-400 shrink-0" />
-                  <span className="text-[11px] flex-1 truncate font-mono">{filename}</span>
-                  {step.status === "COMPLETED" && <Check className="h-3 w-3 text-emerald-500 shrink-0" />}
-                  {step.status === "FAILED" && <AlertCircle className="h-3 w-3 text-destructive shrink-0" />}
-                  {out?.bytes && <span className="text-[9px] text-muted-foreground/50">{(out.bytes / 1024).toFixed(1)}KB</span>}
-                  {canDeploy && (
-                    <button
-                      onClick={() => handleDeploy(step.id)}
-                      disabled={deploying}
-                      className="opacity-0 group-hover:opacity-100 inline-flex items-center gap-1 rounded text-[10px] text-muted-foreground hover:text-foreground px-1 py-0.5 hover:bg-muted transition-all"
-                    >
-                      <Server className="h-2.5 w-2.5" /> Deploy
-                    </button>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
-      {/* Experiment Runs */}
-      {(runSteps.length > 0 || runningJobs.length > 0 || completedJobs.length > 0) && (
-        <div>
-          <h3 className="text-xs font-medium text-muted-foreground mb-2">Experiment Runs</h3>
-          <div className="space-y-1.5">
-            {/* Active remote jobs */}
-            {runningJobs.map((job) => (
-              <div key={job.id} className="rounded-md border border-blue-500/20 bg-blue-500/5 p-2.5">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Loader2 className="h-3 w-3 animate-spin text-blue-500" />
-                    <span className="text-xs font-medium">{job.host.alias}</span>
-                    {job.host.gpuType && <span className="text-[10px] text-muted-foreground">{job.host.gpuType}</span>}
-                    <span className="text-[10px] text-blue-400">{job.status}</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => handleRunLocally(job)}
-                      disabled={runningLocally === job.id}
-                      className="inline-flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
-                      title="Cancel remote and run locally"
-                    >
-                      {runningLocally === job.id ? <Loader2 className="h-2.5 w-2.5 animate-spin" /> : <Monitor className="h-2.5 w-2.5" />}
-                      Run locally
-                    </button>
-                    <button onClick={() => handleCancelJob(job.id)} className="text-[10px] text-muted-foreground hover:text-destructive transition-colors">
-                      Cancel
-                    </button>
-                  </div>
-                </div>
-                <pre className="mt-1 text-[9px] text-muted-foreground/60 font-mono bg-background/30 rounded px-1.5 py-0.5 whitespace-pre-wrap break-all">
-                  $ {job.command}
-                </pre>
-                {job.stdout && (
-                  <pre className="mt-1 text-[10px] text-muted-foreground bg-background/50 rounded p-2 max-h-24 overflow-auto whitespace-pre-wrap font-mono">
-                    {job.stdout.split("\n").filter(Boolean).slice(-8).join("\n")}
-                  </pre>
-                )}
-              </div>
-            ))}
-
-            {/* Completed runs — compact table */}
-            {completedJobs.map((job, idx) => {
-              // Auto-expand the most recent failed/cancelled job
-              const isLatestFailed = job.status !== "COMPLETED" && idx === completedJobs.findIndex((j) => j.status !== "COMPLETED");
-              const isExpanded = expandedJobs.has(job.id) || isLatestFailed;
-
-              return (
-                <div key={job.id}>
-                  <div className="flex items-center gap-2 w-full py-1 group">
-                    <button
-                      onClick={() => toggleJob(job.id)}
-                      className="flex items-center gap-2 flex-1 text-left min-w-0"
-                    >
-                      {job.status === "COMPLETED"
-                        ? <Check className="h-3 w-3 text-emerald-500 shrink-0" />
-                        : <AlertCircle className="h-3 w-3 text-destructive shrink-0" />
-                      }
-                      <span className="text-[11px] flex-1 truncate">{job.host.alias}</span>
-                      <span className={`text-[10px] ${job.status === "COMPLETED" ? "text-emerald-500" : "text-destructive"}`}>
-                        {job.status.toLowerCase()}
-                      </span>
-                      {job.completedAt && (
-                        <span className="text-[9px] text-muted-foreground/50">
-                          {new Date(job.completedAt).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
-                        </span>
-                      )}
-                      <ChevronDown className={`h-2.5 w-2.5 text-muted-foreground/40 transition-transform ${isExpanded ? "rotate-180" : ""}`} />
-                    </button>
-                    {job.status === "FAILED" && (
-                      <button
-                        onClick={() => handleRetryJob(job)}
-                        disabled={deploying}
-                        className="inline-flex items-center gap-1 rounded text-[10px] text-muted-foreground hover:text-foreground px-1.5 py-0.5 hover:bg-muted transition-colors shrink-0"
-                        title="Retry this job"
-                      >
-                        <RotateCcw className="h-2.5 w-2.5" /> Retry
-                      </button>
-                    )}
-                  </div>
-                  {isExpanded && (
-                    <div className="ml-5 mb-1">
-                      <pre className="text-[9px] text-muted-foreground/60 font-mono bg-background/30 rounded px-1.5 py-0.5 mb-1 whitespace-pre-wrap break-all">
-                        $ {job.command}
-                      </pre>
-                      {job.stdout && (
-                        <pre className="text-[10px] text-muted-foreground bg-muted/50 rounded p-2 max-h-32 overflow-auto whitespace-pre-wrap font-mono">
-                          {job.stdout.split("\n").filter(Boolean).slice(-20).join("\n")}
-                        </pre>
-                      )}
-                      {job.stderr && job.status !== "COMPLETED" && (
-                        <pre className="mt-1 text-[10px] text-destructive/70 bg-destructive/5 rounded p-2 max-h-24 overflow-auto whitespace-pre-wrap font-mono">
-                          {job.stderr.split("\n").filter(Boolean).slice(-10).join("\n")}
-                        </pre>
-                      )}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-
-            {/* Local run steps (no remote job) — compact list */}
-            {runSteps
-              .filter((s) => s.status === "COMPLETED" || s.status === "FAILED")
-              .filter((s) => {
-                const out = parseOutput(s.output);
-                return !out?.host; // only local runs
-              })
-              .map((step) => (
-                <div key={step.id} className="flex items-center gap-2 py-1">
-                  {step.status === "COMPLETED"
-                    ? <Check className="h-3 w-3 text-emerald-500 shrink-0" />
-                    : <AlertCircle className="h-3 w-3 text-destructive shrink-0" />
-                  }
-                  <span className="text-[11px] text-muted-foreground truncate">{step.title}</span>
-                </div>
-              ))}
-          </div>
-        </div>
-      )}
+      {/* Experiment groups */}
+      {groups.map((group) => (
+        <ExperimentGroupCard
+          key={group.name}
+          group={group}
+          hosts={hosts}
+          deploying={deploying}
+          expandedJobs={expandedJobs}
+          runningLocally={runningLocally}
+          onDeploy={handleDeploy}
+          onToggleJob={toggleJob}
+          onCancelJob={handleCancelJob}
+          onRetryJob={handleRetryJob}
+          onRunLocally={handleRunLocally}
+        />
+      ))}
 
       {/* Empty state */}
-      {steps.length === 0 && (
+      {!hasContent && (
         <div className="rounded-md border border-dashed border-border p-4 text-center">
           <p className="text-xs text-muted-foreground">
             No experiments yet. Click above to generate experiment code automatically.
           </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Experiment Group Card ────────────────────────────────
+
+function ExperimentGroupCard({
+  group,
+  hosts,
+  deploying,
+  expandedJobs,
+  runningLocally,
+  onDeploy,
+  onToggleJob,
+  onCancelJob,
+  onRetryJob,
+  onRunLocally,
+}: {
+  group: ExperimentGroup;
+  hosts: RemoteHost[];
+  deploying: boolean;
+  expandedJobs: Set<string>;
+  runningLocally: string | null;
+  onDeploy: (stepId: string) => void;
+  onToggleJob: (id: string) => void;
+  onCancelJob: (id: string) => void;
+  onRetryJob: (job: RemoteJob) => void;
+  onRunLocally: (job: RemoteJob) => void;
+}) {
+  const runningJobs = group.jobs.filter((j) => ["SYNCING", "QUEUED", "RUNNING"].includes(j.status));
+  const completedJobs = group.jobs.filter((j) => ["COMPLETED", "FAILED", "CANCELLED"].includes(j.status));
+  const localRuns = group.runs.filter((s) => {
+    if (s.status !== "COMPLETED" && s.status !== "FAILED") return false;
+    const out = parseOutput(s.output);
+    return !out?.host;
+  });
+  const hasRunningScripts = group.scripts.some((s) => s.status === "RUNNING");
+  const isActive = runningJobs.length > 0 || hasRunningScripts;
+
+  const [collapsed, setCollapsed] = useState(!isActive);
+
+  // Auto-expand when group becomes active
+  useEffect(() => {
+    if (isActive) setCollapsed(false);
+  }, [isActive]);
+
+  const totalRuns = runningJobs.length + completedJobs.length + localRuns.length;
+  const successCount = completedJobs.filter((j) => j.status === "COMPLETED").length
+    + localRuns.filter((s) => s.status === "COMPLETED").length;
+  const failCount = completedJobs.filter((j) => j.status === "FAILED").length
+    + localRuns.filter((s) => s.status === "FAILED").length;
+
+  return (
+    <div className="rounded-md border border-border/60 overflow-hidden">
+      {/* Group header */}
+      <button
+        onClick={() => setCollapsed(!collapsed)}
+        className="flex items-center gap-2 w-full px-3 py-2 bg-muted/30 hover:bg-muted/50 transition-colors text-left"
+      >
+        <ChevronDown className={`h-3 w-3 text-muted-foreground transition-transform ${collapsed ? "-rotate-90" : ""}`} />
+        <span className="text-xs font-medium flex-1 truncate">{group.name}</span>
+        {runningJobs.length > 0 && (
+          <span className="flex items-center gap-1 text-[10px] text-blue-400">
+            <Loader2 className="h-2.5 w-2.5 animate-spin" />
+            running
+          </span>
+        )}
+        {totalRuns > 0 && (
+          <span className="text-[10px] text-muted-foreground">
+            {totalRuns} run{totalRuns !== 1 ? "s" : ""}
+            {successCount > 0 && <span className="text-emerald-500 ml-1">{successCount} ok</span>}
+            {failCount > 0 && <span className="text-destructive ml-1">{failCount} fail</span>}
+          </span>
+        )}
+      </button>
+
+      {!collapsed && (
+        <div className="px-3 py-2 space-y-2">
+          {/* Files */}
+          {group.scripts.length > 0 && (
+            <div>
+              <p className="text-[10px] text-muted-foreground/60 mb-1">Files</p>
+              <div className="space-y-0.5">
+              {group.scripts.map((step) => {
+                const out = parseOutput(step.output);
+                const filename = out?.filename || step.title.replace("Write: ", "");
+                const canDeploy = step.status === "COMPLETED" && hosts.length > 0;
+                return (
+                  <div key={step.id} className="flex items-center gap-2 py-0.5 group">
+                    <FileCode className="h-3 w-3 text-blue-400 shrink-0" />
+                    <span className="text-[11px] font-mono truncate flex-1">{filename}</span>
+                    {step.status === "COMPLETED" && <Check className="h-3 w-3 text-emerald-500 shrink-0" />}
+                    {step.status === "FAILED" && <AlertCircle className="h-3 w-3 text-destructive shrink-0" />}
+                    {out?.bytes && <span className="text-[9px] text-muted-foreground/50">{(out.bytes / 1024).toFixed(1)}KB</span>}
+                    {canDeploy && (
+                      <button
+                        onClick={() => onDeploy(step.id)}
+                        disabled={deploying}
+                        className="opacity-0 group-hover:opacity-100 inline-flex items-center gap-1 rounded text-[10px] text-muted-foreground hover:text-foreground px-1 py-0.5 hover:bg-muted transition-all"
+                      >
+                        <Server className="h-2.5 w-2.5" /> Deploy
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+              </div>
+            </div>
+          )}
+
+          {/* Runs */}
+          {(runningJobs.length > 0 || completedJobs.length > 0 || localRuns.length > 0) && (
+            <p className="text-[10px] text-muted-foreground/60 mb-1">Runs</p>
+          )}
+
+          {/* Running jobs */}
+          {runningJobs.map((job) => (
+            <div key={job.id} className="rounded border border-blue-500/20 bg-blue-500/5 p-2">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Loader2 className="h-3 w-3 animate-spin text-blue-500" />
+                  <span className="text-[11px] font-medium">{job.host.alias}</span>
+                  {job.host.gpuType && <span className="text-[10px] text-muted-foreground">{job.host.gpuType}</span>}
+                  <span className="text-[10px] text-blue-400">{job.status}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => onRunLocally(job)}
+                    disabled={runningLocally === job.id}
+                    className="inline-flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
+                  >
+                    {runningLocally === job.id ? <Loader2 className="h-2.5 w-2.5 animate-spin" /> : <Monitor className="h-2.5 w-2.5" />}
+                    Local
+                  </button>
+                  <button onClick={() => onCancelJob(job.id)} className="text-[10px] text-muted-foreground hover:text-destructive transition-colors">
+                    Cancel
+                  </button>
+                </div>
+              </div>
+              <pre className="mt-1 text-[9px] text-muted-foreground/60 font-mono bg-background/30 rounded px-1.5 py-0.5 whitespace-pre-wrap break-all">
+                $ {job.command}
+              </pre>
+              {job.stdout && (
+                <pre className="mt-1 text-[10px] text-muted-foreground bg-background/50 rounded p-2 max-h-24 overflow-auto whitespace-pre-wrap font-mono">
+                  {job.stdout.split("\n").filter(Boolean).slice(-8).join("\n")}
+                </pre>
+              )}
+            </div>
+          ))}
+
+          {/* Completed jobs + local runs */}
+          {(completedJobs.length > 0 || localRuns.length > 0) && (
+            <div className="space-y-0.5 ml-0.5">
+              {completedJobs.map((job, idx) => {
+                const isLatestFailed = job.status !== "COMPLETED" && idx === completedJobs.findIndex((j) => j.status !== "COMPLETED");
+                const isExpanded = expandedJobs.has(job.id) || isLatestFailed;
+
+                return (
+                  <div key={job.id}>
+                    <div className="flex items-center gap-2 w-full py-0.5 group">
+                      <button
+                        onClick={() => onToggleJob(job.id)}
+                        className="flex items-center gap-2 flex-1 text-left min-w-0"
+                      >
+                        {job.status === "COMPLETED"
+                          ? <Check className="h-3 w-3 text-emerald-500 shrink-0" />
+                          : <AlertCircle className="h-3 w-3 text-destructive shrink-0" />
+                        }
+                        <span className="text-[11px] truncate">{job.host.alias}</span>
+                        <span className={`text-[10px] ${job.status === "COMPLETED" ? "text-emerald-500" : "text-destructive"}`}>
+                          {job.status.toLowerCase()}
+                        </span>
+                        {job.completedAt && (
+                          <span className="text-[9px] text-muted-foreground/50">
+                            {new Date(job.completedAt).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+                          </span>
+                        )}
+                        <ChevronDown className={`h-2.5 w-2.5 text-muted-foreground/40 transition-transform ${isExpanded ? "rotate-180" : ""}`} />
+                      </button>
+                      {job.status === "FAILED" && (
+                        <button
+                          onClick={() => onRetryJob(job)}
+                          disabled={deploying}
+                          className="inline-flex items-center gap-1 rounded text-[10px] text-muted-foreground hover:text-foreground px-1.5 py-0.5 hover:bg-muted transition-colors shrink-0"
+                        >
+                          <RotateCcw className="h-2.5 w-2.5" /> Retry
+                        </button>
+                      )}
+                    </div>
+                    {isExpanded && (
+                      <div className="ml-5 mb-1">
+                        <pre className="text-[9px] text-muted-foreground/60 font-mono bg-background/30 rounded px-1.5 py-0.5 mb-1 whitespace-pre-wrap break-all">
+                          $ {job.command}
+                        </pre>
+                        {job.stdout && (
+                          <pre className="text-[10px] text-muted-foreground bg-muted/50 rounded p-2 max-h-32 overflow-auto whitespace-pre-wrap font-mono">
+                            {job.stdout.split("\n").filter(Boolean).slice(-20).join("\n")}
+                          </pre>
+                        )}
+                        {job.stderr && job.status !== "COMPLETED" && (
+                          <pre className="mt-1 text-[10px] text-destructive/70 bg-destructive/5 rounded p-2 max-h-24 overflow-auto whitespace-pre-wrap font-mono">
+                            {job.stderr.split("\n").filter(Boolean).slice(-10).join("\n")}
+                          </pre>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+
+              {localRuns.map((step) => (
+                <div key={step.id} className="flex items-center gap-2 py-0.5">
+                  {step.status === "COMPLETED"
+                    ? <Check className="h-3 w-3 text-emerald-500 shrink-0" />
+                    : <AlertCircle className="h-3 w-3 text-destructive shrink-0" />
+                  }
+                  <span className="text-[10px] text-muted-foreground">local</span>
+                  <span className={`text-[10px] ${step.status === "COMPLETED" ? "text-emerald-500" : "text-destructive"}`}>
+                    {step.status.toLowerCase()}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* No runs yet */}
+          {totalRuns === 0 && group.scripts.length > 0 && (
+            <p className="text-[10px] text-muted-foreground/40 pl-5">No runs yet</p>
+          )}
         </div>
       )}
     </div>

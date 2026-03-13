@@ -92,7 +92,7 @@ export function HypothesisPhase({ projectId, hypotheses, steps, onRefresh }: Hyp
   const failedSteps = steps.filter((s) => s.status === "FAILED");
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 pr-2">
       {/* Action bar */}
       <div className="flex items-center gap-2">
         <button
