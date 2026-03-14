@@ -8,31 +8,55 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     const { paperIds, title, query, mode, depth } = body as {
-      paperIds: string[];
+      paperIds?: string[];
       title?: string;
       query?: string;
       mode?: "auto" | "guided";
       depth?: "quick" | "balanced" | "deep";
     };
 
-    if (!Array.isArray(paperIds) || paperIds.length < 2) {
-      return NextResponse.json(
-        { error: "At least 2 paper IDs are required" },
-        { status: 400 }
-      );
-    }
-
     const userId = await requireUserId();
 
-    // Verify all papers exist and belong to user
-    const papers = await prisma.paper.findMany({
-      where: { id: { in: paperIds }, userId },
-      select: { id: true, title: true },
-    });
+    let papers: { id: string; title: string }[];
 
-    if (papers.length !== paperIds.length) {
+    if (Array.isArray(paperIds) && paperIds.length >= 2) {
+      // Explicit paper selection
+      papers = await prisma.paper.findMany({
+        where: { id: { in: paperIds }, userId },
+        select: { id: true, title: true },
+      });
+      if (papers.length !== paperIds.length) {
+        return NextResponse.json(
+          { error: `Only ${papers.length} of ${paperIds.length} papers found` },
+          { status: 400 }
+        );
+      }
+    } else if (query && query.trim()) {
+      // Auto-find papers matching the query
+      const q = query.trim();
+      papers = await prisma.paper.findMany({
+        where: {
+          userId,
+          OR: [
+            { title: { contains: q } },
+            { abstract: { contains: q } },
+            { summary: { contains: q } },
+            { tags: { some: { tag: { name: { contains: q } } } } },
+          ],
+        },
+        select: { id: true, title: true },
+        orderBy: { createdAt: "desc" },
+        take: 50,
+      });
+      if (papers.length < 2) {
+        return NextResponse.json(
+          { error: `Found only ${papers.length} matching papers — need at least 2. Try a broader topic or add more papers first.` },
+          { status: 400 }
+        );
+      }
+    } else {
       return NextResponse.json(
-        { error: `Only ${papers.length} of ${paperIds.length} papers found` },
+        { error: "Provide either paperIds (2+) or a query to auto-find papers" },
         { status: 400 }
       );
     }
@@ -69,7 +93,7 @@ export async function POST(request: NextRequest) {
         depth: validDepth,
         paperCount: papers.length,
         papers: {
-          create: paperIds.map((paperId) => ({ paperId })),
+          create: papers.map((p) => ({ paperId: p.id })),
         },
       },
     });

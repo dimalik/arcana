@@ -1,7 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { BookOpen, FlaskConical, Lightbulb, BarChart3, IterationCcw, Pause } from "lucide-react";
+import { BookOpen, FlaskConical, Lightbulb, BarChart3, IterationCcw, Pause, MoreVertical, Trash2 } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 const PHASES = ["literature", "hypothesis", "experiment", "analysis", "reflection"] as const;
 
@@ -27,9 +33,10 @@ interface ProjectCardProps {
     collection: { _count: { papers: number } } | null;
     _count: { hypotheses: number };
   };
+  onDelete?: (id: string) => void;
 }
 
-export function ProjectCard({ project }: ProjectCardProps) {
+export function ProjectCard({ project, onDelete }: ProjectCardProps) {
   const brief = (() => {
     try { return JSON.parse(project.brief); } catch { return {}; }
   })();
@@ -81,12 +88,33 @@ export function ProjectCard({ project }: ProjectCardProps) {
                 </p>
               )}
             </div>
-            <div className="flex items-center gap-2 shrink-0 mt-0.5">
+            <div className="flex items-center gap-1 shrink-0 mt-0.5">
               {isPaused && (
-                <span className="flex items-center gap-1 text-[10px] text-amber-500/80">
+                <span className="flex items-center gap-1 text-[10px] text-amber-500/80 mr-1">
                   <Pause className="h-2.5 w-2.5" />
                   paused
                 </span>
+              )}
+              {onDelete && (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <button
+                      onClick={(e) => e.preventDefault()}
+                      className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground/30 hover:text-foreground hover:bg-accent transition-colors"
+                    >
+                      <MoreVertical className="h-3 w-3" />
+                    </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-36">
+                    <DropdownMenuItem
+                      onClick={(e) => { e.preventDefault(); onDelete(project.id); }}
+                      className="text-xs gap-2 text-destructive focus:text-destructive"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                      Delete
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
               )}
               <span className="text-[10px] text-muted-foreground/50">{timeAgo}</span>
             </div>

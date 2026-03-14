@@ -35,7 +35,7 @@ export function CleanTopbar() {
 
   return (
     <TooltipProvider delayDuration={0}>
-      <header className="flex h-12 shrink-0 items-center gap-2 bg-card/50 px-4">
+      <header className="relative flex h-12 shrink-0 items-center gap-2 bg-card/50 px-4">
         {/* Menu button */}
         <Tooltip>
           <TooltipTrigger asChild>
@@ -74,22 +74,26 @@ export function CleanTopbar() {
           </div>
         )}
 
+        <div className="flex-1" />
+
         {wideSearch ? (
           <>
-            <div className="flex-1" />
-            <TopbarSearch wide />
-            <div className="flex-1" />
             {pageInfo?.actions}
+            <UserMenu />
+            {/* Absolutely centered search bar */}
+            <div className="absolute left-1/2 -translate-x-1/2 w-full max-w-2xl px-4 pointer-events-none">
+              <div className="pointer-events-auto">
+                <TopbarSearch wide />
+              </div>
+            </div>
           </>
         ) : (
           <>
-            <div className="flex-1" />
             {pageInfo?.actions}
             <TopbarSearch />
+            <UserMenu />
           </>
         )}
-
-        <UserMenu />
       </header>
 
       <NavCommandMenu open={menuOpen} onOpenChange={setMenuOpen} />

@@ -53,7 +53,8 @@ export async function GET(request: NextRequest) {
   if (tagIds) {
     const ids = tagIds.split(",").filter(Boolean);
     if (ids.length > 0) {
-      where.tags = { some: { tagId: { in: ids } } };
+      // Intersection: paper must have ALL selected tags
+      where.AND = ids.map((id: string) => ({ tags: { some: { tagId: id } } }));
     }
   } else if (clusterId) {
     where.tags = { some: { tag: { clusterId } } };

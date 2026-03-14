@@ -190,9 +190,6 @@ function TypeChips({
                 : "text-muted-foreground/50 hover:text-muted-foreground"
             }`}
           >
-            {t !== "all" && (
-              <span className={`h-1.5 w-1.5 rounded-full ${accent?.dot} ${isActive ? "opacity-100" : "opacity-40"}`} />
-            )}
             {t === "all" ? "All" : accent?.label}
           </button>
         );

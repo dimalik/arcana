@@ -10,7 +10,6 @@ import {
   CommandGroup,
   CommandItem,
 } from "@/components/ui/command";
-import { Settings2 } from "lucide-react";
 import { navItems } from "./nav-items";
 
 interface Props {
@@ -55,16 +54,6 @@ export function NavCommandMenu({ open, onOpenChange }: Props) {
               </CommandItem>
             );
           })}
-          <CommandItem
-            value="Settings"
-            onSelect={() => {
-              router.push("/settings");
-              onOpenChange(false);
-            }}
-          >
-            <Settings2 className="mr-2 h-4 w-4" />
-            Settings
-          </CommandItem>
         </CommandGroup>
       </CommandList>
     </CommandDialog>

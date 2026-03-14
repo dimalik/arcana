@@ -88,10 +88,6 @@ function TagFilterStrip({
                     color: cluster.color,
                   }}
                 >
-                  <span
-                    className="h-1.5 w-1.5 rounded-full"
-                    style={{ backgroundColor: cluster.color }}
-                  />
                   {cluster.name}
                   {activeInCluster > 0 && (
                     <span
@@ -182,9 +178,13 @@ export default function HomePage() {
   const [addDialogOpen, setAddDialogOpen] = useState(false);
   const [addDialogTab, setAddDialogTab] = useState<"pdf" | "arxiv" | "anthology" | "url">("pdf");
 
-  // Fetch clusters once
+  // Fetch clusters — refetch when selection changes to get intersection counts
   useEffect(() => {
-    fetch("/api/tags/clusters")
+    const params = new URLSearchParams();
+    if (selectedTagIds.size > 0) {
+      params.set("filterTagIds", Array.from(selectedTagIds).join(","));
+    }
+    fetch(`/api/tags/clusters?${params}`)
       .then((r) => r.json())
       .then((data) => {
         if (Array.isArray(data)) {
@@ -192,7 +192,7 @@ export default function HomePage() {
         }
       })
       .catch(() => {});
-  }, []);
+  }, [selectedTagIds]);
 
   // Fetch papers
   const fetchPapers = useCallback(async () => {
@@ -263,9 +263,9 @@ export default function HomePage() {
   const hasFilters = selectedTagIds.size > 0;
 
   return (
-    <div className="flex gap-6">
+    <div className="flex gap-6 h-[calc(100vh-3.5rem-2.5rem)] -my-5 -ml-8 -mr-10 pl-8 pr-10 pt-5 overflow-hidden">
       {/* Papers list — 3/4 */}
-      <div className="flex-1 min-w-0 space-y-4">
+      <div className="flex-1 min-w-0 space-y-4 overflow-y-auto pr-1 pb-5">
         <div className="flex items-center justify-between mb-1">
           <div className="flex items-center gap-2">
             <h3 className="text-sm font-medium">Library</h3>
@@ -425,10 +425,8 @@ export default function HomePage() {
       </div>
 
       {/* Discoveries — 1/4 */}
-      <div className="w-72 shrink-0 hidden lg:block">
-        <div className="sticky top-0">
-          <DiscoveriesPanel tagIds={Array.from(selectedTagIds)} />
-        </div>
+      <div className="w-72 shrink-0 hidden lg:block overflow-y-auto pb-5 scrollbar-none" style={{ scrollbarWidth: "none" }}>
+        <DiscoveriesPanel tagIds={Array.from(selectedTagIds)} />
       </div>
     </div>
   );

@@ -1,9 +1,11 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { generateTagClusters } from "@/lib/tags/clustering";
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
+    const filterTagIds = request.nextUrl.searchParams.get("filterTagIds");
+
     const clusters = await prisma.tagCluster.findMany({
       orderBy: { sortOrder: "asc" },
       include: {
@@ -13,6 +15,42 @@ export async function GET() {
         },
       },
     });
+
+    // When tags are selected, recompute counts to show intersection sizes
+    if (filterTagIds) {
+      const selectedIds = filterTagIds.split(",").filter(Boolean);
+      if (selectedIds.length > 0) {
+        // Find papers that have ALL selected tags (intersection)
+        const matchingPapers = await prisma.paper.findMany({
+          where: {
+            AND: selectedIds.map((id) => ({ tags: { some: { tagId: id } } })),
+          },
+          select: {
+            tags: { select: { tagId: true } },
+          },
+        });
+
+        // Count how many matching papers have each tag
+        const tagCounts: Record<string, number> = {};
+        for (const paper of matchingPapers) {
+          for (const pt of paper.tags) {
+            tagCounts[pt.tagId] = (tagCounts[pt.tagId] || 0) + 1;
+          }
+        }
+
+        // Override _count.papers with intersection counts
+        for (const cluster of clusters) {
+          for (const tag of cluster.tags) {
+            if (selectedIds.includes(tag.id)) {
+              // Keep the original count for already-selected tags
+            } else {
+              tag._count.papers = tagCounts[tag.id] || 0;
+            }
+          }
+        }
+      }
+    }
+
     return NextResponse.json(clusters);
   } catch (error) {
     console.error("Get clusters error:", error);
