@@ -27,6 +27,13 @@ const execAsync = promisify(exec);
 
 // ── Helpers ──────────────────────────────────────────────────────
 
+/** Check if a script name is a utility/helper (not an experiment) */
+function isUtilityScript(name: string): boolean {
+  const n = name.toLowerCase();
+  return /^(utils|helpers|config|setup|__init__|constants|common|shared|preprocess|data_loader|eval_utils)\.py$/.test(n)
+    || n === "requirements.txt" || n.endsWith("_utils.py") || n.endsWith("_helpers.py");
+}
+
 function processHtml(html: string, url: string): string {
   const isPlainText = url.endsWith(".md") || url.endsWith(".txt") ||
     url.includes("raw.githubusercontent.com");
@@ -185,9 +192,10 @@ async function runAgent(
   });
   if (!project) throw new Error("Project not found");
 
-  // 2. Set up working directory
+  // 2. Set up working directory (slug + short project ID to avoid collisions)
   const slug = project.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 40);
-  const workDir = project.outputFolder || path.join(process.cwd(), "output", "research", slug);
+  const shortId = projectId.slice(0, 8);
+  const workDir = project.outputFolder || path.join(process.cwd(), "output", "research", `${slug}-${shortId}`);
   await mkdir(workDir, { recursive: true });
 
   // 3. Ensure an active iteration exists
@@ -206,6 +214,15 @@ async function runAgent(
   let iterationId = iteration.id;
   let iterationNumber = iteration.number;
   let stepSortOrder = iteration.steps?.length || 0;
+
+  // 3b. Count existing experiments for sequential numbering
+  const existingExpSteps = await prisma.researchStep.count({
+    where: {
+      iteration: { projectId },
+      type: "generate_code",
+    },
+  });
+  let experimentCounter = existingExpSteps;
 
   // 4. Detect remote hosts and probe GPUs
   const remoteHosts = await prisma.remoteHost.findMany({ take: 5 });
@@ -330,7 +347,8 @@ async function runAgent(
     iterationNumber = newNumber;
     stepSortOrder = 0;
   };
-  const tools = createTools(projectId, userId, workDir, emit, remoteHosts, recordStep, { id: iterationId, number: iteration.number }, sharedDir, onIterationAdvance, model);
+  const expCounter = { value: experimentCounter };
+  const tools = createTools(projectId, userId, workDir, emit, remoteHosts, recordStep, { id: iterationId, number: iteration.number }, sharedDir, onIterationAdvance, model, expCounter);
 
   // 6. Stream with tool use
   const MAX_STEPS = 80;
@@ -518,25 +536,28 @@ ${totalGpus > 1 ? `**You have access to multiple GPUs.** Choose your strategy ba
 - Add ~20-30% overhead for optimizer states, activations, and batch data.
 - If the model + data won't fit in a single GPU's free memory → you MUST use multi-GPU.
 
-${totalGpus > 1 ? `**Multi-GPU approaches (use when model doesn't fit in one GPU):**
-1. **DataParallel** (easiest, for training): \`model = torch.nn.DataParallel(model)\` — replicates model on each GPU, splits batches. Only works if model fits on ONE GPU.
-2. **Device map** (for inference with large models): \`model = AutoModelForCausalLM.from_pretrained(name, device_map="auto")\` — HuggingFace automatically shards across GPUs.
-3. **DeepSpeed / FSDP** (for training large models): Use \`accelerate launch --multi_gpu\` with a config. Better memory efficiency than DataParallel.
-4. **Pipeline parallelism**: Put different layers on different GPUs manually. Use when model is too big for any single GPU.
+${totalGpus > 1 ? `**YOU HAVE MULTIPLE GPUs — USE THEM ALL.** Do NOT limit yourself to a single GPU. The default for any training or inference task should be to use ALL available GPUs.
 
-**Rules:**
-- Always check memory FIRST: \`torch.cuda.mem_get_info()\` at script start, print available memory.
-- If estimated model size > 80% of single GPU memory → use device_map="auto" or multi-GPU.
-- Set \`CUDA_VISIBLE_DEVICES=0,1,...\` if you want to control which GPUs to use.
-- For batch processing, use the largest batch size that fits: start small, double until OOM, back off.
-- Always use \`torch.cuda.empty_cache()\` between major operations to free memory.
-- If you get OOM: try (in order) fp16/bf16 → int8 quantization → device_map="auto" → reduce batch size.
-${multiGpuHost ? `- On "${multiGpuHost.alias}" you have ${multiGpuHost.gpuCount} GPUs — prefer this host for large models.` : ""}` : `**If you get OOM on a single GPU:**
-1. Switch to fp16/bf16: \`model.half()\` or \`torch.autocast("cuda")\`
+**Multi-GPU approaches (in order of preference for training):**
+1. **\`accelerate launch\` + DeepSpeed/FSDP** (PREFERRED for training): Write your training script with HuggingFace \`Trainer\` or \`accelerate\`, then launch with \`accelerate launch --multi_gpu --num_processes=${totalGpus} train.py\`. This handles data parallelism, gradient sync, and mixed precision automatically. Add \`accelerate\` and \`deepspeed\` to requirements.txt.
+2. **Device map** (for inference / loading large models): \`model = AutoModelForCausalLM.from_pretrained(name, device_map="auto")\` — HuggingFace automatically shards across all GPUs.
+3. **DataParallel** (simple but slower): \`model = torch.nn.DataParallel(model)\` — only if you can't use accelerate.
+4. **Manual FSDP**: For custom training loops that need fine-grained control.
+
+**CRITICAL RULES:**
+- **Default to multi-GPU.** With ${totalGpus} GPUs, your EFFECTIVE memory is ~${totalGpus}x a single GPU. Use it.
+- **NEVER reduce dataset size to avoid environment/memory issues.** Instead: use DeepSpeed ZeRO stage 2/3, gradient accumulation, or mixed precision. These solve the REAL problem instead of watering down your experiment.
+- **NEVER simplify your experiment setup to avoid installing a package.** If DeepSpeed or accelerate fails to install, fix the installation — don't rewrite the experiment to avoid it. Use \`validate_environment\` to test first.
+- **NEVER train on a tiny subset "just to test" and call it an experiment.** A full run on real data with proper distributed training is the minimum. Subsets are only acceptable as a debugging step before the real run.
+- Always check memory FIRST: \`torch.cuda.mem_get_info()\` at script start, print available memory per GPU.
+- For batch processing, scale batch size with GPU count: \`per_gpu_batch * ${totalGpus}\`.
+- If you get OOM: try (in order) mixed precision (bf16) → DeepSpeed ZeRO-2 → gradient accumulation → ZeRO-3. NEVER fall back to single-GPU or reduced data as a first resort.
+${multiGpuHost ? `- On "${multiGpuHost.alias}" you have ${multiGpuHost.gpuCount} GPUs — this should be your primary training host.` : ""}` : `**If you get OOM on a single GPU:**
+1. Switch to bf16/fp16: \`torch.autocast("cuda")\` or \`model.half()\`
 2. Use int8 quantization: \`load_in_8bit=True\`
-3. Reduce batch size
+3. Use gradient accumulation to simulate larger batches
 4. Use gradient checkpointing for training
-5. Try a smaller model variant`}`;
+5. Try a smaller model variant — but NEVER reduce dataset size`}`;
   }
 
   // Build resource preference guidance
@@ -579,19 +600,25 @@ ${prefSection}
 
 Example: Submit 3 experiment variants, then read a paper. When done reading, check jobs. Analyze whichever finished first.
 
-${!resourcePreferences || resourcePreferences.length === 0 ? "**Default: use execute_remote for running experiments** (training, evaluation). Use execute_command for local-only tasks.\n" : ""}### Environment Setup (AUTOMATIC — you don't need to manage this)
+${!resourcePreferences || resourcePreferences.length === 0 ? "**Default: use execute_remote for running experiments** (training, evaluation). Use execute_command for local-only tasks.\n" : ""}### Environment Setup (AUTOMATIC — but validate first!)
 The remote execution system **automatically handles Python environments**:
 - Creates a \`.venv\` if one doesn't exist and \`requirements.txt\` is present
 - Installs/updates packages when \`requirements.txt\` changes (tracked via hash)
 - Skips installation on subsequent runs if requirements haven't changed
 - Activates the venv before running your command
 
-**All you need to do:**
+**IMPORTANT: Validate before your first experiment:**
 1. Write a \`requirements.txt\` with your dependencies using \`write_file\`
-2. Write your experiment script
-3. Run with \`execute_remote\`: just \`python3 experiment.py\` — nothing else
+2. Call \`validate_environment\` to test that all packages install correctly on the remote host
+3. If validation FAILS: read the error carefully, fix requirements.txt, and try again. If you cannot fix it (missing system libraries, CUDA version mismatch), **tell the user** what needs to be installed on the remote host and wait for their confirmation.
+4. Once validated: write your experiment script and run with \`execute_remote\`
 
-**Do NOT include** venv creation, pip install, or activation in your command — the system does it all. If you need to add a new package, just update \`requirements.txt\` and re-run.`
+**Do NOT include** venv creation, pip install, or activation in your command — the system does it all.
+
+**When environment issues occur:**
+- **NEVER simplify your experiment to avoid a dependency.** If torch + deepspeed + accelerate fails, fix the installation — don't rewrite without multi-GPU support.
+- **NEVER reduce data or model size because of environment problems.** The environment should accommodate the experiment, not the other way around.
+- **ASK THE USER for help** when you cannot resolve a dependency issue after 2 attempts. They can install system packages, update CUDA, or configure conda.`
     : `\n## Execution
 No remote servers configured. Use execute_command to run experiments locally.
 
@@ -688,10 +715,13 @@ ${(() => {
 
 ### Phase 1: Literature & Hypotheses
 - Search for papers. Read them carefully — extract specific numbers, methods, datasets, and claims.
-- Formulate 2-3 testable hypotheses using log_finding(type="hypothesis"). Be specific: "Model X will outperform Y on dataset Z by N% because of mechanism W."
+- Formulate 2-3 testable hypotheses using log_finding(type="hypothesis"). Write PLAIN TEXT — no markdown, no headers, no bold. Be specific: "Model X will outperform Y on dataset Z by N% because of mechanism W." NOT "## Hypothesis 1: **Claim**: Model X..."
 - Identify what the literature DOESN'T answer. That's where you contribute.
 
 ### Phase 2: Experiment
+
+**Experiment naming:** Every experiment script MUST be named \`exp_NNN_descriptive_name.py\` (e.g., \`exp_001_baseline_gpt2.py\`, \`exp_002_finetune_lora.py\`). The system auto-numbers if you forget, but use consistent naming so experiments can be ordered and compared. Helper scripts (data loaders, utils) don't need numbering.
+
 - **Before EVERY experiment, check the literature.** Use \`search_library\` to find relevant techniques in papers you already have. Use \`search_papers\` when you need new papers on a specific sub-problem. Use \`read_paper\` to extract exact methods, hyperparameters, and baselines from the most relevant papers. The experiment you design should cite at least one paper's approach. Never design an experiment from scratch when a paper has already solved part of the problem — build on their work.
 - **Before writing code, search the web for existing tools.** Use \`web_search\` to find libraries that already do what you need (e.g., \`trl\` for RLHF, \`peft\` for parameter-efficient fine-tuning, \`accelerate\` for distributed training). Read their documentation with \`fetch_webpage\`. Don't rewrite from scratch what a mature library already provides — use pip packages.
 - **USE REAL DATASETS.** When papers mention specific datasets (GLUE, SQuAD, MMLU, ImageNet, WMT, etc.), use those SAME datasets so your results are directly comparable. Download them via HuggingFace \`datasets\`, \`torchvision\`, or direct URLs. NEVER generate tiny synthetic toy data as a substitute for real benchmarks — the results would be scientifically meaningless.
@@ -794,6 +824,9 @@ Think of iterations like chapters — each should have a coherent narrative. Sta
 
 ## Critical Rules
 - Write COMPLETE, RUNNABLE Python code. No placeholders. Always include requirements.txt.
+- **NEVER simplify an experiment to avoid environment or dependency issues.** If a package fails to install, fix the installation (pin versions, check CUDA compatibility, ask the user). The experiment design should NEVER be compromised by tooling problems.
+- **NEVER reduce dataset size, remove multi-GPU support, or drop heavy dependencies as a workaround for failures.** These are not simplifications — they're invalidations of the experiment. Fix the root cause instead.
+- **When an environment issue persists after 2 attempts, STOP and tell the user.** Explain what's failing, what you've tried, and what system-level changes are needed. The user can SSH in and fix things you can't.
 - **NEVER move on after a failed experiment.** Read the error, fix the code, re-run. Only analyze results from successful (exit 0) runs.
 - **NEVER stop after one or two experiments.** One experiment is not research — it's a first draft. You must run ablations, parameter sweeps, alternative approaches, and follow-ups. If you find yourself writing a summary after 2 experiments, STOP and design more experiments instead.
 - **NEVER say "final experiment" or "in conclusion".** You run continuously. Always have a next action planned.
@@ -958,9 +991,12 @@ function createTools(
   sharedDir: string,
   onIterationAdvance?: (newId: string, newNumber: number) => void,
   agentModel?: Parameters<typeof streamText>[0]["model"],
+  expCounter?: { value: number },
 ) {
   // Track active background job IDs for this session
   const activeJobIds = new Set<string>();
+  // Experiment counter for sequential naming (shared with caller via ref object)
+  const experimentCount = expCounter || { value: 0 };
 
   return {
     search_papers: tool({
@@ -1228,14 +1264,23 @@ function createTools(
     }),
 
     write_file: tool({
-      description: "Write a file to the experiment directory. Use for Python scripts, requirements.txt, configs, etc. Overwrites if exists.",
+      description: "Write a file to the experiment directory. Use for Python scripts, requirements.txt, configs, etc. Overwrites if exists. Experiment scripts MUST follow naming: exp_NNN_name.py (e.g. exp_001_baseline.py). Helper/utility scripts can use any name.",
       inputSchema: z.object({
-        filename: z.string().describe("Filename (e.g., experiment.py, requirements.txt)"),
+        filename: z.string().describe("Filename. For experiments: exp_NNN_name.py (e.g. exp_001_baseline.py, exp_002_finetune.py). For utilities/helpers: any name."),
         content: z.string().describe("Full file content"),
       }),
       execute: async ({ filename, content }: { filename: string; content: string }) => {
         // Prevent path traversal
-        const safeName = path.basename(filename);
+        let safeName = path.basename(filename);
+
+        // Auto-number experiment scripts that don't follow the convention
+        if (safeName.endsWith(".py") && !safeName.startsWith("exp_") && !isUtilityScript(safeName)) {
+          experimentCount.value++;
+          const num = String(experimentCount.value).padStart(3, "0");
+          const stem = safeName.replace(/\.py$/, "").replace(/[^a-z0-9_]/gi, "_").toLowerCase();
+          safeName = `exp_${num}_${stem}.py`;
+        }
+
         const filePath = path.join(workDir, safeName);
         await writeFile(filePath, content, "utf-8");
         // Record experiment code as a step
@@ -1539,6 +1584,57 @@ function createTools(
         recordResourceChoice(userId, taskCat, `remote:${host.alias}`, command.slice(0, 80), projectId).catch(() => {});
 
         return `Job submitted to ${host.alias} (ID: ${jobId.slice(0, 8)}). It is now running in the background.\n\n**Continue with other work** — read papers, write code for the next experiment, analyze previous results. Use \`check_job\` with job_id="${jobId}" to check progress, or \`wait_for_jobs\` when you need results before proceeding.\n\nActive jobs this session: ${activeJobIds.size}`;
+      },
+    }),
+
+    validate_environment: tool({
+      description: "Test that requirements.txt can be installed on a remote host WITHOUT running an experiment. Use this BEFORE running your first experiment to catch dependency issues early. If installation fails, show the error to the user and ask them for help. Returns the pip install output so you can diagnose problems.",
+      inputSchema: z.object({
+        host_alias: z.string().optional().describe("Remote host alias. Omit to use the default host."),
+      }),
+      execute: async ({ host_alias }: { host_alias?: string }) => {
+        const hostWhere = host_alias ? { alias: host_alias } : { isDefault: true };
+        let host = await prisma.remoteHost.findFirst({ where: hostWhere });
+        if (!host) host = await prisma.remoteHost.findFirst();
+        if (!host) return "No remote hosts configured.";
+
+        // Check that requirements.txt exists locally
+        const reqPath = path.join(workDir, "requirements.txt");
+        let reqContent: string;
+        try {
+          reqContent = await readFile(reqPath, "utf-8");
+        } catch {
+          return "No requirements.txt found in the experiment directory. Write one first with write_file.";
+        }
+
+        emit({ type: "tool_progress", toolName: "validate_environment", content: `Testing pip install on ${host.alias}...` });
+
+        // Sync files and do a dry-run install
+        try {
+          const result = await quickRemoteCommand(host.id,
+            `cd ${host.workDir} && mkdir -p _env_test && cat > _env_test/requirements.txt << 'EOF'\n${reqContent}\nEOF\n` +
+            `cd _env_test && python3 -m venv .venv 2>&1 && source .venv/bin/activate && ` +
+            `pip3 install --upgrade pip -q 2>&1 && pip3 install -r requirements.txt 2>&1; ` +
+            `EXIT=$?; rm -rf ${host.workDir}/_env_test; exit $EXIT`
+          );
+
+          if (result.ok) {
+            emit({ type: "tool_output", toolName: "validate_environment", content: `Environment validated on ${host.alias}` });
+            return `All requirements install successfully on ${host.alias}.\n\nOutput:\n${result.output.slice(-2000)}`;
+          } else {
+            emit({ type: "tool_output", toolName: "validate_environment", content: `Environment validation FAILED on ${host.alias}` });
+            return `ENVIRONMENT VALIDATION FAILED on ${host.alias}.\n\nError:\n${(result.error || result.output).slice(-3000)}\n\n` +
+              `**ACTION REQUIRED:** Some packages failed to install. Common fixes:\n` +
+              `- Check package names and versions in requirements.txt\n` +
+              `- Some packages need system libraries (e.g. libffi-dev, libssl-dev)\n` +
+              `- CUDA-dependent packages (torch, triton) may need specific versions\n` +
+              `- Try pinning versions: torch==2.1.0 instead of just torch\n\n` +
+              `**Ask the user for help** if you cannot resolve this — they may need to install system packages on the remote host.`;
+          }
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          return `Failed to connect to ${host.alias}: ${msg}`;
+        }
       },
     }),
 
@@ -1932,10 +2028,10 @@ Be harsh but fair. Vague praise is useless. Specific criticism saves months of w
     }),
 
     log_finding: tool({
-      description: "Record an important finding, hypothesis, decision, or question in the research log. This appends to RESEARCH_LOG.md (the persistent lab notebook) AND the project database. Findings and breakthroughs are also saved to the Mind Palace so they can be reused in future research projects. Use liberally — this is how you build the project's knowledge base.",
+      description: "Record an important finding, hypothesis, decision, or question in the research log. This appends to RESEARCH_LOG.md (the persistent lab notebook) AND the project database. Findings and breakthroughs are also saved to the Mind Palace. For hypotheses: write PLAIN TEXT only — no markdown headers, no **bold**, no bullet points. Just a clear, direct statement of the claim.",
       inputSchema: z.object({
         type: z.enum(["finding", "hypothesis", "decision", "question", "breakthrough"]).describe("Type of entry"),
-        content: z.string().describe("What you found/decided/hypothesized"),
+        content: z.string().describe("What you found/decided/hypothesized. For hypotheses: plain text claim, no markdown formatting."),
         related_paper_title: z.string().optional().describe("Title (or fragment) of a paper this finding relates to. If provided, the insight will be linked to that paper in the Mind Palace."),
       }),
       execute: async ({ type, content, related_paper_title }: { type: string; content: string; related_paper_title?: string }) => {
@@ -1957,17 +2053,17 @@ Be harsh but fair. Vague praise is useless. Specific criticism saves months of w
 
         // If it's a hypothesis, also create a ResearchHypothesis record + step
         if (type === "hypothesis") {
-          // Clean up hypothesis text: strip markdown headers, extract claim and rationale
+          // Clean up hypothesis text: strip ALL markdown artifacts
           let statement = content;
           let rationale: string | null = "Generated by research agent";
 
-          // Strip "## Hypothesis N: Title" prefix
+          // Strip "## Hypothesis N: Title" prefix (various formats)
           statement = statement.replace(/^#+\s*(?:Hypothesis\s*\d*[:\s]*)?/i, "").trim();
 
           // Extract rationale if embedded as **Rationale**: ...
           const rationaleMatch = statement.match(/\*\*Rationale\*\*:\s*([\s\S]*?)$/i);
           if (rationaleMatch) {
-            rationale = rationaleMatch[1].trim().slice(0, 500);
+            rationale = rationaleMatch[1].trim().replace(/\*\*/g, "").slice(0, 500);
             statement = statement.replace(/\s*\*\*Rationale\*\*:[\s\S]*$/i, "").trim();
           }
 
@@ -1975,6 +2071,23 @@ Be harsh but fair. Vague praise is useless. Specific criticism saves months of w
           const claimMatch = statement.match(/\*\*Claim\*\*:\s*([\s\S]*)/i);
           if (claimMatch) {
             statement = claimMatch[1].trim();
+          }
+
+          // Strip all remaining markdown bold/italic markers
+          statement = statement.replace(/\*\*(.+?)\*\*/g, "$1");
+          statement = statement.replace(/\*(.+?)\*/g, "$1");
+          statement = statement.replace(/__(.+?)__/g, "$1");
+          statement = statement.replace(/_(.+?)_/g, "$1");
+          // Strip markdown bullet points at start
+          statement = statement.replace(/^[-*•]\s+/, "");
+          // Strip numbered list prefix
+          statement = statement.replace(/^\d+\.\s+/, "");
+          // Strip "Hypothesis:" prefix if still present
+          statement = statement.replace(/^Hypothesis:\s*/i, "").trim();
+
+          // Clean rationale too
+          if (rationale && rationale !== "Generated by research agent") {
+            rationale = rationale.replace(/\*\*(.+?)\*\*/g, "$1").replace(/\*(.+?)\*/g, "$1");
           }
 
           await prisma.researchHypothesis.create({
