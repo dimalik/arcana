@@ -282,61 +282,90 @@ export function ExperimentPhase({ projectId, steps, onRefresh }: ExperimentPhase
   const pendingSteps = steps.filter((s) => s.status === "PROPOSED" || s.status === "APPROVED");
   const runningSteps = steps.filter((s) => s.status === "RUNNING");
 
-  // Build experiment groups by experiment number in filename
-  // e.g., experiment1_xlmr_baseline.py and experiment1_xlmr_v2.py → "Experiment 1"
+  // Build experiment groups by matching scripts to their runs.
+  // Groups are created per Python script (excluding utility files like requirements.txt).
+  // A file is a "utility" only if it's clearly config/helper (requirements.txt, utils.py, helpers.py, config.py, etc.)
   const groups: ExperimentGroup[] = [];
-  const numToGroup = new Map<number, ExperimentGroup>();
   const scriptToGroup = new Map<string, ExperimentGroup>();
   let utilityGroup: ExperimentGroup | null = null;
 
+  const UTILITY_PATTERNS = /^(requirements\.txt|setup\.py|setup\.cfg|conftest\.py|__init__\.py|utils\.py|helpers?\.py|config\.py|common\.py)$/i;
+
   function getExpNumber(filename: string): number | null {
-    const m = filename.match(/experiment(\d+)/i);
+    const m = filename.match(/experiment[\s_-]*(\d+)/i);
     return m ? parseInt(m[1], 10) : null;
   }
 
-  function getOrCreateGroup(num: number): ExperimentGroup {
-    let g = numToGroup.get(num);
-    if (!g) {
-      g = { name: `Experiment ${num}`, scripts: [], runs: [], jobs: [] };
-      numToGroup.set(num, g);
-      groups.push(g);
-    }
-    return g;
+  function makeGroupName(filename: string, index: number): string {
+    // Try to extract experiment number from filename
+    const num = getExpNumber(filename);
+    if (num !== null) return `Experiment ${num}`;
+    // Use the filename stem as the group name (e.g., "train_model.py" → "train_model")
+    const stem = filename.replace(/\.py$/, "").replace(/[_-]/g, " ");
+    // Capitalize first letter
+    return stem.charAt(0).toUpperCase() + stem.slice(1);
   }
 
-  // Group code generation steps by experiment number in filename
+  // Group code generation steps: experiment scripts get their own group, utilities go to one group
   for (const step of codeSteps) {
     const out = parseOutput(step.output);
     const filename = out?.filename || step.title.replace("Write: ", "");
-    const num = getExpNumber(filename);
-    if (num !== null) {
-      const g = getOrCreateGroup(num);
-      g.scripts.push(step);
-      scriptToGroup.set(filename, g);
-    } else {
-      // Utility scripts (run_experiments.py, etc.)
+
+    if (UTILITY_PATTERNS.test(filename)) {
       if (!utilityGroup) {
         utilityGroup = { name: "Utilities", scripts: [], runs: [], jobs: [] };
-        groups.push(utilityGroup);
       }
       utilityGroup.scripts.push(step);
       scriptToGroup.set(filename, utilityGroup);
+    } else {
+      // Each experiment script gets its own group (or joins an existing one with the same experiment number)
+      const num = getExpNumber(filename);
+      let existingGroup: ExperimentGroup | undefined;
+      if (num !== null) {
+        existingGroup = groups.find((g) => getExpNumber(g.name) === num || g.name === `Experiment ${num}`);
+      }
+      if (existingGroup) {
+        existingGroup.scripts.push(step);
+      } else {
+        const g: ExperimentGroup = { name: makeGroupName(filename, groups.length + 1), scripts: [step], runs: [], jobs: [] };
+        groups.push(g);
+      }
+      scriptToGroup.set(filename, groups[groups.length - 1]);
     }
   }
 
-  // Match run steps to experiments by script name
+  // Add utility group at the end if it has items
+  if (utilityGroup) groups.push(utilityGroup);
+
+  // Match run steps to experiments by script name in the command
   for (const step of runSteps) {
     const script = extractScriptName(step.title);
     const g = script ? scriptToGroup.get(script) : undefined;
     if (g) {
       g.runs.push(step);
     } else {
-      // Try matching by experiment number in step title
-      const num = getExpNumber(step.title);
-      if (num !== null) {
-        getOrCreateGroup(num).runs.push(step);
-      } else if (groups.length > 0) {
-        groups[groups.length - 1].runs.push(step);
+      // Try matching by looking at each group's scripts
+      let matched = false;
+      if (script) {
+        for (const group of groups) {
+          if (group === utilityGroup) continue;
+          const groupScripts = group.scripts.map((s) => {
+            const o = parseOutput(s.output);
+            return o?.filename || s.title.replace("Write: ", "");
+          });
+          if (groupScripts.some((gs) => script.includes(gs.replace(/\.py$/, "")) || gs.includes(script.replace(/\.py$/, "")))) {
+            group.runs.push(step);
+            matched = true;
+            break;
+          }
+        }
+      }
+      // Fall back to most recent non-utility group
+      if (!matched) {
+        const expGroups = groups.filter((g) => g !== utilityGroup);
+        if (expGroups.length > 0) {
+          expGroups[expGroups.length - 1].runs.push(step);
+        }
       }
     }
   }
@@ -348,17 +377,36 @@ export function ExperimentPhase({ projectId, steps, onRefresh }: ExperimentPhase
     if (g) {
       g.jobs.push(job);
     } else {
-      const num = getExpNumber(job.command);
-      if (num !== null) {
-        getOrCreateGroup(num).jobs.push(job);
-      } else if (groups.length > 0) {
-        groups[groups.length - 1].jobs.push(job);
+      let matched = false;
+      if (script) {
+        for (const group of groups) {
+          if (group === utilityGroup) continue;
+          const groupScripts = group.scripts.map((s) => {
+            const o = parseOutput(s.output);
+            return o?.filename || s.title.replace("Write: ", "");
+          });
+          if (groupScripts.some((gs) => script.includes(gs.replace(/\.py$/, "")) || gs.includes(script.replace(/\.py$/, "")))) {
+            group.jobs.push(job);
+            matched = true;
+            break;
+          }
+        }
+      }
+      if (!matched) {
+        const expGroups = groups.filter((g) => g !== utilityGroup);
+        if (expGroups.length > 0) {
+          expGroups[expGroups.length - 1].jobs.push(job);
+        }
       }
     }
   }
 
-  // Sort groups: numbered experiments first (by number), utilities last
+  // Sort: numbered experiments first (by number), named experiments next (chronological), utilities last
   groups.sort((a, b) => {
+    const aIsUtil = a === utilityGroup;
+    const bIsUtil = b === utilityGroup;
+    if (aIsUtil && !bIsUtil) return 1;
+    if (!aIsUtil && bIsUtil) return -1;
     const aNum = a.name.match(/Experiment (\d+)/);
     const bNum = b.name.match(/Experiment (\d+)/);
     if (aNum && bNum) return parseInt(aNum[1]) - parseInt(bNum[1]);

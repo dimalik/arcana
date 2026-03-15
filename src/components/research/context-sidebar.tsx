@@ -8,6 +8,7 @@ import {
   Image, FileCode, FileSpreadsheet, FileType,
   Plus, Pencil, Check as CheckIcon, Loader2,
   FlaskConical, BookOpen, Lightbulb, IterationCcw,
+  Users,
 } from "lucide-react";
 import { FilePreview } from "./file-preview";
 
@@ -272,6 +273,9 @@ export function ContextSidebar({ project, papers, hypotheses, iteration }: Conte
             )}
           </div>
         )}
+
+        {/* Sub-Agents */}
+        <SubAgentSection projectId={project.id} />
 
         {/* Process Memory */}
         <div>
@@ -678,6 +682,90 @@ function AddMemoryForm({ onAdd }: { onAdd: (category: string, lesson: string, co
           Add
         </button>
       </div>
+    </div>
+  );
+}
+
+// ── Sub-Agent Status Section ──────────────────────────────────
+
+interface AgentTaskInfo {
+  id: string;
+  role: string;
+  goal: string;
+  status: string;
+  createdAt: string;
+  completedAt: string | null;
+}
+
+const TASK_STATUS_DOT: Record<string, string> = {
+  PENDING: "bg-amber-500",
+  RUNNING: "bg-blue-500 animate-pulse",
+  COMPLETED: "bg-emerald-500",
+  FAILED: "bg-red-500",
+};
+
+function SubAgentSection({ projectId }: { projectId: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const [tasks, setTasks] = useState<AgentTaskInfo[]>([]);
+
+  useEffect(() => {
+    const load = () => {
+      fetch(`/api/research/${projectId}/agent-tasks`)
+        .then((r) => r.ok ? r.json() : [])
+        .then((data) => setTasks(data.tasks || []))
+        .catch(() => {});
+    };
+    load();
+    const interval = setInterval(load, 10000);
+    return () => clearInterval(interval);
+  }, [projectId]);
+
+  if (tasks.length === 0) return null;
+
+  const running = tasks.filter((t) => t.status === "RUNNING" || t.status === "PENDING").length;
+  const completed = tasks.filter((t) => t.status === "COMPLETED").length;
+
+  return (
+    <div>
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="flex items-center gap-1 text-[11px] font-medium text-muted-foreground hover:text-foreground w-full"
+      >
+        {expanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+        <Users className="h-3 w-3" />
+        Sub-Agents ({tasks.length})
+        {running > 0 && (
+          <span className="ml-auto text-[10px] text-blue-500 flex items-center gap-1">
+            <Loader2 className="h-2.5 w-2.5 animate-spin" />
+            {running} active
+          </span>
+        )}
+      </button>
+      {expanded && (
+        <div className="mt-1 space-y-0.5">
+          {tasks.slice(0, 10).map((t) => (
+            <div key={t.id} className="flex items-start gap-1.5">
+              <div className={`h-1.5 w-1.5 rounded-full mt-1.5 shrink-0 ${TASK_STATUS_DOT[t.status] || "bg-muted"}`} />
+              <div className="min-w-0 flex-1">
+                <p className="text-[10px] text-muted-foreground line-clamp-1">
+                  <span className="text-foreground/60">[{t.role}]</span> {t.goal}
+                </p>
+                {t.status === "COMPLETED" && t.completedAt && (
+                  <p className="text-[9px] text-muted-foreground/50">
+                    done {new Date(t.completedAt).toLocaleTimeString()}
+                  </p>
+                )}
+              </div>
+            </div>
+          ))}
+          {tasks.length > 10 && (
+            <p className="text-[10px] text-muted-foreground/50 pl-4">+{tasks.length - 10} more</p>
+          )}
+          <p className="text-[10px] text-muted-foreground/50 pl-4">
+            {completed} completed, {running} active
+          </p>
+        </div>
+      )}
     </div>
   );
 }

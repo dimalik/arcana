@@ -6,7 +6,7 @@
  * results, and iterates.
  */
 
-import { streamText, stepCountIs, tool } from "ai";
+import { streamText, generateText, stepCountIs, tool } from "ai";
 import { z } from "zod";
 import { getModel } from "@/lib/llm/provider";
 import { getDefaultModel } from "@/lib/llm/auto-process";
@@ -330,7 +330,7 @@ async function runAgent(
     iterationNumber = newNumber;
     stepSortOrder = 0;
   };
-  const tools = createTools(projectId, userId, workDir, emit, remoteHosts, recordStep, { id: iterationId, number: iteration.number }, sharedDir, onIterationAdvance);
+  const tools = createTools(projectId, userId, workDir, emit, remoteHosts, recordStep, { id: iterationId, number: iteration.number }, sharedDir, onIterationAdvance, model);
 
   // 6. Stream with tool use
   const MAX_STEPS = 80;
@@ -563,28 +563,43 @@ ${remoteHosts.map((h) => `- "${h.alias}"${h.gpuType ? ` (${h.gpuType})` : ""}`).
 ${gpuSection}
 ${prefSection}
 **Tool selection guide:**
-- \`execute_remote\` → run experiments on GPU servers (syncs files, creates job, polls for completion)
+- \`execute_remote\` → submit experiments to GPU servers (syncs files, starts job, returns IMMEDIATELY). The job runs in the background — you can do other work while it runs.
+- \`check_job\` → check status of a background job (quick, non-blocking). Call periodically to monitor progress.
+- \`wait_for_jobs\` → block until specific jobs complete (use when you need results before proceeding, e.g., to compare outputs).
 - \`check_remote\` → read files/logs on remote, list results, check status (SSH only, instant)
 - \`execute_command\` → local tasks (editing files, data prep, lightweight compute)
 
-${!resourcePreferences || resourcePreferences.length === 0 ? "**Default: use execute_remote for running experiments** (training, evaluation). Use execute_command for local-only tasks.\n" : ""}### Environment Setup (IMPORTANT — do this ONCE, not every run)
-On the FIRST experiment run, create a virtual environment and install dependencies:
-\`\`\`
-python3 -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt && python3 experiment.py
-\`\`\`
-On SUBSEQUENT runs, just activate and run — do NOT reinstall packages:
-\`\`\`
-source .venv/bin/activate && python3 experiment.py
-\`\`\`
-Only re-run pip install if you've changed requirements.txt. The venv persists between runs in the same directory.`
+### Parallel Experiment Workflow (IMPORTANT)
+\`execute_remote\` now returns immediately after submitting a job. **Do NOT wait idle** — keep working:
+1. Submit experiment with \`execute_remote\` → get job ID
+2. While it runs: read papers, write code for the next experiment, analyze previous results
+3. Submit MORE experiments if you have multiple variants to test
+4. Use \`check_job\` periodically to see if jobs finished
+5. When you need results to proceed, use \`wait_for_jobs\` with all pending job IDs
+
+Example: Submit 3 experiment variants, then read a paper. When done reading, check jobs. Analyze whichever finished first.
+
+${!resourcePreferences || resourcePreferences.length === 0 ? "**Default: use execute_remote for running experiments** (training, evaluation). Use execute_command for local-only tasks.\n" : ""}### Environment Setup (AUTOMATIC — you don't need to manage this)
+The remote execution system **automatically handles Python environments**:
+- Creates a \`.venv\` if one doesn't exist and \`requirements.txt\` is present
+- Installs/updates packages when \`requirements.txt\` changes (tracked via hash)
+- Skips installation on subsequent runs if requirements haven't changed
+- Activates the venv before running your command
+
+**All you need to do:**
+1. Write a \`requirements.txt\` with your dependencies using \`write_file\`
+2. Write your experiment script
+3. Run with \`execute_remote\`: just \`python3 experiment.py\` — nothing else
+
+**Do NOT include** venv creation, pip install, or activation in your command — the system does it all. If you need to add a new package, just update \`requirements.txt\` and re-run.`
     : `\n## Execution
 No remote servers configured. Use execute_command to run experiments locally.
 
-### Environment Setup (IMPORTANT — do this ONCE, not every run)
-On the FIRST experiment run, create a virtual environment:
+### Environment Setup (Local)
+On the FIRST local run, create a venv and install deps:
 \`python3 -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt && python3 experiment.py\`
 On SUBSEQUENT runs: \`source .venv/bin/activate && python3 experiment.py\`
-Do NOT reinstall packages every time — the venv persists.`;
+Only reinstall if requirements.txt changed.`;
 
   return `You are an autonomous research agent — a relentless, self-critical scientist. You don't just run one experiment and write it up. You run experiments, interrogate the results, find weaknesses, design better experiments, and iterate until you have genuine, novel findings backed by evidence.
 
@@ -707,9 +722,11 @@ ${(() => {
     \`\`\`
   - **NEVER write a script that only saves results at the very end.** If the script crashes after 30 minutes of training, you lose everything. Always save incrementally.
 - Run the experiment. If it fails, FIX it and re-run. Never move on from a failure.
-- On first run, create a venv and install deps. On re-runs, just activate the existing venv (see Environment Setup above).
+- For remote execution: just write requirements.txt and run \`python3 script.py\` — the system handles venv and packages automatically (see Environment Setup above).
 
 ### Phase 3: Critique (THIS IS THE MOST IMPORTANT PHASE)
+**Use \`adversarial_review\` here.** After getting results, pass your hypotheses, methods, and findings to the adversarial reviewer for independent critique. It will find flaws you're blind to. Address its concerns before designing follow-up experiments.
+
 After EVERY successful experiment, ask yourself:
 - **Are the results statistically meaningful?** If no error bars, standard deviations, or multiple runs — your results are unreliable. Re-run with proper statistical rigor.
 - **Do these results actually test my hypothesis?** Or did I inadvertently test something else?
@@ -783,8 +800,8 @@ Think of iterations like chapters — each should have a coherent narrative. Sta
 - **NEVER claim a result without comparing to a baseline.** "We got 92% accuracy" is meaningless without "compared to baseline X which gets Y%."
 - **NEVER accept results without statistical rigor.** Run experiments multiple times with different seeds. Report mean and standard deviation.
 - **NEVER generate synthetic toy data when a real dataset exists.** If a paper evaluates on GLUE, use GLUE. If on SQuAD, use SQuAD. Generating 50 random samples to "simulate" a dataset invalidates the entire experiment. Use \`datasets\` library, \`torchvision.datasets\`, or direct download URLs from the papers.
-- **NEVER reinstall packages on every run.** Create a venv ONCE with \`python3 -m venv .venv\`, install requirements into it, then reuse it. On subsequent runs just \`source .venv/bin/activate && python3 script.py\`. Only reinstall if requirements.txt has changed.
-- **execute_remote handles EVERYTHING automatically.** The remote wrapper: (1) cds into the experiment directory, (2) activates .venv, (3) runs your command, (4) captures exit code. So your command should be JUST the experiment, e.g. \`python3 experiment.py\`. NEVER include: \`cd\`, \`source .venv/bin/activate\`, \`bash -c\`, \`timeout\`, \`nohup\`, absolute paths to python or .venv/bin/python3. These WILL break the command.
+- **NEVER manage the Python environment manually when using execute_remote.** The remote wrapper handles venv creation, package installation, and activation automatically. Just write a \`requirements.txt\` and run \`python3 script.py\`. For local runs with execute_command, create a venv once: \`python3 -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt && python3 script.py\`, then reuse on subsequent runs.
+- **execute_remote handles EVERYTHING automatically and returns immediately.** The remote wrapper: (1) cds into the experiment directory, (2) creates .venv if needed, (3) installs requirements.txt if changed, (4) activates .venv, (5) runs your command, (6) captures exit code. So your command should be JUST the experiment, e.g. \`python3 experiment.py\`. NEVER include: \`cd\`, \`source .venv/bin/activate\`, \`python3 -m venv\`, \`pip install\`, \`bash -c\`, \`timeout\`, \`nohup\`, absolute paths to python or .venv/bin/python3. These WILL break the command. After submitting, **keep working** — don't just call check_job in a loop. Do something useful (read papers, write code) and check back later.
 - **NEVER use execute_remote for checking files, reading logs, or listing results.** Use check_remote for that — it's a direct SSH command with no sync overhead. execute_remote does a full rsync which is slow and can fail.
 - **ALWAYS use flush=True in print() and save results incrementally.** Remote jobs buffer stdout — without flushing you won't see progress. Without incremental saves, a crash after training means zero results.
 - **Save lessons with save_lesson whenever you fix a non-obvious bug or discover a practical trick.** Future you (and other projects) will benefit. Don't save obvious things — save things that cost you time to figure out.
@@ -892,7 +909,11 @@ function thinkingHint(toolCalls?: { toolName: string; input: unknown }[]): strin
     case "check_remote":
       return "Checking remote files...";
     case "execute_remote":
-      return "Reviewing remote execution results...";
+      return "Job submitted — continuing with other work...";
+    case "check_job":
+      return "Reviewing job status...";
+    case "wait_for_jobs":
+      return "Waiting for background jobs to complete...";
     case "log_finding":
       return "Continuing research based on findings...";
     case "search_library":
@@ -905,6 +926,14 @@ function thinkingHint(toolCalls?: { toolName: string; input: unknown }[]): strin
       return "Reading webpage content...";
     case "view_figures":
       return "Examining paper figures and tables...";
+    case "run_experiment_sweep":
+      return "Submitting experiment variants in parallel...";
+    case "dispatch_scouts":
+      return "Literature scouts are searching in the background...";
+    case "collect_results":
+      return "Reviewing scout findings...";
+    case "adversarial_review":
+      return "Processing adversarial peer review feedback...";
     case "save_lesson":
       return "Saving process lesson for future sessions...";
     case "complete_iteration":
@@ -928,7 +957,11 @@ function createTools(
   currentIteration: { id: string; number: number },
   sharedDir: string,
   onIterationAdvance?: (newId: string, newNumber: number) => void,
+  agentModel?: Parameters<typeof streamText>[0]["model"],
 ) {
+  // Track active background job IDs for this session
+  const activeJobIds = new Set<string>();
+
   return {
     search_papers: tool({
       description: "Search academic databases (OpenAlex, Semantic Scholar, CrossRef) for papers on a topic. Returns titles, abstracts, authors, citation counts. Papers are automatically added to your library.",
@@ -1000,12 +1033,7 @@ function createTools(
               continue;
             }
 
-            let filePath: string | undefined;
-            try {
-              const pdf = await findAndDownloadPdf({ doi: r.doi, arxivId: r.arxivId, existingPdfUrl: r.openAccessPdfUrl });
-              if (pdf) filePath = pdf.filePath;
-            } catch { /* optional */ }
-
+            // Create paper immediately — PDF download happens in background
             const paper = await prisma.paper.create({
               data: {
                 title: r.title, userId,
@@ -1016,12 +1044,25 @@ function createTools(
                 arxivId: r.arxivId ?? (r.doi?.match(/10\.48550\/arXiv\.(\d+\.\d+)/i)?.[1] || null),
                 sourceType: r.arxivId || r.doi?.match(/10\.48550\/arXiv\./i) ? "ARXIV" : "RESEARCH",
                 sourceUrl: r.externalUrl ?? null,
-                filePath,
-                processingStatus: filePath ? "EXTRACTING_TEXT" : "PENDING",
+                processingStatus: "PENDING",
               },
             });
             await prisma.collectionPaper.create({ data: { collectionId, paperId: paper.id } });
-            if (filePath) processingQueue.enqueue(paper.id);
+
+            // Queue PDF download + processing in background (non-blocking)
+            findAndDownloadPdf({ doi: r.doi, arxivId: r.arxivId, existingPdfUrl: r.openAccessPdfUrl })
+              .then(async (pdf) => {
+                if (pdf) {
+                  await prisma.paper.update({
+                    where: { id: paper.id },
+                    data: { filePath: pdf.filePath, processingStatus: "EXTRACTING_TEXT" },
+                  });
+                  processingQueue.enqueue(paper.id);
+                }
+              })
+              .catch((err) => {
+                console.warn(`[search_papers] PDF download failed for "${r.title.slice(0, 60)}":`, err instanceof Error ? err.message : err);
+              });
             imported.push(`"${r.title}" (${r.year || "?"}) — ${r.citationCount || 0} citations${r.abstract ? `\n  Abstract: ${r.abstract.slice(0, 300)}` : ""}`);
           } catch (err) {
             imported.push(`"${r.title}" — failed to import: ${err instanceof Error ? err.message : "error"}`);
@@ -1406,7 +1447,7 @@ function createTools(
     }),
 
     execute_remote: tool({
-      description: "Run an experiment on a remote GPU server. Syncs the experiment directory, runs the command, and syncs results back. ONLY use for actually running experiments (python scripts). For checking files, reading logs, or listing results, use check_remote instead — it's much faster. The remote environment automatically activates .venv and cds into the experiment directory — do NOT include those in your command.",
+      description: "Submit an experiment to a remote GPU server. Syncs files and starts the job, then returns IMMEDIATELY — the job runs in the background. Use check_job to monitor progress, or wait_for_jobs if you need results before continuing. This lets you submit multiple experiments and do other work (read papers, write code) while they run. ONLY use for running experiments (python scripts). For checking files/logs, use check_remote instead.",
       inputSchema: z.object({
         command: z.string().describe("The experiment command ONLY — e.g. 'python3 experiment.py'. Do NOT include: cd, source .venv/bin/activate, bash -c wrappers, timeout, absolute paths, or nohup. The system handles all of that automatically."),
         host_alias: z.string().optional().describe("Remote host alias. Omit to use the default host."),
@@ -1451,6 +1492,11 @@ function createTools(
         // Replace 'pip ' with 'pip3 '
         sanitized = sanitized.replace(/\bpip\b(?!3)/g, "pip3");
 
+        // Strip venv creation and pip install — .run.sh handles these automatically
+        sanitized = sanitized.replace(/python3\s+-m\s+venv\s+\.venv\s*(?:&&|;)\s*/g, "");
+        sanitized = sanitized.replace(/pip3?\s+install\s+(?:-r\s+)?requirements\.txt\s*(?:&&|;)\s*/g, "");
+        sanitized = sanitized.replace(/pip3?\s+install\s+--upgrade\s+pip\s*(?:&&|;)\s*/g, "");
+
         // Strip absolute local paths
         sanitized = sanitized.replace(new RegExp(workDir + "/", "g"), "");
 
@@ -1482,89 +1528,406 @@ function createTools(
           return `Failed to submit remote job to ${host.alias}:\n${errMsg}\n\nThis likely means rsync or SSH failed. Check the remote host configuration.`;
         }
 
-        emit({ type: "tool_output", toolName: "execute_remote", content: `Job submitted (${jobId.slice(0, 8)}). Waiting for output...` });
-        emit({ type: "tool_progress", toolName: "execute_remote", content: `Job submitted to ${host.alias}. Waiting...` });
+        // Track active job for this session
+        activeJobIds.add(jobId);
 
-        // Poll until done (max 30 minutes)
-        const maxWait = 30 * 60 * 1000;
-        const start = Date.now();
-        let lastLog = "";
-        let lastStderr = "";
+        emit({ type: "tool_output", toolName: "execute_remote", content: `Job submitted (${jobId.slice(0, 8)}). Running in background on ${host.alias}.` });
+        emit({ type: "tool_progress", toolName: "execute_remote", content: `Job submitted to ${host.alias}. Continuing...` });
 
-        while (Date.now() - start < maxWait) {
-          await new Promise((r) => setTimeout(r, 5_000)); // poll every 5s instead of 10s
+        await recordStep("run_experiment", `Remote (${host.alias}): ${command.slice(0, 60)}`, "COMPLETED", { host: host.alias, jobId, status: "SUBMITTED" }, "experiment");
+        const taskCat = classifyTaskCategory(command);
+        recordResourceChoice(userId, taskCat, `remote:${host.alias}`, command.slice(0, 80), projectId).catch(() => {});
 
-          const job = await prisma.remoteJob.findUnique({ where: { id: jobId } });
-          if (!job) {
-            emit({ type: "tool_output", toolName: "execute_remote", content: "ERROR: Job record disappeared." });
-            return "Job disappeared unexpectedly.";
+        return `Job submitted to ${host.alias} (ID: ${jobId.slice(0, 8)}). It is now running in the background.\n\n**Continue with other work** — read papers, write code for the next experiment, analyze previous results. Use \`check_job\` with job_id="${jobId}" to check progress, or \`wait_for_jobs\` when you need results before proceeding.\n\nActive jobs this session: ${activeJobIds.size}`;
+      },
+    }),
+
+    check_job: tool({
+      description: "Check the status of a background remote job. Returns status, recent stdout/stderr, and exit code if completed. Use this to monitor jobs submitted with execute_remote. Quick and non-blocking.",
+      inputSchema: z.object({
+        job_id: z.string().describe("The job ID returned by execute_remote"),
+      }),
+      execute: async ({ job_id }: { job_id: string }) => {
+        const job = await prisma.remoteJob.findUnique({
+          where: { id: job_id },
+          include: { host: true },
+        });
+        if (!job) return `Job "${job_id}" not found.`;
+
+        const elapsed = job.startedAt
+          ? Math.floor((Date.now() - job.startedAt.getTime()) / 1000)
+          : null;
+        const elapsedStr = elapsed !== null ? ` (${elapsed}s elapsed)` : "";
+
+        // Stream recent output to UI
+        if (job.stdout) {
+          const recentLines = job.stdout.split("\n").filter(Boolean).slice(-20);
+          for (const line of recentLines) {
+            emit({ type: "tool_output", toolName: "check_job", content: line });
           }
+        }
+
+        if (job.status === "COMPLETED") {
+          activeJobIds.delete(job_id);
+          emit({ type: "tool_output", toolName: "check_job", content: `\n✓ Job completed (exit ${job.exitCode ?? 0}) on ${job.host.alias}${elapsedStr}` });
+
+          // Sync results back if not already synced
+          if (!job.resultsSynced && job.localDir) {
+            try {
+              const { sshExecutor } = await import("./remote-executor");
+              const config = {
+                host: job.host.host, port: job.host.port, user: job.host.user,
+                keyPath: job.host.keyPath, workDir: job.host.workDir,
+                conda: job.host.conda, setupCmd: job.host.setupCmd,
+              };
+              await sshExecutor.syncDown(job.remoteDir, job.localDir, config);
+              await prisma.remoteJob.update({ where: { id: job_id }, data: { resultsSynced: true } });
+            } catch {
+              // Non-critical
+            }
+          }
+
+          return `Job COMPLETED (exit ${job.exitCode ?? 0}) on ${job.host.alias}${elapsedStr}.\n\nstdout:\n${(job.stdout || "").slice(-5000)}\n\n${job.stderr ? `stderr:\n${job.stderr.slice(-1000)}` : ""}`;
+        }
+
+        if (job.status === "FAILED" || job.status === "CANCELLED") {
+          activeJobIds.delete(job_id);
+          emit({ type: "tool_output", toolName: "check_job", content: `\n✗ Job ${job.status.toLowerCase()} (exit ${job.exitCode ?? "?"}) on ${job.host.alias}${elapsedStr}` });
+
+          // Try to recover partial results
+          let partialResults = "";
+          try {
+            const resultsPath = path.join(workDir, "results.json");
+            const resultsContent = await readFile(resultsPath, "utf-8").catch(() => null);
+            if (resultsContent) {
+              partialResults = `\n\nPARTIAL RESULTS RECOVERED:\n${resultsContent.slice(-3000)}`;
+            }
+          } catch {
+            // No partial results
+          }
+
+          return `EXPERIMENT FAILED (exit ${job.exitCode ?? "?"}) on ${job.host.alias}${elapsedStr}. Fix the code and re-run.\n\nstdout:\n${(job.stdout || "").slice(-3000)}\n\nstderr:\n${(job.stderr || "").slice(-2000)}${partialResults}`;
+        }
+
+        // Still running
+        const statusHint = job.status === "SYNCING" ? "syncing files" : job.status === "RUNNING" ? "running" : job.status.toLowerCase();
+        return `Job is ${statusHint} on ${job.host.alias}${elapsedStr}.\n\nstdout so far:\n${(job.stdout || "").slice(-3000)}\n\n${job.stderr ? `stderr:\n${job.stderr.slice(-500)}` : ""}\n\nActive jobs: ${activeJobIds.size}. Continue with other work and check back later.`;
+      },
+    }),
+
+    wait_for_jobs: tool({
+      description: "Wait for one or more background jobs to complete. Use this when you genuinely need results before proceeding (e.g., to compare experiment outputs). Polls all listed jobs until all complete or timeout. Prefer check_job for non-blocking status checks.",
+      inputSchema: z.object({
+        job_ids: z.array(z.string()).describe("Job IDs to wait for"),
+        timeout_minutes: z.number().default(10).optional().describe("Max wait time in minutes (default 10)"),
+      }),
+      execute: async ({ job_ids, timeout_minutes }: { job_ids: string[]; timeout_minutes?: number }) => {
+        const timeoutMs = (timeout_minutes || 10) * 60 * 1000;
+        const start = Date.now();
+        const results: Record<string, { status: string; stdout: string; stderr: string; exitCode: number | null }> = {};
+
+        emit({ type: "tool_progress", toolName: "wait_for_jobs", content: `Waiting for ${job_ids.length} job(s)...` });
+
+        while (Date.now() - start < timeoutMs) {
+          let allDone = true;
+
+          for (const jid of job_ids) {
+            if (results[jid]) continue; // Already finished
+
+            const job = await prisma.remoteJob.findUnique({
+              where: { id: jid },
+              include: { host: true },
+            });
+            if (!job) {
+              results[jid] = { status: "NOT_FOUND", stdout: "", stderr: "", exitCode: null };
+              continue;
+            }
+
+            if (job.status === "COMPLETED" || job.status === "FAILED" || job.status === "CANCELLED") {
+              activeJobIds.delete(jid);
+              results[jid] = {
+                status: job.status,
+                stdout: job.stdout || "",
+                stderr: job.stderr || "",
+                exitCode: job.exitCode,
+              };
+
+              // Sync results if needed
+              if (job.status === "COMPLETED" && !job.resultsSynced && job.localDir) {
+                try {
+                  const { sshExecutor } = await import("./remote-executor");
+                  const config = {
+                    host: job.host.host, port: job.host.port, user: job.host.user,
+                    keyPath: job.host.keyPath, workDir: job.host.workDir,
+                    conda: job.host.conda, setupCmd: job.host.setupCmd,
+                  };
+                  await sshExecutor.syncDown(job.remoteDir, job.localDir, config);
+                  await prisma.remoteJob.update({ where: { id: jid }, data: { resultsSynced: true } });
+                } catch {
+                  // Non-critical
+                }
+              }
+
+              const emoji = job.status === "COMPLETED" ? "✓" : "✗";
+              emit({ type: "tool_output", toolName: "wait_for_jobs", content: `${emoji} Job ${jid.slice(0, 8)} ${job.status.toLowerCase()} on ${job.host.alias}` });
+            } else {
+              allDone = false;
+            }
+          }
+
+          if (allDone) break;
 
           const elapsed = Math.floor((Date.now() - start) / 1000);
-          const statusHint = job.status === "SYNCING" ? "syncing files" : job.status === "RUNNING" ? "running" : job.status.toLowerCase();
-          emit({ type: "tool_progress", toolName: "execute_remote", content: `${statusHint} on ${host.alias} (${elapsed}s)` });
+          const pending = job_ids.filter((jid) => !results[jid]).length;
+          emit({ type: "tool_progress", toolName: "wait_for_jobs", content: `${pending} job(s) still running (${elapsed}s)...` });
 
-          // Stream new stdout lines
-          if (job.stdout && job.stdout !== lastLog) {
-            const newPart = job.stdout.slice(lastLog.length);
-            for (const line of newPart.split("\n").filter(Boolean)) {
-              emit({ type: "tool_output", toolName: "execute_remote", content: line });
-            }
-            lastLog = job.stdout;
+          await new Promise((r) => setTimeout(r, 5_000));
+        }
+
+        // Build summary
+        const summary: string[] = [];
+        for (const jid of job_ids) {
+          const r = results[jid];
+          if (!r) {
+            summary.push(`Job ${jid.slice(0, 8)}: STILL RUNNING (timed out waiting). Use check_job to monitor.`);
+            continue;
+          }
+          if (r.status === "COMPLETED") {
+            summary.push(`Job ${jid.slice(0, 8)}: COMPLETED (exit ${r.exitCode ?? 0})\nstdout:\n${r.stdout.slice(-3000)}\n${r.stderr ? `stderr:\n${r.stderr.slice(-500)}` : ""}`);
+          } else if (r.status === "FAILED" || r.status === "CANCELLED") {
+            summary.push(`Job ${jid.slice(0, 8)}: ${r.status} (exit ${r.exitCode ?? "?"})\nstdout:\n${r.stdout.slice(-2000)}\nstderr:\n${r.stderr.slice(-1000)}`);
+          } else {
+            summary.push(`Job ${jid.slice(0, 8)}: ${r.status}`);
+          }
+        }
+
+        return summary.join("\n\n---\n\n");
+      },
+    }),
+
+    run_experiment_sweep: tool({
+      description: "Submit multiple experiment variants to remote GPU servers in parallel. Each variant runs as a separate background job. Use this for hyperparameter sweeps, ablation studies, or testing multiple approaches simultaneously. Jobs are distributed across available hosts round-robin. Returns all job IDs — use check_job or wait_for_jobs to monitor.",
+      inputSchema: z.object({
+        script: z.string().describe("Path to the base experiment script (e.g., 'experiment.py')"),
+        variants: z.array(z.object({
+          name: z.string().describe("Variant name for identification (e.g., 'lr=0.001', 'no-dropout')"),
+          env: z.record(z.string(), z.string()).optional().describe("Environment variables to set for this variant"),
+          args: z.string().optional().describe("Additional command-line arguments for this variant"),
+        })).min(2).max(8).describe("2-8 experiment variants to run in parallel"),
+        host_aliases: z.array(z.string()).optional().describe("Specific hosts to use (round-robin). Omit to use all available hosts."),
+      }),
+      execute: async ({ script, variants, host_aliases }: { script: string; variants: { name: string; env?: Record<string, string>; args?: string }[]; host_aliases?: string[] }) => {
+        // Resolve hosts
+        let hosts;
+        if (host_aliases && host_aliases.length > 0) {
+          hosts = await prisma.remoteHost.findMany({ where: { alias: { in: host_aliases } } });
+        } else {
+          hosts = await prisma.remoteHost.findMany({ take: 5 });
+        }
+        if (hosts.length === 0) return "No remote hosts available for sweep.";
+
+        emit({ type: "tool_progress", toolName: "run_experiment_sweep", content: `Starting sweep: ${variants.length} variants across ${hosts.length} host(s)...` });
+
+        const jobResults: { name: string; jobId: string; host: string; error?: string }[] = [];
+
+        for (let i = 0; i < variants.length; i++) {
+          const variant = variants[i];
+          const host = hosts[i % hosts.length];
+
+          // Build command with variant env vars and args
+          const envPrefix = variant.env
+            ? Object.entries(variant.env).map(([k, v]) => `${k}=${v}`).join(" ") + " "
+            : "";
+          const args = variant.args ? ` ${variant.args}` : "";
+          let cmd = `${envPrefix}python3 ${script}${args}`;
+
+          // Apply standard sanitization
+          cmd = cmd.replace(/\bpython\b(?!3)/g, "python3");
+          cmd = cmd.replace(/\s+/g, " ").trim();
+          if (!cmd.includes("timeout ")) {
+            cmd = `timeout 2400 ${cmd}`;
           }
 
-          // Stream new stderr lines (prefix with stderr:)
-          if (job.stderr && job.stderr !== lastStderr) {
-            const newPart = job.stderr.slice(lastStderr.length);
-            for (const line of newPart.split("\n").filter(Boolean)) {
-              emit({ type: "tool_output", toolName: "execute_remote", content: `[stderr] ${line}` });
-            }
-            lastStderr = job.stderr;
+          try {
+            const result = await submitRemoteJob({
+              hostId: host.id,
+              localDir: workDir,
+              command: cmd,
+              projectId,
+            });
+            activeJobIds.add(result.jobId);
+            jobResults.push({ name: variant.name, jobId: result.jobId, host: host.alias });
+            emit({ type: "tool_output", toolName: "run_experiment_sweep", content: `Submitted "${variant.name}" to ${host.alias} (${result.jobId.slice(0, 8)})` });
+          } catch (err) {
+            const errMsg = err instanceof Error ? err.message : String(err);
+            jobResults.push({ name: variant.name, jobId: "", host: host.alias, error: errMsg });
+            emit({ type: "tool_output", toolName: "run_experiment_sweep", content: `Failed "${variant.name}" on ${host.alias}: ${errMsg}` });
           }
+        }
 
-          if (job.status === "COMPLETED") {
-            emit({ type: "tool_output", toolName: "execute_remote", content: `\n✓ Job completed (exit 0) on ${host.alias}` });
-            const result = `Job completed successfully on ${host.alias}.\n\nstdout:\n${(job.stdout || "").slice(-5000)}\n\n${job.stderr ? `stderr:\n${job.stderr.slice(-1000)}` : ""}`;
-            await recordStep("run_experiment", `Remote (${host.alias}): ${command.slice(0, 60)}`, "COMPLETED", { host: host.alias, stdout: (job.stdout || "").slice(-2000), stderr: (job.stderr || "").slice(-500) });
-            const taskCat = classifyTaskCategory(command);
-            recordResourceChoice(userId, taskCat, `remote:${host.alias}`, command.slice(0, 80), projectId).catch(() => {});
-            return result;
-          }
-          if (job.status === "FAILED" || job.status === "CANCELLED") {
-            emit({ type: "tool_output", toolName: "execute_remote", content: `\n✗ Job ${job.status.toLowerCase()} (exit ${job.exitCode ?? "?"}) on ${host.alias}` });
-            if (job.stderr) {
-              emit({ type: "tool_output", toolName: "execute_remote", content: `--- stderr ---\n${job.stderr.slice(-1000)}` });
-            }
+        const successful = jobResults.filter((r) => !r.error);
+        const failed = jobResults.filter((r) => r.error);
 
-            // Try to recover partial results even on failure
-            let partialResults = "";
+        await recordStep("run_experiment", `Sweep: ${variants.length} variants of ${script}`, successful.length > 0 ? "COMPLETED" : "FAILED", {
+          script,
+          variants: variants.map((v) => v.name),
+          jobIds: successful.map((r) => r.jobId),
+          failedCount: failed.length,
+        }, "experiment");
+
+        let summary = `Experiment sweep submitted: ${successful.length}/${variants.length} jobs running\n\n`;
+        summary += successful.map((r) => `- "${r.name}" → ${r.host} (ID: ${r.jobId.slice(0, 8)})`).join("\n");
+        if (failed.length > 0) {
+          summary += `\n\nFailed to submit:\n${failed.map((r) => `- "${r.name}" on ${r.host}: ${r.error}`).join("\n")}`;
+        }
+        summary += `\n\n**Continue with other work.** Use \`wait_for_jobs\` with IDs [${successful.map((r) => `"${r.jobId}"`).join(", ")}] when you need to compare results.`;
+
+        return summary;
+      },
+    }),
+
+    dispatch_scouts: tool({
+      description: "Launch parallel literature scout agents to search for papers from multiple angles simultaneously. Each scout is an independent AI that searches, reads papers, and reports back findings. Use this at the start of research or when you need broad coverage of a topic. Much faster than searching sequentially — scouts run in the background while you continue working.",
+      inputSchema: z.object({
+        facets: z.array(z.object({
+          angle: z.string().describe("Search angle, e.g. 'theoretical foundations of attention mechanisms'"),
+          keywords: z.array(z.string()).describe("Search keywords for this angle"),
+        })).min(2).max(4).describe("2-4 different search facets to explore in parallel"),
+      }),
+      execute: async ({ facets }: { facets: { angle: string; keywords: string[] }[] }) => {
+        if (!(prisma as unknown as Record<string, unknown>).agentTask) {
+          return "Sub-agent tasks not available. Restart the dev server to pick up schema changes.";
+        }
+        emit({ type: "tool_progress", toolName: "dispatch_scouts", content: `Launching ${facets.length} literature scouts...` });
+
+        const taskIds: string[] = [];
+        for (const facet of facets) {
+          const task = await prisma.agentTask.create({
+            data: {
+              projectId,
+              role: "scout",
+              goal: facet.angle,
+              status: "PENDING",
+              input: JSON.stringify({ angle: facet.angle, keywords: facet.keywords, userId }),
+            },
+          });
+          taskIds.push(task.id);
+
+          // Launch in background — fire and forget
+          import("./sub-agent").then(({ runSubAgent }) => {
+            runSubAgent(task.id).catch((err) => {
+              console.error(`[dispatch_scouts] Scout ${task.id} failed:`, err);
+            });
+          });
+
+          emit({ type: "tool_output", toolName: "dispatch_scouts", content: `Scout launched: "${facet.angle}" (${task.id.slice(0, 8)})` });
+        }
+
+        await recordStep("search_papers", `Dispatched ${facets.length} literature scouts`, "COMPLETED", { taskIds, facets: facets.map((f) => f.angle) }, "literature");
+
+        return `Launched ${facets.length} literature scouts:\n${facets.map((f, i) => `${i + 1}. "${f.angle}" (ID: ${taskIds[i].slice(0, 8)})`).join("\n")}\n\nScouts are searching in the background. **Continue with other work** — formulate hypotheses, write code, analyze previous results. Use \`collect_results\` with these task IDs when you're ready to review their findings.`;
+      },
+    }),
+
+    collect_results: tool({
+      description: "Collect findings from dispatched scout agents (or any sub-agent tasks). Returns completed outputs and status of pending ones. Call this after doing other work to gather what the scouts found.",
+      inputSchema: z.object({
+        task_ids: z.array(z.string()).describe("Task IDs from dispatch_scouts"),
+      }),
+      execute: async ({ task_ids }: { task_ids: string[] }) => {
+        if (!(prisma as unknown as Record<string, unknown>).agentTask) {
+          return "Sub-agent tasks not available. Restart the dev server to pick up schema changes.";
+        }
+        const tasks = await prisma.agentTask.findMany({
+          where: { id: { in: task_ids } },
+        });
+
+        if (tasks.length === 0) return "No tasks found with those IDs.";
+
+        const completed: string[] = [];
+        const pending: string[] = [];
+        const failed: string[] = [];
+
+        for (const task of tasks) {
+          if (task.status === "COMPLETED" && task.output) {
             try {
-              const resultsPath = path.join(workDir, "results.json");
-              const resultsContent = await readFile(resultsPath, "utf-8").catch(() => null);
-              if (resultsContent) {
-                partialResults = `\n\nPARTIAL RESULTS RECOVERED (results.json was saved before crash):\n${resultsContent.slice(-3000)}`;
-                emit({ type: "tool_output", toolName: "execute_remote", content: `\n📊 Partial results recovered from results.json` });
-              }
+              const output = JSON.parse(task.output);
+              completed.push(`## Scout: "${output.angle || task.goal}"\n${output.summary || "No summary"}\n(${output.stepsUsed || "?"} steps, ${task.tokenUsage || "?"} tokens)`);
             } catch {
-              // No partial results available
+              completed.push(`## Scout: "${task.goal}"\n${task.output.slice(0, 3000)}`);
             }
-
-            const result = `EXPERIMENT FAILED (exit ${job.exitCode ?? "?"}) on ${host.alias}. YOU MUST read the error below, fix the code, and re-run before proceeding.\n\nstdout (last 3000 chars):\n${(job.stdout || "").slice(-3000)}\n\nstderr (last 2000 chars):\n${(job.stderr || "").slice(-2000)}${partialResults}`;
-            await recordStep("run_experiment", `Remote (${host.alias}): ${command.slice(0, 60)}`, "FAILED", { host: host.alias, error: job.stderr?.slice(-1000), exitCode: job.exitCode, hasPartialResults: !!partialResults });
-            return result;
+          } else if (task.status === "FAILED") {
+            failed.push(`Scout "${task.goal}": FAILED — ${task.error || "unknown error"}`);
+          } else {
+            pending.push(`Scout "${task.goal}": ${task.status.toLowerCase()}...`);
           }
         }
 
-        // Timeout — try to get current state and return what we have
-        emit({ type: "tool_output", toolName: "execute_remote", content: `\n⚠ Job polling timeout after 30 minutes. ID: ${jobId}` });
-        const finalJob = await prisma.remoteJob.findUnique({ where: { id: jobId } });
-        const hasOutput = finalJob?.stdout && finalJob.stdout.trim().length > 0;
-        if (hasOutput) {
-          emit({ type: "tool_output", toolName: "execute_remote", content: `Job has output — treating as completed.` });
-          await recordStep("run_experiment", `Remote (${host.alias}): ${command.slice(0, 60)}`, "COMPLETED", { host: host.alias, stdout: (finalJob!.stdout || "").slice(-2000), timedOut: true });
-          return `Job polling timed out after 30 minutes but has output. The background poller will update the final status.\n\nstdout so far:\n${(finalJob!.stdout || "").slice(-5000)}`;
+        const parts: string[] = [];
+        if (completed.length > 0) {
+          parts.push(`# Completed Scout Reports (${completed.length})\n\n${completed.join("\n\n---\n\n")}`);
         }
-        return `Job still running after 30 minutes on ${host.alias}. Job ID: ${jobId}. The stale job cleanup will auto-resolve this. Use check_remote to inspect the remote host directly.`;
+        if (pending.length > 0) {
+          parts.push(`\n# Still Running (${pending.length})\n${pending.join("\n")}\n\nCall collect_results again later to get their findings.`);
+        }
+        if (failed.length > 0) {
+          parts.push(`\n# Failed (${failed.length})\n${failed.join("\n")}`);
+        }
+
+        return parts.join("\n") || "No results yet. Scouts are still working.";
+      },
+    }),
+
+    adversarial_review: tool({
+      description: "Get a rigorous peer review of your hypotheses, experimental design, or results from an independent adversarial reviewer. The reviewer is a separate AI with a skeptical, journal-reviewer persona — it will find flaws, missing controls, confounding variables, statistical errors, and unjustified claims. Use this after formulating hypotheses (to stress-test them) and after getting results (to find weaknesses before designing follow-ups). This is your most powerful quality tool.",
+      inputSchema: z.object({
+        content: z.string().describe("The hypotheses, experimental design, or results to review. Include specific numbers, methods, and claims."),
+        focus: z.enum(["hypotheses", "methodology", "results", "statistical"]).optional().describe("What aspect to focus the review on"),
+      }),
+      execute: async ({ content, focus }: { content: string; focus?: string }) => {
+        if (!agentModel) return "Model not available for adversarial review.";
+
+        emit({ type: "tool_progress", toolName: "adversarial_review", content: "Adversarial reviewer is analyzing..." });
+
+        const focusGuide = focus === "hypotheses"
+          ? "Focus on: Are these hypotheses specific and testable? Are there hidden assumptions? What alternative explanations exist? What would falsify them?"
+          : focus === "methodology"
+          ? "Focus on: Is the experimental design sound? Are there missing controls or baselines? Are datasets appropriate? Could confounding variables explain results?"
+          : focus === "results"
+          ? "Focus on: Are the claims supported by the evidence? Are comparisons fair? What's being cherry-picked or glossed over? What alternative interpretations exist?"
+          : focus === "statistical"
+          ? "Focus on: Is there statistical rigor? Are error bars present? Is the sample size sufficient? Are the statistical tests appropriate? Is there p-hacking?"
+          : "Review all aspects: hypothesis validity, methodology soundness, result interpretation, and statistical rigor.";
+
+        const reviewerSystem = `You are a skeptical, rigorous peer reviewer for a top-tier venue (NeurIPS, ICML, Nature). Your job is to find flaws, weaknesses, and gaps. Be specific and constructive — for every problem you identify, suggest how to fix it.
+
+${focusGuide}
+
+Structure your review as:
+1. **Summary**: One-sentence summary of what's being claimed
+2. **Strengths**: What's well-done (be brief)
+3. **Weaknesses**: Specific flaws, each with a concrete fix
+4. **Missing**: What's absent that a reviewer would expect
+5. **Verdict**: Overall assessment and priority fixes
+
+Be harsh but fair. Vague praise is useless. Specific criticism saves months of wasted work.`;
+
+        try {
+          setLlmContext("adversarial-review", userId, { projectId });
+          const result = await generateText({
+            model: agentModel,
+            system: reviewerSystem,
+            messages: [{ role: "user", content }],
+          });
+
+          emit({ type: "tool_output", toolName: "adversarial_review", content: "Review complete." });
+          await recordStep("critique", `Adversarial review (${focus || "general"})`, "COMPLETED", { focus, reviewLength: result.text.length });
+
+          return `## Adversarial Peer Review\n\n${result.text}`;
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : "Review failed";
+          return `Adversarial review failed: ${msg}`;
+        }
       },
     }),
 
@@ -1594,16 +1957,36 @@ function createTools(
 
         // If it's a hypothesis, also create a ResearchHypothesis record + step
         if (type === "hypothesis") {
+          // Clean up hypothesis text: strip markdown headers, extract claim and rationale
+          let statement = content;
+          let rationale: string | null = "Generated by research agent";
+
+          // Strip "## Hypothesis N: Title" prefix
+          statement = statement.replace(/^#+\s*(?:Hypothesis\s*\d*[:\s]*)?/i, "").trim();
+
+          // Extract rationale if embedded as **Rationale**: ...
+          const rationaleMatch = statement.match(/\*\*Rationale\*\*:\s*([\s\S]*?)$/i);
+          if (rationaleMatch) {
+            rationale = rationaleMatch[1].trim().slice(0, 500);
+            statement = statement.replace(/\s*\*\*Rationale\*\*:[\s\S]*$/i, "").trim();
+          }
+
+          // Extract just the claim if format is "Title **Claim**: actual claim"
+          const claimMatch = statement.match(/\*\*Claim\*\*:\s*([\s\S]*)/i);
+          if (claimMatch) {
+            statement = claimMatch[1].trim();
+          }
+
           await prisma.researchHypothesis.create({
             data: {
               projectId,
-              statement: content.slice(0, 500),
-              rationale: "Generated by research agent",
+              statement: statement.slice(0, 500),
+              rationale,
               status: "PROPOSED",
             },
           });
-          await recordStep("formulate_hypothesis", `Hypothesis: ${content.slice(0, 80)}`, "COMPLETED", { hypothesis: content }, "hypothesis");
-          return `Hypothesis recorded and added to project: "${content.slice(0, 100)}..."`;
+          await recordStep("formulate_hypothesis", `Hypothesis: ${statement.slice(0, 80)}`, "COMPLETED", { hypothesis: content }, "hypothesis");
+          return `Hypothesis recorded and added to project: "${statement.slice(0, 100)}..."`;
         }
 
         if (type === "finding" || type === "breakthrough") {

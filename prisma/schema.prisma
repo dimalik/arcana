@@ -547,6 +547,7 @@ model ResearchProject {
   iterations      ResearchIteration[]
   hypotheses      ResearchHypothesis[]
   log             ResearchLogEntry[]
+  agentTasks      AgentTask[]
 
   @@index([userId])
 }
@@ -648,6 +649,25 @@ model RemoteJob {
 
   @@index([hostId])
   @@index([stepId])
+  @@index([status])
+}
+
+model AgentTask {
+  id          String    @id @default(uuid())
+  projectId   String
+  role        String    // "scout" | "reviewer" | "experimenter"
+  goal        String
+  status      String    @default("PENDING") // PENDING | RUNNING | COMPLETED | FAILED
+  input       String?   // JSON context
+  output      String?   // JSON findings
+  error       String?
+  tokenUsage  Int?
+  createdAt   DateTime  @default(now())
+  completedAt DateTime?
+
+  project     ResearchProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
   @@index([status])
 }
 

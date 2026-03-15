@@ -7,6 +7,18 @@ import {
 } from "lucide-react";
 import { MarkdownRenderer } from "@/components/ui/markdown-renderer";
 
+/** Clean up step titles that contain raw markdown from agent-generated content */
+function cleanStepTitle(title: string): string {
+  let t = title;
+  // Strip "Hypothesis: ## Hypothesis N: Title **Claim**: ..." → "Hypothesis: Title"
+  t = t.replace(/^(Hypothesis:\s*)#+\s*(?:Hypothesis\s*\d*[:\s]*)?/i, "$1");
+  // Strip markdown bold markers
+  t = t.replace(/\*\*/g, "");
+  // Collapse "Claim:" prefix if present
+  t = t.replace(/^(Hypothesis:\s*)Claim:\s*/i, "$1");
+  return t;
+}
+
 interface RemoteHostOption {
   alias: string;
   isDefault: boolean;
@@ -92,7 +104,7 @@ export function StepCard({
     return (
       <div className="flex items-center gap-2 py-1 group">
         <Check className="h-3 w-3 text-emerald-500 shrink-0" />
-        <span className="text-[11px] text-muted-foreground flex-1 truncate">{step.title}</span>
+        <span className="text-[11px] text-muted-foreground flex-1 truncate">{cleanStepTitle(step.title)}</span>
         {completionSummary && (
           <span className="text-[10px] text-emerald-600 dark:text-emerald-400 shrink-0">
             {completionSummary}

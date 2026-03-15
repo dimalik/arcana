@@ -163,13 +163,54 @@ export const sshExecutor: ExecutorBackend = {
       "#!/usr/bin/env bash",
       "set -e",
       `cd ${remoteDir}`,
-      `[ -f .venv/bin/activate ] && source .venv/bin/activate || true`,
+      "",
+      "# ── Auto-setup Python environment ──",
+      "# Creates venv and installs requirements automatically on first run.",
+      "# On subsequent runs, only reinstalls if requirements.txt changed.",
+      "if [ -f requirements.txt ]; then",
+      "  REQS_HASH=$(md5sum requirements.txt 2>/dev/null | cut -d' ' -f1 || md5 -q requirements.txt 2>/dev/null || echo 'none')",
+      "  INSTALLED_HASH=''",
+      "  [ -f .venv/.reqs_hash ] && INSTALLED_HASH=$(cat .venv/.reqs_hash)",
+      "",
+      "  if [ ! -d .venv ]; then",
+      '    echo "[env-setup] Creating virtual environment..." >&2',
+      "    python3 -m venv .venv",
+      '    echo "[env-setup] Venv created." >&2',
+      "  fi",
+      "",
+      "  source .venv/bin/activate",
+      "",
+      '  if [ "$REQS_HASH" != "$INSTALLED_HASH" ]; then',
+      '    echo "[env-setup] Installing/updating requirements (hash changed)..." >&2',
+      "    pip3 install --upgrade pip -q 2>&1 | tail -1",
+      "    pip3 install -r requirements.txt 2>&1 | while IFS= read -r line; do",
+      '      case "$line" in',
+      "        *Successfully*|*already*|*Requirement*|*ERROR*|*error*)",
+      '          echo "[env-setup] $line" >&2 ;;',
+      "      esac",
+      "    done",
+      "    INSTALL_EXIT=${PIPESTATUS[0]}",
+      '    if [ "$INSTALL_EXIT" -ne 0 ]; then',
+      '      echo "[env-setup] ERROR: pip install failed (exit $INSTALL_EXIT). Check stderr for details." >&2',
+      "      echo $INSTALL_EXIT > .exit_code",
+      "      exit $INSTALL_EXIT",
+      "    fi",
+      '    echo "$REQS_HASH" > .venv/.reqs_hash',
+      '    echo "[env-setup] Requirements installed successfully." >&2',
+      "  else",
+      '    echo "[env-setup] Requirements unchanged, skipping install." >&2',
+      "  fi",
+      "else",
+      "  # No requirements.txt — still activate venv if it exists",
+      "  [ -f .venv/bin/activate ] && source .venv/bin/activate || true",
+      "fi",
+      "",
     ];
     if (host.conda) scriptLines.push(`conda activate ${host.conda} 2>/dev/null || source activate ${host.conda} 2>/dev/null || true`);
     if (host.setupCmd) scriptLines.push(host.setupCmd);
     scriptLines.push("set +e"); // Don't exit on command failure — capture exit code
 
-    // Sanitize command — strip redundant cd/venv activation since the script
+    // Sanitize command — strip redundant cd/venv activation/pip install since the script
     // already handles those. This catches cases where the agent adds them anyway.
     let cleanCmd = command;
     cleanCmd = cleanCmd.replace(/^bash\s+-c\s+["'](.+?)["']\s*$/, "$1");
@@ -179,6 +220,11 @@ export const sshExecutor: ExecutorBackend = {
     cleanCmd = cleanCmd.replace(/cd\s+\S+\s*(?:&&|;)\s*/g, "");
     cleanCmd = cleanCmd.replace(/(?:\/\S+)?\.venv\/bin\/python3?\s/g, "python3 ");
     cleanCmd = cleanCmd.replace(/(?:\/\S+)?\.venv\/bin\/pip3?\s/g, "pip3 ");
+    // Strip venv creation — .run.sh handles it automatically now
+    cleanCmd = cleanCmd.replace(/python3\s+-m\s+venv\s+\.venv\s*(?:&&|;)\s*/g, "");
+    // Strip pip install requirements — .run.sh handles it automatically now
+    cleanCmd = cleanCmd.replace(/pip3?\s+install\s+(?:-r\s+)?requirements\.txt\s*(?:&&|;)\s*/g, "");
+    cleanCmd = cleanCmd.replace(/pip3?\s+install\s+--upgrade\s+pip\s*(?:&&|;)\s*/g, "");
     cleanCmd = cleanCmd.replace(/\s+/g, " ").trim();
 
     scriptLines.push(cleanCmd);
