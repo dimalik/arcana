@@ -1,60 +1,48 @@
 # Arcana
 
-A personal research workbench for reading, analyzing, and experimenting with academic papers. Import papers from arXiv, DOI, or PDF, then use AI to summarize, chat, extract concepts, compare methodologies, and run autonomous research projects with remote GPU execution.
+**Your AI research lab in a browser.** Import papers, chat with them, formulate hypotheses, run experiments on remote GPUs, critique results, and iterate — all from one place.
 
-Built for researchers who want to go beyond reading — Arcana helps you formulate hypotheses, run experiments, critique results, consult the literature, and iterate until you find something new.
+Arcana is for researchers who don't just read papers — they act on them. It connects the full arc from literature review to novel findings: search the literature, spot gaps, write experiment code, execute it on your GPU cluster, analyze results, and loop back with better hypotheses.
 
-## Features
+---
 
-### Paper Library
-- Import from arXiv, DOI, OpenReview, URL, or direct PDF upload
-- Auto-fetches metadata from OpenAlex, Semantic Scholar, and CrossRef
-- Full-text extraction with OCR fallback
-- Tag management with auto-clustering by research domain
-- Collections for organizing papers by project or topic
+## What can it do?
 
-### AI Analysis
-- Structured summarization (core problem, novelty, methodology, results)
-- Paper-aware chat — ask questions grounded in the paper's content
-- Code extraction and generation from paper methods
-- Cross-paper methodology comparison and gap finding
-- Concept hierarchies extracted from paper content
-- Custom prompts for any LLM operation
+### Import from anywhere
+arXiv, DOI, OpenReview, ACL Anthology, URL, or raw PDF. Arcana auto-fetches metadata from OpenAlex, Semantic Scholar, and CrossRef, extracts full text (with OCR fallback), and organizes everything with smart tagging.
 
-### Research Agent
-An autonomous research loop modeled on the scientific method:
+### Talk to your papers
+Ask questions grounded in the actual paper content. Highlight a passage and get instant explanations. Compare methodologies across papers. Extract code from methods sections. Run custom prompts against any paper.
 
-1. **Literature** — searches for papers, reads them, extracts methods and baselines
-2. **Hypotheses** — formulates specific, testable claims based on gaps in the literature
-3. **Experiment** — writes runnable Python code with real datasets and baselines, executes on remote GPU servers
-4. **Critique** — interrogates results, compares to literature, identifies weaknesses
-5. **Back to literature** — when results are unexpected, searches existing papers and Mind Palace insights for techniques to adapt
-6. **Follow-up** — designs literature-informed follow-up experiments, iterates
+### Run autonomous research projects
+The research agent follows the scientific method in a loop:
 
-The agent writes to a persistent research log (RESEARCH_LOG.md) that you can read and edit at any time to steer its direction. It supports user-defined capabilities (W&B, HuggingFace, custom data sources) and probes GPU hardware to handle multi-GPU setups.
+1. **Literature** — searches databases, reads papers, extracts methods and baselines
+2. **Hypotheses** — formulates specific, testable claims from gaps in the literature
+3. **Experiment** — writes Python code with real datasets, executes on your remote GPU servers
+4. **Critique** — an adversarial reviewer tears apart the results, finds confounds, challenges claims
+5. **Iterate** — consults the literature and your Mind Palace for techniques to try next
 
-### Mind Palace
-Spaced repetition for research knowledge. Distill papers into insights organized by room (topic), then review them on an SM-2 schedule. The research agent can query your Mind Palace to find relevant techniques when experiments need improvement.
+The agent writes to a persistent `RESEARCH_LOG.md` you can read and edit at any time to steer its direction. It handles multi-GPU setups, manages Python environments automatically, and supports parallel experiment sweeps across multiple hosts.
 
-### Synthesis
-Combine multiple papers into structured reports. Select papers, choose analysis depth, and generate a synthesis with methodology comparisons, thematic analysis, and identified gaps. Export to PDF or LaTeX.
+### Multi-agent parallelism
+The agent doesn't work alone. It dispatches **literature scouts** to search multiple research angles simultaneously, runs **adversarial reviews** with a separate hostile-reviewer persona, and submits **experiment sweeps** across your GPU cluster — all running in parallel while the lead agent continues thinking.
 
-### Discovery
-Explore citation graphs starting from seed papers. Uses Semantic Scholar's paper graph to surface related work, with smart deduplication against your existing library.
+### Build a Mind Palace
+Distill papers into insights organized by topic (rooms). A spaced-repetition system surfaces them for review on schedule. The research agent can query your Mind Palace to find relevant techniques when experiments need improvement — your accumulated knowledge feeds back into active research.
 
-### Notebook
-Collect selections, explanations, chat excerpts, and personal notes across all papers. Filter by type or source paper.
+### Synthesize literature reviews
+Select papers, choose analysis depth, and generate structured synthesis reports with methodology comparisons, thematic analysis, gap identification, and citations. Export to PDF or LaTeX.
 
-## Tech Stack
+### Explore citation graphs
+Start from seed papers and traverse citation networks using Semantic Scholar. Discover related work you didn't know existed, with smart deduplication against your library.
 
-- **Framework**: Next.js 14 (App Router), TypeScript, Tailwind CSS
-- **UI**: shadcn/ui + Radix primitives
-- **Database**: Prisma 6 + SQLite
-- **AI**: Vercel AI SDK v6 (OpenAI, Anthropic, or any OpenAI-compatible proxy)
-- **PDF**: pdf-parse, pdfjs-dist, Tesseract.js for OCR
-- **Remote execution**: SSH + rsync to GPU servers
+### Keep a research notebook
+Collect highlights, explanations, chat excerpts, and personal notes across all papers in a two-panel research journal. Filter by type, search across entries, and build your thinking over time.
 
-## Setup
+---
+
+## Quick start
 
 ```bash
 git clone https://github.com/dimalik/arcana.git
@@ -65,18 +53,18 @@ npm install
 Create a `.env` file:
 
 ```env
-# At least one LLM provider is required
+# At least one LLM provider
 OPENAI_API_KEY="sk-..."
 ANTHROPIC_API_KEY="sk-ant-..."
 
-# Optional: OpenAI-compatible proxy endpoint
+# Optional: OpenAI-compatible proxy (OpenRouter, LiteLLM, Azure, etc.)
 # LLM_PROXY_URL="https://your-proxy.example.com/v1"
 
-# Optional: Semantic Scholar API key (higher rate limits)
+# Optional: higher Semantic Scholar rate limits
 # S2_API_KEY="..."
 ```
 
-Initialize the database and start:
+Initialize and run:
 
 ```bash
 npx prisma db push
@@ -85,34 +73,33 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000).
 
-## Project Structure
+---
 
-```
-src/
-  app/                  # Next.js pages and API routes
-    api/
-      papers/           # Paper CRUD, LLM operations, references
-      research/         # Research projects, agent, steps, hypotheses
-      mind-palace/      # Rooms, insights, review sessions
-      synthesis/        # Multi-paper synthesis
-      discovery/        # Citation graph exploration
-      admin/            # Usage stats, DB export/import
-  components/
-    research/           # Agent activity bar, phase tabs, workspace
-    mind-palace/        # Insight cards, review sessions
-    synthesis/          # Synthesis UI
-    chat/               # Paper chat, selection popover
-    layout/             # App shell, topbar, navigation
-    ui/                 # shadcn/ui primitives
-  lib/
-    research/           # Agent core, remote executor, orchestrator
-    llm/                # Provider abstraction, prompts, models
-    import/             # arXiv, S2, CrossRef, PDF finder
-    mind-palace/        # Spaced repetition algorithm
-    synthesis/          # Synthesis engine
-prisma/
-  schema.prisma         # Database schema
-```
+## Tech stack
+
+| Layer | Technology |
+|-------|-----------|
+| Framework | Next.js 14 (App Router), TypeScript |
+| UI | Tailwind CSS, shadcn/ui, Radix |
+| Database | Prisma 6 + SQLite |
+| AI | Vercel AI SDK v6 (OpenAI, Anthropic, or any compatible proxy) |
+| PDF | pdf-parse, pdfjs-dist, Tesseract.js (OCR) |
+| Graphs | @xyflow/react, Dagre, Recharts |
+| Remote execution | SSH + rsync to GPU servers |
+
+---
+
+## Documentation
+
+See the [`docs/`](docs/) directory:
+
+- **[Architecture](docs/architecture.md)** — system design, data flow, and project structure
+- **[Research Agent](docs/research-agent.md)** — how the autonomous agent works, its tools, and multi-agent coordination
+- **[Remote Execution](docs/remote-execution.md)** — setting up GPU servers for experiment execution
+- **[LLM Configuration](docs/llm-configuration.md)** — providers, proxies, and model selection
+- **[API Reference](docs/api-reference.md)** — all API endpoints
+
+---
 
 ## License
 
