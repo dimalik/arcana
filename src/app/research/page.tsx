@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -242,8 +242,8 @@ export default function ResearchPage() {
       .finally(() => setHostsLoading(false));
   }, []);
 
-  useEffect(() => {
-    Promise.all([
+  const fetchData = useCallback(() => {
+    return Promise.all([
       fetch("/api/research").then((r) => r.json()),
       fetch("/api/synthesis").then((r) => r.json()),
     ])
@@ -251,9 +251,21 @@ export default function ResearchPage() {
         if (Array.isArray(projectData)) setProjects(projectData);
         if (Array.isArray(reviewData)) setReviews(reviewData);
       })
-      .catch(() => {})
-      .finally(() => setLoading(false));
+      .catch(() => {});
   }, []);
+
+  // Initial fetch
+  useEffect(() => {
+    fetchData().finally(() => setLoading(false));
+  }, [fetchData]);
+
+  // Poll every 10s when there are active/running items
+  const hasActive = projects.some((p) => p.status === "ACTIVE") || reviews.some((r) => RUNNING_STATUSES.includes(r.status));
+  useEffect(() => {
+    if (!hasActive) return;
+    const interval = setInterval(fetchData, 10_000);
+    return () => clearInterval(interval);
+  }, [hasActive, fetchData]);
 
   const handleCreate = async () => {
     const t = topic.trim();

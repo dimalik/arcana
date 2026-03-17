@@ -183,13 +183,15 @@ export function startResearchAgent(
   }, 8_000);
 
   // Run agent in background — completely decoupled from the SSE stream
+  console.log(`[research-agent] Starting background agent for project ${projectId}`);
   (async () => {
     try {
       await runAgent(projectId, userId, userMessage || null, trackedEmit);
+      console.log(`[research-agent] Agent completed for project ${projectId}`);
       trackedEmit({ type: "done", content: "Agent finished." });
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Agent error";
-      console.error("[research-agent] Fatal:", msg);
+      console.error("[research-agent] Fatal for project", projectId, ":", msg, err instanceof Error ? err.stack : "");
       trackedEmit({ type: "error", content: msg });
     } finally {
       clearInterval(heartbeat);
@@ -206,6 +208,7 @@ export function startResearchAgent(
 /** Create a read-only SSE stream that observes an agent's events */
 function createObserverStream(projectId: string): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder();
+  let listenerRef: ((event: AgentEvent) => void) | null = null;
 
   return new ReadableStream({
     start(controller) {
@@ -224,13 +227,16 @@ function createObserverStream(projectId: string): ReadableStream<Uint8Array> {
         } catch {
           closed = true;
           state.listeners.delete(encode);
+          listenerRef = null;
         }
       };
+      listenerRef = encode;
 
-      // Replay buffered events (catch up on what happened before this observer connected)
-      for (const event of state.events) {
+      // Replay recent events only (avoid flooding on reconnect — last 50 events)
+      const replayStart = Math.max(0, state.events.length - 50);
+      for (let i = replayStart; i < state.events.length; i++) {
         if (closed) break;
-        encode(event);
+        encode(state.events[i]);
       }
 
       // If agent already finished, close the stream
@@ -241,12 +247,14 @@ function createObserverStream(projectId: string): ReadableStream<Uint8Array> {
 
       // Subscribe to live events
       state.listeners.add(encode);
-
-      // Clean up when stream is cancelled (browser disconnects)
-      // This is a no-op for the agent — it keeps running
     },
     cancel() {
-      // Observer disconnected — agent continues running in background
+      // Observer disconnected — clean up listener, agent continues in background
+      if (listenerRef) {
+        const state = runningAgents.get(projectId);
+        if (state) state.listeners.delete(listenerRef);
+        listenerRef = null;
+      }
     },
   });
 }
