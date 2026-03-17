@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -19,7 +19,7 @@ import {
   BarChart3,
   Compass,
   Server,
-  AlertTriangle,
+  SlidersHorizontal,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -60,9 +60,30 @@ type Review = {
   error: string | null;
 };
 
-type Mode = "investigate" | "review";
-
 const RUNNING_STATUSES = ["PENDING", "PLANNING", "MAPPING", "GRAPHING", "EXPANDING", "REDUCING", "COMPOSING"];
+
+// ── Methodology inference from topic text ─────────────────────────
+
+const METHODOLOGY_PATTERNS: { id: string; patterns: RegExp }[] = [
+  { id: "analytical", patterns: /\b(survey|review|comparison|compare\s+(?:different|various)|landscape|state.of.the.art|sota|meta.analysis|systematic\s+review|literature)\b/i },
+  { id: "design_science", patterns: /\b(build|implement|create|design|system|tool|framework|prototype|architecture|pipeline|platform)\b/i },
+  { id: "exploratory", patterns: /\b(explore|overview|what\s+is|how\s+does|understand|investigate\s+the\s+landscape|broad|emerging)\b/i },
+];
+
+function inferMethodology(topic: string): string {
+  const t = topic.toLowerCase();
+  for (const { id, patterns } of METHODOLOGY_PATTERNS) {
+    if (patterns.test(t)) return id;
+  }
+  return "experimental";
+}
+
+const METHODOLOGY_META: Record<string, { label: string; icon: typeof FlaskConical; hint: string }> = {
+  experimental: { label: "Experiment", icon: FlaskConical, hint: "Hypotheses + GPU experiments" },
+  analytical: { label: "Survey", icon: Search, hint: "Literature review + analysis" },
+  design_science: { label: "Build", icon: BarChart3, hint: "Design, implement, evaluate" },
+  exploratory: { label: "Explore", icon: Compass, hint: "Open-ended investigation" },
+};
 
 // ── Review Card ─────────────────────────────────────────────────────
 
@@ -197,18 +218,27 @@ export default function ResearchPage() {
   const [creating, setCreating] = useState(false);
   const [importing, setImporting] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
-  const [mode, setMode] = useState<Mode>("investigate");
   const [showOptions, setShowOptions] = useState(false);
-  const [methodology, setMethodology] = useState<string>("experimental");
+  const [methodologyOverride, setMethodologyOverride] = useState<string | null>(null);
   const [constraints, setConstraints] = useState("");
-  const [hasGpu, setHasGpu] = useState<boolean | null>(null);
+  const [remoteHosts, setRemoteHosts] = useState<{ id: string; alias: string; gpuType: string | null }[]>([]);
+  const [hostsLoading, setHostsLoading] = useState(true);
+  const [selectedResources, setSelectedResources] = useState<"all" | "local" | Set<string>>("all");
 
-  // Check for available GPU hosts
+  // Infer methodology from topic (when user hasn't manually picked)
+  const inferredMethodology = useMemo(() => inferMethodology(topic), [topic]);
+  const methodology = methodologyOverride ?? inferredMethodology;
+  const isAutoMethodology = methodologyOverride === null;
+
+  // Fetch available GPU hosts
   useEffect(() => {
     fetch("/api/research/remote-hosts")
       .then((r) => r.json())
-      .then((data) => setHasGpu(Array.isArray(data) && data.length > 0))
-      .catch(() => setHasGpu(false));
+      .then((data) => {
+        if (Array.isArray(data)) setRemoteHosts(data.map((h: { id: string; alias: string; gpuType: string | null }) => ({ id: h.id, alias: h.alias, gpuType: h.gpuType })));
+      })
+      .catch(() => {})
+      .finally(() => setHostsLoading(false));
   }, []);
 
   useEffect(() => {
@@ -225,53 +255,31 @@ export default function ResearchPage() {
   }, []);
 
   const handleCreate = async () => {
-    if (mode === "investigate") {
-      const t = topic.trim();
-      if (!t) return;
-      setCreating(true);
-      try {
-        const res = await fetch("/api/research", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            title: t,
-            question: t,
-            methodology,
-            ...(constraints.trim() ? { constraints: constraints.trim() } : {}),
-          }),
-        });
-        if (!res.ok) throw new Error();
-        const project = await res.json();
-        toast.success("Project created");
-        router.push(`/research/${project.id}`);
-      } catch {
-        toast.error("Failed to create project");
-      } finally {
-        setCreating(false);
-      }
-    } else {
-      const t = topic.trim();
-      if (!t) return;
-      setCreating(true);
-      try {
-        const res = await fetch("/api/synthesis", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            query: t,
-            mode: "auto",
-            depth: "balanced",
-          }),
-        });
-        if (!res.ok) throw new Error();
-        const { id } = await res.json();
-        toast.success("Review started");
-        router.push(`/synthesis/${id}`);
-      } catch {
-        toast.error("Failed to start review");
-      } finally {
-        setCreating(false);
-      }
+    const t = topic.trim();
+    if (!t) return;
+    setCreating(true);
+    try {
+      const res = await fetch("/api/research", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: t,
+          question: t,
+          methodology,
+          ...(constraints.trim() ? { constraints: constraints.trim() } : {}),
+          resources: selectedResources === "all" ? "all"
+            : selectedResources === "local" ? "local"
+            : Array.from(selectedResources),
+        }),
+      });
+      if (!res.ok) throw new Error();
+      const project = await res.json();
+      toast.success("Project created");
+      router.push(`/research/${project.id}`);
+    } catch {
+      toast.error("Failed to create project");
+    } finally {
+      setCreating(false);
     }
   };
 
@@ -360,6 +368,17 @@ export default function ResearchPage() {
     }
   };
 
+  // Summary text for collapsed options
+  const resourceSummary = (() => {
+    if (selectedResources === "local") return "Local";
+    if (selectedResources === "all") {
+      if (remoteHosts.length === 0) return "Local";
+      return "Auto";
+    }
+    const names = remoteHosts.filter((h) => (selectedResources as Set<string>).has(h.id)).map((h) => h.alias);
+    return names.join(", ");
+  })();
+
   // Categorize
   const active = projects.filter((p) => p.status === "ACTIVE");
   const paused = projects.filter((p) => p.status === "PAUSED");
@@ -377,6 +396,7 @@ export default function ResearchPage() {
   const hasItems = projects.some((p) => p.status !== "ARCHIVED") || reviews.some((r) => !["FAILED", "CANCELLED"].includes(r.status));
 
   const canCreate = topic.trim().length > 0;
+  const MethIcon = METHODOLOGY_META[methodology]?.icon ?? FlaskConical;
 
   return (
     <div className="max-w-3xl mx-auto space-y-6">
@@ -404,21 +424,17 @@ export default function ResearchPage() {
         </div>
       </div>
 
-      {/* Unified create area */}
-      <div className="space-y-3">
-        {/* Mode toggle + input */}
+      {/* Create area */}
+      <div className="space-y-0">
+        {/* Input row */}
         <div className="flex gap-2">
           <div className="relative flex-1">
-            {mode === "investigate" ? (
-              <FlaskConical className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground/30" />
-            ) : (
-              <Layers className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground/30" />
-            )}
+            <FlaskConical className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground/30" />
             <input
               value={topic}
               onChange={(e) => setTopic(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handleCreate()}
-              placeholder={mode === "investigate" ? "What do you want to investigate?" : "What topic should be reviewed across your papers?"}
+              placeholder="What do you want to investigate?"
               className="w-full rounded-lg border border-border/60 bg-muted/20 pl-9 pr-3 py-2.5 text-sm placeholder:text-muted-foreground/30 focus:outline-none focus:border-foreground/20 focus:bg-muted/30 transition-all"
               disabled={creating}
             />
@@ -432,64 +448,48 @@ export default function ResearchPage() {
           </button>
         </div>
 
-        {/* Mode toggle */}
-        <div className="flex items-center gap-3">
-          <div className="flex rounded-lg bg-muted/30 p-0.5 gap-0.5">
-            <button
-              onClick={() => setMode("investigate")}
-              className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] font-medium transition-all ${
-                mode === "investigate"
-                  ? "bg-background text-foreground shadow-sm"
-                  : "text-muted-foreground/60 hover:text-muted-foreground"
-              }`}
-            >
-              <FlaskConical className="h-3 w-3" />
-              Investigate
-            </button>
-            <button
-              onClick={() => setMode("review")}
-              className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] font-medium transition-all ${
-                mode === "review"
-                  ? "bg-background text-foreground shadow-sm"
-                  : "text-muted-foreground/60 hover:text-muted-foreground"
-              }`}
-            >
-              <Layers className="h-3 w-3" />
-              Review
-            </button>
+        {/* Settings summary strip — always visible */}
+        <button
+          onClick={() => setShowOptions(!showOptions)}
+          className="w-full flex items-center gap-2 px-1 py-1.5 group text-left"
+        >
+          <div className="flex items-center gap-1.5 min-w-0 flex-1">
+            <SlidersHorizontal className="h-2.5 w-2.5 text-muted-foreground/25 shrink-0" />
+            <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground/40">
+              <MethIcon className="h-2.5 w-2.5" />
+              {METHODOLOGY_META[methodology]?.label ?? methodology}
+              {isAutoMethodology && <span className="text-muted-foreground/25">auto</span>}
+            </span>
+            <span className="text-muted-foreground/15">·</span>
+            <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground/40">
+              {remoteHosts.length > 0 && selectedResources !== "local" && <Server className="h-2.5 w-2.5" />}
+              {resourceSummary}
+            </span>
+            {constraints.trim() && (
+              <>
+                <span className="text-muted-foreground/15">·</span>
+                <span className="text-[10px] text-muted-foreground/30 truncate max-w-[200px]">
+                  {constraints.trim()}
+                </span>
+              </>
+            )}
           </div>
-          {mode === "investigate" && (
-            <button
-              onClick={() => setShowOptions(!showOptions)}
-              className="inline-flex items-center gap-1 text-[10px] text-muted-foreground/40 hover:text-muted-foreground/70 transition-colors ml-auto"
-            >
-              Options
-              <ChevronDown className={`h-2.5 w-2.5 transition-transform ${showOptions ? "rotate-180" : ""}`} />
-            </button>
-          )}
-          {mode === "review" && (
-            <span className="text-[10px] text-muted-foreground/30">Auto-finds matching papers and synthesizes a literature review</span>
-          )}
-        </div>
+          <ChevronDown className={`h-2.5 w-2.5 text-muted-foreground/25 group-hover:text-muted-foreground/50 transition-all shrink-0 ${showOptions ? "rotate-180" : ""}`} />
+        </button>
 
-        {/* Inline options for investigate mode */}
-        {mode === "investigate" && showOptions && (
+        {/* Expanded options panel */}
+        {showOptions && (
           <div className="space-y-3 rounded-lg border border-border/40 bg-muted/10 p-3 animate-in fade-in-0 slide-in-from-top-1 duration-150">
             {/* Research approach */}
             <div className="space-y-1.5">
               <span className="text-[10px] text-muted-foreground/50 uppercase tracking-wider">Approach</span>
               <div className="flex flex-wrap gap-1.5">
-                {[
-                  { id: "experimental", label: "Experiment", icon: FlaskConical, hint: "Hypotheses + GPU experiments" },
-                  { id: "analytical", label: "Survey", icon: Search, hint: "Literature review + analysis" },
-                  { id: "design_science", label: "Build", icon: BarChart3, hint: "Design, implement, evaluate" },
-                  { id: "exploratory", label: "Explore", icon: Compass, hint: "Open-ended investigation" },
-                ].map((m) => (
+                {Object.entries(METHODOLOGY_META).map(([id, m]) => (
                   <button
-                    key={m.id}
-                    onClick={() => setMethodology(m.id)}
+                    key={id}
+                    onClick={() => setMethodologyOverride(methodologyOverride === id ? null : id)}
                     className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[11px] transition-all border ${
-                      methodology === m.id
+                      methodology === id
                         ? "border-foreground/20 bg-foreground/5 text-foreground font-medium"
                         : "border-transparent text-muted-foreground/50 hover:text-muted-foreground hover:bg-muted/50"
                     }`}
@@ -497,31 +497,93 @@ export default function ResearchPage() {
                   >
                     <m.icon className="h-3 w-3" />
                     {m.label}
+                    {methodology === id && isAutoMethodology && (
+                      <span className="text-[9px] text-muted-foreground/30 ml-0.5">auto</span>
+                    )}
                   </button>
                 ))}
               </div>
               <p className="text-[10px] text-muted-foreground/30">
                 {methodology === "experimental" && "Will form hypotheses, write experiment code, run on GPU, analyze results"}
                 {methodology === "analytical" && "Deep literature search, systematic comparison, synthesis and critique"}
-                {methodology === "design_science" && "Iterative design → build → evaluate cycle with artifacts"}
+                {methodology === "design_science" && "Iterative design, build, evaluate cycle with artifacts"}
                 {methodology === "exploratory" && "Broad search across angles, identify patterns and gaps"}
+                {isAutoMethodology && " — inferred from topic, click to override"}
               </p>
             </div>
 
-            {/* GPU status indicator */}
-            {methodology === "experimental" && (
-              <div className="flex items-center gap-2 text-[10px]">
-                <Server className="h-3 w-3 text-muted-foreground/40" />
-                {hasGpu === null && <span className="text-muted-foreground/30">Checking GPU hosts...</span>}
-                {hasGpu === true && <span className="text-emerald-500/70">GPU hosts available for experiments</span>}
-                {hasGpu === false && (
-                  <span className="text-amber-500/70 flex items-center gap-1">
-                    <AlertTriangle className="h-2.5 w-2.5" />
-                    No GPU hosts configured — experiments will run locally
-                  </span>
-                )}
-              </div>
-            )}
+            {/* Resource selection */}
+            <div className="space-y-1.5">
+              <span className="text-[10px] text-muted-foreground/50 uppercase tracking-wider">Resources</span>
+              {hostsLoading ? (
+                <span className="text-[10px] text-muted-foreground/30">Loading hosts...</span>
+              ) : (
+                <div className="flex flex-wrap gap-1.5">
+                  <button
+                    onClick={() => setSelectedResources("all")}
+                    className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[11px] transition-all border ${
+                      selectedResources === "all"
+                        ? "border-foreground/20 bg-foreground/5 text-foreground font-medium"
+                        : "border-transparent text-muted-foreground/50 hover:text-muted-foreground hover:bg-muted/50"
+                    }`}
+                  >
+                    Auto
+                  </button>
+                  <button
+                    onClick={() => setSelectedResources("local")}
+                    className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[11px] transition-all border ${
+                      selectedResources === "local"
+                        ? "border-foreground/20 bg-foreground/5 text-foreground font-medium"
+                        : "border-transparent text-muted-foreground/50 hover:text-muted-foreground hover:bg-muted/50"
+                    }`}
+                  >
+                    Local only
+                  </button>
+                  {remoteHosts.map((h) => {
+                    const isSelected = selectedResources === "all" || (selectedResources instanceof Set && selectedResources.has(h.id));
+                    return (
+                      <button
+                        key={h.id}
+                        onClick={() => {
+                          if (selectedResources === "all" || selectedResources === "local") {
+                            setSelectedResources(new Set([h.id]));
+                          } else {
+                            const next = new Set(selectedResources);
+                            if (next.has(h.id)) {
+                              next.delete(h.id);
+                              if (next.size === 0) setSelectedResources("all");
+                              else setSelectedResources(next);
+                            } else {
+                              next.add(h.id);
+                              if (next.size === remoteHosts.length) setSelectedResources("all");
+                              else setSelectedResources(next);
+                            }
+                          }
+                        }}
+                        className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[11px] transition-all border ${
+                          isSelected
+                            ? "border-foreground/20 bg-foreground/5 text-foreground font-medium"
+                            : "border-transparent text-muted-foreground/50 hover:text-muted-foreground hover:bg-muted/50"
+                        }`}
+                      >
+                        <Server className="h-3 w-3" />
+                        {h.alias}
+                        {h.gpuType && <span className="text-muted-foreground/40">{h.gpuType}</span>}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+              <p className="text-[10px] text-muted-foreground/30">
+                {selectedResources === "all" && remoteHosts.length > 0 && "Agent chooses where to run based on task needs"}
+                {selectedResources === "all" && remoteHosts.length === 0 && "No remote hosts configured — will run locally"}
+                {selectedResources === "local" && "No remote GPU access — agent will only use local execution"}
+                {selectedResources instanceof Set && (() => {
+                  const names = remoteHosts.filter((h) => (selectedResources as Set<string>).has(h.id)).map((h) => h.alias);
+                  return `Experiments will run on ${names.join(", ")}`;
+                })()}
+              </p>
+            </div>
 
             {/* Constraints / focus */}
             <div className="space-y-1.5">
@@ -549,7 +611,7 @@ export default function ResearchPage() {
       ) : !hasItems ? (
         <div className="rounded-lg border border-dashed border-border/40 py-12 text-center">
           <p className="text-xs text-muted-foreground/50">
-            No research yet. Type a topic above to investigate, or switch to Review to synthesize papers.
+            No research yet. Type a topic above to start investigating.
           </p>
         </div>
       ) : (

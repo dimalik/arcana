@@ -277,10 +277,19 @@ async function runAgent(
   });
   let experimentCounter = existingExpSteps;
 
-  // 4. Detect remote hosts and probe GPUs
-  const remoteHosts = await prisma.remoteHost.findMany({ take: 5 });
+  // 4. Detect remote hosts and probe GPUs (filtered by user resource preferences)
+  let resourceSetting: "all" | "local" | string[] = "all";
+  try {
+    const briefParsed = JSON.parse(project.brief);
+    if (briefParsed.resources) resourceSetting = briefParsed.resources;
+  } catch { /* plain text brief */ }
 
-  // Probe GPUs on all remote hosts (run in parallel, non-blocking)
+  const allRemoteHosts = resourceSetting === "local" ? [] : await prisma.remoteHost.findMany({ take: 5 });
+  const remoteHosts = resourceSetting === "all" || resourceSetting === "local"
+    ? allRemoteHosts
+    : allRemoteHosts.filter((h) => (resourceSetting as string[]).includes(h.id));
+
+  // Probe GPUs on allowed remote hosts (run in parallel, non-blocking)
   const gpuProbes = await Promise.all(
     remoteHosts.map((h) => probeGpus(h.id).catch(() => null))
   );
@@ -359,7 +368,7 @@ async function runAgent(
 
   // 6. Build context
   const papers = project.collection?.papers.map((cp) => cp.paper) || [];
-  const systemPrompt = buildSystemPrompt(project, papers, workDir, remoteHosts, capabilities, gpuInfo, processMemories, resourcePreferences, sharedUtilities, sharedDir);
+  const systemPrompt = buildSystemPrompt(project, papers, workDir, remoteHosts, resourceSetting, capabilities, gpuInfo, processMemories, resourcePreferences, sharedUtilities, sharedDir);
   const messages = buildMessages(project, papers, userMessage, researchLog);
 
   // 6. Get model — Opus for the main research agent (critical reasoning)
@@ -557,6 +566,7 @@ function buildSystemPrompt(
   papers: { id: string; title: string; abstract: string | null; summary: string | null }[],
   workDir: string,
   remoteHosts: { alias: string; gpuType: string | null }[],
+  resourceSetting: "all" | "local" | string[],
   capabilities?: { name: string; description: string; instructions: string }[],
   gpuInfo?: { alias: string; gpuCount: number; gpus: { index: number; name: string; memoryTotal: string; memoryFree: string }[]; cpuRamGb: number; summary: string }[],
   processMemories?: { category: string; lesson: string; context: string | null }[],
@@ -639,8 +649,10 @@ ${lines.join("\n")}
 Follow confirmed preferences (3+ uses) automatically. The user can still override per-step.\n`;
   })();
 
+  const resourceNote = Array.isArray(resourceSetting) ? `\n**Note:** The user specifically chose ${remoteHosts.length === 1 ? "this host" : "these hosts"} — only use the server(s) listed below.\n` : "";
+
   const remoteSection = remoteHosts.length > 0
-    ? `\n## Remote GPU Servers (IMPORTANT)
+    ? `\n## Remote GPU Servers (IMPORTANT)${resourceNote}
 You have ${remoteHosts.length} remote server(s) configured:
 ${remoteHosts.map((h) => `- "${h.alias}"${h.gpuType ? ` (${h.gpuType})` : ""}`).join("\n")}
 ${gpuSection}
@@ -704,7 +716,7 @@ The remote execution system **automatically handles Python environments**:
 - **NEVER reduce data or model size because of environment problems.** The environment should accommodate the experiment, not the other way around.
 - **ASK THE USER for help** when you cannot resolve a dependency issue after 2 attempts. They can install system packages, update CUDA, or configure conda.`
     : `\n## Execution
-No remote servers configured. Use execute_command to run experiments locally.
+${resourceSetting === "local" ? `**The user chose LOCAL-ONLY execution.** Do NOT write code that assumes GPU access or remote servers. Design experiments that run on CPU (or MPS on macOS). Use smaller models, smaller datasets, and CPU-friendly approaches. If a task genuinely requires a GPU, explain this to the user and suggest they change the resource setting.` : `No remote servers configured.`} Use execute_command to run experiments locally.
 
 ### Environment Setup (Local)
 On the FIRST local run, create a venv and install deps:
