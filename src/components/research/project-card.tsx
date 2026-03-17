@@ -1,22 +1,28 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
-import { BookOpen, FlaskConical, Lightbulb, BarChart3, IterationCcw, Pause, MoreVertical, Trash2 } from "lucide-react";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+  BookOpen, FlaskConical, Lightbulb, BarChart3, IterationCcw,
+  Pause, Trash2, Search, Compass, ChevronDown,
+  FileText, Beaker, Activity,
+} from "lucide-react";
 
 const PHASES = ["literature", "hypothesis", "experiment", "analysis", "reflection"] as const;
 
-const PHASE_META: Record<string, { label: string; icon: typeof BookOpen }> = {
-  literature: { label: "Literature", icon: BookOpen },
-  hypothesis: { label: "Hypothesis", icon: Lightbulb },
-  experiment: { label: "Experiment", icon: FlaskConical },
-  analysis: { label: "Analysis", icon: BarChart3 },
-  reflection: { label: "Reflection", icon: IterationCcw },
+const PHASE_META: Record<string, { label: string; icon: typeof BookOpen; verb: string }> = {
+  literature: { label: "Literature", icon: BookOpen, verb: "Searching papers" },
+  hypothesis: { label: "Hypothesis", icon: Lightbulb, verb: "Forming hypotheses" },
+  experiment: { label: "Experiment", icon: FlaskConical, verb: "Running experiments" },
+  analysis: { label: "Analysis", icon: BarChart3, verb: "Analyzing results" },
+  reflection: { label: "Reflection", icon: IterationCcw, verb: "Reflecting on findings" },
+};
+
+const METHODOLOGY_LABELS: Record<string, { label: string; icon: typeof FlaskConical }> = {
+  experimental: { label: "Experiment", icon: FlaskConical },
+  analytical: { label: "Survey", icon: Search },
+  design_science: { label: "Build", icon: BarChart3 },
+  exploratory: { label: "Explore", icon: Compass },
 };
 
 interface ProjectCardProps {
@@ -32,19 +38,41 @@ interface ProjectCardProps {
     iterations: { number: number; status: string }[];
     collection: { _count: { papers: number } } | null;
     _count: { hypotheses: number };
+    log?: { type: string; content: string; createdAt: string }[];
   };
   onDelete?: (id: string) => void;
 }
 
 export function ProjectCard({ project, onDelete }: ProjectCardProps) {
+  const [expanded, setExpanded] = useState(false);
+
   const brief = (() => {
     try { return JSON.parse(project.brief); } catch { return {}; }
   })();
-  const iterNum = project.iterations[0]?.number || 0;
   const paperCount = project.collection?._count?.papers || 0;
   const isActive = project.status === "ACTIVE";
   const isPaused = project.status === "PAUSED";
   const phaseIdx = PHASES.indexOf(project.currentPhase as typeof PHASES[number]);
+
+  const methMeta = METHODOLOGY_LABELS[project.methodology || ""] || null;
+  const MethIcon = methMeta?.icon;
+  const constraints: string | undefined = brief.constraints;
+
+  // Latest log entry for live status
+  const latestLog = project.log?.[0];
+  const liveStatus = (() => {
+    if (!latestLog || !isActive) return null;
+    // Clean up agent log content for display
+    let text = latestLog.content;
+    // Strip tool call prefixes like "[search_papers] {...}"
+    if (text.startsWith("[")) {
+      const closeBracket = text.indexOf("]");
+      if (closeBracket > 0) text = text.slice(closeBracket + 1).trim();
+    }
+    // Strip JSON objects
+    if (text.startsWith("{")) return null;
+    return text.slice(0, 120);
+  })();
 
   const timeAgo = (() => {
     const diff = Date.now() - new Date(project.updatedAt).getTime();
@@ -58,8 +86,10 @@ export function ProjectCard({ project, onDelete }: ProjectCardProps) {
     return new Date(project.updatedAt).toLocaleDateString(undefined, { month: "short", day: "numeric" });
   })();
 
+  const hasDetails = constraints || (brief.question && brief.question !== project.title);
+
   return (
-    <Link href={`/research/${project.id}`} className="block group">
+    <div className="group">
       <div className={`relative rounded-lg border transition-all duration-150 ${
         isActive
           ? "border-emerald-500/20 bg-emerald-500/[0.02] hover:border-emerald-500/40 hover:bg-emerald-500/[0.04]"
@@ -76,95 +106,125 @@ export function ProjectCard({ project, onDelete }: ProjectCardProps) {
         )}
 
         <div className="px-4 py-3">
-          {/* Top row: title + status */}
+          {/* Top row: title + time + actions */}
           <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0 flex-1">
+            <Link href={`/research/${project.id}`} className="min-w-0 flex-1">
               <h3 className="text-[13px] font-medium truncate group-hover:text-foreground transition-colors">
                 {project.title}
               </h3>
-              {brief.question && brief.question !== project.title && (
-                <p className="text-[11px] text-muted-foreground/70 mt-0.5 line-clamp-1">
-                  {brief.question}
-                </p>
-              )}
-            </div>
-            <div className="flex items-center gap-1 shrink-0 mt-0.5">
+            </Link>
+            <div className="flex items-center gap-1.5 shrink-0 mt-0.5">
               {isPaused && (
-                <span className="flex items-center gap-1 text-[10px] text-amber-500/80 mr-1">
+                <span className="flex items-center gap-1 text-[10px] text-amber-500/80">
                   <Pause className="h-2.5 w-2.5" />
                   paused
                 </span>
               )}
+              <span className="text-[10px] text-muted-foreground/40">{timeAgo}</span>
               {onDelete && (
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <button
-                      onClick={(e) => e.preventDefault()}
-                      className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground/30 hover:text-foreground hover:bg-accent transition-colors"
-                    >
-                      <MoreVertical className="h-3 w-3" />
-                    </button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" className="w-36">
-                    <DropdownMenuItem
-                      onClick={(e) => { e.preventDefault(); onDelete(project.id); }}
-                      className="text-xs gap-2 text-destructive focus:text-destructive"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                      Delete
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
+                <button
+                  onClick={(e) => { e.preventDefault(); e.stopPropagation(); onDelete(project.id); }}
+                  className="inline-flex h-5 w-5 items-center justify-center rounded text-muted-foreground/0 group-hover:text-muted-foreground/30 hover:!text-destructive hover:bg-destructive/10 transition-all"
+                  title="Delete project"
+                >
+                  <Trash2 className="h-2.5 w-2.5" />
+                </button>
               )}
-              <span className="text-[10px] text-muted-foreground/50">{timeAgo}</span>
             </div>
           </div>
 
-          {/* Phase progress track */}
-          <div className="flex items-center gap-0.5 mt-2.5">
+          {/* Live status line (active projects only) */}
+          {isActive && liveStatus && (
+            <Link href={`/research/${project.id}`} className="block">
+              <div className="flex items-center gap-1.5 mt-1.5">
+                <Activity className="h-2.5 w-2.5 text-emerald-500/50 shrink-0 animate-pulse" />
+                <p className="text-[10px] text-muted-foreground/50 truncate">{liveStatus}</p>
+              </div>
+            </Link>
+          )}
+
+          {/* Phase progress — compact dot track */}
+          <div className="flex items-center gap-1 mt-2.5">
             {PHASES.map((phase, idx) => {
               const meta = PHASE_META[phase];
-              const Icon = meta.icon;
               const isCurrent = project.currentPhase === phase;
               const isCompleted = idx < phaseIdx;
 
               return (
-                <div key={phase} className="flex items-center gap-0.5 flex-1 min-w-0">
-                  <div className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] transition-colors ${
-                    isCurrent && isActive
-                      ? "bg-emerald-500/10 text-emerald-400"
-                      : isCurrent && isPaused
-                      ? "bg-amber-500/10 text-amber-400"
-                      : isCompleted
-                      ? "text-muted-foreground/50"
-                      : "text-muted-foreground/20"
-                  }`}>
-                    <Icon className="h-2.5 w-2.5 shrink-0" />
-                    <span className="truncate hidden sm:inline">{meta.label}</span>
-                  </div>
+                <div key={phase} className="flex items-center gap-1 min-w-0">
+                  <div
+                    className={`h-1.5 w-1.5 rounded-full transition-colors shrink-0 ${
+                      isCurrent && isActive
+                        ? "bg-emerald-500 ring-2 ring-emerald-500/20"
+                        : isCurrent && isPaused
+                        ? "bg-amber-500 ring-2 ring-amber-500/20"
+                        : isCompleted
+                        ? "bg-muted-foreground/30"
+                        : "bg-muted-foreground/10"
+                    }`}
+                    title={`${meta.label}${isCurrent ? " (current)" : isCompleted ? " (done)" : ""}`}
+                  />
                   {idx < PHASES.length - 1 && (
-                    <div className={`h-px flex-1 min-w-1 ${
+                    <div className={`h-px flex-1 min-w-2 ${
                       isCompleted ? "bg-muted-foreground/20" : "bg-muted-foreground/8"
                     }`} />
                   )}
                 </div>
               );
             })}
+            {/* Phase label next to dots */}
+            <span className={`text-[10px] ml-1 ${
+              isActive ? "text-emerald-500/70" : isPaused ? "text-amber-500/60" : "text-muted-foreground/40"
+            }`}>
+              {PHASE_META[project.currentPhase]?.label || project.currentPhase}
+            </span>
           </div>
 
           {/* Stats row */}
-          <div className="flex items-center gap-3 mt-2 text-[10px] text-muted-foreground/50">
-            {iterNum > 0 && <span>iter {iterNum}</span>}
-            <span>{paperCount} paper{paperCount !== 1 ? "s" : ""}</span>
-            {project._count.hypotheses > 0 && (
-              <span>{project._count.hypotheses} hypothes{project._count.hypotheses !== 1 ? "es" : "is"}</span>
+          <div className="flex items-center gap-2 mt-2 text-[10px] text-muted-foreground/40">
+            {methMeta && (
+              <span className="inline-flex items-center gap-1">
+                {MethIcon && <MethIcon className="h-2.5 w-2.5" />}
+                {methMeta.label}
+              </span>
             )}
-            {project.methodology && (
-              <span className="ml-auto">{project.methodology}</span>
+            <span className="inline-flex items-center gap-1">
+              <FileText className="h-2.5 w-2.5" />
+              {paperCount}
+            </span>
+            {project._count.hypotheses > 0 && (
+              <span className="inline-flex items-center gap-1">
+                <Beaker className="h-2.5 w-2.5" />
+                {project._count.hypotheses}
+              </span>
+            )}
+            {/* Expand button for details */}
+            {hasDetails && (
+              <button
+                onClick={(e) => { e.preventDefault(); e.stopPropagation(); setExpanded(!expanded); }}
+                className="inline-flex items-center gap-0.5 ml-auto text-muted-foreground/25 hover:text-muted-foreground/50 transition-colors"
+              >
+                <ChevronDown className={`h-2.5 w-2.5 transition-transform ${expanded ? "rotate-180" : ""}`} />
+              </button>
             )}
           </div>
+
+          {/* Expanded details */}
+          {expanded && hasDetails && (
+            <div className="mt-2 pt-2 border-t border-border/30 space-y-1.5 animate-in fade-in-0 slide-in-from-top-1 duration-100">
+              {brief.question && brief.question !== project.title && (
+                <p className="text-[11px] text-muted-foreground/50 leading-relaxed">{brief.question}</p>
+              )}
+              {constraints && (
+                <div className="text-[10px]">
+                  <span className="text-muted-foreground/30 uppercase tracking-wider">Constraints</span>
+                  <p className="text-muted-foreground/50 mt-0.5">{constraints}</p>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
-    </Link>
+    </div>
   );
 }

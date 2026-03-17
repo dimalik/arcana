@@ -44,6 +44,7 @@ type Project = {
   iterations: { number: number; status: string }[];
   collection: { _count: { papers: number } } | null;
   _count: { hypotheses: number };
+  log?: { type: string; content: string; createdAt: string }[];
 };
 
 type Review = {

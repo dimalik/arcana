@@ -123,6 +123,11 @@ export async function GET(request: NextRequest) {
         _count: {
           select: { hypotheses: true },
         },
+        log: {
+          orderBy: { createdAt: "desc" },
+          take: 1,
+          select: { type: true, content: true, createdAt: true },
+        },
       },
     });
 
