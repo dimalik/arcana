@@ -183,23 +183,51 @@ export function startResearchAgent(
   }, 8_000);
 
   // Run agent in background — completely decoupled from the SSE stream
+  // Server-side auto-continue: when the 80-step session ends, restart automatically
+  // if the project is still ACTIVE. This means the agent keeps running even if
+  // the browser navigates away or the client disconnects.
   console.log(`[research-agent] Starting background agent for project ${projectId}`);
-  (async () => {
-    try {
-      await runAgent(projectId, userId, userMessage || null, trackedEmit);
-      console.log(`[research-agent] Agent completed for project ${projectId}`);
-      trackedEmit({ type: "done", content: "Agent finished." });
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "Agent error";
-      console.error("[research-agent] Fatal for project", projectId, ":", msg, err instanceof Error ? err.stack : "");
-      trackedEmit({ type: "error", content: msg });
-    } finally {
-      clearInterval(heartbeat);
-      state.closed = true;
-      // Clean up after a delay (allow reconnections to see final events)
-      setTimeout(() => runningAgents.delete(projectId), 30_000);
+  const runWithAutoContinue = async () => {
+    let sessionCount = 0;
+    const MAX_SESSIONS = 20; // Safety limit to prevent infinite loops
+
+    while (sessionCount < MAX_SESSIONS) {
+      sessionCount++;
+      try {
+        console.log(`[research-agent] Session ${sessionCount} starting for project ${projectId}`);
+        await runAgent(projectId, userId, sessionCount === 1 ? (userMessage || null) : null, trackedEmit);
+        console.log(`[research-agent] Session ${sessionCount} completed for project ${projectId}`);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Agent error";
+        console.error("[research-agent] Fatal for project", projectId, "session", sessionCount, ":", msg, err instanceof Error ? err.stack : "");
+        trackedEmit({ type: "error", content: msg });
+        break; // Don't auto-continue on errors
+      }
+
+      // Check if project is still ACTIVE before auto-continuing
+      const project = await prisma.researchProject.findUnique({
+        where: { id: projectId },
+        select: { status: true },
+      });
+      if (!project || project.status !== "ACTIVE") {
+        console.log(`[research-agent] Project ${projectId} no longer ACTIVE (${project?.status}), stopping`);
+        break;
+      }
+
+      trackedEmit({ type: "done", content: `Session ${sessionCount} complete. Auto-continuing...` });
+      // Brief pause between sessions
+      await new Promise((resolve) => setTimeout(resolve, 2_000));
     }
-  })();
+
+    trackedEmit({ type: "done", content: "Agent finished." });
+  };
+
+  runWithAutoContinue().finally(() => {
+    clearInterval(heartbeat);
+    state.closed = true;
+    // Clean up after a delay (allow reconnections to see final events)
+    setTimeout(() => runningAgents.delete(projectId), 30_000);
+  });
 
   // Return an observer stream for the initial caller
   return createObserverStream(projectId);
