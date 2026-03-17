@@ -60,16 +60,39 @@ export function ProjectCard({ project, onDelete }: ProjectCardProps) {
 
   // Latest log entry for live status
   const latestLog = project.log?.[0];
+  const TOOL_LABELS: Record<string, string> = {
+    search_papers: "Searching papers", read_paper: "Reading paper",
+    write_file: "Writing file", read_file: "Reading file",
+    execute_command: "Running command", execute_remote: "Running on remote",
+    check_remote: "Checking remote", log_finding: "Recording finding",
+    web_search: "Searching the web", fetch_webpage: "Reading webpage",
+  };
+
   const liveStatus = (() => {
     if (!latestLog || !isActive) return null;
-    // Clean up agent log content for display
     let text = latestLog.content;
-    // Strip tool call prefixes like "[search_papers] {...}"
+
+    // Tool call log: "[tool_name] {json...}" → extract tool label + key arg
     if (text.startsWith("[")) {
       const closeBracket = text.indexOf("]");
-      if (closeBracket > 0) text = text.slice(closeBracket + 1).trim();
+      if (closeBracket > 0) {
+        const toolName = text.slice(1, closeBracket);
+        const label = TOOL_LABELS[toolName];
+        if (label) {
+          // Try to extract a meaningful arg from the JSON
+          const jsonPart = text.slice(closeBracket + 1).trim();
+          try {
+            const args = JSON.parse(jsonPart);
+            const detail = args.query || args.command?.slice(0, 60) || args.path || args.paperId?.slice(0, 8) || "";
+            return detail ? `${label}: ${detail}` : label;
+          } catch {
+            return label;
+          }
+        }
+        text = text.slice(closeBracket + 1).trim();
+      }
     }
-    // Strip JSON objects
+    // Skip raw JSON
     if (text.startsWith("{")) return null;
     return text.slice(0, 120);
   })();
