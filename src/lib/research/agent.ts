@@ -12,7 +12,7 @@ import { getModel } from "@/lib/llm/provider";
 import { getDefaultModel, getModelForTier } from "@/lib/llm/auto-process";
 import { setLlmContext } from "@/lib/llm/provider";
 import { prisma } from "@/lib/prisma";
-import { searchAllSources } from "@/lib/import/semantic-scholar";
+import { searchAllSources, isFigureOrSupplementDoi } from "@/lib/import/semantic-scholar";
 import { findAndDownloadPdf } from "@/lib/import/pdf-finder";
 import { processingQueue } from "@/lib/processing/queue";
 import { submitRemoteJob, probeGpus, quickRemoteCommand } from "./remote-executor";
@@ -1292,6 +1292,9 @@ function createTools(
         const imported: string[] = [];
         for (let i = 0; i < toImport.length; i++) {
           const r = toImport[i];
+          // Skip figure/table/supplement DOIs (publishers like PeerJ assign DOIs to individual figures)
+          if (isFigureOrSupplementDoi(r)) continue;
+
           emit({ type: "tool_progress", toolName: "search_papers", content: `Importing paper ${i + 1}/${toImport.length}: "${r.title.slice(0, 60)}..."` });
           try {
             // Check duplicates by DOI, arxivId, or title similarity
@@ -1348,7 +1351,7 @@ function createTools(
             await prisma.collectionPaper.create({ data: { collectionId, paperId: paper.id } });
 
             // Queue PDF download + processing in background (non-blocking)
-            findAndDownloadPdf({ doi: r.doi, arxivId: r.arxivId, existingPdfUrl: r.openAccessPdfUrl })
+            findAndDownloadPdf({ doi: r.doi, arxivId: r.arxivId, existingPdfUrl: r.openAccessPdfUrl, title: r.title })
               .then(async (pdf) => {
                 if (pdf) {
                   await prisma.paper.update({

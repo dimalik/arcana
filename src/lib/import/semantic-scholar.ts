@@ -40,6 +40,18 @@ export interface S2Result {
   source?: SearchSource;
 }
 
+/**
+ * Detect search results that are actually figure/table/supplement DOIs,
+ * not real papers. Publishers like PeerJ assign DOIs to individual figures.
+ */
+export function isFigureOrSupplementDoi(r: { doi?: string | null; title?: string }): boolean {
+  // DOI contains figure/table/supplement path segment
+  if (r.doi && /\/(fig-|table-|supp-|supplement)/i.test(r.doi)) return true;
+  // Title starts with "Figure N", "Table N", "Supplementary" etc. AND has a DOI (safety: don't filter DOI-less results by title alone)
+  if (r.doi && r.title && /^(Figure|Table|Supplement(ary)?|Supp\.)\s+\d/i.test(r.title)) return true;
+  return false;
+}
+
 export class S2RateLimitError extends Error {
   constructor() {
     super("Enrichment API rate limit exceeded");
@@ -459,7 +471,8 @@ export async function searchAllSources(
   ]);
 
   const all = [...oaResults, ...s2Results, ...crResults];
-  const deduped = deduplicateResults(all);
+  const deduped = deduplicateResults(all)
+    .filter((r) => !isFigureOrSupplementDoi(r));
 
   // Sort by citation count descending (nulls last)
   deduped.sort((a, b) => (b.citationCount ?? -1) - (a.citationCount ?? -1));

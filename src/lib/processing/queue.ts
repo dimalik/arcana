@@ -254,6 +254,19 @@ class ProcessingQueue {
       await runAutoProcessPipeline({ paperId, skipExtract, signal, essentialOnly });
       notifyPaperProcessed();
 
+      // Non-blocking: download figures from arXiv HTML / publisher pages
+      const figPaper = await prisma.paper.findUnique({
+        where: { id: paperId },
+        select: { arxivId: true, doi: true },
+      });
+      if (figPaper && (figPaper.arxivId || figPaper.doi)) {
+        import("@/lib/import/figure-downloader")
+          .then(({ downloadFiguresFromHtml }) =>
+            downloadFiguresFromHtml(paperId, { arxivId: figPaper.arxivId, doi: figPaper.doi })
+          )
+          .catch((err) => console.warn(`[queue] Figure download failed for ${paperId}:`, (err as Error).message));
+      }
+
     } catch (e) {
       const cancelled = signal.aborted || e instanceof CancelledError;
       if (cancelled) {

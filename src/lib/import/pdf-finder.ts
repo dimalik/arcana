@@ -13,6 +13,8 @@
  */
 
 import { fetchWithRetry } from "./semantic-scholar";
+import { searchDuckDuckGo } from "./web-search";
+import { titleSimilarity } from "@/lib/references/match";
 import { writeFile, mkdir } from "fs/promises";
 import path from "path";
 import { v4 as uuidv4 } from "uuid";
@@ -23,6 +25,8 @@ const UNPAYWALL_EMAIL =
 export interface PdfDownloadResult {
   filePath: string; // relative path like "uploads/doi-abc123.pdf"
   source: string; // which source provided the PDF
+  needsConfirmation?: boolean; // true if found via web search with close but not exact title match
+  webSearchUrl?: string; // the URL found via web search (audit trail)
 }
 
 /**
@@ -33,6 +37,7 @@ export async function findAndDownloadPdf(opts: {
   doi?: string | null;
   arxivId?: string | null;
   existingPdfUrl?: string | null;
+  title?: string | null;
 }): Promise<PdfDownloadResult | null> {
   const candidates = await collectPdfUrls(opts);
 
@@ -55,6 +60,12 @@ export async function findAndDownloadPdf(opts: {
   if (opts.doi) {
     const pmcResult = await tryPmcOaPackage(opts.doi);
     if (pmcResult) return pmcResult;
+  }
+
+  // Absolute last resort: web search for the paper title + "pdf"
+  if (opts.title) {
+    const webResult = await tryWebSearchForPdf(opts.title);
+    if (webResult) return webResult;
   }
 
   return null;
@@ -506,4 +517,60 @@ async function savePdfBuffer(
   const fullPath = path.join(uploadDir, filename);
   await writeFile(fullPath, buffer);
   return `uploads/${filename}`;
+}
+
+// ── Web search fallback ──────────────────────────────────────────────
+
+/**
+ * Last resort: search the web for a PDF of the paper.
+ * Useful for paywalled papers that might be on arXiv under a slightly different title,
+ * or on institutional repositories.
+ */
+async function tryWebSearchForPdf(title: string): Promise<PdfDownloadResult | null> {
+  try {
+    // Try two queries: exact title with filetype, then relaxed
+    const queries = [
+      `"${title}" filetype:pdf`,
+      `"${title}" pdf`,
+    ];
+
+    for (const query of queries) {
+      const results = await searchDuckDuckGo(query, 5);
+
+      for (const result of results) {
+        // Check title similarity — must be a reasonable match
+        const sim = titleSimilarity(title, result.title.replace(/\s*\[PDF\]\s*/gi, "").replace(/\s*-\s*$/, "").trim());
+
+        // Skip low-confidence matches
+        if (sim < 0.6) continue;
+
+        // Check if URL looks like a direct PDF link
+        const isPdfUrl = /\.pdf($|\?)/i.test(result.url);
+
+        // For direct PDF URLs, try downloading even with moderate similarity
+        if (isPdfUrl && sim >= 0.6) {
+          const buffer = await tryDownloadPdf(result.url);
+          if (buffer) {
+            const filePath = await savePdfBuffer(buffer, "websearch");
+            const needsConfirmation = sim < 0.85;
+            console.log(`[pdf-finder] Web search found PDF (similarity=${sim.toFixed(2)}, confirm=${needsConfirmation}): ${result.url}`);
+            return { filePath, source: "websearch", needsConfirmation, webSearchUrl: result.url };
+          }
+        }
+
+        // For non-PDF URLs with high similarity, try fetching — might redirect to PDF
+        if (!isPdfUrl && sim >= 0.85) {
+          const buffer = await tryDownloadPdf(result.url);
+          if (buffer) {
+            const filePath = await savePdfBuffer(buffer, "websearch");
+            console.log(`[pdf-finder] Web search found PDF via redirect (similarity=${sim.toFixed(2)}): ${result.url}`);
+            return { filePath, source: "websearch", webSearchUrl: result.url };
+          }
+        }
+      }
+    }
+  } catch (err) {
+    console.warn("[pdf-finder] Web search fallback failed:", (err as Error).message);
+  }
+  return null;
 }
