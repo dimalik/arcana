@@ -402,7 +402,7 @@ async function runAgent(
   };
   const expCounter = { value: experimentCounter };
   const searchCounter = { value: 0 };
-  const tools = createTools(projectId, userId, workDir, emit, remoteHosts, recordStep, { id: iterationId, number: iteration.number }, sharedDir, onIterationAdvance, model, expCounter, searchCounter);
+  const tools = createTools(projectId, userId, workDir, emit, remoteHosts, recordStep, { id: iterationId, number: iteration.number }, sharedDir, onIterationAdvance, model, expCounter, searchCounter, gpuInfo?.map((g) => ({ alias: g.alias, gpuCount: g.gpuCount })));
 
   // 6. Stream with tool use
   const MAX_STEPS = 80;
@@ -565,6 +565,7 @@ function buildSystemPrompt(
   sharedDir?: string,
 ): string {
   // Build detailed GPU info section
+  const totalGpus = gpuInfo ? gpuInfo.reduce((s, h) => s + h.gpuCount, 0) : 0;
   let gpuSection = "";
   if (gpuInfo && gpuInfo.length > 0) {
     const details = gpuInfo.map((h) => {
@@ -574,7 +575,6 @@ function buildSystemPrompt(
       return `- "${h.alias}": ${h.gpuCount} GPU(s)${ramNote ? `\n${ramNote}` : ""}\n${gpuLines.join("\n")}`;
     }).join("\n");
 
-    const totalGpus = gpuInfo.reduce((s, h) => s + h.gpuCount, 0);
     const multiGpuHost = gpuInfo.find((h) => h.gpuCount > 1);
 
     gpuSection = `\n### GPU Hardware (probed at startup)
@@ -812,6 +812,29 @@ ${(() => {
 - **Move to experiments quickly** — don't spend more than 12 steps on literature alone. The synthesizer and architect run in the background while you can do other work.
 
 ### Phase 2: Experiment
+
+**╔══════════════════════════════════════════════════════════════════╗**
+**║  HARD GATE: READ BEFORE WRITING ANY EXPERIMENT CODE            ║**
+**╚══════════════════════════════════════════════════════════════════╝**
+
+**The system runs a PRE-FLIGHT VALIDATOR on every script before submission. It will REJECT your code if it violates these rules. Do not try to work around it — fix the underlying issue.**
+
+**DATA RULES (violations = blocked submission):**
+1. **FULL DATASETS ONLY.** Use the complete train/eval/test splits. NEVER slice to [:200], [:500], or any small number. If a dataset has 50,000 examples, use all 50,000.
+2. **No artificial caps.** Never set n_train=200, max_samples=500, or similar hard limits. The point of having 8xA100 is to run at scale.
+3. **If memory is the concern, fix memory — not data.** Use streaming (\`load_dataset(..., streaming=True)\`), lazy loading, or gradient accumulation. NEVER reduce data to fit in memory.
+4. **Evaluation sets: minimum 500 samples** for any metric to be meaningful. Ideally use the full test split.
+
+**GPU RULES (violations = blocked submission):**
+1. **USE ALL GPUs for training.** Use \`accelerate launch\` + DeepSpeed for any training run. This is non-negotiable.
+2. **NEVER disable DeepSpeed/accelerate.** No \`deepspeed=None\`, no \`ACCELERATE_NO_DEEPSPEED\`.
+3. **For inference across multiple models:** Use device_map="auto" for large models, or distribute models across GPUs. But training MUST use proper data parallelism (not just pinning one model per GPU).
+4. **Scale batch sizes with GPU count.** per_device_train_batch_size should be at least 4, giving effective batch = 4×${totalGpus}=${4 * totalGpus}.
+
+**STATISTICAL RIGOR:**
+1. **Multiple seeds** (minimum 3) for any experiment. Report mean ± std.
+2. **Bootstrap confidence intervals** for final metrics.
+3. **Compare against baselines** from the literature with the same datasets and metrics.
 
 **Experiment naming:** Every experiment script MUST be named \`exp_NNN_descriptive_name.py\` (e.g., \`exp_001_baseline_gpt2.py\`, \`exp_002_finetune_lora.py\`). The system auto-numbers if you forget, but use consistent naming so experiments can be ordered and compared. Helper scripts (data loaders, utils) don't need numbering.
 
@@ -1110,6 +1133,7 @@ function createTools(
   agentModel?: Parameters<typeof streamText>[0]["model"],
   expCounter?: { value: number },
   searchCounter?: { value: number },
+  cachedGpuInfo?: { alias: string; gpuCount: number }[],
 ) {
   // Track active background job IDs for this session
   const activeJobIds = new Set<string>();
@@ -1751,6 +1775,23 @@ function createTools(
 
         // No timeout wrapper — ML training can run for hours/days.
         // The stale job cleanup handles genuinely stuck jobs.
+
+        // ── Pre-flight validation: catch antipatterns before burning GPU time ──
+        const preflightGpuCount = cachedGpuInfo?.find((g: { alias: string }) => g.alias === host.alias)?.gpuCount ?? 1;
+        try {
+          const { validateExperiment } = await import("./preflight");
+          const preflight = await validateExperiment(workDir, sanitized, preflightGpuCount);
+          if (!preflight.ok) {
+            emit({ type: "tool_output", toolName: "execute_remote", content: `\n⛔ PRE-FLIGHT CHECK FAILED\n${preflight.summary}` });
+            return `BLOCKED — pre-flight validation found ${preflight.violations.filter(v => v.severity === "error").length} error(s) in the experiment code. Fix these before submitting:\n\n${preflight.summary}\n\nThe experiment was NOT submitted. Fix the code with write_file and try again.`;
+          }
+          if (preflight.violations.length > 0) {
+            emit({ type: "tool_output", toolName: "execute_remote", content: `\n⚠ Pre-flight warnings:\n${preflight.summary}` });
+          }
+        } catch (preflightErr) {
+          // Don't block submission on validator errors
+          console.warn("[agent] preflight validation error:", preflightErr);
+        }
 
         emit({ type: "tool_output", toolName: "execute_remote", content: `$ [${host.alias}] ${sanitized}` });
         emit({ type: "tool_progress", toolName: "execute_remote", content: `Syncing files to ${host.alias}...` });
