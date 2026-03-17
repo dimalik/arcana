@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireUserId } from "@/lib/paper-auth";
-import { startResearchAgent } from "@/lib/research/agent";
+import { startResearchAgent, isAgentRunning } from "@/lib/research/agent";
 
 // Allow long-running SSE streams (45 minutes)
 export const maxDuration = 2700;
@@ -9,7 +9,7 @@ export const maxDuration = 2700;
 type Params = { params: Promise<{ id: string }> };
 
 /**
- * POST — Start the research agent.
+ * POST — Start the research agent (or reconnect to a running one).
  * Returns an SSE stream of agent events.
  *
  * Body (optional): { message?: string }
@@ -40,6 +40,7 @@ export async function POST(request: NextRequest, { params }: Params) {
       data: { status: "ACTIVE" },
     });
 
+    // startResearchAgent handles both new starts and reconnections
     const stream = startResearchAgent(id, userId, userMessage);
 
     return new Response(stream, {
@@ -53,4 +54,12 @@ export async function POST(request: NextRequest, { params }: Params) {
     console.error("[api/research/agent] POST error:", err);
     return NextResponse.json({ error: "Failed to start agent" }, { status: 500 });
   }
+}
+
+/**
+ * GET — Check if the agent is currently running for this project.
+ */
+export async function GET(_request: NextRequest, { params }: Params) {
+  const { id } = await params;
+  return NextResponse.json({ running: isAgentRunning(id) });
 }

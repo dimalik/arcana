@@ -90,85 +90,163 @@ export interface AgentEvent {
 
 // ── Agent entry point ────────────────────────────────────────────
 
+// Track running agents so we can detect reconnection scenarios
+const runningAgents = new Map<string, {
+  events: AgentEvent[];
+  closed: boolean;
+  listeners: Set<(event: AgentEvent) => void>;
+  startedAt: number;
+}>();
+
+/** Check if an agent is currently running for a project */
+export function isAgentRunning(projectId: string): boolean {
+  const state = runningAgents.get(projectId);
+  return !!state && !state.closed;
+}
+
+/**
+ * Start the research agent. The agent runs as a detached background process.
+ * Returns an SSE stream that observes the agent's events. If the browser
+ * disconnects and reconnects, the new stream picks up from where it left off.
+ */
 export function startResearchAgent(
   projectId: string,
   userId: string,
   userMessage?: string,
 ): ReadableStream<Uint8Array> {
+  // If agent is already running for this project, return an observer stream
+  const existing = runningAgents.get(projectId);
+  if (existing && !existing.closed) {
+    return createObserverStream(projectId);
+  }
+
+  // Create agent state
+  const state: typeof runningAgents extends Map<string, infer V> ? V : never = {
+    events: [],
+    closed: false,
+    listeners: new Set(),
+    startedAt: Date.now(),
+  };
+  runningAgents.set(projectId, state);
+
+  const emit = (event: AgentEvent) => {
+    if (state.closed) return;
+    state.events.push(event);
+    // Fan out to all connected observers
+    state.listeners.forEach((listener) => {
+      try { listener(event); } catch { /* observer disconnected */ }
+    });
+  };
+
+  // Heartbeat — keeps observers alive and provides activity metadata
+  const activity = {
+    phase: "thinking" as "generating" | "tool_running" | "thinking" | "idle",
+    tokens: 0,
+    tool: undefined as string | undefined,
+    stepCount: 0,
+    lastEventAt: Date.now(),
+  };
+
+  const origEmit = emit;
+  const trackedEmit = (event: AgentEvent) => {
+    activity.lastEventAt = Date.now();
+    if (event.type === "text") {
+      activity.phase = "generating";
+      activity.tokens += (event.content || "").length;
+    } else if (event.type === "tool_call") {
+      activity.phase = "tool_running";
+      activity.tool = event.toolName;
+    } else if (event.type === "tool_result") {
+      activity.phase = "thinking";
+      activity.tool = undefined;
+    } else if (event.type === "step_done") {
+      activity.stepCount = event.stepNumber || activity.stepCount + 1;
+      activity.phase = "thinking";
+    } else if (event.type === "thinking") {
+      activity.phase = "thinking";
+    }
+    origEmit(event);
+  };
+
+  const heartbeat = setInterval(() => {
+    if (state.closed) { clearInterval(heartbeat); return; }
+    origEmit({
+      type: "heartbeat",
+      activity: {
+        phase: activity.phase,
+        tokens: activity.tokens,
+        tool: activity.tool,
+        stepCount: activity.stepCount,
+        lastEventAgoMs: Date.now() - activity.lastEventAt,
+      },
+    });
+  }, 8_000);
+
+  // Run agent in background — completely decoupled from the SSE stream
+  (async () => {
+    try {
+      await runAgent(projectId, userId, userMessage || null, trackedEmit);
+      trackedEmit({ type: "done", content: "Agent finished." });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Agent error";
+      console.error("[research-agent] Fatal:", msg);
+      trackedEmit({ type: "error", content: msg });
+    } finally {
+      clearInterval(heartbeat);
+      state.closed = true;
+      // Clean up after a delay (allow reconnections to see final events)
+      setTimeout(() => runningAgents.delete(projectId), 30_000);
+    }
+  })();
+
+  // Return an observer stream for the initial caller
+  return createObserverStream(projectId);
+}
+
+/** Create a read-only SSE stream that observes an agent's events */
+function createObserverStream(projectId: string): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder();
 
   return new ReadableStream({
-    async start(controller) {
+    start(controller) {
+      const state = runningAgents.get(projectId);
+      if (!state) {
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "done", content: "No agent running." })}\n\n`));
+        controller.close();
+        return;
+      }
+
       let closed = false;
-
-      // Server-side activity tracking — shared with heartbeat
-      const activity = {
-        phase: "thinking" as "generating" | "tool_running" | "thinking" | "idle",
-        tokens: 0,
-        tool: undefined as string | undefined,
-        stepCount: 0,
-        lastEventAt: Date.now(),
-      };
-
-      const emit = (event: AgentEvent) => {
+      const encode = (event: AgentEvent) => {
         if (closed) return;
-        // Update activity tracker based on event type
-        activity.lastEventAt = Date.now();
-        if (event.type === "text") {
-          activity.phase = "generating";
-          activity.tokens += (event.content || "").length;
-        } else if (event.type === "tool_call") {
-          activity.phase = "tool_running";
-          activity.tool = event.toolName;
-        } else if (event.type === "tool_result") {
-          activity.phase = "thinking";
-          activity.tool = undefined;
-        } else if (event.type === "step_done") {
-          activity.stepCount = event.stepNumber || activity.stepCount + 1;
-          activity.phase = "thinking";
-        } else if (event.type === "thinking") {
-          activity.phase = "thinking";
-        }
         try {
           controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
         } catch {
           closed = true;
+          state.listeners.delete(encode);
         }
       };
 
-      // Heartbeat every 8s with activity metadata
-      const heartbeat = setInterval(() => {
-        if (closed) { clearInterval(heartbeat); return; }
-        try {
-          const hb: AgentEvent = {
-            type: "heartbeat",
-            activity: {
-              phase: activity.phase,
-              tokens: activity.tokens,
-              tool: activity.tool,
-              stepCount: activity.stepCount,
-              lastEventAgoMs: Date.now() - activity.lastEventAt,
-            },
-          };
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify(hb)}\n\n`));
-        } catch {
-          closed = true;
-          clearInterval(heartbeat);
-        }
-      }, 8_000);
-
-      try {
-        await runAgent(projectId, userId, userMessage || null, emit);
-        emit({ type: "done", content: "Agent finished." });
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : "Agent error";
-        console.error("[research-agent] Fatal:", msg);
-        emit({ type: "error", content: msg });
-      } finally {
-        clearInterval(heartbeat);
-        closed = true;
-        try { controller.close(); } catch { /* already closed */ }
+      // Replay buffered events (catch up on what happened before this observer connected)
+      for (const event of state.events) {
+        if (closed) break;
+        encode(event);
       }
+
+      // If agent already finished, close the stream
+      if (state.closed) {
+        try { controller.close(); } catch { /* ok */ }
+        return;
+      }
+
+      // Subscribe to live events
+      state.listeners.add(encode);
+
+      // Clean up when stream is cancelled (browser disconnects)
+      // This is a no-op for the agent — it keeps running
+    },
+    cancel() {
+      // Observer disconnected — agent continues running in background
     },
   });
 }

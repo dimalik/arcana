@@ -727,13 +727,31 @@ export const AgentActivityBar = forwardRef<AgentActivityHandle, AgentActivityBar
       return () => { cancelled = true; };
     }, [projectId]);
 
-    // Auto-start once on mount
+    // Auto-start once on mount, or reconnect to running agent
     useEffect(() => {
-      if (autoStart && !autoStarted.current) {
+      if (autoStarted.current) return;
+      if (autoStart) {
         autoStarted.current = true;
         startAgent();
+        return;
       }
-    }, [autoStart, startAgent]);
+      // If project is ACTIVE and we're not running, check if agent is running server-side
+      if (projectStatus === "ACTIVE" && !runningRef.current) {
+        let cancelled = false;
+        fetch(`/api/research/${projectId}/agent`)
+          .then((r) => r.json())
+          .then((data) => {
+            if (cancelled || autoStarted.current || runningRef.current) return;
+            if (data.running) {
+              // Agent is running server-side — reconnect via POST to get observer stream
+              autoStarted.current = true;
+              startAgent();
+            }
+          })
+          .catch(() => {});
+        return () => { cancelled = true; };
+      }
+    }, [autoStart, startAgent, projectId, projectStatus]);
 
     const handleSend = () => {
       const msg = userInput.trim();
