@@ -611,6 +611,20 @@ async function runAndPoll(
         },
       });
     }
+
+    // Log the failure so it's visible in the research timeline
+    if (job?.projectId) {
+      const scriptMatch = command.match(/python3?\s+(\S+\.py)/);
+      const scriptName = scriptMatch ? scriptMatch[1] : command.slice(0, 60);
+      await prisma.researchLogEntry.create({
+        data: {
+          projectId: job.projectId,
+          type: "dead_end",
+          content: `\`${scriptName}\` failed to start on ${config.host}: ${message}`,
+          metadata: JSON.stringify({ remoteJobId: jobId }),
+        },
+      }).catch(() => {}); // Best effort — don't let log failure mask the real error
+    }
   }
 }
 

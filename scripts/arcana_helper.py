@@ -212,6 +212,13 @@ def setup_venv(workdir, log_callback=None):
 
     venv_path = os.path.join(workdir, ".venv")
 
+    # Detect and remove broken venvs (dir exists but bin/ is missing)
+    if os.path.exists(venv_path) and not os.path.exists(os.path.join(venv_path, "bin")):
+        if log_callback:
+            log_callback("[env-setup] Removing broken venv (no bin/ directory)...")
+        import shutil
+        shutil.rmtree(venv_path, ignore_errors=True)
+
     # Create venv if missing
     if not os.path.exists(os.path.join(venv_path, "bin", "activate")):
         if log_callback:
@@ -223,10 +230,15 @@ def setup_venv(workdir, log_callback=None):
             )
         except subprocess.CalledProcessError as e:
             return False, f"venv creation failed: {e.stderr}"
+        except subprocess.TimeoutExpired:
+            return False, "venv creation timed out (>120s)"
 
     pip_path = os.path.join(venv_path, "bin", "pip3")
     if not os.path.exists(pip_path):
         pip_path = os.path.join(venv_path, "bin", "pip")
+    if not os.path.exists(pip_path):
+        # bin/ exists but pip is missing — broken state
+        return False, f"pip not found at {pip_path}. Venv may be corrupt. Delete .venv/ and retry."
 
     # Upgrade pip
     try:
@@ -244,7 +256,7 @@ def setup_venv(workdir, log_callback=None):
     try:
         result = subprocess.run(
             [pip_path, "install", "-r", reqs_path],
-            capture_output=True, text=True, timeout=600,
+            capture_output=True, text=True, timeout=1800,
         )
         # Save full log
         with open(pip_log_path, "w") as f:
@@ -260,7 +272,7 @@ def setup_venv(workdir, log_callback=None):
                 f"Last 30 lines:\n" + "\n".join(last_lines)
             )
     except subprocess.TimeoutExpired:
-        return False, "pip install timed out (>10 min)"
+        return False, "pip install timed out (>30 min). Large packages like torch may need more time."
 
     # Save hash
     with open(hash_path, "w") as f:

@@ -54,8 +54,11 @@ export async function validateExperiment(
   const lines = code.split("\n");
   const violations: PreflightViolation[] = [];
 
+  // ── Resolve top-level constants to their numeric values ────────
+  const constants = resolveConstants(lines);
+
   // ── Dataset trimming checks ─────────────────────────────────────
-  checkDatasetTrimming(lines, violations);
+  checkDatasetTrimming(lines, constants, violations);
 
   // ── Multi-GPU checks ────────────────────────────────────────────
   if (gpuCount > 1) {
@@ -63,7 +66,12 @@ export async function validateExperiment(
   }
 
   // ── Batch size checks ───────────────────────────────────────────
-  checkBatchSizes(lines, gpuCount, violations);
+  checkBatchSizes(lines, constants, gpuCount, violations);
+
+  // ── Manual GPU pinning checks ─────────────────────────────────
+  if (gpuCount > 1) {
+    checkManualGpuPinning(lines, code, gpuCount, violations);
+  }
 
   // ── Statistical rigor checks ────────────────────────────────────
   checkStatisticalRigor(lines, code, violations);
@@ -98,10 +106,37 @@ export async function validateExperiment(
   };
 }
 
+// ── Constant Resolution ──────────────────────────────────────────
+
+/**
+ * Scan for top-level constant assignments like `N_TRAIN = 120` or `BATCH_SIZE = 4`.
+ * Returns a map from constant name → { value, line }.
+ * This lets later checks resolve `[:N_TRAIN]` → `[:120]`.
+ */
+function resolveConstants(lines: string[]): Map<string, { value: number; line: number }> {
+  const constants = new Map<string, { value: number; line: number }>();
+  // Match: `SOME_VAR = 123` or `some_var = 123` at the start of a line (no leading spaces = top-level)
+  // Also match with type hints: `SOME_VAR: int = 123`
+  const constPattern = /^([A-Za-z_]\w*)\s*(?::\s*\w+\s*)?=\s*(\d+)\s*(?:#.*)?$/;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (line.trim().startsWith("#")) continue;
+    // Only match top-level (no indentation) or minimal indentation
+    if (line.startsWith("  ") || line.startsWith("\t")) continue;
+
+    const m = constPattern.exec(line);
+    if (m) {
+      constants.set(m[1], { value: parseInt(m[2]), line: i + 1 });
+    }
+  }
+  return constants;
+}
+
 // ── Checks ────────────────────────────────────────────────────────
 
 /** Detect dataset slicing to small sizes (the #1 problem). */
-function checkDatasetTrimming(lines: string[], violations: PreflightViolation[]) {
+function checkDatasetTrimming(lines: string[], constants: Map<string, { value: number; line: number }>, violations: PreflightViolation[]) {
   // Patterns that indicate dataset trimming:
   // 1. data[:N] where N < 1000 (on training-like variables)
   // 2. n_train=N, max_train=N, max_samples=N where N < 1000
@@ -109,7 +144,7 @@ function checkDatasetTrimming(lines: string[], violations: PreflightViolation[])
 
   const dataVarPattern = /\b(train|data|dataset|texts|examples|samples|corpus|sft|dpo|grpo|rl_data)\w*\s*(?:=.*)?(\[:\d+\])/i;
   const smallSlicePattern = /\[:(\d+)\]/g;
-  const paramPattern = /\b(n_train|max_train|max_samples|num_train|train_size|max_examples|n_examples)\s*[=:]\s*(\d+)/i;
+  const paramPattern = /\b(n_train|max_train|max_samples|num_train|train_size|max_examples|n_examples|n_test|n_eval|n_calib|num_test|num_eval|test_size|eval_size|num_calib|max_eval|max_test)\s*[=:]\s*(\d+)/i;
   const headSamplePattern = /\.(head|sample)\((\d+)\)/;
 
   for (let i = 0; i < lines.length; i++) {
@@ -142,12 +177,16 @@ function checkDatasetTrimming(lines: string[], violations: PreflightViolation[])
     if (paramMatch) {
       const n = parseInt(paramMatch[2]);
       if (n < 1000) {
+        const paramName = paramMatch[1];
+        const isEval = /test|eval|calib|val/i.test(paramName);
         violations.push({
           severity: "error",
-          code: "SMALL_TRAIN_SIZE",
-          message: `Training size limited to ${n} via '${paramMatch[1]}=${n}'. This produces unreliable results.`,
+          code: isEval ? "SMALL_EVAL_SIZE" : "SMALL_TRAIN_SIZE",
+          message: `${isEval ? "Evaluation" : "Training"} size limited to ${n} via '${paramName}=${n}'. This produces unreliable results.`,
           line: lineNum,
-          fix: `Remove the hard cap or increase to the full dataset size. Use streaming/lazy loading if memory is a concern.`,
+          fix: isEval
+            ? `Increase to at least 500+ for evaluation. Small eval sets produce unreliable metrics.`
+            : `Remove the hard cap or increase to the full dataset size. Use streaming/lazy loading if memory is a concern.`,
         });
       }
     }
@@ -164,6 +203,51 @@ function checkDatasetTrimming(lines: string[], violations: PreflightViolation[])
           line: lineNum,
           fix: `Use the full dataset. .head()/.sample() are for exploration, not experiments.`,
         });
+      }
+    }
+  }
+
+  // Check constants whose names suggest dataset sizes
+  const dataSizeConstNames = /^(n_train|n_test|n_eval|n_calib|n_val|num_train|num_test|num_eval|num_val|num_calib|train_size|test_size|eval_size|val_size|max_train|max_test|max_eval|max_samples|max_examples|n_examples|n_samples)$/i;
+  constants.forEach(({ value, line }, name) => {
+    if (dataSizeConstNames.test(name) && value < 1000) {
+      const isTest = /test|eval|calib|val/i.test(name);
+      if (!violations.some((v) => v.line === line)) {
+        violations.push({
+          severity: "error",
+          code: isTest ? "SMALL_EVAL_SIZE" : "SMALL_TRAIN_SIZE",
+          message: `${name}=${value} limits ${isTest ? "evaluation" : "training"} to only ${value} samples.`,
+          line,
+          fix: isTest
+            ? `Increase ${name} to at least 500+ for evaluation. Small eval sets produce unreliable metrics.`
+            : `Increase ${name} to use the full dataset (1000+ minimum). Use streaming if memory is a concern.`,
+        });
+      }
+    }
+  });
+
+  // Check for variable-based slicing: `data[:N_TRAIN]` where N_TRAIN is a resolved constant
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const lineNum = i + 1;
+    if (line.trim().startsWith("#")) continue;
+    if (violations.some((v) => v.line === lineNum)) continue;
+
+    // Match `something[:VARIABLE_NAME]`
+    const varSlicePattern = /(\w+)\[:([A-Za-z_]\w*)\]/g;
+    let vsMatch;
+    while ((vsMatch = varSlicePattern.exec(line)) !== null) {
+      const constName = vsMatch[2];
+      const resolved = constants.get(constName);
+      if (resolved && resolved.value < 1000) {
+        violations.push({
+          severity: "error",
+          code: "SMALL_DATASET_VIA_CONST",
+          message: `Dataset sliced via '${constName}=${resolved.value}' (defined at line ${resolved.line}). Only ${resolved.value} samples.`,
+          line: lineNum,
+          fix: `Increase ${constName} to use the full dataset (1000+ minimum). The constant is defined at line ${resolved.line}.`,
+        });
+        break; // One violation per line is enough
       }
     }
   }
@@ -265,11 +349,12 @@ function checkMultiGpu(
 /** Check for unreasonably small batch sizes. */
 function checkBatchSizes(
   lines: string[],
+  constants: Map<string, { value: number; line: number }>,
   gpuCount: number,
   violations: PreflightViolation[],
 ) {
-  const batchPattern = /\bper_device_train_batch_size\s*=\s*(\d+)/;
-  const genericBatchPattern = /\bbatch_size\s*=\s*(\d+)/;
+  const batchPattern = /\bper_device_train_batch_size\s*=\s*(\d+)/i;
+  const genericBatchPattern = /\bbatch_size\s*=\s*(\d+)/i;
 
   for (let i = 0; i < lines.length; i++) {
     if (lines[i].trim().startsWith("#")) continue;
@@ -290,17 +375,70 @@ function checkBatchSizes(
       }
     }
 
-    // Check generic batch size (only for very small values)
+    // Check generic batch size (literal or via constant)
     const genericMatch = genericBatchPattern.exec(lines[i]);
     if (genericMatch && !trainerMatch) {
       const bs = parseInt(genericMatch[1]);
-      if (bs <= 2 && !lines[i].includes("micro") && !lines[i].includes("grad_accum")) {
+      if (bs <= 4 && !lines[i].includes("micro") && !lines[i].includes("grad_accum")) {
         violations.push({
           severity: "warning",
           code: "TINY_BATCH",
-          message: `batch_size=${bs} is very small. Consider increasing for better GPU utilization.`,
+          message: `batch_size=${bs} is very small for ${gpuCount} GPU(s). Consider increasing for better utilization.`,
           line: i + 1,
           fix: `Increase batch size or use gradient accumulation. Small batches underutilize GPU memory and slow training.`,
+        });
+      }
+    }
+  }
+
+  // Also check constants that look like batch sizes
+  constants.forEach(({ value, line }, name) => {
+    const lower = name.toLowerCase();
+    if ((lower.includes("batch") && lower.includes("size")) || lower === "bs" || lower === "bsz") {
+      if (value <= 4) {
+        if (!violations.some((v) => v.line === line && v.code === "TINY_BATCH")) {
+          violations.push({
+            severity: "warning",
+            code: "TINY_BATCH",
+            message: `${name}=${value} is very small for ${gpuCount} GPU(s). A100s can handle much larger batches.`,
+            line,
+            fix: `Increase ${name}. With ${gpuCount}× A100 GPUs, batch sizes of 16-64+ are typical depending on model size.`,
+          });
+        }
+      }
+    }
+  });
+}
+
+/** Detect manual GPU pinning that wastes GPUs (e.g., 2 models on 2 GPUs but 6 GPUs idle). */
+function checkManualGpuPinning(
+  lines: string[],
+  code: string,
+  gpuCount: number,
+  violations: PreflightViolation[],
+) {
+  // Count explicit cuda:N device assignments
+  const deviceAssignments = new Set<string>();
+  const devicePattern = /["']cuda:(\d+)["']/g;
+  let dm;
+  while ((dm = devicePattern.exec(code)) !== null) {
+    deviceAssignments.add(dm[1]);
+  }
+
+  // If the script manually pins to specific GPUs but uses fewer than half available
+  if (deviceAssignments.size >= 1 && deviceAssignments.size < gpuCount / 2) {
+    // Don't flag if there's already a multi-GPU strategy
+    const hasMultiGpuStrategy = /accelerate|DataParallel|DistributedDataParallel|FSDP|device_map\s*=\s*["']auto["']/i.test(code);
+    if (!hasMultiGpuStrategy) {
+      // Check if there's a training loop — manual pinning for inference is less concerning
+      const hasTraining = /\.backward\(\)|optimizer\.step\(\)|\.train\(\)|Trainer\s*\(/i.test(code);
+      if (hasTraining) {
+        violations.push({
+          severity: "error",
+          code: "MANUAL_GPU_PINNING",
+          message: `Training script manually pins to ${deviceAssignments.size} GPU(s) via cuda:N but ${gpuCount} are available. ${gpuCount - deviceAssignments.size} GPU(s) are idle.`,
+          line: 1,
+          fix: `Use accelerate + DeepSpeed or FSDP to distribute training across all ${gpuCount} GPUs instead of manually assigning models to specific devices. Manual device pinning doesn't parallelize training.`,
         });
       }
     }

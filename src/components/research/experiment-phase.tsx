@@ -28,6 +28,7 @@ interface RemoteJob {
   command: string;
   stdout: string | null;
   stderr: string | null;
+  exitCode: number | null;
   localDir: string;
   hostId: string;
   host: { alias: string; gpuType: string | null };
@@ -688,14 +689,24 @@ function ExperimentGroupCard({
                           $ {job.command}
                         </pre>
                         {job.stdout && (
-                          <pre className="text-[10px] text-muted-foreground bg-muted/50 rounded p-2 max-h-32 overflow-auto whitespace-pre-wrap font-mono">
-                            {job.stdout.split("\n").filter(Boolean).slice(-20).join("\n")}
+                          <pre className="text-[10px] text-muted-foreground bg-muted/50 rounded p-2 max-h-48 overflow-auto whitespace-pre-wrap font-mono">
+                            {job.stdout.split("\n").filter(Boolean).slice(-30).join("\n")}
                           </pre>
                         )}
-                        {job.stderr && job.status !== "COMPLETED" && (
-                          <pre className="mt-1 text-[10px] text-destructive/70 bg-destructive/5 rounded p-2 max-h-24 overflow-auto whitespace-pre-wrap font-mono">
-                            {job.stderr.split("\n").filter(Boolean).slice(-10).join("\n")}
-                          </pre>
+                        {job.status !== "COMPLETED" && (
+                          <div className="mt-1 space-y-1">
+                            {job.exitCode != null && (
+                              <span className="text-[9px] text-destructive/60 font-mono">exit code: {job.exitCode}</span>
+                            )}
+                            {job.stderr && (
+                              <pre className="text-[10px] text-destructive/70 bg-destructive/5 rounded p-2 max-h-48 overflow-auto whitespace-pre-wrap font-mono">
+                                {job.stderr.split("\n").filter(Boolean).slice(-30).join("\n")}
+                              </pre>
+                            )}
+                            {!job.stderr && !job.stdout && (
+                              <p className="text-[10px] text-destructive/50 italic">No output captured — job may have failed during environment setup (venv/pip install).</p>
+                            )}
+                          </div>
                         )}
                       </div>
                     )}
