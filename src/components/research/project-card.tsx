@@ -143,41 +143,36 @@ export function ProjectCard({ project, onDelete }: ProjectCardProps) {
             </Link>
           )}
 
-          {/* Phase progress — compact dot track */}
-          <div className="flex items-center gap-1 mt-2.5">
+          {/* Phase progress track */}
+          <div className="flex items-center gap-0.5 mt-2.5">
             {PHASES.map((phase, idx) => {
               const meta = PHASE_META[phase];
+              const Icon = meta.icon;
               const isCurrent = project.currentPhase === phase;
               const isCompleted = idx < phaseIdx;
 
               return (
-                <div key={phase} className="flex items-center gap-1 min-w-0">
-                  <div
-                    className={`h-1.5 w-1.5 rounded-full transition-colors shrink-0 ${
-                      isCurrent && isActive
-                        ? "bg-emerald-500 ring-2 ring-emerald-500/20"
-                        : isCurrent && isPaused
-                        ? "bg-amber-500 ring-2 ring-amber-500/20"
-                        : isCompleted
-                        ? "bg-muted-foreground/30"
-                        : "bg-muted-foreground/10"
-                    }`}
-                    title={`${meta.label}${isCurrent ? " (current)" : isCompleted ? " (done)" : ""}`}
-                  />
+                <div key={phase} className="flex items-center gap-0.5 flex-1 min-w-0">
+                  <div className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] transition-colors ${
+                    isCurrent && isActive
+                      ? "bg-emerald-500/10 text-emerald-400"
+                      : isCurrent && isPaused
+                      ? "bg-amber-500/10 text-amber-400"
+                      : isCompleted
+                      ? "text-muted-foreground/50"
+                      : "text-muted-foreground/20"
+                  }`}>
+                    <Icon className="h-2.5 w-2.5 shrink-0" />
+                    <span className="truncate hidden sm:inline">{meta.label}</span>
+                  </div>
                   {idx < PHASES.length - 1 && (
-                    <div className={`h-px flex-1 min-w-2 ${
+                    <div className={`h-px flex-1 min-w-1 ${
                       isCompleted ? "bg-muted-foreground/20" : "bg-muted-foreground/8"
                     }`} />
                   )}
                 </div>
               );
             })}
-            {/* Phase label next to dots */}
-            <span className={`text-[10px] ml-1 ${
-              isActive ? "text-emerald-500/70" : isPaused ? "text-amber-500/60" : "text-muted-foreground/40"
-            }`}>
-              {PHASE_META[project.currentPhase]?.label || project.currentPhase}
-            </span>
           </div>
 
           {/* Stats row */}
