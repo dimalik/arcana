@@ -227,6 +227,8 @@ export const AgentActivityBar = forwardRef<AgentActivityHandle, AgentActivityBar
     }, [running]);
 
     const shouldAutoContinueRef = useRef(false);
+    // Keep startAgent ref stable for auto-continue closures
+    const startAgentRef = useRef<(message?: string) => void>(() => {});
 
     const startAgent = useCallback(async (message?: string) => {
       if (runningRef.current) return;
@@ -528,7 +530,7 @@ export const AgentActivityBar = forwardRef<AgentActivityHandle, AgentActivityBar
               // Reset running state so startAgent's guard allows the call
               setRunning(false);
               runningRef.current = false;
-              startAgent(continuationMessage);
+              startAgentRef.current(continuationMessage);
             } catch (err) {
               console.error("[agent-activity-bar] Auto-continue failed:", err);
               setRunning(false);
@@ -547,6 +549,9 @@ export const AgentActivityBar = forwardRef<AgentActivityHandle, AgentActivityBar
         }
       }
     }, [projectId, onRefresh]);
+
+    // Keep ref in sync so auto-continue closures always call the latest startAgent
+    startAgentRef.current = startAgent;
 
     const stopAgent = useCallback(() => {
       stoppedByUserRef.current = true;

@@ -120,11 +120,26 @@ export async function POST(_request: NextRequest, { params }: Params) {
       summaryParts.push(`## Completed Experiments:\n${expSummaries.join("\n")}`);
     }
 
-    // Failed experiments (so agent knows what went wrong)
+    // Failed experiments — include actual error details so agent knows what to fix
     const failedExps = failedSteps.filter((s) => s.type === "run_experiment");
     if (failedExps.length > 0) {
+      // Fetch recent failed remote jobs for detailed error info
+      const recentFailedJobs = await prisma.remoteJob.findMany({
+        where: { projectId: id, status: "FAILED" },
+        orderBy: { completedAt: "desc" },
+        take: 5,
+        select: { command: true, exitCode: true, stderr: true, stdout: true },
+      });
+
+      const jobDetails = recentFailedJobs.map((j) => {
+        const isOOM = j.exitCode === 137 || (j.stderr || "").includes("Killed") || (j.stderr || "").toLowerCase().includes("oom");
+        const errSnippet = (j.stderr || "").slice(-500).trim();
+        const outSnippet = (j.stdout || "").slice(-300).trim();
+        return `- \`${(j.command || "").slice(0, 80)}\` → exit ${j.exitCode ?? "?"}${isOOM ? " (OOM KILL)" : ""}${errSnippet ? `\n  stderr: ${errSnippet}` : ""}${outSnippet ? `\n  stdout: ${outSnippet}` : ""}`;
+      }).join("\n");
+
       summaryParts.push(
-        `## Previously Failed (${failedExps.length} runs):\n${failedExps.map((s) => `- ${s.title}`).join("\n")}\nThese failed in a prior run. Fix the code before re-running.`
+        `## Previously Failed (${failedExps.length} runs):\n${jobDetails || failedExps.map((s) => `- ${s.title}`).join("\n")}\n\n**You MUST fix the root cause before re-running.** If exit code is 137 (OOM kill), reduce memory usage — don't just retry the same script.`
       );
     }
 

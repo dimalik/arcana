@@ -20,6 +20,7 @@ export async function GET(
         role: true,
         goal: true,
         status: true,
+        error: true,
         createdAt: true,
         completedAt: true,
       },

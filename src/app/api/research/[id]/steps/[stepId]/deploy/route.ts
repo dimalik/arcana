@@ -65,7 +65,8 @@ export async function POST(request: NextRequest, { params }: Params) {
         }
       } catch { /* use default */ }
 
-      runCmd = `pip3 install -r requirements.txt 2>/dev/null; python3 ${filename}`;
+      // The Arcana helper handles venv + pip install automatically — just run the script
+      runCmd = `python3 ${filename}`;
     }
 
     // Submit the remote job

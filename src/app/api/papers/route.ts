@@ -64,6 +64,9 @@ export async function GET(request: NextRequest) {
 
   if (collectionId) {
     where.collections = { some: { collectionId } };
+  } else {
+    // Hide research-only papers from main library (they live in project collections)
+    where.isResearchOnly = false;
   }
 
   if (year) {

@@ -693,6 +693,7 @@ interface AgentTaskInfo {
   role: string;
   goal: string;
   status: string;
+  error: string | null;
   createdAt: string;
   completedAt: string | null;
 }
@@ -724,6 +725,7 @@ function SubAgentSection({ projectId }: { projectId: string }) {
 
   const running = tasks.filter((t) => t.status === "RUNNING" || t.status === "PENDING").length;
   const completed = tasks.filter((t) => t.status === "COMPLETED").length;
+  const failed = tasks.filter((t) => t.status === "FAILED").length;
 
   return (
     <div>
@@ -755,6 +757,11 @@ function SubAgentSection({ projectId }: { projectId: string }) {
                     done {new Date(t.completedAt).toLocaleTimeString()}
                   </p>
                 )}
+                {t.status === "FAILED" && t.error && (
+                  <p className="text-[9px] text-red-400 line-clamp-2">
+                    {t.error}
+                  </p>
+                )}
               </div>
             </div>
           ))}
@@ -762,7 +769,7 @@ function SubAgentSection({ projectId }: { projectId: string }) {
             <p className="text-[10px] text-muted-foreground/50 pl-4">+{tasks.length - 10} more</p>
           )}
           <p className="text-[10px] text-muted-foreground/50 pl-4">
-            {completed} completed, {running} active
+            {completed} completed{failed > 0 ? `, ${failed} failed` : ""}{running > 0 ? `, ${running} active` : ""}
           </p>
         </div>
       )}

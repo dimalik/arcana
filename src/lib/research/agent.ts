@@ -9,7 +9,7 @@
 import { streamText, generateText, stepCountIs, tool } from "ai";
 import { z } from "zod";
 import { getModel } from "@/lib/llm/provider";
-import { getDefaultModel } from "@/lib/llm/auto-process";
+import { getDefaultModel, getModelForTier } from "@/lib/llm/auto-process";
 import { setLlmContext } from "@/lib/llm/provider";
 import { prisma } from "@/lib/prisma";
 import { searchAllSources } from "@/lib/import/semantic-scholar";
@@ -17,6 +17,7 @@ import { findAndDownloadPdf } from "@/lib/import/pdf-finder";
 import { processingQueue } from "@/lib/processing/queue";
 import { submitRemoteJob, probeGpus, quickRemoteCommand } from "./remote-executor";
 import { classifyTaskCategory } from "./task-classifier";
+import { processQuery, scoreWeighted, scoreText, filterByRelevance } from "./search-utils";
 import { getAllResourcePreferences, recordResourceChoice, CONFIDENCE_THRESHOLD } from "./resource-preferences";
 import { exec, spawn } from "child_process";
 import { promisify } from "util";
@@ -198,6 +199,58 @@ async function runAgent(
   const workDir = project.outputFolder || path.join(process.cwd(), "output", "research", `${slug}-${shortId}`);
   await mkdir(workDir, { recursive: true });
 
+  // Persist workDir so API endpoints (log-file, files) can find it
+  if (!project.outputFolder) {
+    await prisma.researchProject.update({
+      where: { id: projectId },
+      data: { outputFolder: workDir },
+    });
+  }
+
+  // 2b. Recover sub-agent tasks from previous sessions
+  if ((prisma as unknown as Record<string, unknown>).agentTask) {
+    const zombieThreshold = new Date(Date.now() - 15 * 60 * 1000); // 15min
+
+    // Old zombies (>15min): mark failed
+    await prisma.agentTask.updateMany({
+      where: {
+        projectId,
+        status: { in: ["RUNNING", "PENDING"] },
+        createdAt: { lt: zombieThreshold },
+      },
+      data: {
+        status: "FAILED",
+        error: "Zombie: process died before completion (cleaned up on agent restart)",
+        completedAt: new Date(),
+      },
+    });
+
+    // Recent tasks (<15min) still PENDING or RUNNING: re-launch them
+    // These were likely killed by a process restart mid-flight
+    const recentOrphans = await prisma.agentTask.findMany({
+      where: {
+        projectId,
+        status: { in: ["RUNNING", "PENDING"] },
+        createdAt: { gte: zombieThreshold },
+      },
+    });
+    if (recentOrphans.length > 0) {
+      console.log(`[agent] Re-launching ${recentOrphans.length} orphaned sub-agent tasks from previous session`);
+      for (const orphan of recentOrphans) {
+        // Reset to PENDING so runSubAgent picks it up fresh
+        await prisma.agentTask.update({
+          where: { id: orphan.id },
+          data: { status: "PENDING" },
+        });
+        import("./sub-agent").then(({ runSubAgent }) => {
+          runSubAgent(orphan.id).catch((err) => {
+            console.error(`[agent] Re-launched task ${orphan.id} (${orphan.role}) failed:`, err);
+          });
+        });
+      }
+    }
+  }
+
   // 3. Ensure an active iteration exists
   let iteration = project.iterations[0];
   if (!iteration || iteration.status !== "ACTIVE") {
@@ -309,8 +362,8 @@ async function runAgent(
   const systemPrompt = buildSystemPrompt(project, papers, workDir, remoteHosts, capabilities, gpuInfo, processMemories, resourcePreferences, sharedUtilities, sharedDir);
   const messages = buildMessages(project, papers, userMessage, researchLog);
 
-  // 6. Get model
-  const { provider, modelId, proxyConfig } = await getDefaultModel();
+  // 6. Get model — Opus for the main research agent (critical reasoning)
+  const { provider, modelId, proxyConfig } = await getModelForTier("reasoning");
   const model = await getModel(provider, modelId, proxyConfig);
   setLlmContext("research-agent", userId, { projectId });
 
@@ -348,7 +401,8 @@ async function runAgent(
     stepSortOrder = 0;
   };
   const expCounter = { value: experimentCounter };
-  const tools = createTools(projectId, userId, workDir, emit, remoteHosts, recordStep, { id: iterationId, number: iteration.number }, sharedDir, onIterationAdvance, model, expCounter);
+  const searchCounter = { value: 0 };
+  const tools = createTools(projectId, userId, workDir, emit, remoteHosts, recordStep, { id: iterationId, number: iteration.number }, sharedDir, onIterationAdvance, model, expCounter, searchCounter);
 
   // 6. Stream with tool use
   const MAX_STEPS = 80;
@@ -375,6 +429,7 @@ async function runAgent(
       stepCount++;
 
       // Track tool usage patterns for nudges
+      let hasNonSearch = false;
       for (const tc of toolCalls || []) {
         if (LIT_TOOLS.has(tc.toolName)) {
           experimentsSinceLastLitReview = 0;
@@ -384,6 +439,11 @@ async function runAgent(
           experimentsSinceLastLitReview++;
           totalExperimentsRun++;
         }
+        if (tc.toolName !== "search_papers") hasNonSearch = true;
+      }
+      // Reset consecutive search counter when agent does something else
+      if (hasNonSearch || (toolCalls || []).length === 0) {
+        searchCounter.value = 0;
       }
 
       // Persist important events to research log
@@ -412,30 +472,22 @@ async function runAgent(
 
       emit({ type: "step_done", stepNumber: stepCount });
 
-      // Inject step budget reminders at key thresholds
+      // Internal nudges — logged for debugging but NOT emitted to the user's console.
+      // These are already covered by the system prompt; emitting them leaked prompt text to the UI.
       const remaining = MAX_STEPS - stepCount;
-      if (stepCount === 15 && remaining > 50) {
-        emit({ type: "text", content: "\n\n[System: 15 steps used this session. If you've only run 1 experiment, that's not enough — you should be designing follow-ups, ablations, and alternative approaches. Keep going.]\n" });
-      } else if (remaining === 10) {
-        emit({ type: "text", content: "\n\n[System: 10 steps left in this session. Log your findings with log_finding and update hypotheses. The session will auto-continue so you won't lose progress — but save your key results now.]\n" });
-      } else if (remaining === 3) {
-        emit({ type: "text", content: "\n\n[System: 3 steps left in this session. Quickly log any unrecorded findings. The session will auto-restart and you'll continue from where you left off.]\n" });
+      if (remaining === 10 || remaining === 3) {
+        // Budget reminders — only log, agent already knows from system prompt
+        console.log(`[agent] Step budget: ${remaining} steps remaining (step ${stepCount}/${MAX_STEPS})`);
       }
-
-      // Literature consultation nudges — trigger when running many experiments without consulting papers
       if (experimentsSinceLastLitReview >= 3) {
-        emit({ type: "text", content: `\n\n[System: You've run ${experimentsSinceLastLitReview} experiments without consulting the literature. Before designing another experiment, search for papers or check your library for relevant techniques. Use search_library or search_papers with a SPECIFIC question about what you're observing. Good research is literature-informed, not trial-and-error.]\n` });
-      }
-      // Nudge if low paper consultation ratio overall
-      if (totalExperimentsRun >= 4 && totalPaperConsultations === 0) {
-        emit({ type: "text", content: "\n\n[System: You have not consulted any papers during this session. Use search_library to check if existing papers in your collection address the patterns you're seeing. Use search_papers to find new papers on specific sub-problems. This is research, not blind experimentation.]\n" });
+        console.log(`[agent] Nudge: ${experimentsSinceLastLitReview} experiments without lit review`);
       }
 
-      // Iteration advancement nudge — if this iteration has accumulated many steps, prompt to advance
+      // Iteration advancement nudge — internal only
       const totalIterationSteps = iterationStepsAtStart + stepCount;
       if (!iterationNudged && totalIterationSteps >= 50 && stepCount >= 10) {
         iterationNudged = true;
-        emit({ type: "text", content: `\n\n[System: This iteration (#${iteration.number}) has ${totalIterationSteps} steps. If you have solid findings and see a new direction, use \`complete_iteration\` to record what was learned and start a fresh iteration with a new goal. Good research has clear iterations — each with a focused question, experiments, and conclusions. Don't stuff everything into one iteration forever.]\n` });
+        console.log(`[agent] Nudge: iteration #${iteration.number} has ${totalIterationSteps} steps, consider advancing`);
       }
 
       // Emit thinking indicator
@@ -506,7 +558,7 @@ function buildSystemPrompt(
   workDir: string,
   remoteHosts: { alias: string; gpuType: string | null }[],
   capabilities?: { name: string; description: string; instructions: string }[],
-  gpuInfo?: { alias: string; gpuCount: number; gpus: { index: number; name: string; memoryTotal: string; memoryFree: string }[]; summary: string }[],
+  gpuInfo?: { alias: string; gpuCount: number; gpus: { index: number; name: string; memoryTotal: string; memoryFree: string }[]; cpuRamGb: number; summary: string }[],
   processMemories?: { category: string; lesson: string; context: string | null }[],
   resourcePreferences?: { taskCategory: string; preference: string; usageCount: number }[],
   sharedUtilities?: { filename: string; description: string }[],
@@ -516,9 +568,10 @@ function buildSystemPrompt(
   let gpuSection = "";
   if (gpuInfo && gpuInfo.length > 0) {
     const details = gpuInfo.map((h) => {
-      if (h.gpuCount === 0) return `- "${h.alias}": No GPUs detected`;
+      if (h.gpuCount === 0) return `- "${h.alias}": No GPUs detected${h.cpuRamGb ? ` (${h.cpuRamGb} GB CPU RAM)` : ""}`;
       const gpuLines = h.gpus.map((g) => `  GPU ${g.index}: ${g.name} — ${g.memoryTotal} total, ${g.memoryFree} free`);
-      return `- "${h.alias}": ${h.gpuCount} GPU(s)\n${gpuLines.join("\n")}`;
+      const ramNote = h.cpuRamGb ? `  CPU RAM: ${h.cpuRamGb} GB` : "";
+      return `- "${h.alias}": ${h.gpuCount} GPU(s)${ramNote ? `\n${ramNote}` : ""}\n${gpuLines.join("\n")}`;
     }).join("\n");
 
     const totalGpus = gpuInfo.reduce((s, h) => s + h.gpuCount, 0);
@@ -552,7 +605,16 @@ ${totalGpus > 1 ? `**YOU HAVE MULTIPLE GPUs — USE THEM ALL.** Do NOT limit you
 - Always check memory FIRST: \`torch.cuda.mem_get_info()\` at script start, print available memory per GPU.
 - For batch processing, scale batch size with GPU count: \`per_gpu_batch * ${totalGpus}\`.
 - If you get OOM: try (in order) mixed precision (bf16) → DeepSpeed ZeRO-2 → gradient accumulation → ZeRO-3. NEVER fall back to single-GPU or reduced data as a first resort.
-${multiGpuHost ? `- On "${multiGpuHost.alias}" you have ${multiGpuHost.gpuCount} GPUs — this should be your primary training host.` : ""}` : `**If you get OOM on a single GPU:**
+${multiGpuHost ? `- On "${multiGpuHost.alias}" you have ${multiGpuHost.gpuCount} GPUs — this should be your primary training host.` : ""}
+
+**CPU RAM / OOM PREVENTION (CRITICAL):**
+Processes that exhaust CPU RAM get SIGKILL'd by the Linux OOM killer — no error message, no traceback, just "Killed".
+To prevent this:
+- **Use streaming/lazy loading for datasets**: \`load_dataset(..., streaming=True)\` or load with \`split="train[:1000]"\` instead of loading everything then slicing.
+- **Load models directly to GPU**: \`AutoModel.from_pretrained(..., device_map="auto")\` or \`.to("cuda:0")\` immediately — don't load to CPU first.
+- **Don't load multiple large models simultaneously on CPU.** Load one, move to GPU, then load the next.
+- **Use \`torch.no_grad()\` for inference** — no activation caching.
+- **For datasets: filter on disk, not in memory.** Don't load the full dataset then filter in Python — use HuggingFace's \`dataset.filter()\` which operates lazily, or select a subset split.` : `**If you get OOM on a single GPU:**
 1. Switch to bf16/fp16: \`torch.autocast("cuda")\` or \`model.half()\`
 2. Use int8 quantization: \`load_in_8bit=True\`
 3. Use gradient accumulation to simulate larger batches
@@ -590,15 +652,37 @@ ${prefSection}
 - \`check_remote\` → read files/logs on remote, list results, check status (SSH only, instant)
 - \`execute_command\` → local tasks (editing files, data prep, lightweight compute)
 
-### Parallel Experiment Workflow (IMPORTANT)
-\`execute_remote\` now returns immediately after submitting a job. **Do NOT wait idle** — keep working:
-1. Submit experiment with \`execute_remote\` → get job ID
-2. While it runs: read papers, write code for the next experiment, analyze previous results
-3. Submit MORE experiments if you have multiple variants to test
-4. Use \`check_job\` periodically to see if jobs finished
-5. When you need results to proceed, use \`wait_for_jobs\` with all pending job IDs
+### Parallel Workflow (YOU MUST DO THIS — NOT OPTIONAL)
+You have the ability to do multiple things at once. **Use it aggressively.** Sequential one-at-a-time work is unacceptable when you have tools for parallelism.
 
-Example: Submit 3 experiment variants, then read a paper. When done reading, check jobs. Analyze whichever finished first.
+**Experiments run in background — ALWAYS keep working:**
+1. Submit experiment with \`execute_remote\` → get job ID → **immediately** start your next task
+2. While experiments run: search for papers, read papers, write code for the NEXT experiment, analyze PREVIOUS results
+3. Submit 2-3 experiment variants at once when testing different approaches — don't wait for one to finish before submitting the next
+4. Use \`check_job\` periodically to see if jobs finished. It fetches live logs from the remote.
+5. When you need results to proceed, use \`wait_for_jobs\`
+
+**Literature scouts — use them at the START of every project:**
+At the beginning of research, call \`dispatch_scouts\` with 2-3 different angles. Collect findings with \`collect_results\`, then import the best papers.
+
+**Synthesizer — use it AFTER importing papers from scouts:**
+Call \`dispatch_synthesizer\` with the imported paper titles and a focus area. The synthesizer (Opus) reads them all together and finds contradictions, complementary techniques, and unexplored combinations.
+
+**Architect — use it AFTER getting synthesis (and optionally diagnostics):**
+Call \`dispatch_architect\` with the synthesizer's output, any analyst data, and your research goal. The architect (Opus) proposes 2-3 novel approaches with risk ratings and validation experiments. **Always run the cheapest validation experiment first.**
+
+**Analyst — use it AFTER experiments complete:**
+Call \`dispatch_analyst\` to run diagnostic scripts on experiment results (attention analysis, gradient flow, error patterns). It produces raw data — feed this to \`dispatch_architect\` for interpretation.
+
+**Adversarial review — use \`adversarial_review\` for quick inline critique or \`dispatch_reviewer\` for deep background review.**
+
+**The full research pipeline:**
+1. \`dispatch_scouts\` (3 angles) → read existing papers while scouts work
+2. \`collect_results\` → import best papers → \`dispatch_synthesizer\`
+3. \`collect_results\` (synthesis) → \`dispatch_architect\` with synthesis
+4. \`collect_results\` (architect proposals) → implement cheapest validation experiment
+5. Run experiment → \`dispatch_analyst\` on results
+6. \`collect_results\` (diagnostics) → \`dispatch_architect\` with synthesis + diagnostics → iterate
 
 ${!resourcePreferences || resourcePreferences.length === 0 ? "**Default: use execute_remote for running experiments** (training, evaluation). Use execute_command for local-only tasks.\n" : ""}### Environment Setup (AUTOMATIC — but validate first!)
 The remote execution system **automatically handles Python environments**:
@@ -713,10 +797,19 @@ ${(() => {
 ` : ""}
 ## The Research Cycle (repeat this loop — NEVER stop after one experiment)
 
-### Phase 1: Literature & Hypotheses
-- Search for papers. Read them carefully — extract specific numbers, methods, datasets, and claims.
-- Formulate 2-3 testable hypotheses using log_finding(type="hypothesis"). Write PLAIN TEXT — no markdown, no headers, no bold. Be specific: "Model X will outperform Y on dataset Z by N% because of mechanism W." NOT "## Hypothesis 1: **Claim**: Model X..."
-- Identify what the literature DOESN'T answer. That's where you contribute.
+### Phase 1: Literature, Synthesis & Hypotheses
+**IMPORTANT: Use \`dispatch_scouts\` for all bulk literature search — do NOT call \`search_papers\` more than twice in a row.** Scouts run in parallel and are much faster. Use \`search_papers\` only for targeted follow-up queries on a specific sub-question.
+
+**Step-by-step:**
+1. \`dispatch_scouts\` with 2-3 angles → while they run, read papers already in your library with \`search_library\`
+2. \`collect_results\` → import the best papers with \`search_papers\`
+3. **\`dispatch_synthesizer\`** with the imported paper titles and your research focus → the synthesizer (Opus) reads them all together and finds contradictions, complementary techniques, and unexplored combinations
+4. \`collect_results\` (synthesis) → use the cross-paper analysis to formulate hypotheses
+5. Formulate 2-3 testable hypotheses using log_finding(type="hypothesis"). Write PLAIN TEXT — no markdown, no headers, no bold. Be specific: "Model X will outperform Y on dataset Z by N% because of mechanism W."
+6. **\`dispatch_architect\`** with the synthesis output and your goal → the architect (Opus) proposes novel approaches with risk ratings and validation experiments
+7. \`collect_results\` (architect proposals) → pick the cheapest validation experiment to try first
+
+- **Move to experiments quickly** — don't spend more than 12 steps on literature alone. The synthesizer and architect run in the background while you can do other work.
 
 ### Phase 2: Experiment
 
@@ -754,8 +847,19 @@ ${(() => {
 - Run the experiment. If it fails, FIX it and re-run. Never move on from a failure.
 - For remote execution: just write requirements.txt and run \`python3 script.py\` — the system handles venv and packages automatically (see Environment Setup above).
 
-### Phase 3: Critique (THIS IS THE MOST IMPORTANT PHASE)
-**Use \`adversarial_review\` here.** After getting results, pass your hypotheses, methods, and findings to the adversarial reviewer for independent critique. It will find flaws you're blind to. Address its concerns before designing follow-up experiments.
+### Phase 3: Diagnostics & Critique (THIS IS THE MOST IMPORTANT PHASE)
+After an experiment completes, do BOTH of these:
+
+1. **\`dispatch_analyst\`** — run diagnostic scripts on the experiment results. Choose the right type:
+   - \`attention\`: if the model uses attention (head importance, redundancy, entropy)
+   - \`gradient\`: if training is unstable or slow (gradient norms, dead neurons)
+   - \`errors\`: if accuracy is disappointing (confusion matrix, worst examples)
+   - \`general\`: if unsure — runs abbreviated versions of all
+   The analyst produces RAW DATA (numbers, not interpretations). Feed this to the architect.
+
+2. **\`adversarial_review\` or \`dispatch_reviewer\`** — get independent critique of your hypotheses, methods, and findings. Use \`adversarial_review\` for quick inline feedback, or \`dispatch_reviewer\` for deep background review (Opus with library access).
+
+3. **\`dispatch_architect\`** with the synthesis (from Phase 1) + analyst diagnostics + current results → the architect interprets the raw diagnostic data in context of the literature and proposes novel approaches for the next iteration.
 
 After EVERY successful experiment, ask yourself:
 - **Are the results statistically meaningful?** If no error bars, standard deviations, or multiple runs — your results are unreliable. Re-run with proper statistical rigor.
@@ -795,8 +899,9 @@ When experiments produce disappointing, surprising, or hard-to-explain results, 
 - Run and compare: "After applying Paper D's preprocessing, accuracy improved from 60% to 82%"
 
 ### Phase 4: Follow-up Experiments
-Based on your critique AND literature consultation, design and run follow-up experiments:
-- **Literature-informed fixes**: Apply techniques from papers that address the specific weaknesses you found.
+Based on the architect's proposals, analyst diagnostics, and reviewer critique, design and run follow-up experiments:
+- **Start with the architect's cheapest validation experiment** — never commit to a large change without testing the core idea first.
+- **Literature-informed fixes**: Apply techniques from papers that address the specific weaknesses the analyst found.
 - **Ablation studies**: Remove components to understand what actually matters.
 - **Parameter sensitivity**: How robust are the results to hyperparameter changes?
 - **Different datasets/conditions**: Does it generalize?
@@ -933,6 +1038,8 @@ function thinkingHint(toolCalls?: { toolName: string; input: unknown }[]): strin
   switch (last.toolName) {
     case "search_papers":
       return "Analyzing search results and deciding which papers to read...";
+    case "remove_paper":
+      return "Cleaning up irrelevant papers...";
     case "read_paper":
       return "Processing paper content and extracting key insights...";
     case "write_file":
@@ -963,8 +1070,18 @@ function thinkingHint(toolCalls?: { toolName: string; input: unknown }[]): strin
       return "Submitting experiment variants in parallel...";
     case "dispatch_scouts":
       return "Literature scouts are searching in the background...";
+    case "dispatch_reviewer":
+      return "Adversarial reviewer is analyzing in the background...";
+    case "dispatch_experimenter":
+      return "Experiment runner is working in the background...";
+    case "dispatch_synthesizer":
+      return "Synthesizer is analyzing papers in the background...";
+    case "dispatch_analyst":
+      return "Analyst is running diagnostics in the background...";
+    case "dispatch_architect":
+      return "Architect is designing novel approaches in the background...";
     case "collect_results":
-      return "Reviewing scout findings...";
+      return "Reviewing sub-agent findings...";
     case "adversarial_review":
       return "Processing adversarial peer review feedback...";
     case "save_lesson":
@@ -992,24 +1109,39 @@ function createTools(
   onIterationAdvance?: (newId: string, newNumber: number) => void,
   agentModel?: Parameters<typeof streamText>[0]["model"],
   expCounter?: { value: number },
+  searchCounter?: { value: number },
 ) {
   // Track active background job IDs for this session
   const activeJobIds = new Set<string>();
+  const consecutiveSearches = searchCounter || { value: 0 };
   // Experiment counter for sequential naming (shared with caller via ref object)
   const experimentCount = expCounter || { value: 0 };
 
   return {
     search_papers: tool({
-      description: "Search academic databases (OpenAlex, Semantic Scholar, CrossRef) for papers on a topic. Returns titles, abstracts, authors, citation counts. Papers are automatically added to your library.",
+      description: "Search academic databases (OpenAlex, Semantic Scholar, CrossRef) for papers on a topic. Only imports papers relevant to your query — irrelevant results are filtered out. Papers are added to the project collection (not your main library).",
       inputSchema: z.object({
         query: z.string().describe("Search query — use specific technical terms"),
-        max_results: z.number().min(1).max(15).default(8).optional(),
+        max_results: z.number().min(1).max(8).default(5).optional(),
       }),
       execute: async ({ query, max_results }: { query: string; max_results?: number }) => {
-        const maxResults = max_results || 8;
+        // Hard rate-limit: max 2 consecutive search_papers calls before requiring a different tool
+        consecutiveSearches.value++;
+        if (consecutiveSearches.value > 2) {
+          return `STOP: You've called search_papers ${consecutiveSearches.value} times in a row. This is inefficient — use dispatch_scouts to search multiple angles in parallel (one call replaces 3-4 search_papers). Search_papers is for single targeted follow-ups only. Call a different tool now.`;
+        }
+
+        const maxResults = max_results || 5;
         const results = await searchAllSources(query);
-        const toImport = results.slice(0, maxResults);
-        if (toImport.length === 0) return "No papers found for this query.";
+        // Filter by relevance BEFORE importing — only papers matching the query
+        const relevant = filterByRelevance(results, query);
+        const toImport = relevant.slice(0, maxResults);
+        if (toImport.length === 0) {
+          const totalFound = results.length;
+          return totalFound > 0
+            ? `Found ${totalFound} papers but none were relevant enough to "${query}". Try a more specific query.`
+            : "No papers found for this query.";
+        }
 
         // Ensure project collection exists
         const proj = await prisma.researchProject.findUnique({
@@ -1081,6 +1213,7 @@ function createTools(
                 sourceType: r.arxivId || r.doi?.match(/10\.48550\/arXiv\./i) ? "ARXIV" : "RESEARCH",
                 sourceUrl: r.externalUrl ?? null,
                 processingStatus: "PENDING",
+                isResearchOnly: true,
               },
             });
             await prisma.collectionPaper.create({ data: { collectionId, paperId: paper.id } });
@@ -1094,10 +1227,31 @@ function createTools(
                     data: { filePath: pdf.filePath, processingStatus: "EXTRACTING_TEXT" },
                   });
                   processingQueue.enqueue(paper.id);
+                } else if (r.abstract) {
+                  // No PDF but has abstract — still process (summarize, categorize, etc.)
+                  await prisma.paper.update({
+                    where: { id: paper.id },
+                    data: { processingStatus: "NO_PDF" },
+                  });
+                  processingQueue.enqueue(paper.id);
+                } else {
+                  await prisma.paper.update({
+                    where: { id: paper.id },
+                    data: { processingStatus: "NO_PDF" },
+                  });
                 }
               })
-              .catch((err) => {
+              .catch(async (err) => {
                 console.warn(`[search_papers] PDF download failed for "${r.title.slice(0, 60)}":`, err instanceof Error ? err.message : err);
+                // Still process if we have an abstract
+                if (r.abstract) {
+                  processingQueue.enqueue(paper.id);
+                } else {
+                  await prisma.paper.update({
+                    where: { id: paper.id },
+                    data: { processingStatus: "NO_PDF" },
+                  }).catch(() => {});
+                }
               });
             imported.push(`"${r.title}" (${r.year || "?"}) — ${r.citationCount || 0} citations${r.abstract ? `\n  Abstract: ${r.abstract.slice(0, 300)}` : ""}`);
           } catch (err) {
@@ -1108,6 +1262,53 @@ function createTools(
         const summary = `Found and imported ${imported.length} papers:\n\n${imported.join("\n\n")}`;
         await recordStep("search_papers", `Search: "${query}"`, "COMPLETED", { imported: imported.length, query }, "literature");
         return summary;
+      },
+    }),
+
+    remove_paper: tool({
+      description: "Remove an irrelevant paper from the current research project. Use when a paper turns out to be off-topic or not useful. This removes it from the project collection — if it was research-only, it's deleted entirely.",
+      inputSchema: z.object({
+        title: z.string().describe("Title or partial title of the paper to remove"),
+        reason: z.string().optional().describe("Brief reason for removal"),
+      }),
+      execute: async ({ title, reason }: { title: string; reason?: string }) => {
+        // Find the paper
+        const proj = await prisma.researchProject.findUnique({
+          where: { id: projectId },
+          select: { collectionId: true },
+        });
+        if (!proj?.collectionId) return "No project collection found.";
+
+        const collectionPapers = await prisma.collectionPaper.findMany({
+          where: { collectionId: proj.collectionId },
+          include: { paper: { select: { id: true, title: true, isResearchOnly: true } } },
+        });
+
+        const normTitle = title.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+        const match = collectionPapers.find((cp) => {
+          const ct = cp.paper.title.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+          return ct.includes(normTitle) || normTitle.includes(ct.slice(0, Math.floor(ct.length * 0.8)));
+        });
+
+        if (!match) return `Paper "${title}" not found in this project's collection.`;
+
+        // Remove from project collection
+        await prisma.collectionPaper.delete({
+          where: { paperId_collectionId: { collectionId: proj.collectionId, paperId: match.paper.id } },
+        });
+
+        // If research-only and no other collections, delete the paper entirely
+        if (match.paper.isResearchOnly) {
+          const otherCollections = await prisma.collectionPaper.count({
+            where: { paperId: match.paper.id },
+          });
+          if (otherCollections === 0) {
+            await prisma.paper.delete({ where: { id: match.paper.id } });
+            return `Removed and deleted "${match.paper.title}" (research-only, no other collections).${reason ? ` Reason: ${reason}` : ""}`;
+          }
+        }
+
+        return `Removed "${match.paper.title}" from project collection.${reason ? ` Reason: ${reason}` : ""}`;
       },
     }),
 
@@ -1508,24 +1709,24 @@ function createTools(
         }
         if (!host) return "No remote hosts configured. Use execute_command to run locally, or ask the user to configure a remote host.";
 
-        // Sanitize command — the .run.sh wrapper already handles cd, venv activation,
+        // Sanitize command — the Arcana helper handles cd, venv activation,
         // conda, and setup. Strip all that so the command is just the actual work.
         let sanitized = command;
 
         // Unwrap bash -c "..." wrappers the agent sometimes adds
         sanitized = sanitized.replace(/^bash\s+-c\s+["'](.+?)["']\s*$/, "$1");
 
-        // Strip existing timeout wrappers (we'll re-add cleanly)
+        // Strip timeout wrappers the agent might add — training can run for hours
         sanitized = sanitized.replace(/^timeout\s+\d+[smh]?\s+/, "");
 
         // Strip redirect guards early so subsequent patterns match cleanly
         sanitized = sanitized.replace(/\s*2>\/dev\/null\s*\|\|\s*true\s*/g, " ");
 
-        // Strip venv activation — .run.sh already does this
+        // Strip venv activation — the helper already does this
         sanitized = sanitized.replace(/(?:source\s+)?\.venv\/bin\/activate\s*(?:&&|;)\s*/g, "");
         sanitized = sanitized.replace(/source\s+activate\s*(?:&&|;)\s*/g, "");
 
-        // Strip cd to project/experiment dirs — .run.sh already cds
+        // Strip cd to project/experiment dirs — the helper already cds
         sanitized = sanitized.replace(/cd\s+\S+\s*(?:&&|;)\s*/g, "");
 
         // Strip absolute paths to .venv python/pip — just use python3/pip3
@@ -1537,7 +1738,7 @@ function createTools(
         // Replace 'pip ' with 'pip3 '
         sanitized = sanitized.replace(/\bpip\b(?!3)/g, "pip3");
 
-        // Strip venv creation and pip install — .run.sh handles these automatically
+        // Strip venv creation and pip install — the helper handles these automatically
         sanitized = sanitized.replace(/python3\s+-m\s+venv\s+\.venv\s*(?:&&|;)\s*/g, "");
         sanitized = sanitized.replace(/pip3?\s+install\s+(?:-r\s+)?requirements\.txt\s*(?:&&|;)\s*/g, "");
         sanitized = sanitized.replace(/pip3?\s+install\s+--upgrade\s+pip\s*(?:&&|;)\s*/g, "");
@@ -1548,10 +1749,8 @@ function createTools(
         // Clean up whitespace
         sanitized = sanitized.replace(/\s+/g, " ").trim();
 
-        // Add timeout wrapper for safety (40 min max)
-        if (!sanitized.includes("timeout ")) {
-          sanitized = `timeout 2400 ${sanitized}`;
-        }
+        // No timeout wrapper — ML training can run for hours/days.
+        // The stale job cleanup handles genuinely stuck jobs.
 
         emit({ type: "tool_output", toolName: "execute_remote", content: `$ [${host.alias}] ${sanitized}` });
         emit({ type: "tool_progress", toolName: "execute_remote", content: `Syncing files to ${host.alias}...` });
@@ -1702,10 +1901,85 @@ function createTools(
             // No partial results
           }
 
-          return `EXPERIMENT FAILED (exit ${job.exitCode ?? "?"}) on ${job.host.alias}${elapsedStr}. Fix the code and re-run.\n\nstdout:\n${(job.stdout || "").slice(-3000)}\n\nstderr:\n${(job.stderr || "").slice(-2000)}${partialResults}`;
+          // Detect OOM kills — exit 137 = SIGKILL (128+9), almost always OOM
+          const isOOM = job.exitCode === 137
+            || (job.stderr || "").includes("OUT OF MEMORY")
+            || (job.stderr || "").includes("[OOM DETECTED]")
+            || (job.stderr || "").includes("CUDA out of memory")
+            || (job.stderr || "").includes("OutOfMemoryError");
+          const oomGuidance = isOOM
+            ? "\n\n⚠ OOM KILL DETECTED — the process ran out of memory. To fix:\n1. Reduce per_device_train_batch_size (try halving it)\n2. Enable gradient_checkpointing=True\n3. Use DeepSpeed ZeRO stage 2 or 3 (add deepspeed config)\n4. Use accelerate with device_map='auto' for model sharding\n5. Use mixed precision (fp16=True or bf16=True)\nDo NOT reduce the dataset or simplify the model — fix memory usage instead."
+            : "";
+
+          return `EXPERIMENT FAILED (exit ${job.exitCode ?? "?"}) on ${job.host.alias}${elapsedStr}. Fix the code and re-run.\n\nstdout:\n${(job.stdout || "").slice(-3000)}\n\nstderr:\n${(job.stderr || "").slice(-2000)}${partialResults}${oomGuidance}`;
         }
 
-        // Still running
+        // Still running/syncing — use helper for single-call structured status
+        if ((job.status === "RUNNING" || job.status === "SYNCING") && job.remoteDir) {
+          try {
+            const { getHelperStatus, sshExecutor } = await import("./remote-executor");
+            const config = {
+              host: job.host.host, port: job.host.port, user: job.host.user,
+              keyPath: job.host.keyPath, workDir: job.host.workDir,
+              conda: job.host.conda, setupCmd: job.host.setupCmd,
+            };
+            const status = await getHelperStatus(config, job.remoteDir);
+
+            // Update DB with fresh logs
+            await prisma.remoteJob.update({
+              where: { id: job_id },
+              data: { stdout: status.stdout_tail || job.stdout, stderr: status.stderr_tail || job.stderr },
+            });
+
+            // Process finished — detected by helper via waitpid
+            if (status.status !== "running" && status.status !== "setup") {
+              const exitCode = status.exit_code;
+              const oomKill = status.oom_detected;
+              let stderr = status.stderr_tail || "";
+              if (oomKill && status.oom_detail) {
+                stderr = `${stderr}\n\n[OOM DETECTED] ${status.oom_detail}`.trim();
+              }
+              const failed = oomKill || (exitCode !== null && exitCode !== 0);
+
+              // Sync results back
+              if (job.localDir) {
+                await sshExecutor.syncDown(job.remoteDir, job.localDir, config).catch(() => {});
+              }
+              await prisma.remoteJob.update({
+                where: { id: job_id },
+                data: {
+                  status: failed ? "FAILED" : "COMPLETED",
+                  exitCode,
+                  stdout: status.stdout_tail || job.stdout,
+                  stderr,
+                  resultsSynced: true,
+                  completedAt: new Date(),
+                },
+              });
+              activeJobIds.delete(job_id);
+
+              const oomGuidance = oomKill
+                ? "\n\n⚠ OOM KILL DETECTED — the process ran out of CPU RAM. To fix:\n1. Use streaming/lazy dataset loading (datasets.load_dataset with streaming=True)\n2. Load model directly to GPU: model.to('cuda') or device_map='auto'\n3. Don't load multiple models simultaneously\n4. Reduce batch size\nDo NOT just retry the same script — fix memory usage first."
+                : "";
+              return `Job ${failed ? "FAILED" : "COMPLETED"} (exit ${exitCode}) on ${job.host.alias}${elapsedStr}. Results synced.\n\nstdout:\n${(status.stdout_tail || "").slice(-5000)}${stderr ? `\n\nstderr:\n${stderr.slice(-1000)}` : ""}${oomGuidance}`;
+            }
+
+            // Still running — return live status with resource info
+            const resourceNote = status.resource_snapshots?.length
+              ? (() => {
+                  const latest = status.resource_snapshots[status.resource_snapshots.length - 1];
+                  const ramUsed = latest.cpu_ram_total_gb - latest.cpu_ram_avail_gb;
+                  const gpuNote = latest.gpu_mem.map(g => `GPU${g.idx}: ${g.used_mb}/${g.total_mb} MiB`).join(", ");
+                  return `\nResources: CPU RAM ${ramUsed.toFixed(1)}/${latest.cpu_ram_total_gb.toFixed(1)} GB${gpuNote ? `, ${gpuNote}` : ""}`;
+                })()
+              : "";
+            const statusHint = job.status === "SYNCING" ? "syncing files" : "running";
+            return `Job is ${statusHint} on ${job.host.alias}${elapsedStr}.${resourceNote}\n\nstdout (live):\n${(status.stdout_tail || "").slice(-3000)}\n\n${status.stderr_tail ? `stderr:\n${status.stderr_tail.slice(-500)}` : ""}\n\nActive jobs: ${activeJobIds.size}. Continue with other work and check back later.`;
+          } catch {
+            // Fall through to DB-cached logs
+          }
+        }
+
         const statusHint = job.status === "SYNCING" ? "syncing files" : job.status === "RUNNING" ? "running" : job.status.toLowerCase();
         return `Job is ${statusHint} on ${job.host.alias}${elapsedStr}.\n\nstdout so far:\n${(job.stdout || "").slice(-3000)}\n\n${job.stderr ? `stderr:\n${job.stderr.slice(-500)}` : ""}\n\nActive jobs: ${activeJobIds.size}. Continue with other work and check back later.`;
       },
@@ -1715,10 +1989,10 @@ function createTools(
       description: "Wait for one or more background jobs to complete. Use this when you genuinely need results before proceeding (e.g., to compare experiment outputs). Polls all listed jobs until all complete or timeout. Prefer check_job for non-blocking status checks.",
       inputSchema: z.object({
         job_ids: z.array(z.string()).describe("Job IDs to wait for"),
-        timeout_minutes: z.number().default(10).optional().describe("Max wait time in minutes (default 10)"),
+        timeout_minutes: z.number().default(120).optional().describe("Max wait time in minutes (default 120 — ML training can take hours)"),
       }),
       execute: async ({ job_ids, timeout_minutes }: { job_ids: string[]; timeout_minutes?: number }) => {
-        const timeoutMs = (timeout_minutes || 10) * 60 * 1000;
+        const timeoutMs = (timeout_minutes || 120) * 60 * 1000;
         const start = Date.now();
         const results: Record<string, { status: string; stdout: string; stderr: string; exitCode: number | null }> = {};
 
@@ -1840,9 +2114,6 @@ function createTools(
           // Apply standard sanitization
           cmd = cmd.replace(/\bpython\b(?!3)/g, "python3");
           cmd = cmd.replace(/\s+/g, " ").trim();
-          if (!cmd.includes("timeout ")) {
-            cmd = `timeout 2400 ${cmd}`;
-          }
 
           try {
             const result = await submitRemoteJob({
@@ -1883,12 +2154,12 @@ function createTools(
     }),
 
     dispatch_scouts: tool({
-      description: "Launch parallel literature scout agents to search for papers from multiple angles simultaneously. Each scout is an independent AI that searches, reads papers, and reports back findings. Use this at the start of research or when you need broad coverage of a topic. Much faster than searching sequentially — scouts run in the background while you continue working.",
+      description: "Launch parallel literature scout agents to search from multiple angles. Scouts search and REPORT findings — they do NOT import papers. You review their findings via collect_results and import only the best papers with search_papers. This keeps your library clean.",
       inputSchema: z.object({
         facets: z.array(z.object({
           angle: z.string().describe("Search angle, e.g. 'theoretical foundations of attention mechanisms'"),
           keywords: z.array(z.string()).describe("Search keywords for this angle"),
-        })).min(2).max(4).describe("2-4 different search facets to explore in parallel"),
+        })).min(2).max(3).describe("2-3 different search facets to explore in parallel"),
       }),
       execute: async ({ facets }: { facets: { angle: string; keywords: string[] }[] }) => {
         if (!(prisma as unknown as Record<string, unknown>).agentTask) {
@@ -1925,10 +2196,206 @@ function createTools(
       },
     }),
 
-    collect_results: tool({
-      description: "Collect findings from dispatched scout agents (or any sub-agent tasks). Returns completed outputs and status of pending ones. Call this after doing other work to gather what the scouts found.",
+    dispatch_reviewer: tool({
+      description: "Launch a background adversarial reviewer (runs on Opus) to critique your hypotheses, methodology, or results. The reviewer has access to the paper library and Mind Palace to verify claims against literature. Returns a task ID — collect the review with collect_results when ready. Use this for deep, literature-grounded critique; use adversarial_review for quick inline critique.",
       inputSchema: z.object({
-        task_ids: z.array(z.string()).describe("Task IDs from dispatch_scouts"),
+        content: z.string().describe("The hypotheses, experimental design, or results to review. Include specific numbers, methods, and claims."),
+        focus: z.enum(["hypotheses", "methodology", "results", "statistical", "general"]).default("general").optional()
+          .describe("What aspect to focus the review on"),
+      }),
+      execute: async ({ content, focus }: { content: string; focus?: string }) => {
+        if (!(prisma as unknown as Record<string, unknown>).agentTask) {
+          return "Sub-agent tasks not available. Restart the dev server to pick up schema changes.";
+        }
+        const reviewFocus = focus || "general";
+        emit({ type: "tool_progress", toolName: "dispatch_reviewer", content: `Launching adversarial reviewer (${reviewFocus})...` });
+
+        const task = await prisma.agentTask.create({
+          data: {
+            projectId,
+            role: "reviewer",
+            goal: `Adversarial review (${reviewFocus})`,
+            status: "PENDING",
+            input: JSON.stringify({ content, focus: reviewFocus, userId }),
+          },
+        });
+
+        import("./sub-agent").then(({ runSubAgent }) => {
+          runSubAgent(task.id).catch((err) => {
+            console.error(`[dispatch_reviewer] Reviewer ${task.id} failed:`, err);
+          });
+        });
+
+        emit({ type: "tool_output", toolName: "dispatch_reviewer", content: `Reviewer launched (${task.id.slice(0, 8)})` });
+        await recordStep("critique", `Dispatched adversarial reviewer (${reviewFocus})`, "COMPLETED", { taskId: task.id, focus: reviewFocus });
+
+        return `Launched adversarial reviewer (ID: ${task.id.slice(0, 8)}, focus: ${reviewFocus}).\n\nThe reviewer runs on Opus and has access to your paper library and Mind Palace — it will verify claims against literature. **Continue with other work** and use \`collect_results\` with ["${task.id}"] when ready.`;
+      },
+    }),
+
+    dispatch_experimenter: tool({
+      description: "Launch a background experiment runner to execute a specific experiment autonomously. The experimenter can write scripts, run commands, and read results in the project directory. Use this to run independent experiments in parallel while you do other work. Returns a task ID — collect results with collect_results.",
+      inputSchema: z.object({
+        goal: z.string().describe("What the experiment should accomplish (e.g., 'Run ablation study removing attention heads 4,5,6 and measure perplexity')"),
+        instructions: z.string().describe("Detailed instructions: what script to run, what parameters to use, what output to produce. Be specific."),
+      }),
+      execute: async ({ goal, instructions }: { goal: string; instructions: string }) => {
+        if (!(prisma as unknown as Record<string, unknown>).agentTask) {
+          return "Sub-agent tasks not available. Restart the dev server to pick up schema changes.";
+        }
+        emit({ type: "tool_progress", toolName: "dispatch_experimenter", content: `Launching experimenter: ${goal.slice(0, 60)}...` });
+
+        const task = await prisma.agentTask.create({
+          data: {
+            projectId,
+            role: "experimenter",
+            goal,
+            status: "PENDING",
+            input: JSON.stringify({ instructions, workDir, userId }),
+          },
+        });
+
+        import("./sub-agent").then(({ runSubAgent }) => {
+          runSubAgent(task.id).catch((err) => {
+            console.error(`[dispatch_experimenter] Experimenter ${task.id} failed:`, err);
+          });
+        });
+
+        emit({ type: "tool_output", toolName: "dispatch_experimenter", content: `Experimenter launched: ${goal.slice(0, 60)} (${task.id.slice(0, 8)})` });
+        await recordStep("run_experiment", `Dispatched experimenter: ${goal.slice(0, 80)}`, "COMPLETED", { taskId: task.id, goal }, "experiment");
+
+        return `Launched experimenter (ID: ${task.id.slice(0, 8)}): "${goal}"\n\nThe experimenter will run autonomously in ${workDir}. **Continue with other work** and use \`collect_results\` with ["${task.id}"] when ready.`;
+      },
+    }),
+
+    dispatch_synthesizer: tool({
+      description: "Launch a background synthesizer (runs on Opus) to do deep cross-paper analysis. Given paper titles from your library, the synthesizer reads them all and finds contradictions, complementary techniques, and unexplored combinations that individual readings miss. Returns a task ID — collect with collect_results. Feed its output to dispatch_architect.",
+      inputSchema: z.object({
+        papers: z.array(z.string()).optional().describe("Paper titles to synthesize across. If omitted, synthesizer searches the library based on the focus."),
+        focus: z.string().describe("What to focus the synthesis on (e.g., 'attention mechanism efficiency techniques across these papers')"),
+      }),
+      execute: async ({ papers, focus }: { papers?: string[]; focus: string }) => {
+        if (!(prisma as unknown as Record<string, unknown>).agentTask) {
+          return "Sub-agent tasks not available. Restart the dev server to pick up schema changes.";
+        }
+        emit({ type: "tool_progress", toolName: "dispatch_synthesizer", content: `Launching synthesizer: ${focus.slice(0, 60)}...` });
+
+        const task = await prisma.agentTask.create({
+          data: {
+            projectId,
+            role: "synthesizer",
+            goal: `Synthesize: ${focus.slice(0, 200)}`,
+            status: "PENDING",
+            input: JSON.stringify({ papers: papers || [], focus, userId }),
+          },
+        });
+
+        import("./sub-agent").then(({ runSubAgent }) => {
+          runSubAgent(task.id).catch((err) => {
+            console.error(`[dispatch_synthesizer] Synthesizer ${task.id} failed:`, err);
+          });
+        });
+
+        emit({ type: "tool_output", toolName: "dispatch_synthesizer", content: `Synthesizer launched (${task.id.slice(0, 8)})` });
+        await recordStep("synthesize", `Dispatched synthesizer: ${focus.slice(0, 80)}`, "COMPLETED", { taskId: task.id, focus, paperCount: (papers || []).length }, "literature");
+
+        const paperNote = papers && papers.length > 0
+          ? `Analyzing ${papers.length} papers: ${papers.slice(0, 3).map(p => `"${p.slice(0, 40)}"`).join(", ")}${papers.length > 3 ? ` +${papers.length - 3} more` : ""}`
+          : "Searching library for relevant papers";
+        return `Launched synthesizer (ID: ${task.id.slice(0, 8)}): ${paperNote}\nFocus: ${focus}\n\nThe synthesizer runs on Opus and reads papers deeply. **Continue with other work** and use \`collect_results\` with ["${task.id}"] when ready. Feed its output to \`dispatch_architect\` for novel approach proposals.`;
+      },
+    }),
+
+    dispatch_analyst: tool({
+      description: "Launch a background experiment analyst to run diagnostic scripts on a completed experiment. The analyst writes and runs diagnostic code (attention analysis, gradient flow, error patterns) and reports RAW DATA — numbers, not interpretations. Feed its output to dispatch_architect for interpretation in context of the literature.",
+      inputSchema: z.object({
+        goal: z.string().describe("What to diagnose (e.g., 'Model achieves 72% accuracy — diagnose why attention mechanism underperforms')"),
+        diagnosis_type: z.enum(["attention", "gradient", "errors", "general"]).default("general").optional()
+          .describe("What type of diagnostics to run"),
+        experiment_script: z.string().optional().describe("Path to the experiment script (relative to workDir)"),
+        results_path: z.string().optional().describe("Path to results file"),
+        model_path: z.string().optional().describe("Path to model checkpoint"),
+        instructions: z.string().optional().describe("Additional instructions for the analyst"),
+      }),
+      execute: async ({ goal, diagnosis_type, experiment_script, results_path, model_path, instructions }: {
+        goal: string; diagnosis_type?: string; experiment_script?: string;
+        results_path?: string; model_path?: string; instructions?: string;
+      }) => {
+        if (!(prisma as unknown as Record<string, unknown>).agentTask) {
+          return "Sub-agent tasks not available. Restart the dev server to pick up schema changes.";
+        }
+        const diagType = diagnosis_type || "general";
+        emit({ type: "tool_progress", toolName: "dispatch_analyst", content: `Launching analyst (${diagType}): ${goal.slice(0, 60)}...` });
+
+        const task = await prisma.agentTask.create({
+          data: {
+            projectId,
+            role: "analyst",
+            goal,
+            status: "PENDING",
+            input: JSON.stringify({
+              workDir, userId, diagnosis_type: diagType,
+              experiment_script, results_path, model_path, instructions,
+            }),
+          },
+        });
+
+        import("./sub-agent").then(({ runSubAgent }) => {
+          runSubAgent(task.id).catch((err) => {
+            console.error(`[dispatch_analyst] Analyst ${task.id} failed:`, err);
+          });
+        });
+
+        emit({ type: "tool_output", toolName: "dispatch_analyst", content: `Analyst launched (${task.id.slice(0, 8)})` });
+        await recordStep("analyze_results", `Dispatched analyst (${diagType}): ${goal.slice(0, 80)}`, "COMPLETED", { taskId: task.id, diagType }, "experiment");
+
+        return `Launched analyst (ID: ${task.id.slice(0, 8)}, type: ${diagType}): "${goal}"\n\nThe analyst will run diagnostic scripts in ${workDir} and report raw data. **Continue with other work** and use \`collect_results\` with ["${task.id}"] when ready. Feed its raw data to \`dispatch_architect\` for interpretation.`;
+      },
+    }),
+
+    dispatch_architect: tool({
+      description: "Launch a background research architect (runs on Opus) to propose novel approaches. The architect combines synthesis reports (from dispatch_synthesizer) and diagnostic data (from dispatch_analyst) to propose 2-3 creative approaches with risk ratings and validation experiments. Call this AFTER you have synthesis output and optionally analyst data.",
+      inputSchema: z.object({
+        goal: z.string().describe("The research goal (e.g., 'Improve attention efficiency for long-sequence modeling')"),
+        synthesis: z.string().describe("Output from the synthesizer sub-agent (cross-paper analysis)"),
+        diagnostics: z.string().optional().describe("Raw data from the analyst sub-agent (optional but recommended)"),
+        current_approach: z.string().optional().describe("What's been tried so far and the results"),
+      }),
+      execute: async ({ goal, synthesis, diagnostics, current_approach }: {
+        goal: string; synthesis: string; diagnostics?: string; current_approach?: string;
+      }) => {
+        if (!(prisma as unknown as Record<string, unknown>).agentTask) {
+          return "Sub-agent tasks not available. Restart the dev server to pick up schema changes.";
+        }
+        emit({ type: "tool_progress", toolName: "dispatch_architect", content: `Launching architect: ${goal.slice(0, 60)}...` });
+
+        const task = await prisma.agentTask.create({
+          data: {
+            projectId,
+            role: "architect",
+            goal: `Architect: ${goal.slice(0, 200)}`,
+            status: "PENDING",
+            input: JSON.stringify({ goal, synthesis, diagnostics, current_approach, userId }),
+          },
+        });
+
+        import("./sub-agent").then(({ runSubAgent }) => {
+          runSubAgent(task.id).catch((err) => {
+            console.error(`[dispatch_architect] Architect ${task.id} failed:`, err);
+          });
+        });
+
+        emit({ type: "tool_output", toolName: "dispatch_architect", content: `Architect launched (${task.id.slice(0, 8)})` });
+        await recordStep("synthesize", `Dispatched architect: ${goal.slice(0, 80)}`, "COMPLETED", { taskId: task.id, goal, hasDiagnostics: !!diagnostics }, "literature");
+
+        return `Launched architect (ID: ${task.id.slice(0, 8)}): "${goal}"\n\nThe architect runs on Opus with library access and will propose 2-3 novel approaches with risk ratings. **Continue with other work** and use \`collect_results\` with ["${task.id}"] when ready.\n\n**Important:** Review proposals critically. Start with the cheapest validation experiment before committing to larger changes.`;
+      },
+    }),
+
+    collect_results: tool({
+      description: "Collect findings from dispatched sub-agents (scouts, reviewers, experimenters, synthesizers, analysts, architects). Returns completed outputs and status of pending ones. Automatically detects and re-launches zombie tasks that got stuck. Call this after doing other work.",
+      inputSchema: z.object({
+        task_ids: z.array(z.string()).describe("Task IDs from any dispatch tool"),
       }),
       execute: async ({ task_ids }: { task_ids: string[] }) => {
         if (!(prisma as unknown as Record<string, unknown>).agentTask) {
@@ -1943,34 +2410,87 @@ function createTools(
         const completed: string[] = [];
         const pending: string[] = [];
         const failed: string[] = [];
+        const relaunched: string[] = [];
+
+        const ZOMBIE_THRESHOLD_MS = 10 * 60 * 1000; // 10 minutes — scouts should finish in 2-5min
+
+        const roleLabel = (t: { role: string }) => {
+          const labels: Record<string, string> = {
+            scout: "Scout", reviewer: "Reviewer", experimenter: "Experimenter",
+            synthesizer: "Synthesizer", analyst: "Analyst", architect: "Architect",
+          };
+          return labels[t.role] || t.role;
+        };
+
+        // Zombie thresholds per role (experimenters take longer)
+        const zombieThreshold = (role: string) =>
+          role === "experimenter" ? 30 * 60 * 1000 : 10 * 60 * 1000;
 
         for (const task of tasks) {
+          const label = roleLabel(task);
           if (task.status === "COMPLETED" && task.output) {
             try {
               const output = JSON.parse(task.output);
-              completed.push(`## Scout: "${output.angle || task.goal}"\n${output.summary || "No summary"}\n(${output.stepsUsed || "?"} steps, ${task.tokenUsage || "?"} tokens)`);
+              let entry = `## ${label}: "${output.angle || task.goal}"\n${output.summary || "No summary"}\n(${output.stepsUsed || "?"} steps, ${task.tokenUsage || "?"} tokens)`;
+              if (task.role === "architect") {
+                entry += "\n\n> **Review these proposals critically.** Start with the cheapest validation experiment before committing to larger changes.";
+              }
+              completed.push(entry);
             } catch {
-              completed.push(`## Scout: "${task.goal}"\n${task.output.slice(0, 3000)}`);
+              completed.push(`## ${label}: "${task.goal}"\n${task.output.slice(0, 3000)}`);
             }
           } else if (task.status === "FAILED") {
-            failed.push(`Scout "${task.goal}": FAILED — ${task.error || "unknown error"}`);
-          } else {
-            pending.push(`Scout "${task.goal}": ${task.status.toLowerCase()}...`);
+            failed.push(`${label} "${task.goal}": FAILED — ${task.error || "unknown error"}`);
+          } else if (task.status === "RUNNING" || task.status === "PENDING") {
+            const age = Date.now() - new Date(task.createdAt).getTime();
+            if (age > zombieThreshold(task.role)) {
+              // Zombie task — mark failed and re-launch
+              await prisma.agentTask.update({
+                where: { id: task.id },
+                data: { status: "FAILED", error: `Zombie: stuck in ${task.status} for ${Math.round(age / 60000)}min`, completedAt: new Date() },
+              });
+
+              // Re-launch with a new task
+              try {
+                const newTask = await prisma.agentTask.create({
+                  data: {
+                    projectId: task.projectId,
+                    role: task.role,
+                    goal: task.goal,
+                    status: "PENDING",
+                    input: task.input,
+                  },
+                });
+                import("./sub-agent").then(({ runSubAgent }) => {
+                  runSubAgent(newTask.id).catch((err) => {
+                    console.error(`[collect_results] Re-launched ${task.role} ${newTask.id} failed:`, err);
+                  });
+                });
+                relaunched.push(`${label} "${task.goal}": was zombie (${Math.round(age / 60000)}min), re-launched as ${newTask.id.slice(0, 8)}`);
+              } catch {
+                failed.push(`${label} "${task.goal}": zombie (${Math.round(age / 60000)}min), re-launch failed`);
+              }
+            } else {
+              pending.push(`${label} "${task.goal}": ${task.status.toLowerCase()} (${Math.round(age / 60000)}min)...`);
+            }
           }
         }
 
         const parts: string[] = [];
         if (completed.length > 0) {
-          parts.push(`# Completed Scout Reports (${completed.length})\n\n${completed.join("\n\n---\n\n")}`);
+          parts.push(`# Completed Reports (${completed.length})\n\n${completed.join("\n\n---\n\n")}`);
+        }
+        if (relaunched.length > 0) {
+          parts.push(`\n# Re-launched Zombie Tasks (${relaunched.length})\n${relaunched.join("\n")}\n\nThese were stuck and have been re-launched. Call collect_results again in a few minutes.`);
         }
         if (pending.length > 0) {
-          parts.push(`\n# Still Running (${pending.length})\n${pending.join("\n")}\n\nCall collect_results again later to get their findings.`);
+          parts.push(`\n# Still Running (${pending.length})\n${pending.join("\n")}\n\nCall collect_results again later.`);
         }
         if (failed.length > 0) {
           parts.push(`\n# Failed (${failed.length})\n${failed.join("\n")}`);
         }
 
-        return parts.join("\n") || "No results yet. Scouts are still working.";
+        return parts.join("\n") || "No results yet. Sub-agents are still working.";
       },
     }),
 
@@ -2279,7 +2799,7 @@ Be harsh but fair. Vague praise is useless. Specific criticism saves months of w
         });
 
         // Build searchable text per paper including all intelligence
-        const queryTerms = query.toLowerCase().split(/\s+/).filter((t) => t.length > 2);
+        const queryTerms = await processQuery(query);
         const scored = allPapers.map((paper) => {
           // Gather all searchable text with weight multipliers
           const weighted: { text: string; weight: number }[] = [
@@ -2314,14 +2834,8 @@ Be harsh but fair. Vague praise is useless. Specific criticism saves months of w
             weighted.push({ text: typeof paper.promptResults[0].result === "string" ? paper.promptResults[0].result : JSON.stringify(paper.promptResults[0].result), weight: 2 });
           }
 
-          // Score with weights
-          let score = 0;
-          for (const { text, weight } of weighted) {
-            const lower = text.toLowerCase();
-            for (const term of queryTerms) {
-              score += (lower.match(new RegExp(term, "g")) || []).length * weight;
-            }
-          }
+          // Score with weights (stemmed + expanded terms)
+          let score = scoreWeighted(weighted, queryTerms);
 
           // Boost project papers
           if (paperIds.has(paper.id)) score *= 1.5;
@@ -2353,8 +2867,8 @@ Be harsh but fair. Vague praise is useless. Specific criticism saves months of w
           if (p.insights.length > 0) {
             const matchingInsights = p.insights
               .filter((ins) => {
-                const text = `${ins.learning} ${ins.significance} ${ins.applications || ""}`.toLowerCase();
-                return queryTerms.some((t) => text.includes(t));
+                const text = `${ins.learning} ${ins.significance} ${ins.applications || ""}`;
+                return scoreText(text, queryTerms) > 0;
               })
               .slice(0, 3);
             if (matchingInsights.length > 0) {
@@ -2373,8 +2887,8 @@ Be harsh but fair. Vague praise is useless. Specific criticism saves months of w
           ];
           const matchingRels = allRelations
             .filter((r) => {
-              const text = `${r.desc || ""} ${r.other}`.toLowerCase();
-              return queryTerms.some((t) => text.includes(t));
+              const text = `${r.desc || ""} ${r.other}`;
+              return scoreText(text, queryTerms) > 0;
             })
             .slice(0, 3);
           if (matchingRels.length > 0) {
@@ -2386,10 +2900,7 @@ Be harsh but fair. Vague praise is useless. Specific criticism saves months of w
 
           // Matching citation contexts
           const matchingCites = p.references
-            .filter((ref) => {
-              const text = (ref.citationContext || "").toLowerCase();
-              return queryTerms.some((t) => text.includes(t));
-            })
+            .filter((ref) => scoreText(ref.citationContext || "", queryTerms) > 0)
             .slice(0, 2);
           if (matchingCites.length > 0) {
             parts.push(`   Relevant Citations:`);
@@ -2401,7 +2912,7 @@ Be harsh but fair. Vague praise is useless. Specific criticism saves months of w
           // Contradictions snippet if relevant
           if (p.promptResults[0]?.result) {
             const contradText = typeof p.promptResults[0].result === "string" ? p.promptResults[0].result : JSON.stringify(p.promptResults[0].result);
-            if (queryTerms.some((t) => contradText.toLowerCase().includes(t))) {
+            if (scoreText(contradText, queryTerms) > 0) {
               parts.push(`   Contradictions: ${contradText.slice(0, 250)}`);
             }
           }
@@ -2412,10 +2923,7 @@ Be harsh but fair. Vague praise is useless. Specific criticism saves months of w
         // Bump usageCount for insights surfaced in search results
         const surfacedInsightIds = scored.flatMap((s) =>
           s.paper.insights
-            .filter((ins) => {
-              const text = `${ins.learning} ${ins.significance} ${ins.applications || ""}`.toLowerCase();
-              return queryTerms.some((t) => text.includes(t));
-            })
+            .filter((ins) => scoreText(`${ins.learning} ${ins.significance} ${ins.applications || ""}`, queryTerms) > 0)
             .map((ins) => ins.id)
         );
         if (surfacedInsightIds.length > 0) {
@@ -2452,8 +2960,8 @@ Be harsh but fair. Vague praise is useless. Specific criticism saves months of w
           return "No insights in the Mind Palace yet. Use search_library or search_papers to find relevant literature.";
         }
 
-        // Score by relevance
-        const queryTerms = query.toLowerCase().split(/\s+/).filter((t) => t.length > 2);
+        // Score by relevance (stemmed + LLM-expanded terms)
+        const queryTerms = await processQuery(query);
         const scored = insights.map((insight) => {
           const searchable = [
             insight.learning,
@@ -2462,13 +2970,9 @@ Be harsh but fair. Vague praise is useless. Specific criticism saves months of w
             insight.userNotes || "",
             insight.paper.title,
             insight.room.name,
-          ].join(" ").toLowerCase();
+          ].join(" ");
 
-          let score = 0;
-          for (const term of queryTerms) {
-            score += (searchable.match(new RegExp(term, "g")) || []).length;
-          }
-          return { insight, score };
+          return { insight, score: scoreText(searchable, queryTerms) };
         })
           .filter((s) => s.score > 0)
           .sort((a, b) => b.score - a.score)
@@ -2507,13 +3011,16 @@ Be harsh but fair. Vague praise is useless. Specific criticism saves months of w
       execute: async ({ query }: { query: string }) => {
         emit({ type: "tool_progress", toolName: "web_search", content: `Searching web: "${query.slice(0, 60)}..."` });
         try {
-          // Use DuckDuckGo HTML search — no API key required
-          const encoded = encodeURIComponent(query);
-          const url = `https://html.duckduckgo.com/html/?q=${encoded}`;
-          const res = await fetch(url, {
+          // Use DuckDuckGo HTML search via POST — no API key required
+          // POST avoids the CAPTCHA that GET triggers for server-side requests
+          const res = await fetch("https://html.duckduckgo.com/html/", {
+            method: "POST",
             headers: {
-              "User-Agent": "Mozilla/5.0 (compatible; ArcanaResearchBot/1.0)",
+              "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+              "Referer": "https://duckduckgo.com/",
+              "Content-Type": "application/x-www-form-urlencoded",
             },
+            body: `q=${encodeURIComponent(query)}`,
             signal: AbortSignal.timeout(15_000),
           });
           if (!res.ok) return `Web search failed (HTTP ${res.status}). Try a different query.`;

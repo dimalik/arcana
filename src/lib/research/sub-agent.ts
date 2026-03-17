@@ -10,131 +10,94 @@
  * - Marks COMPLETED/FAILED
  */
 
-import { generateText, stepCountIs, tool } from "ai";
+import { streamText, stepCountIs, tool } from "ai";
 import { z } from "zod";
 import { getModel } from "@/lib/llm/provider";
-import { getDefaultModel } from "@/lib/llm/auto-process";
+import { getModelForTier } from "@/lib/llm/auto-process";
 import { setLlmContext } from "@/lib/llm/provider";
 import { prisma } from "@/lib/prisma";
 import { searchAllSources } from "@/lib/import/semantic-scholar";
+import { processQuery, scoreText, filterByRelevance, stemTerms, scoreWeighted } from "./search-utils";
+import { exec } from "child_process";
+import { promisify } from "util";
+import { readFile, writeFile, readdir, stat } from "fs/promises";
+import path from "path";
+
+const execAsync = promisify(exec);
 
 // ── Scout system prompt ─────────────────────────────────────────
 
 function scoutSystemPrompt(angle: string, keywords: string[]): string {
-  return `You are a focused literature scout — a specialist researcher tasked with finding and summarizing papers on a specific angle of a research topic.
+  return `You are a focused literature scout. You search for papers and report findings — you do NOT import papers.
 
 ## Your Mission
 Search for papers related to: "${angle}"
 Keywords to try: ${keywords.join(", ")}
 
 ## Instructions
-1. Search for papers using 2-3 different queries (vary keywords, try synonyms)
-2. For the most relevant results, read them to extract key methods, datasets, findings, and specific numbers
+1. Use \`find_papers\` with 2-3 different queries (vary keywords, try synonyms)
+2. For promising results, use \`read_paper\` if they're already in the library
 3. Synthesize what you found into a structured summary
 
-## Output Format
-When you have gathered enough information (or exhausted your search budget), return a final summary with:
-- **Key Papers**: List of the most relevant papers with their main contributions
-- **Methods**: Specific techniques and approaches found
-- **Datasets**: Any benchmark datasets mentioned
-- **Key Numbers**: Specific performance numbers, baselines, or thresholds
-- **Gaps**: What the literature doesn't address or disagrees on
-- **Recommendations**: Which papers the lead researcher should read in detail
+**IMPORTANT: find_papers does NOT import papers. You are scouting only — the lead researcher decides what to import.**
 
-Be specific — include paper titles, author names, years, and concrete numbers. Vague summaries are useless.`;
+## Output Format
+Return a summary with:
+- **Key Papers**: The 3-5 most relevant papers (title, year, authors, why relevant)
+- **Methods**: Specific techniques found
+- **Key Numbers**: Performance numbers and baselines
+- **Gaps**: What the literature doesn't address
+- **Import Recommendations**: Which papers the lead researcher SHOULD import (include DOI/arxivId for easy import)
+
+Be specific — include paper titles, years, and concrete numbers.`;
 }
 
 // ── Sub-agent tool sets ─────────────────────────────────────────
 
-function scoutTools(userId: string, projectId: string) {
+function scoutTools(userId: string, _projectId: string) {
   return {
-    search_papers: tool({
-      description: "Search academic databases for papers.",
+    find_papers: tool({
+      description: "Search academic databases and return results for evaluation. Does NOT import papers — report findings so the lead researcher can decide what to import.",
       inputSchema: z.object({
         query: z.string(),
-        max_results: z.number().min(1).max(10).default(5).optional(),
+        max_results: z.number().min(1).max(5).default(3).optional(),
       }),
       execute: async ({ query, max_results }: { query: string; max_results?: number }) => {
         const results = await searchAllSources(query);
-        const toShow = results.slice(0, max_results || 5);
-        if (toShow.length === 0) return "No papers found.";
-
-        // Auto-import to project collection
-        const proj = await prisma.researchProject.findUnique({
-          where: { id: projectId },
-          select: { collectionId: true, title: true },
-        });
-        let collectionId = proj?.collectionId;
-        if (!collectionId) {
-          const col = await prisma.collection.create({
-            data: { name: `Research: ${proj?.title || "Project"}` },
-          });
-          collectionId = col.id;
-          await prisma.researchProject.update({
-            where: { id: projectId },
-            data: { collectionId },
-          });
+        const relevant = filterByRelevance(results, query);
+        const toShow = relevant.slice(0, max_results || 3);
+        if (toShow.length === 0) {
+          return results.length > 0
+            ? `Found ${results.length} papers but none were relevant to "${query}".`
+            : "No papers found.";
         }
 
-        const imported: string[] = [];
-        for (const r of toShow) {
-          try {
-            // Check duplicates
-            let existing: { id: string } | null = null;
-            if (r.doi || r.arxivId) {
-              existing = await prisma.paper.findFirst({
-                where: {
-                  userId,
-                  OR: [
-                    ...(r.doi ? [{ doi: r.doi }] : []),
-                    ...(r.arxivId ? [{ arxivId: r.arxivId }] : []),
-                  ],
-                },
-                select: { id: true },
-              });
-            }
-            if (!existing && r.title) {
-              const normTitle = r.title.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
-              const candidates = await prisma.paper.findMany({
-                where: { userId },
-                select: { id: true, title: true },
-              });
-              existing = candidates.find((c) => {
-                const ct = c.title.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
-                return ct === normTitle;
-              }) || null;
-            }
+        const terms = stemTerms(query);
+        const formatted = toShow.map((r, i) => {
+          const score = scoreWeighted(
+            [{ text: r.title, weight: 3 }, { text: r.abstract || "", weight: 2 }],
+            terms,
+          );
+          return `${i + 1}. "${r.title}" (${r.year || "?"}) — ${r.citationCount || 0} citations, relevance=${score.toFixed(1)}${r.doi ? `\n   DOI: ${r.doi}` : ""}${r.arxivId ? `\n   arXiv: ${r.arxivId}` : ""}${r.abstract ? `\n   Abstract: ${r.abstract.slice(0, 300)}` : ""}`;
+        });
 
-            if (existing) {
-              await prisma.collectionPaper.upsert({
-                where: { paperId_collectionId: { collectionId, paperId: existing.id } },
-                create: { collectionId, paperId: existing.id },
-                update: {},
-              });
-              imported.push(`"${r.title}" (already in library)`);
-            } else {
-              const paper = await prisma.paper.create({
-                data: {
-                  title: r.title, userId,
-                  abstract: r.abstract ?? null,
-                  authors: r.authors ? JSON.stringify(r.authors) : null,
-                  year: r.year ?? null, venue: r.venue ?? null,
-                  doi: r.doi ?? null,
-                  arxivId: r.arxivId ?? null,
-                  sourceType: r.arxivId ? "ARXIV" : "RESEARCH",
-                  sourceUrl: r.externalUrl ?? null,
-                  processingStatus: "PENDING",
-                },
-              });
-              await prisma.collectionPaper.create({ data: { collectionId, paperId: paper.id } });
-              imported.push(`"${r.title}" (${r.year || "?"}) — ${r.citationCount || 0} citations${r.abstract ? `\n  Abstract: ${r.abstract.slice(0, 300)}` : ""}`);
-            }
-          } catch {
-            imported.push(`"${r.title}" — import failed`);
+        // Also check which are already in the library
+        const existingTitles = new Set<string>();
+        for (const r of toShow) {
+          if (r.doi || r.arxivId) {
+            const existing = await prisma.paper.findFirst({
+              where: { userId, OR: [...(r.doi ? [{ doi: r.doi }] : []), ...(r.arxivId ? [{ arxivId: r.arxivId }] : [])] },
+              select: { id: true },
+            });
+            if (existing) existingTitles.add(r.title);
           }
         }
 
-        return `Found ${imported.length} papers:\n\n${imported.join("\n\n")}`;
+        const libraryNote = existingTitles.size > 0
+          ? `\n\nAlready in library: ${Array.from(existingTitles).map(t => `"${t}"`).join(", ")}`
+          : "";
+
+        return `Found ${toShow.length} relevant papers (of ${results.length} total):\n\n${formatted.join("\n\n")}${libraryNote}\n\n(These are NOT imported — recommend the best ones in your summary for the lead researcher to import.)`;
       },
     }),
 
@@ -173,19 +136,15 @@ function scoutTools(userId: string, projectId: string) {
         query: z.string(),
       }),
       execute: async ({ query }: { query: string }) => {
-        const queryTerms = query.toLowerCase().split(/\s+/).filter((t) => t.length > 2);
+        const queryTerms = await processQuery(query);
         const papers = await prisma.paper.findMany({
           where: { userId },
           select: { title: true, abstract: true, summary: true, year: true },
         });
 
         const scored = papers.map((p) => {
-          const text = `${p.title} ${p.abstract || ""} ${p.summary || ""}`.toLowerCase();
-          let score = 0;
-          for (const t of queryTerms) {
-            score += (text.match(new RegExp(t, "g")) || []).length;
-          }
-          return { paper: p, score };
+          const text = `${p.title} ${p.abstract || ""} ${p.summary || ""}`;
+          return { paper: p, score: scoreText(text, queryTerms) };
         })
           .filter((s) => s.score > 0)
           .sort((a, b) => b.score - a.score)
@@ -200,6 +159,466 @@ function scoutTools(userId: string, projectId: string) {
     }),
   };
 }
+
+// ── Shared library tools (read-only) ────────────────────────────
+// Used by: reviewer, synthesizer, architect
+
+function libraryTools(userId: string) {
+  return {
+    read_paper: tool({
+      description: "Read a paper's abstract, summary, and key findings.",
+      inputSchema: z.object({
+        title: z.string().describe("Title or partial title"),
+      }),
+      execute: async ({ title }: { title: string }) => {
+        const paper = await prisma.paper.findFirst({
+          where: { userId, title: { contains: title } },
+          select: {
+            title: true, abstract: true, summary: true, keyFindings: true,
+            authors: true, year: true, venue: true,
+            insights: { select: { learning: true, significance: true } },
+          },
+        });
+        if (!paper) return `Paper "${title}" not found in library.`;
+
+        const parts = [`# ${paper.title}`];
+        if (paper.authors) parts.push(`Authors: ${paper.authors}`);
+        if (paper.year) parts.push(`Year: ${paper.year}`);
+        if (paper.abstract) parts.push(`\n## Abstract\n${paper.abstract}`);
+        if (paper.summary) parts.push(`\n## Summary\n${paper.summary}`);
+        if (paper.keyFindings) parts.push(`\n## Key Findings\n${paper.keyFindings}`);
+        if (paper.insights.length > 0) {
+          parts.push(`\n## Insights\n${paper.insights.map((i) => `- ${i.learning}`).join("\n")}`);
+        }
+        return parts.join("\n");
+      },
+    }),
+
+    search_library: tool({
+      description: "Search the paper library for related work.",
+      inputSchema: z.object({
+        query: z.string(),
+      }),
+      execute: async ({ query }: { query: string }) => {
+        const queryTerms = await processQuery(query);
+        const papers = await prisma.paper.findMany({
+          where: { userId },
+          select: { title: true, abstract: true, summary: true, year: true },
+        });
+
+        const scored = papers.map((p) => {
+          const text = `${p.title} ${p.abstract || ""} ${p.summary || ""}`;
+          return { paper: p, score: scoreText(text, queryTerms) };
+        })
+          .filter((s) => s.score > 0)
+          .sort((a, b) => b.score - a.score)
+          .slice(0, 5);
+
+        if (scored.length === 0) return `No papers match "${query}".`;
+
+        return scored.map((s, i) =>
+          `${i + 1}. "${s.paper.title}" (${s.paper.year || "?"})\n   ${(s.paper.summary || s.paper.abstract || "").slice(0, 200)}`
+        ).join("\n\n");
+      },
+    }),
+
+    query_insights: tool({
+      description: "Search the Mind Palace for insights and techniques.",
+      inputSchema: z.object({
+        query: z.string(),
+      }),
+      execute: async ({ query }: { query: string }) => {
+        const queryTerms = await processQuery(query);
+        const insights = await prisma.insight.findMany({
+          include: {
+            paper: { select: { title: true, year: true } },
+            room: { select: { name: true } },
+          },
+        });
+
+        if (insights.length === 0) return "No insights in the Mind Palace yet.";
+
+        const scored = insights.map((insight) => {
+          const searchable = [
+            insight.learning, insight.significance,
+            insight.applications || "", insight.paper.title, insight.room.name,
+          ].join(" ");
+          return { insight, score: scoreText(searchable, queryTerms) };
+        })
+          .filter((s) => s.score > 0)
+          .sort((a, b) => b.score - a.score)
+          .slice(0, 5);
+
+        if (scored.length === 0) return `No insights match "${query}".`;
+
+        return scored.map((s, i) =>
+          `${i + 1}. [${s.insight.room.name}] "${s.insight.paper.title}" (${s.insight.paper.year || "?"})\n   ${s.insight.learning}\n   Significance: ${s.insight.significance}`
+        ).join("\n\n");
+      },
+    }),
+  };
+}
+
+// ── Reviewer system prompt ───────────────────────────────────────
+
+function reviewerSystemPrompt(focus: string): string {
+  return `You are a skeptical, rigorous peer reviewer for a top-tier venue (NeurIPS, ICML, Nature). Your job is to find flaws, weaknesses, and gaps in the research presented to you.
+
+## Your Mission
+Review the following research content with focus on: "${focus}"
+
+## Instructions
+1. Read the submitted content carefully
+2. Use \`read_paper\` and \`search_library\` to verify claims against the existing literature
+3. Use \`query_insights\` to check if known techniques or findings contradict the claims
+4. Produce a structured, adversarial review
+
+## Review Structure
+1. **Summary**: One-sentence summary of what's being claimed
+2. **Strengths**: What's well-done (be brief — 2-3 bullets max)
+3. **Weaknesses**: Specific flaws, each with a concrete fix. Reference papers by name when possible.
+4. **Missing**: What's absent that a reviewer would expect (baselines, ablations, statistical tests, related work)
+5. **Alternative Explanations**: What else could explain these results?
+6. **Verdict**: Overall assessment and the 3 highest-priority fixes
+
+Be harsh but fair. Vague praise is useless. Specific criticism saves months of wasted work.`;
+}
+
+// (Reviewer uses libraryTools — defined above)
+
+// ── Experimenter system prompt ──────────────────────────────────
+
+function experimenterSystemPrompt(goal: string, workDir: string): string {
+  return `You are a focused experiment runner. You execute a specific experiment and report structured results.
+
+## Your Mission
+${goal}
+
+## Working Directory
+${workDir}
+
+## Instructions
+1. Use \`list_files\` to understand the project layout
+2. Use \`read_file\` to read experiment scripts and configs
+3. If needed, use \`write_file\` to create or modify experiment scripts
+4. Use \`run_command\` to execute the experiment
+5. Use \`read_file\` to read output files and logs
+6. Report structured results
+
+## Output Format
+Return a structured summary:
+- **Setup**: What was configured and run
+- **Results**: Key metrics, numbers, and outcomes
+- **Logs**: Any errors or warnings encountered
+- **Files**: Output files created (paths and brief description)
+- **Assessment**: Did the experiment succeed? What do the results mean?
+
+Be precise — include exact numbers, file paths, and command outputs.`;
+}
+
+// ── Shared workdir tools ────────────────────────────────────────
+// Used by: experimenter, analyst
+
+function workdirTools(workDir: string) {
+  return {
+    run_command: tool({
+      description: "Run a shell command in the experiment directory. For pip install, python scripts, data processing, etc.",
+      inputSchema: z.object({
+        command: z.string().describe("Shell command to run"),
+        timeout_seconds: z.number().default(300).optional().describe("Max execution time (default 300s)"),
+      }),
+      execute: async ({ command, timeout_seconds }: { command: string; timeout_seconds?: number }) => {
+        const timeoutMs = (timeout_seconds || 300) * 1000;
+        try {
+          const { stdout, stderr } = await execAsync(command, {
+            cwd: workDir,
+            timeout: timeoutMs,
+            env: { ...process.env, PYTHONUNBUFFERED: "1" },
+            maxBuffer: 5 * 1024 * 1024,
+          });
+          const parts: string[] = [];
+          if (stdout) parts.push(`stdout:\n${stdout.slice(-3000)}`);
+          if (stderr) parts.push(`stderr:\n${stderr.slice(-1000)}`);
+          return parts.join("\n\n") || "(no output)";
+        } catch (err) {
+          const e = err as { stdout?: string; stderr?: string; code?: number; killed?: boolean; message?: string };
+          if (e.killed) return `Command timed out after ${timeout_seconds || 300}s.\nstdout: ${(e.stdout || "").slice(-1000)}\nstderr: ${(e.stderr || "").slice(-500)}`;
+          return `Exit code ${e.code || 1}\nstdout: ${(e.stdout || "").slice(-2000)}\nstderr: ${(e.stderr || "").slice(-1000)}`;
+        }
+      },
+    }),
+
+    read_file: tool({
+      description: "Read a file from the experiment directory.",
+      inputSchema: z.object({
+        filepath: z.string().describe("Relative path within the experiment directory"),
+      }),
+      execute: async ({ filepath }: { filepath: string }) => {
+        const fullPath = path.resolve(workDir, filepath);
+        if (!fullPath.startsWith(workDir)) return "Error: path escapes experiment directory.";
+        try {
+          const content = await readFile(fullPath, "utf-8");
+          if (content.length > 10000) {
+            return `${content.slice(0, 5000)}\n\n... [truncated ${content.length - 10000} chars] ...\n\n${content.slice(-5000)}`;
+          }
+          return content;
+        } catch {
+          return `File not found: ${filepath}`;
+        }
+      },
+    }),
+
+    write_file: tool({
+      description: "Write a file to the experiment directory.",
+      inputSchema: z.object({
+        filepath: z.string().describe("Relative path within the experiment directory"),
+        content: z.string().describe("File content"),
+      }),
+      execute: async ({ filepath, content }: { filepath: string; content: string }) => {
+        const fullPath = path.resolve(workDir, filepath);
+        if (!fullPath.startsWith(workDir)) return "Error: path escapes experiment directory.";
+        await writeFile(fullPath, content, "utf-8");
+        return `Wrote ${content.length} bytes to ${filepath}`;
+      },
+    }),
+
+    list_files: tool({
+      description: "List files in a directory within the experiment workspace.",
+      inputSchema: z.object({
+        dir: z.string().default(".").optional().describe("Relative directory path (default: root)"),
+      }),
+      execute: async ({ dir }: { dir?: string }) => {
+        const fullPath = path.resolve(workDir, dir || ".");
+        if (!fullPath.startsWith(workDir)) return "Error: path escapes experiment directory.";
+        try {
+          const entries = await readdir(fullPath);
+          const details = await Promise.all(
+            entries.slice(0, 50).map(async (name) => {
+              try {
+                const s = await stat(path.join(fullPath, name));
+                return `${s.isDirectory() ? "d" : "-"} ${name}${s.isDirectory() ? "/" : ""} (${s.size}B)`;
+              } catch {
+                return `? ${name}`;
+              }
+            }),
+          );
+          return details.join("\n") + (entries.length > 50 ? `\n... and ${entries.length - 50} more` : "");
+        } catch {
+          return `Directory not found: ${dir || "."}`;
+        }
+      },
+    }),
+  };
+}
+
+// ── Synthesizer system prompt ───────────────────────────────────
+
+function synthesizerSystemPrompt(focus: string, paperTitles: string[]): string {
+  const papersSection = paperTitles.length > 0
+    ? `\n## Papers to Analyze\n${paperTitles.map((t, i) => `${i + 1}. "${t}"`).join("\n")}\n\nRead each of these papers using \`read_paper\`, then synthesize across them.`
+    : `\n## Finding Papers\nNo specific papers provided. Use \`search_library\` to find papers related to the focus area, then read the most relevant ones.`;
+
+  return `You are a deep synthesis agent. Your job is to read multiple papers and find what no individual reading reveals: contradictions, complementary techniques, and unexplored combinations.
+
+## Focus
+${focus}
+${papersSection}
+
+## Instructions
+1. Read each paper thoroughly using \`read_paper\`
+2. Use \`query_insights\` to find related techniques and known results
+3. Use \`search_library\` if you need to find additional related work
+4. Produce a structured cross-paper analysis
+
+## Output Format
+Your response MUST include these sections:
+- **Agreements**: What do these papers converge on? (methods, findings, assumptions)
+- **Contradictions**: Where do they disagree? Which has stronger evidence? Be specific — cite paper titles.
+- **Complementary Techniques**: Methods from different papers that could be combined but haven't been. For each pair, explain WHY they're complementary.
+- **Gaps**: What none of them address
+- **Unexplored Combinations**: Specific pairs of techniques that should work together, with theoretical reasoning for why
+
+Be specific — reference papers by name, cite specific techniques and numbers. Vague synthesis is useless.`;
+}
+
+// ── Analyst system prompt ───────────────────────────────────────
+
+function analystSystemPrompt(diagnosisType: string, workDir: string): string {
+  const diagnosisGuide =
+    diagnosisType === "attention"
+      ? `Focus on attention analysis:
+- Compute attention head importance scores (e.g., head masking or Taylor expansion)
+- Calculate pairwise cosine similarity between attention heads to find redundant pairs
+- Measure attention entropy per head per layer (low entropy = degenerate attention)
+- Save all numerical results to JSON files`
+      : diagnosisType === "gradient"
+      ? `Focus on gradient analysis:
+- Compute layer-wise gradient L2 norms during a forward+backward pass
+- Count dead neurons per layer (activation = 0 on >95% of inputs)
+- Check for vanishing gradients (norm < 1e-7) or exploding gradients (norm > 1e3)
+- Save all numerical results to JSON files`
+      : diagnosisType === "errors"
+      ? `Focus on error analysis:
+- Generate a confusion matrix on the validation/test set
+- Compute per-class accuracy and find worst-performing classes
+- Extract 10-20 specific examples the model gets wrong — include input, predicted, and actual
+- Save all results to JSON files`
+      : `Run general diagnostics (abbreviated versions of all):
+- Attention head entropy (if attention model)
+- Layer-wise gradient norms
+- Confusion matrix and per-class accuracy
+- 10 worst error examples
+- Save all results to JSON files`;
+
+  return `You are a focused experiment diagnostician. You write and run diagnostic scripts to produce RAW DATA about model behavior. You do NOT interpret the results — you report numbers and let the architect interpret them.
+
+## Working Directory
+${workDir}
+
+## Diagnosis Type
+${diagnosisGuide}
+
+## Instructions
+1. Use \`read_file\` to understand the experiment code and results
+2. Use \`list_files\` to find model checkpoints and output files
+3. Write diagnostic scripts with \`write_file\` — keep them focused and short
+4. Run them with \`run_command\`
+5. Read the output files and report the raw numbers
+
+## CRITICAL: Report Data, Not Interpretations
+Your job is to produce NUMBERS. Do not say "the model seems to struggle with X" — instead say "class X accuracy = 0.23, compared to mean accuracy 0.71." The architect will interpret these numbers in context of the literature.
+
+## Output Format
+End your response with a structured summary containing:
+- **Diagnosis Type**: What diagnostics were run
+- **Raw Data**: Key numbers, matrices, scores (inline or reference files)
+- **Diagnostic Files**: Paths to saved JSON/CSV files
+- **Summary**: One-paragraph factual summary of what the numbers show (no interpretation)`;
+}
+
+// ── Architect system prompt ─────────────────────────────────────
+
+function architectSystemPrompt(goal: string): string {
+  return `You are a research architect. You combine insights from literature synthesis and experimental diagnostics to propose NOVEL approaches. You are creative but disciplined — every proposal must be grounded in evidence and include a cheap validation experiment.
+
+## Research Goal
+${goal}
+
+## Instructions
+1. Read the synthesis and diagnostic reports provided to you
+2. Use \`read_paper\` to look up specific implementation details when needed
+3. Use \`query_insights\` to find related techniques
+4. Propose 2-3 novel approaches
+
+## CRITICAL CONSTRAINTS
+- Your proposals will be IMPLEMENTED AND RUN. Bad proposals waste GPU hours and research time.
+- Be honest about risk. If you're uncertain, say so.
+- ALWAYS propose a cheap validation experiment before a full training run.
+- Every proposal must reference specific papers or diagnostic findings as justification.
+
+## Output Format
+For each approach:
+
+**Approach N: [Descriptive Name]** (Risk: low|medium|high, Cost: trivial|small|medium|large)
+- **Inspiration**: Which papers/findings led to this idea (be specific — paper titles, section numbers)
+- **Core Idea**: 1-2 sentences
+- **Implementation Sketch**: Specific code changes needed (not full code, but precise enough to implement — e.g., "replace the standard MultiHeadAttention with a gated variant where each head has a learned sigmoid gate on the query projection")
+- **Why It Should Work**: Theoretical argument grounded in the literature
+- **Risks**: What could go wrong, and how you'd detect it
+- **Validation Experiment**: A SMALL, CHEAP experiment that tests the core idea (e.g., "train for 1 epoch on 10% of data and compare head utilization before/after gating")
+
+End with:
+**Recommendation**: Which approach to try first and why. Always recommend starting with the cheapest validation experiment.`;
+}
+
+// ── Role configuration ──────────────────────────────────────────
+
+type ModelTier = "reasoning" | "standard";
+
+interface RoleConfig {
+  tier: ModelTier;
+  maxSteps: number;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  getTools: (input: Record<string, any>) => Record<string, any>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  getSystemPrompt: (input: Record<string, any>, goal: string) => string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  getUserMessage: (input: Record<string, any>, goal: string) => string;
+}
+
+const ROLE_CONFIG: Record<string, RoleConfig> = {
+  scout: {
+    tier: "standard",
+    maxSteps: 15,
+    getTools: (input) => scoutTools(input.userId || "system", input.projectId || ""),
+    getSystemPrompt: (input, goal) => scoutSystemPrompt(input.angle || goal, input.keywords || []),
+    getUserMessage: (input, goal) => {
+      const angle = input.angle || goal;
+      const keywords: string[] = input.keywords || [];
+      return `Search for papers on: ${angle}\nKeywords: ${keywords.join(", ")}\n\nFind relevant papers, read the most promising ones, and provide a structured summary of what the literature says about this angle.`;
+    },
+  },
+  reviewer: {
+    tier: "reasoning",
+    maxSteps: 10,
+    getTools: (input) => libraryTools(input.userId || "system"),
+    getSystemPrompt: (input) => reviewerSystemPrompt(input.focus || "general"),
+    getUserMessage: (input, goal) => input.content || goal,
+  },
+  experimenter: {
+    tier: "standard",
+    maxSteps: 20,
+    getTools: (input) => {
+      if (!input.workDir) throw new Error("Experimenter requires workDir in input");
+      return workdirTools(input.workDir);
+    },
+    getSystemPrompt: (input, goal) => experimenterSystemPrompt(goal, input.workDir),
+    getUserMessage: (input, goal) => input.instructions || goal,
+  },
+  synthesizer: {
+    tier: "reasoning",
+    maxSteps: 15,
+    getTools: (input) => libraryTools(input.userId || "system"),
+    getSystemPrompt: (input, goal) => synthesizerSystemPrompt(input.focus || goal, input.papers || []),
+    getUserMessage: (input, goal) => {
+      const papers: string[] = input.papers || [];
+      const focus = input.focus || goal;
+      return papers.length > 0
+        ? `Synthesize across these ${papers.length} papers with focus on: ${focus}\n\nPapers: ${papers.map((p: string) => `"${p}"`).join(", ")}`
+        : `Find and synthesize papers related to: ${focus}`;
+    },
+  },
+  analyst: {
+    tier: "standard",
+    maxSteps: 20,
+    getTools: (input) => {
+      if (!input.workDir) throw new Error("Analyst requires workDir in input");
+      return workdirTools(input.workDir);
+    },
+    getSystemPrompt: (input, _goal) => analystSystemPrompt(input.diagnosis_type || "general", input.workDir),
+    getUserMessage: (input, goal) => {
+      const parts = [goal];
+      if (input.experiment_script) parts.push(`Experiment script: ${input.experiment_script}`);
+      if (input.results_path) parts.push(`Results file: ${input.results_path}`);
+      if (input.model_path) parts.push(`Model checkpoint: ${input.model_path}`);
+      if (input.instructions) parts.push(`\nAdditional instructions: ${input.instructions}`);
+      return parts.join("\n");
+    },
+  },
+  architect: {
+    tier: "reasoning",
+    maxSteps: 12,
+    getTools: (input) => libraryTools(input.userId || "system"),
+    getSystemPrompt: (input, goal) => architectSystemPrompt(input.goal || goal),
+    getUserMessage: (input, goal) => {
+      const parts = [`Research goal: ${input.goal || goal}`];
+      if (input.synthesis) parts.push(`\n## Synthesis Report\n${input.synthesis}`);
+      if (input.diagnostics) parts.push(`\n## Diagnostic Data\n${input.diagnostics}`);
+      if (input.current_approach) parts.push(`\n## Current Approach & Results\n${input.current_approach}`);
+      return parts.join("\n");
+    },
+  },
+};
 
 // ── Main runner ─────────────────────────────────────────────────
 
@@ -217,47 +636,68 @@ export async function runSubAgent(taskId: string): Promise<void> {
   });
 
   try {
-    const { provider, modelId, proxyConfig } = await getDefaultModel();
-    const model = await getModel(provider, modelId, proxyConfig);
-    setLlmContext("sub-agent-scout", "system", { projectId: task.projectId, taskId });
-
-    // Parse input
+    // Parse input and attach projectId for role configs
     const input = task.input ? JSON.parse(task.input) : {};
-    const angle = input.angle || task.goal;
-    const keywords: string[] = input.keywords || [];
+    input.projectId = task.projectId;
 
-    // Build tools based on role
-    const tools = task.role === "scout"
-      ? scoutTools(input.userId || "system", task.projectId)
-      : scoutTools(input.userId || "system", task.projectId); // extensible for future roles
+    // Look up role config — unknown roles throw instead of silent fallthrough
+    const config = ROLE_CONFIG[task.role];
+    if (!config) throw new Error(`Unknown sub-agent role: "${task.role}". Valid roles: ${Object.keys(ROLE_CONFIG).join(", ")}`);
 
-    const systemPrompt = task.role === "scout"
-      ? scoutSystemPrompt(angle, keywords)
-      : scoutSystemPrompt(angle, keywords);
+    // Select model tier
+    const { provider, modelId, proxyConfig } = await getModelForTier(config.tier);
+    const model = await getModel(provider, modelId, proxyConfig);
+    setLlmContext(`sub-agent-${task.role}`, "system", { projectId: task.projectId, taskId });
 
-    const result = await generateText({
-      model,
-      system: systemPrompt,
-      messages: [
-        { role: "user", content: `Search for papers on: ${angle}\nKeywords: ${keywords.join(", ")}\n\nFind relevant papers, read the most promising ones, and provide a structured summary of what the literature says about this angle.` },
-      ],
-      tools,
-      stopWhen: stepCountIs(15),
-    });
+    // Build tools, prompt, and user message from role config
+    const tools = config.getTools(input);
+    const systemPrompt = config.getSystemPrompt(input, task.goal);
+    const userMessage = config.getUserMessage(input, task.goal);
+    const maxSteps = config.maxSteps;
+
+    // Use streamText (not generateText) so the proxy gateway sees data flowing
+    // and doesn't time out. We collect the full result at the end.
+    // Retry with backoff — sub-agents often fail from rate limits when 3-4 run in parallel
+    let text = "";
+    let stepsUsed = 0;
+    let totalInputTokens = 0;
+    let totalOutputTokens = 0;
+    const MAX_RETRIES = 3;
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        const stream = streamText({
+          model,
+          system: systemPrompt,
+          messages: [{ role: "user", content: userMessage }],
+          tools,
+          stopWhen: stepCountIs(maxSteps),
+        });
+
+        // Consume the stream to keep the connection alive
+        text = await stream.text;
+        const usage = await stream.usage;
+        const steps = await stream.steps;
+        stepsUsed = steps?.length || 0;
+        totalInputTokens = usage?.inputTokens || 0;
+        totalOutputTokens = usage?.outputTokens || 0;
+        break; // Success
+      } catch (retryErr) {
+        const msg = retryErr instanceof Error ? retryErr.message : String(retryErr);
+        console.warn(`[sub-agent] Task ${taskId} attempt ${attempt}/${MAX_RETRIES} failed: ${msg}`);
+        if (attempt === MAX_RETRIES) throw retryErr;
+        // Exponential backoff: 5s, 15s, 45s
+        await new Promise((r) => setTimeout(r, 5000 * Math.pow(3, attempt - 1)));
+      }
+    }
 
     // Save output
     const output = {
-      angle,
-      keywords,
-      summary: result.text,
-      stepsUsed: result.steps?.length || 0,
-      tokenUsage: result.usage ? {
-        inputTokens: result.usage.inputTokens,
-        outputTokens: result.usage.outputTokens,
-      } : null,
+      summary: text,
+      stepsUsed,
+      tokenUsage: { inputTokens: totalInputTokens, outputTokens: totalOutputTokens },
     };
 
-    const totalTokens = (result.usage?.inputTokens || 0) + (result.usage?.outputTokens || 0);
+    const totalTokens = totalInputTokens + totalOutputTokens;
 
     await prisma.agentTask.update({
       where: { id: taskId },

@@ -33,6 +33,34 @@ async function setStep(paperId: string, step: ProcessingStep | null) {
  * Priority: DB settings > proxy env > openai env > anthropic env
  * When provider is "proxy", loads and returns the full ProxyConfig.
  */
+/**
+ * Model tiers for different tasks. Opus for critical reasoning, Sonnet for everything else.
+ */
+type ModelTier = "reasoning" | "standard";
+
+const TIER_MODEL_MAP: Record<ModelTier, string> = {
+  reasoning: "claude-opus-4-6",
+  standard: "claude-sonnet-4-6",
+};
+
+/**
+ * Get a model for a specific capability tier.
+ * - "reasoning": Opus — for the main research agent and adversarial reviewer
+ * - "standard": Sonnet — for scouts, paper processing, query expansion
+ *
+ * Falls back to the default model if the tier model isn't available via the proxy.
+ */
+export async function getModelForTier(tier: ModelTier): Promise<{ provider: LLMProvider; modelId: string; proxyConfig?: ProxyConfig }> {
+  const defaults = await getDefaultModel();
+
+  // Only upgrade if using proxy (direct API keys may not have Opus access)
+  if (defaults.provider !== "proxy") return defaults;
+
+  const targetModel = TIER_MODEL_MAP[tier];
+  // Use the tier model with the same proxy config
+  return { ...defaults, modelId: targetModel };
+}
+
 export async function getDefaultModel(): Promise<{ provider: LLMProvider; modelId: string; proxyConfig?: ProxyConfig }> {
   // Check DB settings first
   const [providerSetting, modelSetting] = await Promise.all([

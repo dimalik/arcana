@@ -4,6 +4,8 @@ import { notifyPaperProcessed, maybeRunTagMaintenance } from "@/lib/tags/mainten
 
 const STALL_THRESHOLD_MS = 5 * 60 * 1000; // 5 minutes
 const MAX_CONCURRENT = 3; // Process up to N papers simultaneously
+const BATCH_AUTO_THRESHOLD = 6; // Auto-route to Batch API when this many papers queue up
+const BATCH_FLUSH_DELAY_MS = 5_000; // Wait 5s for more papers before flushing to batch
 
 export class CancelledError extends Error {
   constructor(paperId: string) {
@@ -17,10 +19,12 @@ class ProcessingQueue {
   private processing = new Map<string, AbortController>();
   private initialized = false;
   private runningDeferred = false;
+  private batchFlushTimer: ReturnType<typeof setTimeout> | null = null;
+  private batchPending: string[] = []; // Papers waiting to be flushed to batch API
 
   /**
    * Add a paper to the processing queue (deduped).
-   * Starts processing if slots are available.
+   * When many papers arrive in a burst, auto-routes to the Batch API (50% cheaper).
    */
   enqueue(paperId: string): void {
     if (!this.initialized) {
@@ -31,15 +35,72 @@ class ProcessingQueue {
     }
 
     // Dedupe: don't add if already queued or currently processing
-    if (this.processing.has(paperId) || this.queue.includes(paperId)) {
+    if (this.processing.has(paperId) || this.queue.includes(paperId) || this.batchPending.includes(paperId)) {
       return;
     }
 
-    this.queue.push(paperId);
-    console.log(`[queue] Enqueued ${paperId} (queue: ${this.queue.length}, active: ${this.processing.size})`);
+    this.batchPending.push(paperId);
+    console.log(`[queue] Enqueued ${paperId} (pending: ${this.batchPending.length}, queue: ${this.queue.length}, active: ${this.processing.size})`);
 
-    // Fill available slots
-    this.fillSlots();
+    // If we already hit the batch threshold, flush immediately
+    if (this.batchPending.length >= BATCH_AUTO_THRESHOLD) {
+      this.flushPending();
+    } else {
+      // Wait briefly for more papers to arrive (search_papers imports ~8 at once)
+      if (this.batchFlushTimer) clearTimeout(this.batchFlushTimer);
+      this.batchFlushTimer = setTimeout(() => this.flushPending(), BATCH_FLUSH_DELAY_MS);
+    }
+  }
+
+  /**
+   * Flush pending papers — route to batch API if enough, otherwise sequential queue.
+   */
+  private flushPending(): void {
+    if (this.batchFlushTimer) {
+      clearTimeout(this.batchFlushTimer);
+      this.batchFlushTimer = null;
+    }
+
+    const pending = this.batchPending.splice(0);
+    if (pending.length === 0) return;
+
+    if (pending.length >= BATCH_AUTO_THRESHOLD) {
+      // Route to Batch API
+      this.submitToBatchApi(pending);
+    } else {
+      // Too few for batch — process sequentially
+      for (const paperId of pending) {
+        this.queue.push(paperId);
+      }
+      this.fillSlots();
+    }
+  }
+
+  /**
+   * Submit papers to the Anthropic Batch API for cheaper parallel processing.
+   */
+  private async submitToBatchApi(paperIds: string[]): Promise<void> {
+    try {
+      const { createBatchJob } = await import("./batch");
+      console.log(`[queue] Auto-routing ${paperIds.length} papers to Batch API (50% cheaper)`);
+      const result = await createBatchJob(paperIds);
+      console.log(`[queue] Batch submitted: ${result.requestCount} requests, group=${result.groupId}`);
+      if (result.skippedForChunking.length > 0) {
+        // Papers too long for batch — fall back to sequential for those
+        console.log(`[queue] ${result.skippedForChunking.length} papers too long for batch, processing sequentially`);
+        for (const paperId of result.skippedForChunking) {
+          this.queue.push(paperId);
+        }
+        this.fillSlots();
+      }
+    } catch (err) {
+      // Batch API not available (no proxy config, API error, etc.) — fall back to sequential
+      console.warn(`[queue] Batch API unavailable, falling back to sequential:`, err instanceof Error ? err.message : err);
+      for (const paperId of paperIds) {
+        this.queue.push(paperId);
+      }
+      this.fillSlots();
+    }
   }
 
   /**
@@ -47,6 +108,14 @@ class ProcessingQueue {
    * If it's queued, removes it. Sets status to FAILED.
    */
   async cancel(paperId: string): Promise<boolean> {
+    // Remove from batch pending if waiting
+    const batchIdx = this.batchPending.indexOf(paperId);
+    if (batchIdx !== -1) {
+      this.batchPending.splice(batchIdx, 1);
+      console.log(`[queue] Removed ${paperId} from batch pending`);
+      return true;
+    }
+
     // Remove from queue if waiting
     const idx = this.queue.indexOf(paperId);
     if (idx !== -1) {
@@ -236,12 +305,22 @@ class ProcessingQueue {
       select: { id: true, processingStatus: true, processingStep: true },
     });
 
+    // Also recover PENDING papers that have an abstract but were never enqueued
+    // (e.g., PDF download failed silently before the enqueue-on-abstract fix)
+    const abandonedPending = await prisma.paper.findMany({
+      where: {
+        processingStatus: "PENDING",
+        abstract: { not: null },
+      },
+      select: { id: true },
+      take: 200, // Process in chunks to avoid overwhelming the queue
+    });
+
     const allStalled = [...stalledPapers, ...legacyStuck];
 
     if (allStalled.length > 0) {
       console.log(
-        `[queue] Recovering ${allStalled.length} stalled papers:`,
-        allStalled.map((p) => `${p.id} (${p.processingStatus}/${p.processingStep})`),
+        `[queue] Recovering ${allStalled.length} stalled papers`,
       );
 
       for (const paper of allStalled) {
@@ -261,17 +340,30 @@ class ProcessingQueue {
       // Kick off processing for recovered papers
       this.fillSlots();
     }
+
+    // Recover abandoned PENDING papers (have abstract, never enqueued)
+    if (abandonedPending.length > 0) {
+      console.log(`[queue] Found ${abandonedPending.length} abandoned PENDING papers with abstracts, routing to batch`);
+      const ids = abandonedPending.map(p => p.id);
+      // Chunk into batches of 100 papers to avoid memory/API limits
+      const CHUNK_SIZE = 100;
+      for (let i = 0; i < ids.length; i += CHUNK_SIZE) {
+        const chunk = ids.slice(i, i + CHUNK_SIZE);
+        this.submitToBatchApi(chunk);
+      }
+    }
   }
 
   /**
    * Get current queue status for the API.
    */
-  getStatus(): { processing: string | null; queue: string[]; queueLength: number; activeCount: number } {
+  getStatus(): { processing: string | null; queue: string[]; queueLength: number; activeCount: number; batchPending: number } {
     return {
       processing: this.processing.size > 0 ? Array.from(this.processing.keys())[0] : null,
       queue: [...this.queue],
       queueLength: this.queue.length,
       activeCount: this.processing.size,
+      batchPending: this.batchPending.length,
     };
   }
 }

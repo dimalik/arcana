@@ -59,9 +59,16 @@ export async function logLlmUsage(entry: UsageEntry): Promise<void> {
       entry.outputTokens
     );
 
+    // Validate userId exists before inserting (FK constraint)
+    let validUserId: string | null = entry.userId || null;
+    if (validUserId) {
+      const userExists = await prisma.user.findUnique({ where: { id: validUserId }, select: { id: true } });
+      if (!userExists) validUserId = null;
+    }
+
     await prisma.llmUsageLog.create({
       data: {
-        userId: entry.userId || null,
+        userId: validUserId,
         provider: entry.provider,
         modelId: entry.modelId,
         operation: entry.operation,

@@ -126,20 +126,34 @@ async function submitBatch(requests: BatchRequest[], config: Awaited<ReturnType<
     },
   }));
 
-  const res = await fetch(`${config.baseUrl}/messages/batches`, {
-    method: "POST",
-    headers: config.headers,
-    body: JSON.stringify({ requests: sanitized }),
-    signal: AbortSignal.timeout(60_000),
-  });
+  // Retry on transient gateway errors (502, 503, 429)
+  const MAX_RETRIES = 3;
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    const res = await fetch(`${config.baseUrl}/messages/batches`, {
+      method: "POST",
+      headers: config.headers,
+      body: JSON.stringify({ requests: sanitized }),
+      signal: AbortSignal.timeout(60_000),
+    });
 
-  if (!res.ok) {
+    if (res.ok) {
+      const data = await res.json() as { id: string };
+      return data.id;
+    }
+
     const body = await res.text();
-    throw new Error(`Batch API error ${res.status}: ${body}`);
+    const retryable = res.status === 502 || res.status === 503 || res.status === 429;
+    if (!retryable || attempt === MAX_RETRIES) {
+      throw new Error(`Batch API error ${res.status}: ${body}`);
+    }
+
+    // Exponential backoff: 5s, 15s, 45s
+    const delay = 5000 * Math.pow(3, attempt);
+    console.warn(`[batch] Transient ${res.status} on attempt ${attempt + 1}, retrying in ${delay / 1000}s...`);
+    await new Promise(r => setTimeout(r, delay));
   }
 
-  const data = await res.json() as { id: string };
-  return data.id;
+  throw new Error("Unreachable");
 }
 
 export async function checkBatchApiStatus(anthropicBatchId: string): Promise<{
@@ -278,7 +292,7 @@ async function buildPhase1Requests(
 
   const papers = await prisma.paper.findMany({
     where: { id: { in: paperIds } },
-    select: { id: true, fullText: true, sourceType: true, userId: true, summary: true, keyFindings: true },
+    select: { id: true, fullText: true, abstract: true, sourceType: true, userId: true, summary: true, keyFindings: true },
   });
 
   // Get user context once (same user for all papers)
@@ -290,27 +304,32 @@ async function buildPhase1Requests(
   }
 
   for (const paper of papers) {
-    if (!paper.fullText) continue;
-    const truncated = truncateText(paper.fullText, modelId, proxyConfig);
+    // Use fullText if available, otherwise fall back to abstract
+    const text = paper.fullText || paper.abstract;
+    if (!text) continue;
+
+    const truncated = truncateText(text, modelId, proxyConfig);
 
     // Extract metadata (skip for ArXiv/OpenReview that already have it)
-    if (paper.sourceType !== "ARXIV" && paper.sourceType !== "OPENREVIEW" && !paper.keyFindings) {
+    if (paper.fullText && paper.sourceType !== "ARXIV" && paper.sourceType !== "OPENREVIEW" && !paper.keyFindings) {
       requests.push(buildExtractRequest(paper.id, truncated, modelId));
     }
 
     // Summarize — only batch short papers; long ones need chunked map-reduce
     if (!paper.summary) {
-      if (paper.fullText.length <= MAX_PAPER_CHARS) {
+      if (text.length <= MAX_PAPER_CHARS) {
         requests.push(buildSummarizeRequest(paper.id, truncated, modelId, userContextPreamble));
       } else {
         skippedForChunking.push(paper.id);
       }
     }
 
-    // Extract references
-    const refText = getTextForReferenceExtraction(paper.fullText);
-    if (refText) {
-      requests.push(buildExtractReferencesRequest(paper.id, refText, modelId));
+    // Extract references (only if we have full text)
+    if (paper.fullText) {
+      const refText = getTextForReferenceExtraction(paper.fullText);
+      if (refText) {
+        requests.push(buildExtractReferencesRequest(paper.id, refText, modelId));
+      }
     }
   }
 
@@ -364,8 +383,9 @@ async function buildPhase2Requests(
   const roomNames = existingRooms.map(r => r.name);
 
   for (const paper of papers) {
-    if (!paper.fullText) continue;
-    const truncated = truncateText(paper.fullText, modelId, proxyConfig);
+    const text = paper.fullText || paper.abstract;
+    if (!text) continue;
+    const truncated = truncateText(text, modelId, proxyConfig);
 
     // Categorize
     requests.push(buildCategorizeRequest(paper.id, truncated, modelId, tagsForPrompt, overusedTags));
@@ -379,15 +399,17 @@ async function buildPhase2Requests(
     ].filter(Boolean).join("\n");
     requests.push(buildLinkingRequest(paper.id, paperInfo, fullExistingList, modelId));
 
-    // Citation contexts (needs references from Phase 1)
-    const refs = await prisma.reference.findMany({
-      where: { paperId: paper.id },
-      select: { id: true },
-    });
-    if (refs.length > 0) {
-      const bodyText = getBodyTextForContextExtraction(paper.fullText);
-      if (bodyText) {
-        requests.push(buildCitationContextsRequest(paper.id, bodyText, modelId));
+    // Citation contexts (needs references from Phase 1, and full text)
+    if (paper.fullText) {
+      const refs = await prisma.reference.findMany({
+        where: { paperId: paper.id },
+        select: { id: true },
+      });
+      if (refs.length > 0) {
+        const bodyText = getBodyTextForContextExtraction(paper.fullText);
+        if (bodyText) {
+          requests.push(buildCitationContextsRequest(paper.id, bodyText, modelId));
+        }
       }
     }
 
