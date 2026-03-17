@@ -14,6 +14,12 @@ import {
   MoreVertical,
   Trash2,
   RefreshCw,
+  ChevronDown,
+  Search,
+  BarChart3,
+  Compass,
+  Server,
+  AlertTriangle,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -192,6 +198,18 @@ export default function ResearchPage() {
   const [importing, setImporting] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
   const [mode, setMode] = useState<Mode>("investigate");
+  const [showOptions, setShowOptions] = useState(false);
+  const [methodology, setMethodology] = useState<string>("experimental");
+  const [constraints, setConstraints] = useState("");
+  const [hasGpu, setHasGpu] = useState<boolean | null>(null);
+
+  // Check for available GPU hosts
+  useEffect(() => {
+    fetch("/api/research/remote-hosts")
+      .then((r) => r.json())
+      .then((data) => setHasGpu(Array.isArray(data) && data.length > 0))
+      .catch(() => setHasGpu(false));
+  }, []);
 
   useEffect(() => {
     Promise.all([
@@ -215,7 +233,12 @@ export default function ResearchPage() {
         const res = await fetch("/api/research", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ title: t, question: t, methodology: "experimental" }),
+          body: JSON.stringify({
+            title: t,
+            question: t,
+            methodology,
+            ...(constraints.trim() ? { constraints: constraints.trim() } : {}),
+          }),
         });
         if (!res.ok) throw new Error();
         const project = await res.json();
@@ -373,9 +396,10 @@ export default function ResearchPage() {
           <Link
             href="/research/new"
             className="inline-flex items-center gap-1 rounded-md text-[11px] text-muted-foreground/60 hover:text-foreground px-2 py-1 hover:bg-accent transition-colors"
+            title="Full creation wizard with seed papers"
           >
             <Plus className="h-3 w-3" />
-            Advanced
+            Wizard
           </Link>
         </div>
       </div>
@@ -435,12 +459,83 @@ export default function ResearchPage() {
             </button>
           </div>
           {mode === "investigate" && (
-            <span className="text-[10px] text-muted-foreground/30">Hypothesis-driven research with agent</span>
+            <button
+              onClick={() => setShowOptions(!showOptions)}
+              className="inline-flex items-center gap-1 text-[10px] text-muted-foreground/40 hover:text-muted-foreground/70 transition-colors ml-auto"
+            >
+              Options
+              <ChevronDown className={`h-2.5 w-2.5 transition-transform ${showOptions ? "rotate-180" : ""}`} />
+            </button>
           )}
           {mode === "review" && (
             <span className="text-[10px] text-muted-foreground/30">Auto-finds matching papers and synthesizes a literature review</span>
           )}
         </div>
+
+        {/* Inline options for investigate mode */}
+        {mode === "investigate" && showOptions && (
+          <div className="space-y-3 rounded-lg border border-border/40 bg-muted/10 p-3 animate-in fade-in-0 slide-in-from-top-1 duration-150">
+            {/* Research approach */}
+            <div className="space-y-1.5">
+              <span className="text-[10px] text-muted-foreground/50 uppercase tracking-wider">Approach</span>
+              <div className="flex flex-wrap gap-1.5">
+                {[
+                  { id: "experimental", label: "Experiment", icon: FlaskConical, hint: "Hypotheses + GPU experiments" },
+                  { id: "analytical", label: "Survey", icon: Search, hint: "Literature review + analysis" },
+                  { id: "design_science", label: "Build", icon: BarChart3, hint: "Design, implement, evaluate" },
+                  { id: "exploratory", label: "Explore", icon: Compass, hint: "Open-ended investigation" },
+                ].map((m) => (
+                  <button
+                    key={m.id}
+                    onClick={() => setMethodology(m.id)}
+                    className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[11px] transition-all border ${
+                      methodology === m.id
+                        ? "border-foreground/20 bg-foreground/5 text-foreground font-medium"
+                        : "border-transparent text-muted-foreground/50 hover:text-muted-foreground hover:bg-muted/50"
+                    }`}
+                    title={m.hint}
+                  >
+                    <m.icon className="h-3 w-3" />
+                    {m.label}
+                  </button>
+                ))}
+              </div>
+              <p className="text-[10px] text-muted-foreground/30">
+                {methodology === "experimental" && "Will form hypotheses, write experiment code, run on GPU, analyze results"}
+                {methodology === "analytical" && "Deep literature search, systematic comparison, synthesis and critique"}
+                {methodology === "design_science" && "Iterative design → build → evaluate cycle with artifacts"}
+                {methodology === "exploratory" && "Broad search across angles, identify patterns and gaps"}
+              </p>
+            </div>
+
+            {/* GPU status indicator */}
+            {methodology === "experimental" && (
+              <div className="flex items-center gap-2 text-[10px]">
+                <Server className="h-3 w-3 text-muted-foreground/40" />
+                {hasGpu === null && <span className="text-muted-foreground/30">Checking GPU hosts...</span>}
+                {hasGpu === true && <span className="text-emerald-500/70">GPU hosts available for experiments</span>}
+                {hasGpu === false && (
+                  <span className="text-amber-500/70 flex items-center gap-1">
+                    <AlertTriangle className="h-2.5 w-2.5" />
+                    No GPU hosts configured — experiments will run locally
+                  </span>
+                )}
+              </div>
+            )}
+
+            {/* Constraints / focus */}
+            <div className="space-y-1.5">
+              <span className="text-[10px] text-muted-foreground/50 uppercase tracking-wider">Focus & constraints <span className="normal-case tracking-normal">(optional)</span></span>
+              <textarea
+                value={constraints}
+                onChange={(e) => setConstraints(e.target.value)}
+                placeholder="e.g., Only open-source models, focus on transformer architectures, must run on single GPU, compare at least 3 baselines..."
+                className="w-full rounded-md border border-border/40 bg-background/50 px-3 py-2 text-[12px] placeholder:text-muted-foreground/25 focus:outline-none focus:border-foreground/20 transition-all resize-none"
+                rows={2}
+              />
+            </div>
+          </div>
+        )}
 
       </div>
 

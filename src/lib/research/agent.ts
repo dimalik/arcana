@@ -1014,10 +1014,17 @@ function buildMessages(
     messages.push({ role: "user", content: userMessage + context });
   } else {
     let brief = project.brief;
+    let briefConstraints = "";
+    let briefSubQuestions: string[] = [];
     try {
       const parsed = JSON.parse(project.brief);
       brief = parsed.question || parsed.topic || project.brief;
+      if (parsed.constraints) briefConstraints = parsed.constraints;
+      if (Array.isArray(parsed.subQuestions) && parsed.subQuestions.length > 0) briefSubQuestions = parsed.subQuestions;
     } catch { /* plain text */ }
+
+    const constraintBlock = briefConstraints ? `\n\nUser constraints/focus: ${briefConstraints}` : "";
+    const subQBlock = briefSubQuestions.length > 0 ? `\nSub-questions to address:\n${briefSubQuestions.map((q, i) => `${i + 1}. ${q}`).join("\n")}` : "";
 
     const hasWork = papers.length > 0 || project.hypotheses.length > 0;
     const hasPapersNoHypotheses = papers.length > 0 && project.hypotheses.length === 0;
@@ -1026,7 +1033,7 @@ function buildMessages(
     messages.push({
       role: "user",
       content: hasWork
-        ? `Continue researching this topic: ${brief}
+        ? `Continue researching this topic: ${brief}${subQBlock}${constraintBlock}
 
 You already have ${papers.length} papers and prior work. Check the existing results files with list_files and read_file before starting new experiments. If experiment code already exists, review it, fix any issues, and re-run. Do NOT re-search for papers you already have.
 
@@ -1035,7 +1042,7 @@ IMPORTANT: Don't just re-run what failed. Critically examine the results so far.
 CRITICAL: You have ${papers.length} papers but NO hypotheses yet. Before running any experiments, you MUST formulate 2-3 specific, testable hypotheses using log_finding(type="hypothesis"). Read the papers first if you haven't, extract their key claims and methods, then formulate hypotheses that you can test experimentally.` : ""}${allHypothesesResolved ? `
 
 All current hypotheses have been resolved (supported or refuted). Consider: (1) formulating NEW hypotheses based on what you learned, (2) using complete_iteration to start a new research cycle with a fresh direction, or (3) running deeper experiments on the most interesting findings.` : ""}${context}`
-        : `Start researching this topic: ${brief}
+        : `Start researching this topic: ${brief}${subQBlock}${constraintBlock}
 
 Follow the full research cycle:
 1. Search broadly for papers (2-3 different queries covering different angles)

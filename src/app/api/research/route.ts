@@ -7,7 +7,7 @@ export async function POST(request: NextRequest) {
   try {
     const userId = await requireUserId();
     const body = await request.json();
-    const { title, question, subQuestions, domains, keywords, methodology, seedPaperIds } = body as {
+    const { title, question, subQuestions, domains, keywords, methodology, seedPaperIds, constraints } = body as {
       title: string;
       question: string;
       subQuestions?: string[];
@@ -15,6 +15,7 @@ export async function POST(request: NextRequest) {
       keywords?: string[];
       methodology?: string;
       seedPaperIds?: string[];
+      constraints?: string;
     };
 
     if (!title?.trim() || !question?.trim()) {
@@ -26,6 +27,7 @@ export async function POST(request: NextRequest) {
       subQuestions: subQuestions || [],
       domains: domains || [],
       keywords: keywords || [],
+      ...(constraints?.trim() ? { constraints: constraints.trim() } : {}),
     });
 
     // Create a collection for this project's papers
