@@ -10,13 +10,16 @@ import { requireUserId } from "@/lib/paper-auth";
  * using its DOI and/or arXiv ID.
  */
 export async function POST(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: { id: string } }
 ) {
   const userId = await requireUserId();
-    const paper = await prisma.paper.findFirst({
+  const { searchParams } = new URL(request.url);
+  const skipProcessing = searchParams.get("skipProcessing") === "true";
+
+  const paper = await prisma.paper.findFirst({
     where: { id: params.id, userId },
-    select: { id: true, doi: true, arxivId: true, filePath: true },
+    select: { id: true, doi: true, arxivId: true, filePath: true, fullText: true },
   });
 
   if (!paper) {
@@ -49,15 +52,21 @@ export async function POST(
     );
   }
 
+  // If paper already has fullText (e.g., extracted from HTML source), skip reprocessing
+  // — the existing text is likely more reliable than PDF extraction
+  const shouldProcess = !skipProcessing && !paper.fullText;
+
   await prisma.paper.update({
     where: { id: paper.id },
     data: {
       filePath: result.filePath,
-      processingStatus: "EXTRACTING_TEXT",
+      ...(shouldProcess ? { processingStatus: "EXTRACTING_TEXT" } : {}),
     },
   });
 
-  processingQueue.enqueue(paper.id);
+  if (shouldProcess) {
+    processingQueue.enqueue(paper.id);
+  }
 
   return NextResponse.json(
     { success: true, filePath: result.filePath, source: result.source },

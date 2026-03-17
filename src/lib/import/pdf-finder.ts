@@ -3,9 +3,11 @@
  *
  * Tries sources in priority order:
  *   1. Provided URL (from OpenAlex/S2 during discovery)
- *   2. Unpaywall (best OA coverage, free with email)
- *   3. Semantic Scholar openAccessPdf
- *   4. Europe PMC (biomedical papers)
+ *   2. Direct arXiv PDF (if arXiv paper)
+ *   3. Unpaywall (best OA coverage, free with email)
+ *   4. Semantic Scholar openAccessPdf
+ *   5. Europe PMC (biomedical papers)
+ *   6. Publisher page scraping (follow DOI, extract PDF links from HTML)
  *
  * Returns the downloaded PDF buffer or null.
  */
@@ -47,6 +49,12 @@ export async function findAndDownloadPdf(opts: {
     console.log(
       `[pdf-finder] Tried ${candidates.length} sources, none returned a valid PDF`
     );
+  }
+
+  // Last resort: PMC OA package (downloads tar.gz, extracts PDF)
+  if (opts.doi) {
+    const pmcResult = await tryPmcOaPackage(opts.doi);
+    if (pmcResult) return pmcResult;
   }
 
   return null;
@@ -96,15 +104,27 @@ async function collectPdfUrls(opts: {
 
   // 3-5. API lookups (run in parallel for speed)
   if (opts.doi) {
-    const [unpaywall, s2, pmc] = await Promise.all([
+    const [unpaywall, s2, pmcUrls] = await Promise.all([
       fetchUnpaywallPdfUrl(opts.doi),
       fetchS2PdfUrl(opts.doi),
-      fetchEuropePmcPdfUrl(opts.doi),
+      fetchEuropePmcPdfUrls(opts.doi),
     ]);
 
+    // PMC URLs first — they're the most reliable (no Cloudflare, always OA)
+    for (const pmcUrl of pmcUrls) {
+      add(pmcUrl, "europepmc");
+    }
     if (unpaywall) add(unpaywall, "unpaywall");
     if (s2) add(s2, "semantic-scholar");
-    if (pmc) add(pmc, "europepmc");
+
+  }
+
+  // 6. Follow DOI to publisher page and scrape for PDF links (last resort)
+  if (opts.doi) {
+    const publisherPdfs = await scrapePublisherPdfUrls(opts.doi);
+    for (const pdfUrl of publisherPdfs) {
+      add(pdfUrl, "publisher");
+    }
   }
 
   return candidates;
@@ -152,34 +172,295 @@ async function fetchS2PdfUrl(doi: string): Promise<string | null> {
 
 // ── Europe PMC ───────────────────────────────────────────────────────
 
-async function fetchEuropePmcPdfUrl(doi: string): Promise<string | null> {
+async function fetchEuropePmcPdfUrls(doi: string): Promise<string[]> {
   const url = `https://www.ebi.ac.uk/europepmc/webservices/rest/search?query=DOI:${encodeURIComponent(doi)}&format=json&resultType=core&pageSize=1`;
   const res = await fetchWithRetry(url, "europepmc", 200);
-  if (!res) return null;
+  if (!res) return [];
 
   try {
     const data = await res.json();
     const result = data.resultList?.result?.[0];
-    if (!result) return null;
+    if (!result) return [];
 
-    // Look for PDF in fullTextUrlList
+    const pdfUrls: string[] = [];
+
+    // Collect ALL PDF URLs from fullTextUrlList
     const urls = result.fullTextUrlList?.fullTextUrl;
     if (Array.isArray(urls)) {
-      const pdf = urls.find(
+      // Prefer Europe_PMC's own PDFs (no Cloudflare), then others
+      const sorted = [...urls].filter(
         (u: { documentStyle?: string }) => u.documentStyle === "pdf"
-      );
-      if (pdf?.url) return pdf.url;
+      ).sort((a: { site?: string }, b: { site?: string }) => {
+        // Europe_PMC PDFs first (most reliable), publisher PDFs last (may have Cloudflare)
+        const aIsPmc = (a.site || "").includes("Europe_PMC") ? 0 : 1;
+        const bIsPmc = (b.site || "").includes("Europe_PMC") ? 0 : 1;
+        return aIsPmc - bIsPmc;
+      });
+      for (const entry of sorted) {
+        if ((entry as { url?: string }).url) pdfUrls.push((entry as { url: string }).url);
+      }
     }
 
-    // Fall back to PMC PDF URL if available
+    // Also add PMC render URL if we have a PMCID (reliable, no Cloudflare)
     if (result.pmcid) {
-      return `https://europepmc.org/backend/ptpmcrender.fcgi?accid=${result.pmcid}&blobtype=pdf`;
+      const pmcUrl = `https://europepmc.org/articles/${result.pmcid}?pdf=render`;
+      if (!pdfUrls.includes(pmcUrl)) {
+        pdfUrls.unshift(pmcUrl); // Highest priority — always works
+      }
     }
 
-    return null;
+    return pdfUrls;
   } catch {
+    return [];
+  }
+}
+
+// ── PMC OA Package (tar.gz with PDF) ────────────────────────────────
+
+/**
+ * Download a PDF from PMC's Open Access FTP package.
+ * This is the most reliable source for PMC papers — even when publisher
+ * sites are behind Cloudflare, PMC's FTP always serves the OA PDF.
+ *
+ * Flow: DOI → Europe PMC API (get PMCID) → PMC OA service (get FTP URL) → download tar.gz → extract PDF
+ */
+async function tryPmcOaPackage(doi: string): Promise<PdfDownloadResult | null> {
+  try {
+    // Step 1: Get PMCID from Europe PMC
+    const pmcSearchUrl = `https://www.ebi.ac.uk/europepmc/webservices/rest/search?query=DOI:${encodeURIComponent(doi)}&format=json&pageSize=1`;
+    const pmcSearchRes = await fetchWithRetry(pmcSearchUrl, "europepmc", 200);
+    if (!pmcSearchRes) return null;
+
+    const pmcData = await pmcSearchRes.json();
+    const pmcid = pmcData.resultList?.result?.[0]?.pmcid;
+    if (!pmcid) return null;
+
+    // Step 2: Get FTP URL from PMC OA service
+    const oaUrl = `https://www.ncbi.nlm.nih.gov/pmc/utils/oa/oa.fcgi?id=${pmcid}`;
+    const oaRes = await fetch(oaUrl, { signal: AbortSignal.timeout(10_000) });
+    if (!oaRes.ok) return null;
+
+    const oaXml = await oaRes.text();
+    const ftpMatch = oaXml.match(/href="(ftp:\/\/[^"]+\.tar\.gz)"/);
+    if (!ftpMatch) return null;
+
+    // Convert FTP URL to HTTPS (NCBI supports both)
+    const tarUrl = ftpMatch[1].replace("ftp://ftp.ncbi.nlm.nih.gov", "https://ftp.ncbi.nlm.nih.gov");
+    console.log(`[pdf-finder] Downloading PMC OA package: ${tarUrl}`);
+
+    // Step 3: Download tar.gz
+    const tarRes = await fetch(tarUrl, {
+      headers: BROWSER_HEADERS,
+      signal: AbortSignal.timeout(120_000), // Large packages
+    });
+    if (!tarRes.ok) return null;
+
+    const tarBuffer = Buffer.from(await tarRes.arrayBuffer());
+
+    // Step 4: Extract PDF from tar.gz
+    // Use zlib to decompress, then scan for PDF file entries
+    const { gunzipSync } = await import("zlib");
+    const tarData = gunzipSync(tarBuffer);
+
+    // Simple tar parser: each entry has a 512-byte header with filename at offset 0
+    // and filesize (octal) at offset 124, followed by the file data padded to 512 bytes
+    let offset = 0;
+    while (offset < tarData.length - 512) {
+      const header = tarData.subarray(offset, offset + 512);
+      const nameEnd = header.indexOf(0);
+      const name = header.subarray(0, Math.min(nameEnd, 100)).toString("utf-8");
+      if (!name) break;
+
+      const sizeStr = header.subarray(124, 136).toString("utf-8").trim();
+      const size = parseInt(sizeStr, 8) || 0;
+
+      offset += 512; // Move past header
+
+      // Look for the main PDF (not supplemental/reviewer files)
+      if (name.endsWith(".pdf") && !name.includes("supplement") && !name.includes("reviewer") && !name.includes("response") && !name.includes("original_submission") && !name.includes("revision")) {
+        const pdfData = tarData.subarray(offset, offset + size);
+        // Validate it's a real PDF
+        if (pdfData.length >= 5 && pdfData.subarray(0, 5).toString() === "%PDF-") {
+          const filePath = await savePdfBuffer(Buffer.from(pdfData), "pmc-oa");
+          console.log(`[pdf-finder] Extracted PDF from PMC OA package: ${name}`);
+          return { filePath, source: "pmc-oa" };
+        }
+      }
+
+      // Advance past file data (padded to 512 bytes)
+      offset += Math.ceil(size / 512) * 512;
+    }
+
+    console.log(`[pdf-finder] No suitable PDF found in PMC OA package for ${pmcid}`);
+    return null;
+  } catch (err) {
+    console.log(`[pdf-finder] PMC OA package failed for DOI ${doi}:`, err instanceof Error ? err.message : err);
     return null;
   }
+}
+
+// ── Publisher page scraping ──────────────────────────────────────────
+
+/**
+ * Follow a DOI to the publisher's landing page and extract PDF URLs from HTML.
+ *
+ * Most academic publishers embed PDF links in standard meta tags:
+ *   <meta name="citation_pdf_url" content="...">
+ *   <meta property="citation_pdf_url" content="...">
+ *
+ * We also check for common patterns in <a href> and <link> tags, and
+ * apply publisher-specific URL transformations (e.g., /article/ → /article-pdf/).
+ */
+async function scrapePublisherPdfUrls(doi: string): Promise<string[]> {
+  try {
+    // Follow DOI redirect to get the publisher URL
+    const doiUrl = `https://doi.org/${doi}`;
+    const res = await fetch(doiUrl, {
+      headers: { ...BROWSER_HEADERS, Accept: "text/html,application/xhtml+xml,*/*" },
+      redirect: "follow",
+      signal: AbortSignal.timeout(15_000),
+    });
+
+    if (!res.ok) return [];
+
+    const finalUrl = res.url; // The resolved publisher URL after redirects
+    const html = await res.text();
+    const candidates: string[] = [];
+    const seen = new Set<string>();
+
+    const add = (url: string) => {
+      if (!url || seen.has(url)) return;
+      try {
+        // Resolve relative URLs against the final page URL
+        const resolved = new URL(url, finalUrl).href;
+        if (!seen.has(resolved)) {
+          seen.add(resolved);
+          candidates.push(resolved);
+        }
+      } catch { /* invalid URL */ }
+    };
+
+    // 1. citation_pdf_url meta tag — the gold standard for academic publishers
+    const citationPdfMatch = html.match(/<meta\s+(?:name|property)\s*=\s*["']citation_pdf_url["']\s+content\s*=\s*["']([^"']+)["']/i);
+    if (citationPdfMatch) {
+      add(citationPdfMatch[1]);
+    }
+    // Also match reversed attribute order: content before name
+    const citationPdfMatch2 = html.match(/<meta\s+content\s*=\s*["']([^"']+)["']\s+(?:name|property)\s*=\s*["']citation_pdf_url["']/i);
+    if (citationPdfMatch2) {
+      add(citationPdfMatch2[1]);
+    }
+
+    // 2. <link rel="alternate" type="application/pdf">
+    const linkPdfMatch = html.match(/<link\s+[^>]*type\s*=\s*["']application\/pdf["'][^>]*href\s*=\s*["']([^"']+)["']/i);
+    if (linkPdfMatch) {
+      add(linkPdfMatch[1]);
+    }
+
+    // 3. Common publisher PDF URL patterns based on the landing page URL
+    const publisherPatterns = generatePublisherPdfUrls(finalUrl);
+    for (const pdfUrl of publisherPatterns) {
+      add(pdfUrl);
+    }
+
+    // 4. Scan for PDF links in the HTML (href="...pdf..." patterns)
+    // Be selective — only match links that look like direct PDF downloads
+    const pdfLinkRegex = /href\s*=\s*["']([^"']*\.pdf(?:\?[^"']*)?)["']/gi;
+    let match;
+    while ((match = pdfLinkRegex.exec(html)) !== null) {
+      // Skip navigation/utility PDFs
+      const href = match[1];
+      if (href.includes("policy") || href.includes("terms") || href.includes("license")) continue;
+      add(href);
+    }
+
+    // 5. Look for PDF download buttons/links (common class names and text)
+    const downloadLinkRegex = /href\s*=\s*["']([^"']+)["'][^>]*(?:class\s*=\s*["'][^"']*(?:pdf|download)[^"']*["']|>[\s\S]*?(?:Download\s*PDF|Full\s*Text\s*PDF|PDF\s*Download))/gi;
+    while ((match = downloadLinkRegex.exec(html)) !== null) {
+      add(match[1]);
+    }
+
+    if (candidates.length > 0) {
+      console.log(`[pdf-finder] Scraped ${candidates.length} PDF candidate(s) from publisher page: ${finalUrl}`);
+    }
+
+    return candidates;
+  } catch (err) {
+    console.log(`[pdf-finder] Publisher scrape failed for DOI ${doi}:`, err instanceof Error ? err.message : err);
+    return [];
+  }
+}
+
+/**
+ * Generate likely PDF URLs from known publisher URL patterns.
+ * These are URL transformations that work for major publishers.
+ */
+function generatePublisherPdfUrls(landingUrl: string): string[] {
+  const urls: string[] = [];
+
+  try {
+    const u = new URL(landingUrl);
+    const host = u.hostname;
+    const path = u.pathname;
+
+    // Oxford Academic: /article/... → /article-pdf/...
+    if (host.includes("academic.oup.com") && path.includes("/article/")) {
+      urls.push(landingUrl.replace("/article/", "/article-pdf/"));
+    }
+
+    // Springer/Nature: add .pdf suffix
+    if ((host.includes("link.springer.com") || host.includes("nature.com")) && !path.endsWith(".pdf")) {
+      urls.push(`${landingUrl}.pdf`);
+      // Springer content PDFs
+      if (path.includes("/article/")) {
+        urls.push(landingUrl.replace("/article/", "/content/pdf/") + ".pdf");
+      }
+    }
+
+    // Wiley: /doi/abs/ or /doi/full/ → /doi/pdfdirect/
+    if (host.includes("onlinelibrary.wiley.com")) {
+      urls.push(landingUrl.replace(/\/doi\/(abs|full)\//, "/doi/pdfdirect/"));
+    }
+
+    // MDPI: add /pdf at the end
+    if (host.includes("mdpi.com") && !path.endsWith("/pdf")) {
+      urls.push(`${landingUrl}/pdf`);
+    }
+
+    // PLoS: add ?type=printable
+    if (host.includes("journals.plos.org") && !landingUrl.includes("type=printable")) {
+      urls.push(`${landingUrl}?type=printable`);
+    }
+
+    // ScienceDirect: /science/article/pii/XXX → /science/article/pii/XXX/pdf
+    if (host.includes("sciencedirect.com") && path.includes("/pii/") && !path.endsWith("/pdf")) {
+      urls.push(`${landingUrl}/pdf`);
+    }
+
+    // Frontiers: add /pdf
+    if (host.includes("frontiersin.org") && !path.endsWith("/pdf")) {
+      urls.push(`${landingUrl}/pdf`);
+    }
+
+    // IEEE: /document/XXX → /stamp/stamp.jsp?tp=&arnumber=XXX
+    if (host.includes("ieeexplore.ieee.org") && path.includes("/document/")) {
+      const arnumber = path.match(/\/document\/(\d+)/)?.[1];
+      if (arnumber) {
+        urls.push(`https://ieeexplore.ieee.org/stamp/stamp.jsp?tp=&arnumber=${arnumber}`);
+      }
+    }
+
+    // ACM DL: /doi/XXX → /doi/pdf/XXX
+    if (host.includes("dl.acm.org") && path.startsWith("/doi/") && !path.includes("/pdf/")) {
+      urls.push(landingUrl.replace(/\/doi\//, "/doi/pdf/"));
+    }
+
+    // GigaScience (Oxford): same as OUP pattern
+    // Already covered by academic.oup.com pattern above
+
+  } catch { /* invalid URL */ }
+
+  return urls;
 }
 
 // ── PDF download + validation ────────────────────────────────────────
