@@ -36,19 +36,25 @@ async function setStep(paperId: string, step: ProcessingStep | null) {
 /**
  * Model tiers for different tasks. Opus for critical reasoning, Sonnet for everything else.
  */
-type ModelTier = "reasoning" | "standard";
+export type ModelTier = "reasoning" | "standard";
 
-const TIER_MODEL_MAP: Record<ModelTier, string> = {
+const TIER_DEFAULTS: Record<ModelTier, string> = {
   reasoning: "claude-opus-4-6",
   standard: "claude-sonnet-4-6",
 };
 
+const TIER_DB_KEYS: Record<ModelTier, string> = {
+  reasoning: "tier_reasoning_model",
+  standard: "tier_standard_model",
+};
+
 /**
  * Get a model for a specific capability tier.
- * - "reasoning": Opus — for the main research agent and adversarial reviewer
- * - "standard": Sonnet — for scouts, paper processing, query expansion
+ * - "reasoning": Opus — for the main research agent, adversarial reviewer, synthesizer, architect
+ * - "standard": Sonnet — for scouts, paper processing, query expansion, analyst
  *
- * Falls back to the default model if the tier model isn't available via the proxy.
+ * Reads user-configured tier models from DB settings, falls back to defaults.
+ * Only applies tier models when using proxy provider (direct API keys may not have Opus access).
  */
 export async function getModelForTier(tier: ModelTier): Promise<{ provider: LLMProvider; modelId: string; proxyConfig?: ProxyConfig }> {
   const defaults = await getDefaultModel();
@@ -56,8 +62,10 @@ export async function getModelForTier(tier: ModelTier): Promise<{ provider: LLMP
   // Only upgrade if using proxy (direct API keys may not have Opus access)
   if (defaults.provider !== "proxy") return defaults;
 
-  const targetModel = TIER_MODEL_MAP[tier];
-  // Use the tier model with the same proxy config
+  // Check DB for user-configured tier model
+  const setting = await prisma.setting.findUnique({ where: { key: TIER_DB_KEYS[tier] } }).catch(() => null);
+  const targetModel = setting?.value || TIER_DEFAULTS[tier];
+
   return { ...defaults, modelId: targetModel };
 }
 

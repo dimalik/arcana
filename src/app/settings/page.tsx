@@ -546,9 +546,12 @@ function LLMSection() {
           </div>
         )}
         <p className="text-xs text-muted-foreground">
-          Used for summaries, tagging, chat, research steps, and all other AI features.
+          Used for summaries, tagging, chat, and general AI features.
         </p>
       </div>
+
+      {/* Research agent model tiers */}
+      <ResearchModelTiers />
 
       {/* API Keys */}
       <div className="space-y-3 pt-4 border-t border-border">
@@ -695,6 +698,119 @@ function LLMSection() {
         )}
       </div>
     </>
+  );
+}
+
+// ── Research Model Tiers ────────────────────────────────────────────
+
+const ROLE_TIERS: { role: string; tier: "reasoning" | "standard" }[] = [
+  { role: "Lead agent", tier: "reasoning" },
+  { role: "Reviewer", tier: "reasoning" },
+  { role: "Synthesizer", tier: "reasoning" },
+  { role: "Architect", tier: "reasoning" },
+  { role: "Scout", tier: "standard" },
+  { role: "Analyst", tier: "standard" },
+  { role: "Experimenter", tier: "standard" },
+];
+
+function ResearchModelTiers() {
+  const [reasoning, setReasoning] = useState("");
+  const [standard, setStandard] = useState("");
+  const [loaded, setLoaded] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [proxyModels, setProxyModels] = useState<string[]>([]);
+
+  useEffect(() => {
+    fetch("/api/settings/model-tiers")
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.reasoning) setReasoning(data.reasoning);
+        if (data.standard) setStandard(data.standard);
+        setLoaded(true);
+      })
+      .catch(() => setLoaded(true));
+
+    // Load proxy models for dropdown options
+    fetch("/api/settings/proxy-status")
+      .then((r) => r.json())
+      .then((data) => {
+        if (Array.isArray(data.models)) setProxyModels(data.models.map((m: { id: string }) => m.id));
+        else if (typeof data.models === "string") setProxyModels(data.models.split(",").map((s: string) => s.trim()).filter(Boolean));
+      })
+      .catch(() => {});
+  }, []);
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      const res = await fetch("/api/settings/model-tiers", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reasoning, standard }),
+      });
+      if (res.ok) toast.success("Tier models saved");
+      else toast.error("Failed to save");
+    } catch { toast.error("Failed to save"); }
+    finally { setSaving(false); }
+  };
+
+  if (!loaded) return null;
+
+  const modelOptions = proxyModels.length > 0 ? proxyModels : [
+    "claude-opus-4-6", "claude-sonnet-4-6", "claude-haiku-4-5-20251001",
+    "gpt-4o", "gpt-4o-mini",
+  ];
+
+  return (
+    <div className="space-y-3 pt-4 border-t border-border">
+      <div>
+        <Label className="text-sm font-medium">Research Agent Models</Label>
+        <p className="text-xs text-muted-foreground mt-0.5">
+          Different agent roles use different model tiers. Only applies when using a proxy provider.
+        </p>
+      </div>
+
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-1.5">
+          <Label className="text-xs text-muted-foreground">Reasoning tier</Label>
+          <Select value={reasoning} onValueChange={setReasoning}>
+            <SelectTrigger className="h-8 text-xs">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {modelOptions.map((m) => (
+                <SelectItem key={m} value={m} className="text-xs">{m}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <p className="text-[10px] text-muted-foreground/60">
+            {ROLE_TIERS.filter((r) => r.tier === "reasoning").map((r) => r.role).join(", ")}
+          </p>
+        </div>
+
+        <div className="space-y-1.5">
+          <Label className="text-xs text-muted-foreground">Standard tier</Label>
+          <Select value={standard} onValueChange={setStandard}>
+            <SelectTrigger className="h-8 text-xs">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {modelOptions.map((m) => (
+                <SelectItem key={m} value={m} className="text-xs">{m}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <p className="text-[10px] text-muted-foreground/60">
+            {ROLE_TIERS.filter((r) => r.tier === "standard").map((r) => r.role).join(", ")}
+          </p>
+        </div>
+      </div>
+
+      <Button size="sm" onClick={handleSave} disabled={saving}>
+        {saving ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Save className="mr-1.5 h-3.5 w-3.5" />}
+        Save
+      </Button>
+    </div>
   );
 }
 
