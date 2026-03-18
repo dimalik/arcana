@@ -29,6 +29,13 @@ import {
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Dialog,
+  DialogContent,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
 import { ProjectCard } from "@/components/research/project-card";
 import { toast } from "sonner";
 
@@ -220,6 +227,7 @@ export default function ResearchPage() {
   const [importing, setImporting] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
   const [showOptions, setShowOptions] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState<{ id: string; title: string; type: "project" | "review" } | null>(null);
   const [methodologyOverride, setMethodologyOverride] = useState<string | null>(null);
   const [constraints, setConstraints] = useState("");
   const [remoteHosts, setRemoteHosts] = useState<{ id: string; alias: string; gpuType: string | null }[]>([]);
@@ -329,14 +337,29 @@ export default function ResearchPage() {
   };
 
   // Project actions
-  const handleDeleteProject = async (id: string) => {
-    if (!confirm("Delete this project?")) return;
-    const res = await fetch(`/api/research/${id}`, { method: "DELETE" });
-    if (res.ok) {
-      setProjects((prev) => prev.filter((p) => p.id !== id));
-      toast.success("Project deleted");
+  const handleDeleteProject = (id: string) => {
+    const proj = projects.find((p) => p.id === id);
+    setConfirmDelete({ id, title: proj?.title || "this project", type: "project" });
+  };
+
+  const executeDelete = async () => {
+    if (!confirmDelete) return;
+    const { id, type } = confirmDelete;
+    setConfirmDelete(null);
+    if (type === "project") {
+      const res = await fetch(`/api/research/${id}`, { method: "DELETE" });
+      if (res.ok) {
+        setProjects((prev) => prev.filter((p) => p.id !== id));
+        toast.success("Project deleted");
+      } else {
+        toast.error("Failed to delete project");
+      }
     } else {
-      toast.error("Failed to delete project");
+      const res = await fetch(`/api/synthesis/${id}`, { method: "DELETE" });
+      if (res.ok) {
+        setReviews((prev) => prev.filter((r) => r.id !== id));
+        toast.success("Review deleted");
+      }
     }
   };
 
@@ -356,13 +379,9 @@ export default function ResearchPage() {
   };
 
   // Review actions
-  const handleDeleteReview = async (id: string) => {
-    if (!confirm("Delete this review?")) return;
-    const res = await fetch(`/api/synthesis/${id}`, { method: "DELETE" });
-    if (res.ok) {
-      setReviews((prev) => prev.filter((r) => r.id !== id));
-      toast.success("Review deleted");
-    }
+  const handleDeleteReview = (id: string) => {
+    const rev = reviews.find((r) => r.id === id);
+    setConfirmDelete({ id, title: rev?.title || "this review", type: "review" });
   };
 
   const handleExportReview = async (id: string) => {
@@ -737,6 +756,30 @@ export default function ResearchPage() {
           )}
         </div>
       )}
+
+      {/* Delete confirmation dialog */}
+      <Dialog open={!!confirmDelete} onOpenChange={(open) => !open && setConfirmDelete(null)}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogTitle className="text-sm">Delete {confirmDelete?.type}?</DialogTitle>
+          <DialogDescription className="text-xs text-muted-foreground">
+            <span className="font-medium text-foreground/80">{confirmDelete?.title}</span> will be permanently deleted. This cannot be undone.
+          </DialogDescription>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <button
+              onClick={() => setConfirmDelete(null)}
+              className="rounded-md px-3 py-1.5 text-xs text-muted-foreground hover:bg-accent transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={executeDelete}
+              className="rounded-md bg-destructive px-3 py-1.5 text-xs text-destructive-foreground hover:bg-destructive/90 transition-colors"
+            >
+              Delete
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
