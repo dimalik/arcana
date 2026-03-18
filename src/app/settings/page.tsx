@@ -734,8 +734,9 @@ function ResearchModelTiers() {
     fetch("/api/settings/proxy-status")
       .then((r) => r.json())
       .then((data) => {
-        if (Array.isArray(data.models)) setProxyModels(data.models.map((m: { id: string }) => m.id));
-        else if (typeof data.models === "string") setProxyModels(data.models.split(",").map((s: string) => s.trim()).filter(Boolean));
+        if (Array.isArray(data.models) && data.models.length > 0) {
+          setProxyModels(data.models.map((m: string | { id: string }) => typeof m === "string" ? m : m.id));
+        }
       })
       .catch(() => {});
   }, []);
@@ -756,10 +757,12 @@ function ResearchModelTiers() {
 
   if (!loaded) return null;
 
-  const modelOptions = proxyModels.length > 0 ? proxyModels : [
+  const baseOptions = proxyModels.length > 0 ? proxyModels : [
     "claude-opus-4-6", "claude-sonnet-4-6", "claude-haiku-4-5-20251001",
     "gpt-4o", "gpt-4o-mini",
   ];
+  // Ensure current values are always in the list
+  const modelOptions = Array.from(new Set([...baseOptions, reasoning, standard].filter(Boolean)));
 
   return (
     <div className="space-y-3 pt-4 border-t border-border">
