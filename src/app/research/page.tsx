@@ -4,7 +4,6 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
-  Plus,
   Loader2,
   FlaskConical,
   Upload,
@@ -460,14 +459,6 @@ export default function ResearchPage() {
             {importing ? <Loader2 className="h-3 w-3 animate-spin" /> : <Upload className="h-3 w-3" />}
             Import
           </button>
-          <Link
-            href="/research/new"
-            className="inline-flex items-center gap-1 rounded-md text-[11px] text-muted-foreground/60 hover:text-foreground px-2 py-1 hover:bg-accent transition-colors"
-            title="Full creation wizard with seed papers"
-          >
-            <Plus className="h-3 w-3" />
-            Wizard
-          </Link>
         </div>
       </div>
 
