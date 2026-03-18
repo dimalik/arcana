@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/dimalik/arcana/actions/workflows/ci.yml?branch=main"><img src="https://img.shields.io/github/actions/workflow/status/dimalik/arcana/ci.yml?branch=main&style=for-the-badge" alt="CI"></a>
+  <a href="https://github.com/dimalik/arcana/actions/workflows/ci.yml"><img src="https://github.com/dimalik/arcana/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-AGPL--3.0-blue.svg?style=for-the-badge" alt="AGPL-3.0 License"></a>
   <img src="https://img.shields.io/badge/Next.js-14-black?style=for-the-badge&logo=next.js" alt="Next.js 14">
   <img src="https://img.shields.io/badge/TypeScript-5-3178C6?style=for-the-badge&logo=typescript&logoColor=white" alt="TypeScript">
