@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { getApiKeyStatus, saveApiKey } from "@/lib/llm/api-keys";
 import { clearApiKeyCache } from "@/lib/llm/provider";
 
+export const dynamic = "force-dynamic";
+
 /**
  * GET — return masked key status for each provider.
  */

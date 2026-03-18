@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { z } from "zod";
 
+export const dynamic = "force-dynamic";
+
 export async function GET() {
   const providerSetting = await prisma.setting.findUnique({
     where: { key: "default_provider" },

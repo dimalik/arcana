@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { getRecommendations } from "@/lib/recommendations/engine";
 import { requireUserId } from "@/lib/paper-auth";
 
+export const dynamic = "force-dynamic";
+
 export async function GET(request: NextRequest) {
   try {
     const userId = await requireUserId();
