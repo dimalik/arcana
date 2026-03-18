@@ -5,7 +5,7 @@ import Link from "next/link";
 import {
   BookOpen, FlaskConical, Lightbulb, BarChart3, IterationCcw,
   Pause, Play, Trash2, Search, Compass, ChevronDown,
-  FileText, Beaker, Activity, CheckCircle, MoreVertical, Archive,
+  FileText, Beaker, Activity, CheckCircle, MoreVertical, Archive, Download,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -49,9 +49,10 @@ interface ProjectCardProps {
   };
   onDelete?: (id: string) => void;
   onStatusChange?: (id: string, status: string) => void;
+  onExport?: (id: string) => void;
 }
 
-export function ProjectCard({ project, onDelete, onStatusChange }: ProjectCardProps) {
+export function ProjectCard({ project, onDelete, onStatusChange, onExport }: ProjectCardProps) {
   const [expanded, setExpanded] = useState(false);
 
   const brief = (() => {
@@ -187,6 +188,15 @@ export function ProjectCard({ project, onDelete, onStatusChange }: ProjectCardPr
                     >
                       <CheckCircle className="h-3 w-3" />
                       Complete
+                    </DropdownMenuItem>
+                  )}
+                  {onExport && (
+                    <DropdownMenuItem
+                      onClick={(e) => { e.stopPropagation(); onExport(project.id); }}
+                      className="text-xs gap-2"
+                    >
+                      <Download className="h-3 w-3" />
+                      Export
                     </DropdownMenuItem>
                   )}
                   {onDelete && (

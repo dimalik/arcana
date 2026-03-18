@@ -362,6 +362,26 @@ export default function ResearchPage() {
     }
   };
 
+  const handleExportProject = async (id: string) => {
+    try {
+      const res = await fetch(`/api/research/${id}/export`);
+      if (!res.ok) { toast.error("Export failed"); return; }
+      const data = await res.json();
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `research-${data.title?.replace(/[^a-z0-9]+/gi, "-").slice(0, 40) || id}.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      toast.success("Project exported");
+    } catch {
+      toast.error("Export failed");
+    }
+  };
+
   const handleProjectStatusChange = async (id: string, status: string) => {
     const res = await fetch(`/api/research/${id}`, {
       method: "PATCH",
@@ -664,7 +684,7 @@ export default function ResearchPage() {
               <div className="space-y-2">
                 {running.map((item) =>
                   "methodology" in item ? (
-                    <ProjectCard key={item.id} project={item as Project} onDelete={handleDeleteProject} onStatusChange={handleProjectStatusChange} />
+                    <ProjectCard key={item.id} project={item as Project} onDelete={handleDeleteProject} onStatusChange={handleProjectStatusChange} onExport={handleExportProject} />
                   ) : (
                     <ReviewCard
                       key={item.id}
@@ -688,7 +708,7 @@ export default function ResearchPage() {
               </div>
               <div className="space-y-2">
                 {paused.map((p) => (
-                  <ProjectCard key={p.id} project={p} onDelete={handleDeleteProject} onStatusChange={handleProjectStatusChange} />
+                  <ProjectCard key={p.id} project={p} onDelete={handleDeleteProject} onStatusChange={handleProjectStatusChange} onExport={handleExportProject} />
                 ))}
               </div>
             </section>
@@ -703,7 +723,7 @@ export default function ResearchPage() {
               <div className="space-y-1.5">
                 {completed.map((item) =>
                   "methodology" in item ? (
-                    <ProjectCard key={item.id} project={item as Project} onDelete={handleDeleteProject} onStatusChange={handleProjectStatusChange} />
+                    <ProjectCard key={item.id} project={item as Project} onDelete={handleDeleteProject} onStatusChange={handleProjectStatusChange} onExport={handleExportProject} />
                   ) : (
                     <ReviewCard
                       key={item.id}
@@ -730,7 +750,7 @@ export default function ResearchPage() {
                 <div className="space-y-1.5 mt-2 opacity-50">
                   {archivedAll.map((item) =>
                     "methodology" in item ? (
-                      <ProjectCard key={item.id} project={item as Project} onDelete={handleDeleteProject} onStatusChange={handleProjectStatusChange} />
+                      <ProjectCard key={item.id} project={item as Project} onDelete={handleDeleteProject} onStatusChange={handleProjectStatusChange} onExport={handleExportProject} />
                     ) : (
                       <ReviewCard
                         key={item.id}
