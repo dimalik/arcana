@@ -43,25 +43,23 @@ Arcana is for researchers who don't just read papers — they act on them. It co
 ## How it works
 
 ```mermaid
-graph TD
-    A[Arcana — localhost:3000] --> B[Library Manager]
-    A --> C[Research Agent]
-    A --> D[Synthesis Engine]
+graph LR
+    A["🔬 Arcana"] --> B["📚 Library"]
+    A --> C["🤖 Research Agent"]
+    A --> D["📝 Synthesis"]
 
-    B --> E[Import Pipeline]
-    E --> E1[OpenAlex]
-    E --> E2[Semantic Scholar / PMC]
-    E --> E3[CrossRef / Unpaywall]
-    E --> E4[Web Search fallback]
+    B --> E["Import Pipeline
+    OpenAlex · S2 · PMC
+    CrossRef · Unpaywall
+    Web Search"]
 
-    C --> F[Sub-agents — parallel]
-    F --> F1[Literature Scouts]
-    F --> F2[Synthesizer — Opus]
-    F --> F3[Architect — Opus]
-    F --> F4[Analyst]
-    F --> F5[Adversarial Reviewer]
+    C --> F["Sub-agents
+    Scouts · Synthesizer
+    Architect · Analyst
+    Reviewer"]
 
-    C --> G[Remote GPU Servers — SSH + rsync]
+    C --> G["🖥️ Remote GPUs
+    SSH + rsync"]
 ```
 
 ## Quick start
