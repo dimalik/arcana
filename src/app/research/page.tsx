@@ -340,6 +340,21 @@ export default function ResearchPage() {
     }
   };
 
+  const handleProjectStatusChange = async (id: string, status: string) => {
+    const res = await fetch(`/api/research/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status }),
+    });
+    if (res.ok) {
+      setProjects((prev) => prev.map((p) => p.id === id ? { ...p, status } : p));
+      const label = status === "PAUSED" ? "paused" : status === "ACTIVE" ? "resumed" : status === "COMPLETED" ? "completed" : status;
+      toast.success(`Project ${label}`);
+    } else {
+      toast.error("Failed to update project");
+    }
+  };
+
   // Review actions
   const handleDeleteReview = async (id: string) => {
     if (!confirm("Delete this review?")) return;
@@ -639,7 +654,7 @@ export default function ResearchPage() {
               <div className="space-y-2">
                 {running.map((item) =>
                   "methodology" in item ? (
-                    <ProjectCard key={item.id} project={item as Project} onDelete={handleDeleteProject} />
+                    <ProjectCard key={item.id} project={item as Project} onDelete={handleDeleteProject} onStatusChange={handleProjectStatusChange} />
                   ) : (
                     <ReviewCard
                       key={item.id}
@@ -663,7 +678,7 @@ export default function ResearchPage() {
               </div>
               <div className="space-y-2">
                 {paused.map((p) => (
-                  <ProjectCard key={p.id} project={p} onDelete={handleDeleteProject} />
+                  <ProjectCard key={p.id} project={p} onDelete={handleDeleteProject} onStatusChange={handleProjectStatusChange} />
                 ))}
               </div>
             </section>
@@ -678,7 +693,7 @@ export default function ResearchPage() {
               <div className="space-y-1.5">
                 {completed.map((item) =>
                   "methodology" in item ? (
-                    <ProjectCard key={item.id} project={item as Project} onDelete={handleDeleteProject} />
+                    <ProjectCard key={item.id} project={item as Project} onDelete={handleDeleteProject} onStatusChange={handleProjectStatusChange} />
                   ) : (
                     <ReviewCard
                       key={item.id}
@@ -705,7 +720,7 @@ export default function ResearchPage() {
                 <div className="space-y-1.5 mt-2 opacity-50">
                   {archivedAll.map((item) =>
                     "methodology" in item ? (
-                      <ProjectCard key={item.id} project={item as Project} onDelete={handleDeleteProject} />
+                      <ProjectCard key={item.id} project={item as Project} onDelete={handleDeleteProject} onStatusChange={handleProjectStatusChange} />
                     ) : (
                       <ReviewCard
                         key={item.id}

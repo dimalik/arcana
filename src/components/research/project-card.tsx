@@ -4,9 +4,16 @@ import { useState } from "react";
 import Link from "next/link";
 import {
   BookOpen, FlaskConical, Lightbulb, BarChart3, IterationCcw,
-  Pause, Trash2, Search, Compass, ChevronDown,
-  FileText, Beaker, Activity,
+  Pause, Play, Trash2, Search, Compass, ChevronDown,
+  FileText, Beaker, Activity, CheckCircle, MoreVertical, Archive,
 } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+  DropdownMenuSeparator,
+} from "@/components/ui/dropdown-menu";
 
 const PHASES = ["literature", "hypothesis", "experiment", "analysis", "reflection"] as const;
 
@@ -41,9 +48,10 @@ interface ProjectCardProps {
     log?: { type: string; content: string; createdAt: string }[];
   };
   onDelete?: (id: string) => void;
+  onStatusChange?: (id: string, status: string) => void;
 }
 
-export function ProjectCard({ project, onDelete }: ProjectCardProps) {
+export function ProjectCard({ project, onDelete, onStatusChange }: ProjectCardProps) {
   const [expanded, setExpanded] = useState(false);
 
   const brief = (() => {
@@ -144,15 +152,57 @@ export function ProjectCard({ project, onDelete }: ProjectCardProps) {
                 </span>
               )}
               <span className="text-[10px] text-muted-foreground/40">{timeAgo}</span>
-              {onDelete && (
-                <button
-                  onClick={(e) => { e.preventDefault(); e.stopPropagation(); onDelete(project.id); }}
-                  className="inline-flex h-5 w-5 items-center justify-center rounded text-muted-foreground/0 group-hover:text-muted-foreground/30 hover:!text-destructive hover:bg-destructive/10 transition-all"
-                  title="Delete project"
-                >
-                  <Trash2 className="h-2.5 w-2.5" />
-                </button>
-              )}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    onClick={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                    className="inline-flex h-5 w-5 items-center justify-center rounded text-muted-foreground/0 group-hover:text-muted-foreground/30 hover:!text-muted-foreground hover:bg-accent transition-all"
+                  >
+                    <MoreVertical className="h-3 w-3" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-36">
+                  {isActive && onStatusChange && (
+                    <DropdownMenuItem
+                      onClick={(e) => { e.stopPropagation(); onStatusChange(project.id, "PAUSED"); }}
+                      className="text-xs gap-2"
+                    >
+                      <Pause className="h-3 w-3" />
+                      Pause
+                    </DropdownMenuItem>
+                  )}
+                  {isPaused && onStatusChange && (
+                    <DropdownMenuItem
+                      onClick={(e) => { e.stopPropagation(); onStatusChange(project.id, "ACTIVE"); }}
+                      className="text-xs gap-2"
+                    >
+                      <Play className="h-3 w-3" />
+                      Resume
+                    </DropdownMenuItem>
+                  )}
+                  {(isActive || isPaused) && onStatusChange && (
+                    <DropdownMenuItem
+                      onClick={(e) => { e.stopPropagation(); onStatusChange(project.id, "COMPLETED"); }}
+                      className="text-xs gap-2"
+                    >
+                      <CheckCircle className="h-3 w-3" />
+                      Complete
+                    </DropdownMenuItem>
+                  )}
+                  {onDelete && (
+                    <>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem
+                        onClick={(e) => { e.stopPropagation(); onDelete(project.id); }}
+                        className="text-xs gap-2 text-destructive focus:text-destructive"
+                      >
+                        <Trash2 className="h-3 w-3" />
+                        Delete
+                      </DropdownMenuItem>
+                    </>
+                  )}
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
           </div>
 
