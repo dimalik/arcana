@@ -61,13 +61,14 @@ async function renderPdfPageToImage(
   const canvas = createCanvas(viewport.width, viewport.height);
   const ctx = canvas.getContext("2d");
 
-  // pdfjs render expects a CanvasRenderingContext2D-compatible object
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  // pdfjs render expects a CanvasRenderingContext2D-compatible object — types don't match node-canvas
+  /* eslint-disable @typescript-eslint/no-explicit-any */
   await page.render({
     canvasContext: ctx as any,
     viewport,
     canvas: null as any,
   } as any).promise;
+  /* eslint-enable @typescript-eslint/no-explicit-any */
 
   // Save as PNG
   const buffer = canvas.toBuffer("image/png");

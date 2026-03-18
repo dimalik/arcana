@@ -698,7 +698,7 @@ export async function cleanupStaleJobs(projectId?: string): Promise<number> {
     console.warn(`[remote-executor] Cleaning up job ${job.id} (${job.status} for ${Math.round(elapsed / 60000)}min, exit=${exitCodeFromRemote}, oom=${helperResult?.oom_detected})`);
 
     // Use helper's structured output for logs
-    let finalStdout = helperResult?.stdout_tail || job.stdout || "";
+    const finalStdout = helperResult?.stdout_tail || job.stdout || "";
     let finalStderr = helperResult?.stderr_tail || job.stderr || "";
 
     // Append OOM info if detected

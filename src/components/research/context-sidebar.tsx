@@ -66,6 +66,7 @@ const LARGE_FILE_THRESHOLD = 50 * 1024 * 1024; // 50MB
 
 function fileIcon(name: string) {
   const ext = name.split(".").pop()?.toLowerCase();
+  // eslint-disable-next-line jsx-a11y/alt-text -- this is a lucide-react icon, not an <img>
   if (["png", "jpg", "jpeg", "gif", "svg"].includes(ext || "")) return <Image className="h-3 w-3 shrink-0" />;
   if (["py", "sh", "r", "js", "ts"].includes(ext || "")) return <FileCode className="h-3 w-3 shrink-0" />;
   if (["csv", "tsv", "xlsx"].includes(ext || "")) return <FileSpreadsheet className="h-3 w-3 shrink-0" />;

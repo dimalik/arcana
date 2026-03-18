@@ -87,14 +87,6 @@ function layoutGraph(
 }
 
 export function VizCitations({ data }: VizCitationsProps) {
-  if (data.nodes.length === 0) {
-    return (
-      <p className="text-sm text-muted-foreground text-center py-4">
-        No citation relationships found between selected papers.
-      </p>
-    );
-  }
-
   const { nodes: layoutNodes, edges: layoutEdges } = useMemo(
     () => layoutGraph(data.nodes, data.edges),
     [data]
@@ -102,6 +94,14 @@ export function VizCitations({ data }: VizCitationsProps) {
 
   const [nodes, , onNodesChange] = useNodesState(layoutNodes);
   const [edges, , onEdgesChange] = useEdgesState(layoutEdges);
+
+  if (data.nodes.length === 0) {
+    return (
+      <p className="text-sm text-muted-foreground text-center py-4">
+        No citation relationships found between selected papers.
+      </p>
+    );
+  }
 
   return (
     <div className="h-full w-full">

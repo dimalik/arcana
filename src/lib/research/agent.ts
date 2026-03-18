@@ -389,7 +389,7 @@ async function runAgent(
       type: "generate_code",
     },
   });
-  let experimentCounter = existingExpSteps;
+  const experimentCounter = existingExpSteps;
 
   // 4. Detect remote hosts and probe GPUs (filtered by user resource preferences)
   let resourceSetting: "all" | "local" | string[] = "all";
@@ -414,6 +414,7 @@ async function runAgent(
   // 4b. Load user-defined agent capabilities (defensive — model may not exist if server hasn't restarted after migration)
   let capabilities: { name: string; description: string; instructions: string }[] = [];
   try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- model may not exist if migration hasn't run
     capabilities = await (prisma as any).agentCapability.findMany({
       where: { userId, enabled: true },
       select: { name: true, description: true, instructions: true },
@@ -425,7 +426,7 @@ async function runAgent(
   // 4c. Scan shared utilities directory
   const sharedDir = path.join(process.cwd(), "output", "shared");
   await mkdir(sharedDir, { recursive: true });
-  let sharedUtilities: { filename: string; description: string }[] = [];
+  const sharedUtilities: { filename: string; description: string }[] = [];
   try {
     const files = await readdir(sharedDir);
     for (const f of files) {

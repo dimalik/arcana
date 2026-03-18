@@ -961,7 +961,7 @@ export const AgentActivityBar = forwardRef<AgentActivityHandle, AgentActivityBar
                           onKeyDown={(e) => {
                             if (e.key === "Enter" && !e.shiftKey) {
                               e.preventDefault();
-                              userInput.trim() ? handleSend() : startAgent();
+                              if (userInput.trim()) { handleSend(); } else { startAgent(); }
                             }
                           }}
                           placeholder="Guide the agent or press Enter to restart..."
@@ -1477,7 +1477,7 @@ function FullscreenPanel({
                     onKeyDown={(e) => {
                       if (e.key === "Enter" && !e.shiftKey) {
                         e.preventDefault();
-                        userInput.trim() ? onSend() : onStart();
+                        if (userInput.trim()) { onSend(); } else { onStart(); }
                       }
                     }}
                     placeholder="Guide the agent or press Enter to restart..."
