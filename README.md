@@ -9,6 +9,7 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/dimalik/arcana/actions/workflows/ci.yml?branch=main"><img src="https://img.shields.io/github/actions/workflow/status/dimalik/arcana/ci.yml?branch=main&style=for-the-badge" alt="CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-AGPL--3.0-blue.svg?style=for-the-badge" alt="AGPL-3.0 License"></a>
   <img src="https://img.shields.io/badge/Next.js-14-black?style=for-the-badge&logo=next.js" alt="Next.js 14">
   <img src="https://img.shields.io/badge/TypeScript-5-3178C6?style=for-the-badge&logo=typescript&logoColor=white" alt="TypeScript">
@@ -148,31 +149,6 @@ Start from seed papers and traverse citation networks using Semantic Scholar's S
 ### Research notebook
 
 Collect highlights, explanations, chat excerpts, and personal notes across all papers in a two-panel research journal. Filter by type, search across entries, and build your thinking over time.
-
-## Tech stack
-
-| Layer | Technology |
-|-------|-----------|
-| Framework | Next.js 14 (App Router), TypeScript |
-| UI | Tailwind CSS, shadcn/ui, Radix |
-| Database | Prisma 6 + SQLite |
-| AI | Vercel AI SDK v6 (OpenAI, Anthropic, or any compatible proxy) |
-| PDF | pdf-parse, pdfjs-dist, Tesseract.js (OCR) |
-| Graphs | @xyflow/react, Dagre, Recharts |
-| Remote execution | SSH + rsync to GPU servers |
-
-## From source (development)
-
-```bash
-git clone https://github.com/dimalik/arcana.git
-cd arcana
-
-npm install
-npx prisma generate
-npx prisma db push
-
-npm run dev
-```
 
 ## License
 
