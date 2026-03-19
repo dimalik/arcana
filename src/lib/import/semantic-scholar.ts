@@ -224,16 +224,21 @@ export function parseS2Paper(raw: S2PaperRaw): S2Result {
   };
 }
 
-export function getS2Headers(): Record<string, string> | undefined {
-  const apiKey = process.env.S2_API_KEY;
-  return apiKey ? { "x-api-key": apiKey } : undefined;
+let _cachedS2Key: string | null | undefined;
+
+export async function getS2Headers(): Promise<Record<string, string> | undefined> {
+  if (_cachedS2Key === undefined) {
+    const { getApiKey } = await import("@/lib/llm/api-keys");
+    _cachedS2Key = await getApiKey("s2");
+  }
+  return _cachedS2Key ? { "x-api-key": _cachedS2Key } : undefined;
 }
 
 async function searchS2(
   title: string,
   year: number | null | undefined
 ): Promise<S2Result | null> {
-  const headers = getS2Headers();
+  const headers = await getS2Headers();
   if (!headers) return null; // skip S2 if no API key
 
   const cleaned = title.replace(/-/g, " ").replace(/\s+/g, " ").trim();
@@ -389,7 +394,7 @@ async function searchOpenAlexMulti(
 async function searchS2Multi(
   query: string,
 ): Promise<S2Result[]> {
-  const headers = getS2Headers();
+  const headers = await getS2Headers();
   if (!headers) return [];
 
   const cleaned = query.replace(/-/g, " ").replace(/\s+/g, " ").trim();
@@ -505,7 +510,7 @@ export async function getS2Recommendations(
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        ...(getS2Headers() || {}),
+        ...((await getS2Headers()) || {}),
       },
       body: JSON.stringify({ positivePaperIds: paperIds }),
     });

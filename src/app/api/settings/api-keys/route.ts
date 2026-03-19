@@ -25,6 +25,9 @@ export async function PUT(req: NextRequest) {
     if (typeof body.anthropic === "string") {
       await saveApiKey("anthropic", body.anthropic);
     }
+    if (typeof body.s2 === "string") {
+      await saveApiKey("s2", body.s2);
+    }
 
     clearApiKeyCache();
     return NextResponse.json({ ok: true });

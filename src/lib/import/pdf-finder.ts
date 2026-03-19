@@ -167,9 +167,8 @@ async function fetchUnpaywallPdfUrl(
 
 async function fetchS2PdfUrl(doi: string): Promise<string | null> {
   const url = `https://api.semanticscholar.org/graph/v1/paper/DOI:${doi}?fields=openAccessPdf`;
-  const headers = process.env.S2_API_KEY
-    ? { "x-api-key": process.env.S2_API_KEY }
-    : undefined;
+  const { getS2Headers } = await import("./semantic-scholar");
+  const headers = await getS2Headers();
   const res = await fetchWithRetry(url, "s2", 1100, headers);
   if (!res) return null;
 

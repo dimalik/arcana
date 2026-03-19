@@ -45,7 +45,7 @@ interface S2PaperRaw {
  * Accepts: s2:<id>, DOI URL, OpenAlex URL, arXiv ID, or plain DOI.
  */
 async function resolveToS2Id(paperId: string): Promise<string | null> {
-  const s2Headers = getS2Headers();
+  const s2Headers = await getS2Headers();
   if (!s2Headers) return null;
 
   // Already an S2 ID
@@ -120,7 +120,7 @@ async function searchS2ByTitle(
 // ── S2 graph API ────────────────────────────────────────────────────
 
 async function getS2References(s2Id: string): Promise<S2Result[]> {
-  const s2Headers = getS2Headers();
+  const s2Headers = await getS2Headers();
   if (!s2Headers) return [];
 
   const url = `${S2_BASE}/${s2Id}/references?fields=${S2_FIELDS}&limit=100`;
@@ -135,7 +135,7 @@ async function getS2References(s2Id: string): Promise<S2Result[]> {
 }
 
 async function getS2Citations(s2Id: string): Promise<S2Result[]> {
-  const s2Headers = getS2Headers();
+  const s2Headers = await getS2Headers();
   if (!s2Headers) return [];
 
   const url = `${S2_BASE}/${s2Id}/citations?fields=${S2_FIELDS}&limit=100`;

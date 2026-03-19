@@ -376,9 +376,10 @@ function LLMSection() {
   const [loaded, setLoaded] = useState(false);
 
   // API keys
-  const [keyStatus, setKeyStatus] = useState<{ openai: KeyStatus; anthropic: KeyStatus } | null>(null);
+  const [keyStatus, setKeyStatus] = useState<{ openai: KeyStatus; anthropic: KeyStatus; s2: KeyStatus } | null>(null);
   const [openaiKey, setOpenaiKey] = useState("");
   const [anthropicKey, setAnthropicKey] = useState("");
+  const [s2Key, setS2Key] = useState("");
   const [keysSaving, setKeysSaving] = useState(false);
 
   // Proxy
@@ -451,6 +452,7 @@ function LLMSection() {
       const body: Record<string, string> = {};
       if (openaiKey) body.openai = openaiKey;
       if (anthropicKey) body.anthropic = anthropicKey;
+      if (s2Key) body.s2 = s2Key;
       const res = await fetch("/api/settings/api-keys", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
@@ -593,8 +595,26 @@ function LLMSection() {
               className="font-mono text-sm"
             />
           </div>
+          <div className="space-y-1">
+            <div className="flex items-center gap-2">
+              <Label className="text-xs">Semantic Scholar</Label>
+              {keyStatus?.s2.set && (
+                <span className="text-[10px] text-emerald-600 dark:text-emerald-400">
+                  {keyStatus.s2.masked}
+                  {keyStatus.s2.source === "env" && " (from .env)"}
+                </span>
+              )}
+            </div>
+            <Input
+              type="password"
+              value={s2Key}
+              onChange={(e) => setS2Key(e.target.value)}
+              placeholder={keyStatus?.s2.set ? "Enter new key to replace" : "Optional — higher rate limits for paper search"}
+              className="font-mono text-sm"
+            />
+          </div>
         </div>
-        <Button size="sm" onClick={handleKeysSave} disabled={keysSaving || (!openaiKey && !anthropicKey)}>
+        <Button size="sm" onClick={handleKeysSave} disabled={keysSaving || (!openaiKey && !anthropicKey && !s2Key)}>
           {keysSaving ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Save className="mr-1.5 h-3.5 w-3.5" />}
           Save Keys
         </Button>

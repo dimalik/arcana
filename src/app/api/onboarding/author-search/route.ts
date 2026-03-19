@@ -49,7 +49,7 @@ export async function GET(req: NextRequest) {
   const query = affiliation ? `${name.trim()} ${affiliation.trim()}` : name.trim();
 
   const url = `${S2_BASE}/author/search?query=${encodeURIComponent(query)}&fields=${AUTHOR_FIELDS}&limit=5`;
-  const headers = getS2Headers();
+  const headers = await getS2Headers();
   const res = await fetchWithRetry(url, "s2", 1100, headers);
 
   if (!res) {
@@ -90,7 +90,7 @@ export async function POST(req: NextRequest) {
   }
 
   const url = `${S2_BASE}/author/${encodeURIComponent(authorId)}/papers?fields=${PAPER_FIELDS}&limit=20`;
-  const headers = getS2Headers();
+  const headers = await getS2Headers();
   const res = await fetchWithRetry(url, "s2", 1100, headers);
 
   if (!res) {
