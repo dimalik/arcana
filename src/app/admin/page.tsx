@@ -113,13 +113,13 @@ export default function AdminPage() {
       .finally(() => setLoading(false));
   }, [days]);
 
-  const handleRepairPdfs = async (limit: number) => {
+  const handleRepairPdfs = async (limit: number, scope: "all" | "library" | "research") => {
     setRepairing(true);
     setRepairResult(null);
     try {
-      const res = await fetch(`/api/admin/repair-pdfs?limit=${limit}&reprocess=true`, { method: "POST" });
+      const res = await fetch(`/api/admin/repair-pdfs?limit=${limit}&scope=${scope}&reprocess=true`, { method: "POST" });
       const data = await res.json();
-      setRepairResult(`Downloaded ${data.downloaded}/${data.processed} PDFs, ${data.queued} queued for batch processing${data.batch ? ` — ${data.batch}` : ""}`);
+      setRepairResult(`Downloaded ${data.downloaded}/${data.processed} PDFs, extracted text for ${data.textExtracted}, ${data.queued} queued for batch${data.batch ? ` — ${data.batch}` : ""}`);
       fetchBatches();
     } catch {
       setRepairResult("Repair failed");
@@ -359,20 +359,33 @@ export default function AdminPage() {
                   <span>{batchData.missingPdfs.research} from research</span>
                   <span>{batchData.missingPdfs.repairable} repairable (have arXiv/DOI)</span>
                 </div>
-                <div className="flex items-center gap-2">
-                  {[50, 200, 500].map((n) => (
-                    <Button
-                      key={n}
-                      size="sm"
-                      variant="outline"
-                      onClick={() => handleRepairPdfs(n)}
-                      disabled={repairing}
-                      className="text-xs h-7"
-                    >
-                      {repairing ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : null}
-                      Repair {n}
-                    </Button>
+                <div className="space-y-2">
+                  {([
+                    { scope: "library" as const, label: "Library", count: batchData.missingPdfs.library },
+                    { scope: "research" as const, label: "Research", count: batchData.missingPdfs.research },
+                  ]).filter((s) => s.count > 0).map(({ scope, label, count }) => (
+                    <div key={scope} className="flex items-center gap-2">
+                      <span className="text-xs text-muted-foreground w-20">{label} ({count})</span>
+                      {[50, 200, 500].map((n) => (
+                        <Button
+                          key={n}
+                          size="sm"
+                          variant="outline"
+                          onClick={() => handleRepairPdfs(n, scope)}
+                          disabled={repairing}
+                          className="text-xs h-6 px-2"
+                        >
+                          {n}
+                        </Button>
+                      ))}
+                    </div>
                   ))}
+                  {repairing && (
+                    <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                      Downloading PDFs and extracting text...
+                    </div>
+                  )}
                 </div>
                 {repairResult && (
                   <p className="text-xs text-muted-foreground">{repairResult}</p>
