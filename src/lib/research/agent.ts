@@ -26,6 +26,71 @@ import path from "path";
 
 const execAsync = promisify(exec);
 
+// ── Background PDF download queue (serial to avoid rate limits) ───
+
+interface PdfDownloadItem {
+  paperId: string;
+  doi: string | null;
+  arxivId: string | null;
+  openAccessPdfUrl: string | null;
+  title: string;
+  hasAbstract: boolean;
+}
+
+const pdfDownloadQueue: PdfDownloadItem[] = [];
+let pdfDownloadRunning = false;
+
+async function drainPdfDownloadQueue() {
+  if (pdfDownloadRunning) return;
+  pdfDownloadRunning = true;
+
+  while (pdfDownloadQueue.length > 0) {
+    const item = pdfDownloadQueue.shift()!;
+    try {
+      const pdf = await findAndDownloadPdf({
+        doi: item.doi,
+        arxivId: item.arxivId,
+        existingPdfUrl: item.openAccessPdfUrl,
+        title: item.title,
+      });
+
+      if (pdf) {
+        await prisma.paper.update({
+          where: { id: item.paperId },
+          data: { filePath: pdf.filePath, processingStatus: "EXTRACTING_TEXT" },
+        });
+        processingQueue.enqueue(item.paperId);
+        console.log(`[pdf-queue] Downloaded PDF for ${item.paperId} from ${pdf.source}`);
+      } else if (item.hasAbstract) {
+        await prisma.paper.update({
+          where: { id: item.paperId },
+          data: { processingStatus: "NO_PDF" },
+        });
+        processingQueue.enqueue(item.paperId);
+      } else {
+        await prisma.paper.update({
+          where: { id: item.paperId },
+          data: { processingStatus: "NO_PDF" },
+        });
+      }
+    } catch (err) {
+      console.warn(`[pdf-queue] Failed for ${item.paperId}:`, (err as Error).message);
+      if (item.hasAbstract) {
+        processingQueue.enqueue(item.paperId);
+      }
+      await prisma.paper.update({
+        where: { id: item.paperId },
+        data: { processingStatus: "NO_PDF" },
+      }).catch(() => {});
+    }
+
+    // 500ms delay between downloads to respect rate limits
+    await new Promise((r) => setTimeout(r, 500));
+  }
+
+  pdfDownloadRunning = false;
+}
+
 // ── Helpers ──────────────────────────────────────────────────────
 
 /** Check if a script name is a utility/helper (not an experiment) */
@@ -1379,46 +1444,23 @@ function createTools(
             });
             await prisma.collectionPaper.create({ data: { collectionId, paperId: paper.id } });
 
-            // Queue PDF download + processing in background (non-blocking)
-            findAndDownloadPdf({ doi: r.doi, arxivId: r.arxivId, existingPdfUrl: r.openAccessPdfUrl, title: r.title })
-              .then(async (pdf) => {
-                if (pdf) {
-                  await prisma.paper.update({
-                    where: { id: paper.id },
-                    data: { filePath: pdf.filePath, processingStatus: "EXTRACTING_TEXT" },
-                  });
-                  processingQueue.enqueue(paper.id);
-                } else if (r.abstract) {
-                  // No PDF but has abstract — still process (summarize, categorize, etc.)
-                  await prisma.paper.update({
-                    where: { id: paper.id },
-                    data: { processingStatus: "NO_PDF" },
-                  });
-                  processingQueue.enqueue(paper.id);
-                } else {
-                  await prisma.paper.update({
-                    where: { id: paper.id },
-                    data: { processingStatus: "NO_PDF" },
-                  });
-                }
-              })
-              .catch(async (err) => {
-                console.warn(`[search_papers] PDF download failed for "${r.title.slice(0, 60)}":`, err instanceof Error ? err.message : err);
-                // Still process if we have an abstract
-                if (r.abstract) {
-                  processingQueue.enqueue(paper.id);
-                } else {
-                  await prisma.paper.update({
-                    where: { id: paper.id },
-                    data: { processingStatus: "NO_PDF" },
-                  }).catch(() => {});
-                }
-              });
+            // Queue PDF download in background — serialized to avoid rate limits
+            pdfDownloadQueue.push({
+              paperId: paper.id,
+              doi: r.doi,
+              arxivId: r.arxivId,
+              openAccessPdfUrl: r.openAccessPdfUrl,
+              title: r.title,
+              hasAbstract: !!r.abstract,
+            });
             imported.push(`"${r.title}" (${r.year || "?"}) — ${r.citationCount || 0} citations${r.abstract ? `\n  Abstract: ${r.abstract.slice(0, 300)}` : ""}`);
           } catch (err) {
             imported.push(`"${r.title}" — failed to import: ${err instanceof Error ? err.message : "error"}`);
           }
         }
+
+        // Start draining the PDF download queue (non-blocking, serial)
+        drainPdfDownloadQueue().catch((err) => console.error("[pdf-queue] Drain error:", err));
 
         const summary = `Found and imported ${imported.length} papers:\n\n${imported.join("\n\n")}`;
         await recordStep("search_papers", `Search: "${query}"`, "COMPLETED", { imported: imported.length, query }, "literature");

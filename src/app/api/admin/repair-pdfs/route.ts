@@ -1,0 +1,118 @@
+import { NextRequest, NextResponse } from "next/server";
+import { prisma } from "@/lib/prisma";
+import { findAndDownloadPdf } from "@/lib/import/pdf-finder";
+import { processingQueue } from "@/lib/processing/queue";
+
+export const dynamic = "force-dynamic";
+export const maxDuration = 300; // 5 minutes
+
+/**
+ * POST — Bulk-repair papers missing PDFs.
+ * Downloads PDFs for papers that have arxivId or doi but no filePath.
+ * Processes in serial with a small delay to avoid rate limits.
+ *
+ * Query params:
+ *   ?limit=50        max papers to process (default 50)
+ *   ?dryRun=true     just count, don't download
+ *   ?reprocess=true  queue papers for batch reprocessing after PDF download
+ */
+export async function POST(request: NextRequest) {
+  const { searchParams } = new URL(request.url);
+  const limit = parseInt(searchParams.get("limit") || "50");
+  const dryRun = searchParams.get("dryRun") === "true";
+  const reprocess = searchParams.get("reprocess") !== "false"; // default true
+
+  // Find papers missing PDFs that have identifiers we can use
+  const candidates = await prisma.paper.findMany({
+    where: {
+      filePath: null,
+      OR: [
+        { arxivId: { not: null } },
+        { doi: { not: null } },
+      ],
+    },
+    select: { id: true, title: true, arxivId: true, doi: true, processingStatus: true },
+    // Prioritize arXiv (guaranteed PDF), then by recency
+    orderBy: [{ arxivId: "desc" }, { createdAt: "desc" }],
+    take: limit,
+  });
+
+  if (dryRun) {
+    // Count totals
+    const total = await prisma.paper.count({
+      where: {
+        filePath: null,
+        OR: [{ arxivId: { not: null } }, { doi: { not: null } }],
+      },
+    });
+    return NextResponse.json({ dryRun: true, total, batch: candidates.length });
+  }
+
+  let downloaded = 0;
+  let failed = 0;
+  let queued = 0;
+  const errors: string[] = [];
+
+  for (const paper of candidates) {
+    try {
+      const result = await findAndDownloadPdf({
+        doi: paper.doi,
+        arxivId: paper.arxivId,
+        title: paper.title,
+      });
+
+      if (result) {
+        const needsReprocessing = reprocess && (
+          paper.processingStatus === "PENDING" ||
+          paper.processingStatus === "NO_PDF" ||
+          paper.processingStatus === "FAILED"
+        );
+
+        await prisma.paper.update({
+          where: { id: paper.id },
+          data: {
+            filePath: result.filePath,
+            processingStatus: needsReprocessing ? "EXTRACTING_TEXT" : undefined,
+          },
+        });
+
+        if (needsReprocessing) {
+          processingQueue.enqueue(paper.id);
+          queued++;
+        }
+
+        downloaded++;
+      } else {
+        failed++;
+      }
+
+      // Small delay between downloads to avoid rate limits
+      await new Promise((r) => setTimeout(r, 500));
+    } catch (err) {
+      failed++;
+      errors.push(`${paper.id}: ${(err as Error).message}`);
+    }
+  }
+
+  return NextResponse.json({
+    processed: candidates.length,
+    downloaded,
+    failed,
+    queued,
+    errors: errors.slice(0, 10),
+  });
+}
+
+/**
+ * GET — Check how many papers are missing PDFs.
+ */
+export async function GET() {
+  const [total, withArxiv, withDoi, noIdentifier] = await Promise.all([
+    prisma.paper.count({ where: { filePath: null } }),
+    prisma.paper.count({ where: { filePath: null, arxivId: { not: null } } }),
+    prisma.paper.count({ where: { filePath: null, doi: { not: null }, arxivId: null } }),
+    prisma.paper.count({ where: { filePath: null, doi: null, arxivId: null } }),
+  ]);
+
+  return NextResponse.json({ total, withArxiv, withDoi, noIdentifier });
+}
