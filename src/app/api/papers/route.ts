@@ -73,6 +73,13 @@ export async function GET(request: NextRequest) {
     where.year = parseInt(year);
   }
 
+  const pdfFilter = searchParams.get("pdf"); // "has" | "missing"
+  if (pdfFilter === "has") {
+    where.filePath = { not: null };
+  } else if (pdfFilter === "missing") {
+    where.filePath = null;
+  }
+
   const [papers, total] = await Promise.all([
     prisma.paper.findMany({
       where,

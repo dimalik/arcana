@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/popover";
 import {
   FileText,
+  FileX,
   ArrowUpDown,
   MoreHorizontal,
   Plus,
@@ -173,6 +174,7 @@ export default function HomePage() {
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [sort, setSort] = useState("newest");
+  const [pdfFilter, setPdfFilter] = useState<"all" | "has" | "missing">("all");
 
   // Add Paper dialog
   const [addDialogOpen, setAddDialogOpen] = useState(false);
@@ -206,6 +208,10 @@ export default function HomePage() {
         params.set("tagIds", Array.from(selectedTagIds).join(","));
       }
 
+      if (pdfFilter !== "all") {
+        params.set("pdf", pdfFilter);
+      }
+
       const res = await fetch(`/api/papers?${params}`);
       const data = await res.json();
       setPapers(data.papers ?? []);
@@ -215,7 +221,7 @@ export default function HomePage() {
       toast.error("Failed to load papers");
     }
     setLoading(false);
-  }, [page, selectedTagIds, sort]);
+  }, [page, selectedTagIds, sort, pdfFilter]);
 
   useEffect(() => {
     fetchPapers();
@@ -240,6 +246,7 @@ export default function HomePage() {
 
   const clearFilters = () => {
     setSelectedTagIds(new Set());
+    setPdfFilter("all");
     setPage(1);
   };
 
@@ -260,7 +267,7 @@ export default function HomePage() {
     fetchPapers();
   };
 
-  const hasFilters = selectedTagIds.size > 0;
+  const hasFilters = selectedTagIds.size > 0 || pdfFilter !== "all";
 
   return (
     <div className="flex gap-6 h-[calc(100vh-3.5rem-2.5rem)] -my-5 -ml-8 -mr-10 pl-8 pr-10 pt-5 overflow-hidden">
@@ -327,6 +334,15 @@ export default function HomePage() {
                     <Tags className="h-3.5 w-3.5" />
                     Manage tags
                   </Link>
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => { setPdfFilter(pdfFilter === "has" ? "all" : "has"); setPage(1); }} className="flex items-center justify-between">
+                  <span className="flex items-center gap-2"><FileText className="h-3.5 w-3.5" /> Has PDF</span>
+                  {pdfFilter === "has" && <Check className="h-3.5 w-3.5 text-primary" />}
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => { setPdfFilter(pdfFilter === "missing" ? "all" : "missing"); setPage(1); }} className="flex items-center justify-between">
+                  <span className="flex items-center gap-2"><FileX className="h-3.5 w-3.5" /> No PDF</span>
+                  {pdfFilter === "missing" && <Check className="h-3.5 w-3.5 text-primary" />}
                 </DropdownMenuItem>
                 {hasFilters && (
                   <>
