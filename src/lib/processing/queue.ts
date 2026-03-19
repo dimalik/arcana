@@ -4,8 +4,8 @@ import { notifyPaperProcessed, maybeRunTagMaintenance } from "@/lib/tags/mainten
 
 const STALL_THRESHOLD_MS = 5 * 60 * 1000; // 5 minutes
 const MAX_CONCURRENT = 3; // Process up to N papers simultaneously
-const BATCH_AUTO_THRESHOLD = 6; // Auto-route to Batch API when this many papers queue up
-const BATCH_FLUSH_DELAY_MS = 5_000; // Wait 5s for more papers before flushing to batch
+const BATCH_AUTO_THRESHOLD = 20; // Auto-route to Batch API when this many papers queue up
+const BATCH_FLUSH_DELAY_MS = 30_000; // Wait 30s for more papers before deciding batch vs sequential
 
 export class CancelledError extends Error {
   constructor(paperId: string) {
