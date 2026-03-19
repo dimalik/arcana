@@ -11,7 +11,12 @@ import {
   Users,
   TrendingUp,
   Activity,
+  Package,
+  FileDown,
+  Loader2,
+  RefreshCw,
 } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 
 interface UsageSummary {
@@ -46,27 +51,76 @@ interface UserInfo {
   _count: { llmUsageLogs: number; appEvents: number };
 }
 
+interface BatchInfo {
+  id: string;
+  groupId: string;
+  phase: number;
+  status: string;
+  requestCount: number;
+  completedCount: number;
+  failedCount: number;
+  createdAt: string;
+  completedAt: string | null;
+}
+
+interface BatchData {
+  summary: {
+    processing: number;
+    submitted: number;
+    completed: number;
+    failed: number;
+    totalRequests: number;
+    completedRequests: number;
+    failedRequests: number;
+  };
+  missingPdfs: number;
+  batches: BatchInfo[];
+}
+
 export default function AdminPage() {
   const [usage, setUsage] = useState<UsageSummary | null>(null);
   const [events, setEvents] = useState<AppEvent[]>([]);
   const [users, setUsers] = useState<UserInfo[]>([]);
+  const [batchData, setBatchData] = useState<BatchData | null>(null);
   const [loading, setLoading] = useState(true);
   const [days, setDays] = useState(30);
+  const [repairing, setRepairing] = useState(false);
+  const [repairResult, setRepairResult] = useState<string | null>(null);
+
+  const fetchBatches = () => {
+    fetch("/api/admin/batches").then((r) => r.json()).then(setBatchData).catch(() => {});
+  };
 
   useEffect(() => {
     Promise.all([
       fetch(`/api/admin/usage?days=${days}`).then((r) => r.json()),
       fetch("/api/admin/events?limit=30&level=error").then((r) => r.json()),
       fetch("/api/admin/users").then((r) => r.json()),
+      fetch("/api/admin/batches").then((r) => r.json()),
     ])
-      .then(([usageData, eventsData, usersData]) => {
+      .then(([usageData, eventsData, usersData, batchesData]) => {
         setUsage(usageData);
         setEvents(Array.isArray(eventsData) ? eventsData : []);
         setUsers(Array.isArray(usersData) ? usersData : []);
+        setBatchData(batchesData);
       })
       .catch(() => toast.error("Failed to load admin data"))
       .finally(() => setLoading(false));
   }, [days]);
+
+  const handleRepairPdfs = async (limit: number) => {
+    setRepairing(true);
+    setRepairResult(null);
+    try {
+      const res = await fetch(`/api/admin/repair-pdfs?limit=${limit}&reprocess=true`, { method: "POST" });
+      const data = await res.json();
+      setRepairResult(`Downloaded ${data.downloaded}/${data.processed} PDFs, ${data.queued} queued for batch processing${data.batch ? ` — ${data.batch}` : ""}`);
+      fetchBatches();
+    } catch {
+      setRepairResult("Repair failed");
+    }
+    setRepairing(false);
+  };
 
   if (loading) {
     return (
@@ -242,6 +296,126 @@ export default function AdminPage() {
                 );
               })}
             </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Batch Processing */}
+      {batchData && (
+        <Card>
+          <CardContent className="p-4 space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-medium flex items-center gap-2">
+                <Package className="h-4 w-4" />
+                Batch Processing
+              </h3>
+              <button onClick={fetchBatches} className="text-muted-foreground hover:text-foreground transition-colors">
+                <RefreshCw className="h-3.5 w-3.5" />
+              </button>
+            </div>
+
+            {/* Summary pills */}
+            <div className="flex flex-wrap gap-2">
+              {batchData.summary.processing > 0 && (
+                <Badge variant="default" className="text-xs gap-1">
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                  {batchData.summary.processing} processing
+                </Badge>
+              )}
+              {batchData.summary.submitted > 0 && (
+                <Badge variant="secondary" className="text-xs">
+                  {batchData.summary.submitted} submitted
+                </Badge>
+              )}
+              {batchData.summary.completed > 0 && (
+                <Badge variant="outline" className="text-xs">
+                  {batchData.summary.completed} completed
+                </Badge>
+              )}
+              {batchData.summary.failed > 0 && (
+                <Badge variant="destructive" className="text-xs">
+                  {batchData.summary.failed} failed
+                </Badge>
+              )}
+              <span className="text-xs text-muted-foreground">
+                {batchData.summary.completedRequests}/{batchData.summary.totalRequests} requests done
+              </span>
+            </div>
+
+            {/* Missing PDFs + repair */}
+            {batchData.missingPdfs > 0 && (
+              <div className="rounded-md border border-amber-500/20 bg-amber-500/5 p-3 space-y-2">
+                <div className="flex items-center gap-2 text-sm">
+                  <FileDown className="h-4 w-4 text-amber-500" />
+                  <span className="font-medium">{batchData.missingPdfs} papers missing PDFs</span>
+                  <span className="text-xs text-muted-foreground">(have arXiv ID or DOI)</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  {[50, 200, 500].map((n) => (
+                    <Button
+                      key={n}
+                      size="sm"
+                      variant="outline"
+                      onClick={() => handleRepairPdfs(n)}
+                      disabled={repairing}
+                      className="text-xs h-7"
+                    >
+                      {repairing ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : null}
+                      Repair {n}
+                    </Button>
+                  ))}
+                </div>
+                {repairResult && (
+                  <p className="text-xs text-muted-foreground">{repairResult}</p>
+                )}
+              </div>
+            )}
+
+            {/* Recent batches table */}
+            {batchData.batches.length > 0 && (
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="text-muted-foreground/60 border-b">
+                      <th className="text-left py-1.5 font-medium">Group</th>
+                      <th className="text-left py-1.5 font-medium">Phase</th>
+                      <th className="text-left py-1.5 font-medium">Status</th>
+                      <th className="text-right py-1.5 font-medium">Requests</th>
+                      <th className="text-right py-1.5 font-medium">Done</th>
+                      <th className="text-right py-1.5 font-medium">Failed</th>
+                      <th className="text-right py-1.5 font-medium">Created</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {batchData.batches.map((b) => (
+                      <tr key={b.id} className="border-b border-border/30 hover:bg-muted/30">
+                        <td className="py-1.5 font-mono text-muted-foreground">{b.groupId.slice(0, 8)}</td>
+                        <td className="py-1.5">{b.phase}</td>
+                        <td className="py-1.5">
+                          <Badge
+                            variant={
+                              b.status === "COMPLETED" ? "outline" :
+                              b.status === "PROCESSING" ? "default" :
+                              b.status === "FAILED" ? "destructive" : "secondary"
+                            }
+                            className="text-[10px]"
+                          >
+                            {b.status === "PROCESSING" && <Loader2 className="h-2.5 w-2.5 animate-spin mr-0.5" />}
+                            {b.status.toLowerCase()}
+                          </Badge>
+                        </td>
+                        <td className="py-1.5 text-right">{b.requestCount}</td>
+                        <td className="py-1.5 text-right">{b.completedCount}</td>
+                        <td className="py-1.5 text-right">{b.failedCount || "—"}</td>
+                        <td className="py-1.5 text-right text-muted-foreground">
+                          {new Date(b.createdAt).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </CardContent>
         </Card>
       )}
