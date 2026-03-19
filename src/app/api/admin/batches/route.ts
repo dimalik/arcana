@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  const [batches, missingPdfs] = await Promise.all([
+  const [batches, missingPdfs, totalNoPdf, libraryNoPdf, researchNoPdf] = await Promise.all([
     prisma.processingBatch.findMany({
       orderBy: { createdAt: "desc" },
       take: 20,
@@ -26,6 +26,9 @@ export async function GET() {
         OR: [{ arxivId: { not: null } }, { doi: { not: null } }],
       },
     }),
+    prisma.paper.count({ where: { filePath: null } }),
+    prisma.paper.count({ where: { filePath: null, isResearchOnly: false } }),
+    prisma.paper.count({ where: { filePath: null, isResearchOnly: true } }),
   ]);
 
   // Aggregate by status
@@ -52,7 +55,12 @@ export async function GET() {
 
   return NextResponse.json({
     summary,
-    missingPdfs,
+    missingPdfs: {
+      repairable: missingPdfs,
+      total: totalNoPdf,
+      library: libraryNoPdf,
+      research: researchNoPdf,
+    },
     batches: batches.map((b) => ({
       ...b,
       createdAt: new Date(Number(b.createdAt)).toISOString(),

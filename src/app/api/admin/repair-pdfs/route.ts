@@ -132,12 +132,27 @@ export async function POST(request: NextRequest) {
  * GET — Check how many papers are missing PDFs.
  */
 export async function GET() {
-  const [total, withArxiv, withDoi, noIdentifier] = await Promise.all([
-    prisma.paper.count({ where: { filePath: null } }),
-    prisma.paper.count({ where: { filePath: null, arxivId: { not: null } } }),
-    prisma.paper.count({ where: { filePath: null, doi: { not: null }, arxivId: null } }),
-    prisma.paper.count({ where: { filePath: null, doi: null, arxivId: null } }),
+  const noPdf = { filePath: null as null };
+  const repairable = { filePath: null as null, OR: [{ arxivId: { not: null } }, { doi: { not: null } }] as Record<string, unknown>[] };
+
+  const [totalPapers, totalNoPdf, libraryNoPdf, researchNoPdf, withArxiv, withDoi, noIdentifier] = await Promise.all([
+    prisma.paper.count(),
+    prisma.paper.count({ where: noPdf }),
+    prisma.paper.count({ where: { ...noPdf, isResearchOnly: false } }),
+    prisma.paper.count({ where: { ...noPdf, isResearchOnly: true } }),
+    prisma.paper.count({ where: { ...noPdf, arxivId: { not: null } } }),
+    prisma.paper.count({ where: { ...noPdf, doi: { not: null }, arxivId: null } }),
+    prisma.paper.count({ where: { ...noPdf, doi: null, arxivId: null } }),
   ]);
 
-  return NextResponse.json({ total, withArxiv, withDoi, noIdentifier });
+  return NextResponse.json({
+    totalPapers,
+    totalNoPdf,
+    libraryNoPdf,
+    researchNoPdf,
+    repairable: withArxiv + withDoi,
+    withArxiv,
+    withDoi,
+    noIdentifier,
+  });
 }

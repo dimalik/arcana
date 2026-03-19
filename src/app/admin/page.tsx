@@ -73,7 +73,12 @@ interface BatchData {
     completedRequests: number;
     failedRequests: number;
   };
-  missingPdfs: number;
+  missingPdfs: {
+    repairable: number;
+    total: number;
+    library: number;
+    research: number;
+  };
   batches: BatchInfo[];
 }
 
@@ -343,12 +348,16 @@ export default function AdminPage() {
             </div>
 
             {/* Missing PDFs + repair */}
-            {batchData.missingPdfs > 0 && (
+            {batchData.missingPdfs.total > 0 && (
               <div className="rounded-md border border-amber-500/20 bg-amber-500/5 p-3 space-y-2">
                 <div className="flex items-center gap-2 text-sm">
                   <FileDown className="h-4 w-4 text-amber-500" />
-                  <span className="font-medium">{batchData.missingPdfs} papers missing PDFs</span>
-                  <span className="text-xs text-muted-foreground">(have arXiv ID or DOI)</span>
+                  <span className="font-medium">{batchData.missingPdfs.total} papers missing PDFs</span>
+                </div>
+                <div className="flex flex-wrap gap-3 text-xs text-muted-foreground">
+                  <span>{batchData.missingPdfs.library} in library</span>
+                  <span>{batchData.missingPdfs.research} from research</span>
+                  <span>{batchData.missingPdfs.repairable} repairable (have arXiv/DOI)</span>
                 </div>
                 <div className="flex items-center gap-2">
                   {[50, 200, 500].map((n) => (
