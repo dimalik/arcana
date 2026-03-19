@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { findAndDownloadPdf } from "@/lib/import/pdf-finder";
 import { createBatchJob } from "@/lib/processing/batch";
+import { runTextExtraction } from "@/lib/llm/auto-process";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300; // 5 minutes
@@ -93,9 +94,20 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  // Submit all papers needing reprocessing as a single batch (50% cheaper)
+  // Extract text from downloaded PDFs (cheap, no LLM), then batch-process
+  let textExtracted = 0;
   let batchInfo: string | null = null;
   if (toReprocess.length > 0) {
+    for (const paperId of toReprocess) {
+      try {
+        await runTextExtraction(paperId);
+        textExtracted++;
+      } catch (err) {
+        console.warn(`[repair-pdfs] Text extraction failed for ${paperId}:`, (err as Error).message);
+      }
+    }
+
+    // Now submit to batch API (50% cheaper than sequential LLM calls)
     try {
       const batch = await createBatchJob(toReprocess);
       batchInfo = `Batch submitted: ${batch.requestCount} requests, group=${batch.groupId}`;
