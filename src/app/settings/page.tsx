@@ -595,24 +595,6 @@ function LLMSection() {
               className="font-mono text-sm"
             />
           </div>
-          <div className="space-y-1">
-            <div className="flex items-center gap-2">
-              <Label className="text-xs">Semantic Scholar</Label>
-              {keyStatus?.s2.set && (
-                <span className="text-[10px] text-emerald-600 dark:text-emerald-400">
-                  {keyStatus.s2.masked}
-                  {keyStatus.s2.source === "env" && " (from .env)"}
-                </span>
-              )}
-            </div>
-            <Input
-              type="password"
-              value={s2Key}
-              onChange={(e) => setS2Key(e.target.value)}
-              placeholder={keyStatus?.s2.set ? "Enter new key to replace" : "Optional — higher rate limits for paper search"}
-              className="font-mono text-sm"
-            />
-          </div>
         </div>
         <Button size="sm" onClick={handleKeysSave} disabled={keysSaving || (!openaiKey && !anthropicKey && !s2Key)}>
           {keysSaving ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Save className="mr-1.5 h-3.5 w-3.5" />}
@@ -715,6 +697,41 @@ function LLMSection() {
               </Button>
             </div>
           </div>
+        )}
+      </div>
+
+      {/* External services */}
+      <div className="space-y-3 pt-4 border-t border-border">
+        <div>
+          <Label className="text-sm font-medium">External Services</Label>
+          <p className="text-xs text-muted-foreground mt-0.5">Optional keys for third-party services used by the import pipeline.</p>
+        </div>
+        <div className="space-y-1">
+          <div className="flex items-center gap-2">
+            <Label className="text-xs">Semantic Scholar</Label>
+            {keyStatus?.s2.set && (
+              <span className="text-[10px] text-emerald-600 dark:text-emerald-400">
+                {keyStatus.s2.masked}
+                {keyStatus.s2.source === "env" && " (from .env)"}
+              </span>
+            )}
+          </div>
+          <Input
+            type="password"
+            value={s2Key}
+            onChange={(e) => setS2Key(e.target.value)}
+            placeholder={keyStatus?.s2.set ? "Enter new key to replace" : "Optional — higher rate limits for paper search"}
+            className="font-mono text-sm"
+          />
+          <p className="text-[10px] text-muted-foreground">
+            Without a key, paper search uses public rate limits (1 req/s). Get one at <a href="https://www.semanticscholar.org/product/api#api-key-form" target="_blank" rel="noopener noreferrer" className="underline">semanticscholar.org</a>.
+          </p>
+        </div>
+        {s2Key && (
+          <Button size="sm" onClick={handleKeysSave} disabled={keysSaving}>
+            {keysSaving ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Save className="mr-1.5 h-3.5 w-3.5" />}
+            Save
+          </Button>
         )}
       </div>
     </>
