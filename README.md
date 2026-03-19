@@ -73,20 +73,6 @@ cd arcana
 npm install
 ```
 
-Create a `.env` file:
-
-```env
-# At least one LLM provider
-OPENAI_API_KEY="sk-..."
-ANTHROPIC_API_KEY="sk-ant-..."
-
-# Optional: OpenAI-compatible proxy (OpenRouter, LiteLLM, Azure, etc.)
-# LLM_PROXY_URL="https://your-proxy.example.com/v1"
-
-# Optional: higher Semantic Scholar rate limits
-# S2_API_KEY="..."
-```
-
 Initialize and run:
 
 ```bash
@@ -94,7 +80,7 @@ npx prisma db push
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000). First run auto-creates a default user (`user@localhost` / `1234`).
+Open [http://localhost:3000](http://localhost:3000). First run auto-creates a default user (`user@localhost` / `1234`). Configure your LLM provider (API keys or proxy) in **Settings > LLM**.
 
 ## Everything we built so far
 
