@@ -352,12 +352,15 @@ export default function AdminPage() {
               <div className="rounded-md border border-amber-500/20 bg-amber-500/5 p-3 space-y-2">
                 <div className="flex items-center gap-2 text-sm">
                   <FileDown className="h-4 w-4 text-amber-500" />
-                  <span className="font-medium">{batchData.missingPdfs.total} papers missing PDFs</span>
+                  <span className="font-medium">{batchData.missingPdfs.repairable} papers missing PDFs</span>
+                  <span className="text-xs text-muted-foreground">(repairable — have arXiv/DOI)</span>
                 </div>
                 <div className="flex flex-wrap gap-3 text-xs text-muted-foreground">
                   <span>{batchData.missingPdfs.library} in library</span>
                   <span>{batchData.missingPdfs.research} from research</span>
-                  <span>{batchData.missingPdfs.repairable} repairable (have arXiv/DOI)</span>
+                  {batchData.missingPdfs.total - batchData.missingPdfs.repairable > 0 && (
+                    <span>{batchData.missingPdfs.total - batchData.missingPdfs.repairable} unrepairable (no identifier)</span>
+                  )}
                 </div>
                 <div className="space-y-2">
                   {([
