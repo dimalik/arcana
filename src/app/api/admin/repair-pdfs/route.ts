@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { findAndDownloadPdf } from "@/lib/import/pdf-finder";
-import { processingQueue } from "@/lib/processing/queue";
+import { createBatchJob } from "@/lib/processing/batch";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300; // 5 minutes
@@ -50,7 +50,7 @@ export async function POST(request: NextRequest) {
 
   let downloaded = 0;
   let failed = 0;
-  let queued = 0;
+  const toReprocess: string[] = [];
   const errors: string[] = [];
 
   for (const paper of candidates) {
@@ -72,13 +72,12 @@ export async function POST(request: NextRequest) {
           where: { id: paper.id },
           data: {
             filePath: result.filePath,
-            processingStatus: needsReprocessing ? "EXTRACTING_TEXT" : undefined,
+            ...(needsReprocessing ? { processingStatus: "EXTRACTING_TEXT" } : {}),
           },
         });
 
         if (needsReprocessing) {
-          processingQueue.enqueue(paper.id);
-          queued++;
+          toReprocess.push(paper.id);
         }
 
         downloaded++;
@@ -94,11 +93,25 @@ export async function POST(request: NextRequest) {
     }
   }
 
+  // Submit all papers needing reprocessing as a single batch (50% cheaper)
+  let batchInfo: string | null = null;
+  if (toReprocess.length > 0) {
+    try {
+      const batch = await createBatchJob(toReprocess);
+      batchInfo = `Batch submitted: ${batch.requestCount} requests, group=${batch.groupId}`;
+      console.log(`[repair-pdfs] ${batchInfo}`);
+    } catch (err) {
+      batchInfo = `Batch submission failed: ${(err as Error).message}`;
+      console.warn(`[repair-pdfs] ${batchInfo}`);
+    }
+  }
+
   return NextResponse.json({
     processed: candidates.length,
     downloaded,
     failed,
-    queued,
+    queued: toReprocess.length,
+    batch: batchInfo,
     errors: errors.slice(0, 10),
   });
 }
