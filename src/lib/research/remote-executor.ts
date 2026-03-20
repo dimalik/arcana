@@ -817,13 +817,20 @@ export interface ConnectionTestResult {
  * Probe GPUs on a remote host. Returns structured info for agent context.
  * Fast — runs a single SSH command. Returns null on failure (non-critical).
  */
-export async function probeGpus(hostId: string): Promise<{
+export interface HostProfile {
   alias: string;
   gpuCount: number;
   gpus: { index: number; name: string; memoryTotal: string; memoryFree: string }[];
   cpuRamGb: number;
+  cudaVersion: string | null;
+  pythonVersion: string | null;
+  diskFreeGb: number | null;
+  installedPackages: string[]; // key packages detected (torch, transformers, flash-attn, etc.)
+  os: string | null;
   summary: string;
-} | null> {
+}
+
+export async function probeGpus(hostId: string): Promise<HostProfile | null> {
   const host = await prisma.remoteHost.findUnique({ where: { id: hostId } });
   if (!host) return null;
 
@@ -833,18 +840,53 @@ export async function probeGpus(hostId: string): Promise<{
       keyPath: host.keyPath, workDir: host.workDir, conda: null, setupCmd: null,
     };
 
-    const cmd = `nvidia-smi --query-gpu=index,name,memory.total,memory.free --format=csv,noheader,nounits 2>/dev/null || echo NO_GPU`;
-    const [output, memOutput] = await Promise.all([
-      sshExec(config, cmd),
+    // Run all probes in parallel for speed
+    const [gpuOutput, memOutput, envOutput] = await Promise.all([
+      sshExec(config, `nvidia-smi --query-gpu=index,name,memory.total,memory.free --format=csv,noheader,nounits 2>/dev/null || echo NO_GPU`),
       sshExec(config, `free -g 2>/dev/null | awk '/^Mem:/{print $2}'`).catch(() => ""),
+      sshExec(config, [
+        `echo "CUDA:$(nvcc --version 2>/dev/null | grep -oP 'release \\K[0-9.]+' || nvidia-smi 2>/dev/null | grep -oP 'CUDA Version: \\K[0-9.]+')"`,
+        `echo "PYTHON:$(python3 --version 2>/dev/null | awk '{print $2}')"`,
+        `echo "DISK:$(df -BG ${host.workDir} 2>/dev/null | awk 'NR==2{print $4}' | tr -d 'G')"`,
+        `echo "OS:$(cat /etc/os-release 2>/dev/null | grep PRETTY_NAME | cut -d'"' -f2 || uname -s)"`,
+        // Check for key pre-installed packages (fast — just check if importable)
+        `python3 -c "
+pkgs = []
+for p in ['torch','transformers','accelerate','deepspeed','flash_attn','bitsandbytes','datasets','scipy','numpy','pandas','sklearn']:
+    try:
+        m = __import__(p)
+        v = getattr(m, '__version__', '?')
+        pkgs.append(f'{p}=={v}')
+    except: pass
+print('PKGS:' + ','.join(pkgs))
+" 2>/dev/null || echo "PKGS:"`,
+      ].join(" && ")).catch(() => ""),
     ]);
+
     const cpuRamGb = parseInt(memOutput.trim()) || 0;
 
-    if (!output || output.includes("NO_GPU")) {
-      return { alias: host.alias, gpuCount: 0, gpus: [], cpuRamGb, summary: `${host.alias}: No GPUs detected${cpuRamGb ? `, ${cpuRamGb} GB CPU RAM` : ""}` };
+    // Parse environment info
+    const envLines = envOutput.split("\n");
+    const getVal = (prefix: string) => {
+      const line = envLines.find((l) => l.startsWith(prefix));
+      return line ? line.slice(prefix.length).trim() || null : null;
+    };
+    const cudaVersion = getVal("CUDA:");
+    const pythonVersion = getVal("PYTHON:");
+    const diskFreeGb = parseInt(getVal("DISK:") || "") || null;
+    const os = getVal("OS:");
+    const installedPackages = (getVal("PKGS:") || "").split(",").filter(Boolean);
+
+    // Parse GPU info
+    if (!gpuOutput || gpuOutput.includes("NO_GPU")) {
+      return {
+        alias: host.alias, gpuCount: 0, gpus: [], cpuRamGb,
+        cudaVersion, pythonVersion, diskFreeGb, installedPackages, os,
+        summary: `${host.alias}: No GPUs detected${cpuRamGb ? `, ${cpuRamGb} GB CPU RAM` : ""}`,
+      };
     }
 
-    const gpus = output.split("\n").filter(Boolean).map((line) => {
+    const gpus = gpuOutput.split("\n").filter(Boolean).map((line) => {
       const [index, name, memTotal, memFree] = line.split(",").map((s) => s.trim());
       return {
         index: parseInt(index) || 0,
@@ -860,7 +902,11 @@ export async function probeGpus(hostId: string): Promise<{
     const ramNote = cpuRamGb > 0 ? `, ${cpuRamGb} GB CPU RAM` : "";
     const summary = `${host.alias}: ${gpus.length}x ${gpus[0]?.name || "GPU"} (${Math.round(totalMem / 1024)} GB total, ${Math.round(freeMem / 1024)} GB free${ramNote})`;
 
-    return { alias: host.alias, gpuCount: gpus.length, gpus, cpuRamGb, summary };
+    return {
+      alias: host.alias, gpuCount: gpus.length, gpus, cpuRamGb,
+      cudaVersion, pythonVersion, diskFreeGb, installedPackages, os,
+      summary,
+    };
   } catch (err) {
     console.error(`[remote-executor] GPU probe failed for ${host.alias}:`, err);
     return null;

@@ -805,7 +805,7 @@ function buildSystemPrompt(
   remoteHosts: { alias: string; gpuType: string | null }[],
   resourceSetting: "all" | "local" | string[],
   capabilities?: { name: string; description: string; instructions: string }[],
-  gpuInfo?: { alias: string; gpuCount: number; gpus: { index: number; name: string; memoryTotal: string; memoryFree: string }[]; cpuRamGb: number; summary: string }[],
+  gpuInfo?: import("./remote-executor").HostProfile[],
   processMemories?: { category: string; lesson: string; context: string | null }[],
   resourcePreferences?: { taskCategory: string; preference: string; usageCount: number }[],
   sharedUtilities?: { filename: string; description: string }[],
@@ -818,8 +818,17 @@ function buildSystemPrompt(
     const details = gpuInfo.map((h) => {
       if (h.gpuCount === 0) return `- "${h.alias}": No GPUs detected${h.cpuRamGb ? ` (${h.cpuRamGb} GB CPU RAM)` : ""}`;
       const gpuLines = h.gpus.map((g) => `  GPU ${g.index}: ${g.name} — ${g.memoryTotal} total, ${g.memoryFree} free`);
-      const ramNote = h.cpuRamGb ? `  CPU RAM: ${h.cpuRamGb} GB` : "";
-      return `- "${h.alias}": ${h.gpuCount} GPU(s)${ramNote ? `\n${ramNote}` : ""}\n${gpuLines.join("\n")}`;
+      const envLines = [
+        h.cpuRamGb ? `CPU RAM: ${h.cpuRamGb} GB` : "",
+        h.cudaVersion ? `CUDA: ${h.cudaVersion}` : "",
+        h.pythonVersion ? `Python: ${h.pythonVersion}` : "",
+        h.diskFreeGb ? `Disk free: ${h.diskFreeGb} GB` : "",
+        h.os ? `OS: ${h.os}` : "",
+      ].filter(Boolean).map((l) => `  ${l}`);
+      const pkgLine = h.installedPackages?.length
+        ? `  Pre-installed: ${h.installedPackages.join(", ")}`
+        : "";
+      return `- "${h.alias}": ${h.gpuCount} GPU(s)\n${envLines.join("\n")}${pkgLine ? `\n${pkgLine}` : ""}\n${gpuLines.join("\n")}`;
     }).join("\n");
 
     const multiGpuHost = gpuInfo.find((h) => h.gpuCount > 1);
@@ -911,8 +920,12 @@ You have the ability to do multiple things at once. **Use it aggressively.** Seq
 4. Use \`check_job\` periodically to see if jobs finished. It fetches live logs from the remote.
 5. When you need results to proceed, use \`wait_for_jobs\`
 
-**Literature scouts — use them at the START of every project:**
-At the beginning of research, call \`dispatch_scouts\` with 2-3 different angles. Collect findings with \`collect_results\`, then import the best papers.
+**Literature scouts — use them OFTEN, not just at the start:**
+At the beginning of research, call \`dispatch_scouts\` with 2-3 different angles. But also dispatch scouts **during experiments** when:
+- Results are unexpected (NaN, divergence, suspiciously bad/good numbers)
+- You need techniques to fix a specific problem (e.g., "stabilize training", "fix attention collapse")
+- You've exhausted your current approaches and need fresh ideas
+Scouts are cheap and fast — use them liberally throughout the project, not just once at the start.
 
 **Synthesizer — use it AFTER importing papers from scouts:**
 Call \`dispatch_synthesizer\` with the imported paper titles and a focus area. The synthesizer (Opus) reads them all together and finds contradictions, complementary techniques, and unexplored combinations.
@@ -948,9 +961,21 @@ The remote execution system **automatically handles Python environments**:
 
 **Do NOT include** venv creation, pip install, or activation in your command — the system does it all.
 
+**requirements.txt best practices:**
+- Check the "Pre-installed" packages listed above — if torch/transformers/etc are already on the host, pin compatible versions (don't blindly install a different torch version that breaks CUDA)
+- Include commonly useful packages that improve experiment quality:
+  - \`flash-attn\` for efficient attention (if the host has CUDA 11.8+)
+  - \`accelerate\` for multi-GPU training
+  - \`wandb\` or \`tensorboard\` for experiment tracking
+  - \`bitsandbytes\` for quantization
+  - \`einops\` for tensor operations
+  - \`scipy\` and \`scikit-learn\` for statistical tests
+- Match torch version to the host's CUDA version (check the CUDA info above)
+
 **When environment issues occur:**
 - **NEVER simplify your experiment to avoid a dependency.** If torch + deepspeed + accelerate fails, fix the installation — don't rewrite without multi-GPU support.
 - **NEVER reduce data or model size because of environment problems.** The environment should accommodate the experiment, not the other way around.
+- If a package fails to install, check the host's Python version and CUDA version listed above for compatibility.
 - **ASK THE USER for help** when you cannot resolve a dependency issue after 2 attempts. They can install system packages, update CUDA, or configure conda.`
     : `\n## Execution
 ${resourceSetting === "local" ? `**The user chose LOCAL-ONLY execution.** Do NOT write code that assumes GPU access or remote servers. Design experiments that run on CPU (or MPS on macOS). Use smaller models, smaller datasets, and CPU-friendly approaches. If a task genuinely requires a GPU, explain this to the user and suggest they change the resource setting.` : `No remote servers configured.`} Use execute_command to run experiments locally.
@@ -2085,27 +2110,43 @@ function createTools(
 
         emit({ type: "tool_progress", toolName: "validate_environment", content: `Testing pip install on ${host.alias}...` });
 
-        // Sync files and do a dry-run install
+        // Phase 1: Install packages in isolated venv
+        // Phase 2: Smoke test — import all packages and check CUDA access
         try {
+          // Extract package names from requirements.txt for import test
+          const pkgNames = reqContent.split("\n")
+            .map((l) => l.trim().split(/[>=<!\[]/)[0].trim().replace(/-/g, "_"))
+            .filter((p) => p && !p.startsWith("#"));
+
+          const smokeTest = pkgNames.length > 0
+            ? `python3 -c "\nimport sys; failed = []\nfor p in ${JSON.stringify(pkgNames)}:\n    try:\n        __import__(p)\n    except ImportError as e:\n        failed.append(f'{p}: {e}')\nif failed:\n    print('IMPORT FAILURES:'); [print(f'  - {f}') for f in failed]; sys.exit(1)\nelse:\n    print('All packages import OK')\nimport torch; print(f'PyTorch: {torch.__version__}, CUDA: {torch.cuda.is_available()}, GPUs: {torch.cuda.device_count()}')\n" 2>&1`
+            : `echo "No packages to test"`;
+
+          emit({ type: "tool_progress", toolName: "validate_environment", content: `Installing packages on ${host.alias}...` });
+
           const result = await quickRemoteCommand(host.id,
             `cd ${host.workDir} && mkdir -p _env_test && cat > _env_test/requirements.txt << 'EOF'\n${reqContent}\nEOF\n` +
             `cd _env_test && python3 -m venv .venv 2>&1 && source .venv/bin/activate && ` +
-            `pip3 install --upgrade pip -q 2>&1 && pip3 install -r requirements.txt 2>&1; ` +
+            `pip3 install --upgrade pip -q 2>&1 && pip3 install -r requirements.txt 2>&1 && ` +
+            `echo "=== SMOKE TEST ===" && ${smokeTest}; ` +
             `EXIT=$?; rm -rf ${host.workDir}/_env_test; exit $EXIT`
           );
 
           if (result.ok) {
             emit({ type: "tool_output", toolName: "validate_environment", content: `Environment validated on ${host.alias}` });
-            return `All requirements install successfully on ${host.alias}.\n\nOutput:\n${result.output.slice(-2000)}`;
+            return `All requirements install and import successfully on ${host.alias}.\n\nOutput:\n${result.output.slice(-2000)}`;
           } else {
             emit({ type: "tool_output", toolName: "validate_environment", content: `Environment validation FAILED on ${host.alias}` });
-            return `ENVIRONMENT VALIDATION FAILED on ${host.alias}.\n\nError:\n${(result.error || result.output).slice(-3000)}\n\n` +
-              `**ACTION REQUIRED:** Some packages failed to install. Common fixes:\n` +
+            const output = (result.error || result.output).slice(-3000);
+            const isImportFailure = output.includes("IMPORT FAILURES");
+            return `ENVIRONMENT VALIDATION FAILED on ${host.alias}.\n\n${isImportFailure ? "Packages installed but some failed to import" : "Package installation failed"}:\n${output}\n\n` +
+              `**ACTION REQUIRED:**\n` +
               `- Check package names and versions in requirements.txt\n` +
               `- Some packages need system libraries (e.g. libffi-dev, libssl-dev)\n` +
-              `- CUDA-dependent packages (torch, triton) may need specific versions\n` +
+              `- CUDA-dependent packages need matching CUDA version\n` +
+              `- flash-attn needs CUDA 11.8+ and matching torch version\n` +
               `- Try pinning versions: torch==2.1.0 instead of just torch\n\n` +
-              `**Ask the user for help** if you cannot resolve this — they may need to install system packages on the remote host.`;
+              `**Ask the user for help** if you cannot resolve this after 2 attempts.`;
           }
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
