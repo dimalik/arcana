@@ -93,6 +93,13 @@ async function drainPdfDownloadQueue() {
 
 // ── Helpers ──────────────────────────────────────────────────────
 
+/** Strip invalid Unicode surrogates and control characters that break JSON serialization */
+function sanitizeForJson(text: string): string {
+  // Remove unpaired surrogates (cause "invalid high surrogate in string" API errors)
+  // eslint-disable-next-line no-control-regex
+  return text.replace(/[\uD800-\uDFFF]|[\x00-\x08\x0B\x0C\x0E-\x1F]/g, "");
+}
+
 /** Check if a script name is a utility/helper (not an experiment) */
 function isUtilityScript(name: string): boolean {
   const n = name.toLowerCase();
@@ -256,17 +263,31 @@ export function startResearchAgent(
     let sessionCount = 0;
     const MAX_SESSIONS = 20; // Safety limit to prevent infinite loops
 
+    let consecutiveErrors = 0;
+    const MAX_CONSECUTIVE_ERRORS = 3;
+
     while (sessionCount < MAX_SESSIONS) {
       sessionCount++;
       try {
         console.log(`[research-agent] Session ${sessionCount} starting for project ${projectId}`);
         await runAgent(projectId, userId, sessionCount === 1 ? (userMessage || null) : null, trackedEmit);
         console.log(`[research-agent] Session ${sessionCount} completed for project ${projectId}`);
+        consecutiveErrors = 0; // Reset on success
       } catch (err) {
+        consecutiveErrors++;
         const msg = err instanceof Error ? err.message : "Agent error";
-        console.error("[research-agent] Fatal for project", projectId, "session", sessionCount, ":", msg, err instanceof Error ? err.stack : "");
+        console.error(`[research-agent] Error in session ${sessionCount} for project ${projectId} (${consecutiveErrors}/${MAX_CONSECUTIVE_ERRORS}):`, msg);
         trackedEmit({ type: "error", content: msg });
-        break; // Don't auto-continue on errors
+
+        if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
+          console.error(`[research-agent] ${MAX_CONSECUTIVE_ERRORS} consecutive errors for project ${projectId}, stopping`);
+          break;
+        }
+
+        // Wait before retrying — backoff
+        trackedEmit({ type: "text", content: `\n\n[Error: ${msg}. Retrying in 10s...]` });
+        await new Promise((r) => setTimeout(r, 10_000));
+        continue; // Retry instead of breaking
       }
 
       // Check if project is still ACTIVE before auto-continuing
@@ -690,7 +711,7 @@ async function runAgent(
     for await (const chunk of result.fullStream) {
       switch (chunk.type) {
         case "text-delta":
-          emit({ type: "text", content: chunk.text });
+          emit({ type: "text", content: sanitizeForJson(chunk.text) });
           break;
         case "tool-call":
           lastToolName = chunk.toolName;
@@ -706,9 +727,11 @@ async function runAgent(
             type: "tool_result",
             toolName: chunk.toolName,
             toolCallId: chunk.toolCallId,
-            result: typeof chunk.output === "string"
-              ? chunk.output.slice(0, 2000)
-              : JSON.stringify(chunk.output).slice(0, 2000),
+            result: sanitizeForJson(
+              typeof chunk.output === "string"
+                ? chunk.output.slice(0, 2000)
+                : JSON.stringify(chunk.output).slice(0, 2000)
+            ),
           });
           break;
       }
