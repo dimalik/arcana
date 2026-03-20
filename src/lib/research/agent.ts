@@ -265,14 +265,31 @@ export function startResearchAgent(
 
     let consecutiveErrors = 0;
     const MAX_CONSECUTIVE_ERRORS = 3;
+    const SESSION_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes per session
 
     while (sessionCount < MAX_SESSIONS) {
       sessionCount++;
       try {
         console.log(`[research-agent] Session ${sessionCount} starting for project ${projectId}`);
-        await runAgent(projectId, userId, sessionCount === 1 ? (userMessage || null) : null, trackedEmit);
+
+        // Race the agent against a timeout — prevents hung sessions from blocking forever
+        const sessionResult = await Promise.race([
+          runAgent(projectId, userId, sessionCount === 1 ? (userMessage || null) : null, trackedEmit)
+            .then(() => "completed" as const),
+          new Promise<"timeout">((resolve) =>
+            setTimeout(() => resolve("timeout"), SESSION_TIMEOUT_MS)
+          ),
+        ]);
+
+        if (sessionResult === "timeout") {
+          console.warn(`[research-agent] Session ${sessionCount} timed out after ${SESSION_TIMEOUT_MS / 60000}min for project ${projectId}`);
+          trackedEmit({ type: "error", content: `Session timed out after ${SESSION_TIMEOUT_MS / 60000} minutes. Auto-continuing with fresh session...` });
+          // Timeout is not a consecutive error — it's likely a hung tool call. Fresh session will work.
+          continue;
+        }
+
         console.log(`[research-agent] Session ${sessionCount} completed for project ${projectId}`);
-        consecutiveErrors = 0; // Reset on success
+        consecutiveErrors = 0;
       } catch (err) {
         consecutiveErrors++;
         const msg = err instanceof Error ? err.message : "Agent error";
@@ -287,7 +304,7 @@ export function startResearchAgent(
         // Wait before retrying — backoff
         trackedEmit({ type: "text", content: `\n\n[Error: ${msg}. Retrying in 10s...]` });
         await new Promise((r) => setTimeout(r, 10_000));
-        continue; // Retry instead of breaking
+        continue;
       }
 
       // Check if project is still ACTIVE before auto-continuing
@@ -612,7 +629,24 @@ async function runAgent(
   };
   const expCounter = { value: experimentCounter };
   const searchCounter = { value: 0 };
-  const tools = createTools(projectId, userId, workDir, emit, remoteHosts, recordStep, { id: iterationId, number: iteration.number }, sharedDir, onIterationAdvance, model, expCounter, searchCounter, gpuInfo?.map((g) => ({ alias: g.alias, gpuCount: g.gpuCount })));
+  const rawTools = createTools(projectId, userId, workDir, emit, remoteHosts, recordStep, { id: iterationId, number: iteration.number }, sharedDir, onIterationAdvance, model, expCounter, searchCounter, gpuInfo?.map((g) => ({ alias: g.alias, gpuCount: g.gpuCount })));
+
+  // Wrap every tool's execute to sanitize return values — prevents invalid Unicode
+  // surrogates from entering the LLM message history and causing API errors
+  const tools = Object.fromEntries(
+    Object.entries(rawTools).map(([name, t]) => {
+      const orig = t as { execute?: (...args: unknown[]) => Promise<unknown> };
+      if (!orig.execute) return [name, t];
+      return [name, {
+        ...t,
+        execute: async (...args: unknown[]) => {
+          const result = await orig.execute!(...args);
+          if (typeof result === "string") return sanitizeForJson(result);
+          return result;
+        },
+      }];
+    })
+  ) as typeof rawTools;
 
   // 6. Stream with tool use
   const MAX_STEPS = 80;
