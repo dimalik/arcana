@@ -51,6 +51,22 @@ interface UserInfo {
   _count: { llmUsageLogs: number; appEvents: number };
 }
 
+interface CostPerPaperData {
+  paperProcessing: {
+    totalCost: number;
+    processedPapers: number;
+    avgCostPerPaper: number;
+    byModel: Record<string, { cost: number; calls: number; inputTokens: number; outputTokens: number }>;
+  };
+  researchProjects: {
+    id: string;
+    title: string;
+    totalCost: number;
+    totalCalls: number;
+    byModel: Record<string, { cost: number; calls: number }>;
+  }[];
+}
+
 interface BatchInfo {
   id: string;
   groupId: string;
@@ -87,6 +103,7 @@ export default function AdminPage() {
   const [events, setEvents] = useState<AppEvent[]>([]);
   const [users, setUsers] = useState<UserInfo[]>([]);
   const [batchData, setBatchData] = useState<BatchData | null>(null);
+  const [costData, setCostData] = useState<CostPerPaperData | null>(null);
   const [loading, setLoading] = useState(true);
   const [days, setDays] = useState(30);
   const [repairing, setRepairing] = useState(false);
@@ -102,12 +119,14 @@ export default function AdminPage() {
       fetch("/api/admin/events?limit=30&level=error").then((r) => r.json()),
       fetch("/api/admin/users").then((r) => r.json()),
       fetch("/api/admin/batches").then((r) => r.json()),
+      fetch(`/api/admin/cost-per-paper?days=${days}`).then((r) => r.json()),
     ])
-      .then(([usageData, eventsData, usersData, batchesData]) => {
+      .then(([usageData, eventsData, usersData, batchesData, costPerPaper]) => {
         setUsage(usageData);
         setEvents(Array.isArray(eventsData) ? eventsData : []);
         setUsers(Array.isArray(usersData) ? usersData : []);
         setBatchData(batchesData);
+        setCostData(costPerPaper);
       })
       .catch(() => toast.error("Failed to load admin data"))
       .finally(() => setLoading(false));
@@ -270,6 +289,74 @@ export default function AdminPage() {
           </Card>
         )}
       </div>
+
+      {/* Cost per Paper / Project */}
+      {costData && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {/* Paper processing costs */}
+          <Card>
+            <CardContent className="p-4">
+              <h3 className="text-sm font-medium mb-3">Cost per Paper (Processing)</h3>
+              <div className="space-y-3">
+                <div className="flex items-baseline gap-3">
+                  <span className="text-2xl font-bold">${costData.paperProcessing.avgCostPerPaper.toFixed(3)}</span>
+                  <span className="text-xs text-muted-foreground">avg per paper</span>
+                </div>
+                <div className="text-xs text-muted-foreground">
+                  {costData.paperProcessing.processedPapers} papers processed, ${costData.paperProcessing.totalCost.toFixed(2)} total
+                </div>
+                {Object.entries(costData.paperProcessing.byModel).length > 0 && (
+                  <div className="space-y-1.5 pt-2 border-t border-border/50">
+                    {Object.entries(costData.paperProcessing.byModel)
+                      .sort(([, a], [, b]) => b.cost - a.cost)
+                      .map(([model, data]) => (
+                        <div key={model} className="flex items-center justify-between text-xs">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <span className="font-mono truncate">{model}</span>
+                            <span className="text-muted-foreground">{data.calls} calls</span>
+                          </div>
+                          <div className="flex items-center gap-3 shrink-0">
+                            <span className="text-muted-foreground">{Math.round(data.inputTokens / data.calls)} in / {Math.round(data.outputTokens / data.calls)} out avg</span>
+                            <span className="font-medium">${(data.cost / (costData.paperProcessing.processedPapers || 1)).toFixed(3)}/paper</span>
+                          </div>
+                        </div>
+                      ))}
+                  </div>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Research project costs */}
+          <Card>
+            <CardContent className="p-4">
+              <h3 className="text-sm font-medium mb-3">Cost per Research Project</h3>
+              <div className="space-y-2">
+                {costData.researchProjects.slice(0, 10).map((proj) => (
+                  <div key={proj.id} className="space-y-1">
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="truncate max-w-[250px]" title={proj.title}>{proj.title}</span>
+                      <span className="font-medium shrink-0">${proj.totalCost.toFixed(2)}</span>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {Object.entries(proj.byModel)
+                        .sort(([, a], [, b]) => b.cost - a.cost)
+                        .map(([model, data]) => (
+                          <span key={model} className="text-[10px] text-muted-foreground">
+                            {model.replace("claude-", "").replace("sonnet-4-6", "sonnet").replace("opus-4-6", "opus")}: ${data.cost.toFixed(2)} ({data.calls})
+                          </span>
+                        ))}
+                    </div>
+                  </div>
+                ))}
+                {costData.researchProjects.length === 0 && (
+                  <p className="text-xs text-muted-foreground">No research project costs recorded yet.</p>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
 
       {/* Daily Usage */}
       {usage && usage.byDay.length > 0 && (
