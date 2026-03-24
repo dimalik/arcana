@@ -24,6 +24,7 @@ import { ExperimentPhase } from "@/components/research/experiment-phase";
 import { AnalysisPhase } from "@/components/research/analysis-phase";
 import { ReflectionPhase } from "@/components/research/reflection-phase";
 import { AgentActivityBar, AgentActivityHandle } from "@/components/research/agent-activity-bar";
+import { ResearchChat } from "@/components/research/research-chat";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
 
@@ -473,6 +474,9 @@ export default function ResearchWorkspacePage({ params }: { params: { id: string
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Research chat */}
+      <ResearchChat projectId={project.id} projectTitle={project.title} />
     </div>
   );
 }
