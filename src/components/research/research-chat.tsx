@@ -115,17 +115,15 @@ export function ResearchChat({ projectId, projectTitle }: { projectId: string; p
       {open && (
         <div className="fixed bottom-20 right-6 z-40 w-[420px] max-h-[70vh] flex flex-col rounded-xl border border-border/60 bg-background shadow-2xl animate-in slide-in-from-bottom-2 fade-in-0 duration-200">
           {/* Header */}
-          <div className="flex items-center justify-between px-4 py-3 border-b border-border/40">
-            <div className="min-w-0 flex-1">
-              <h3 className="text-xs font-medium truncate">{projectTitle}</h3>
-              <p className="text-[10px] text-muted-foreground">Ask about methods, findings, and how to apply them</p>
-            </div>
+          <div className="relative px-4 py-3 border-b border-border/40">
             <button
               onClick={() => setOpen(false)}
-              className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground/50 hover:text-foreground hover:bg-accent transition-colors shrink-0"
+              className="absolute -top-2 -right-2 inline-flex h-5 w-5 items-center justify-center rounded-full bg-muted border border-border/60 text-muted-foreground/60 hover:text-foreground hover:bg-accent shadow-sm transition-colors z-10"
             >
-              <X className="h-3.5 w-3.5" />
+              <X className="h-3 w-3" />
             </button>
+            <h3 className="text-xs font-medium truncate pr-4">{projectTitle}</h3>
+            <p className="text-[10px] text-muted-foreground">Ask about methods, findings, and how to apply them</p>
           </div>
 
           {/* Messages */}
