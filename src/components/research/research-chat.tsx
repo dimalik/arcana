@@ -104,16 +104,17 @@ export function ResearchChat({ projectId, projectTitle }: { projectId: string; p
       {!open && (
         <button
           onClick={() => setOpen(true)}
-          className="fixed bottom-4 right-4 z-40 inline-flex items-center justify-center h-8 w-8 rounded-full bg-foreground/80 text-background shadow-md hover:bg-foreground hover:scale-105 transition-all duration-200"
+          className="fixed bottom-16 right-8 z-40 inline-flex items-center gap-1.5 rounded-full bg-foreground/90 text-background pl-3 pr-3.5 py-1.5 text-[11px] font-medium shadow-lg hover:bg-foreground hover:shadow-xl transition-all duration-200 backdrop-blur-sm"
           title="Chat about this research"
         >
-          <MessageCircle className="h-3.5 w-3.5" />
+          <MessageCircle className="h-3 w-3" />
+          Ask
         </button>
       )}
 
       {/* Chat panel */}
       {open && (
-        <div className="fixed bottom-20 right-6 z-40 w-[420px] max-h-[70vh] flex flex-col rounded-xl border border-border/60 bg-background shadow-2xl animate-in slide-in-from-bottom-2 fade-in-0 duration-200">
+        <div className="fixed bottom-16 right-8 z-40 w-[400px] max-h-[70vh] flex flex-col rounded-xl border border-border/60 bg-background shadow-2xl animate-in slide-in-from-bottom-2 fade-in-0 duration-200">
           {/* Header */}
           <div className="relative px-4 py-3 border-b border-border/40">
             <button
@@ -127,7 +128,7 @@ export function ResearchChat({ projectId, projectTitle }: { projectId: string; p
           </div>
 
           {/* Messages */}
-          <div className="flex-1 overflow-y-auto px-4 py-3 space-y-4 min-h-[200px] max-h-[calc(70vh-130px)]">
+          <div className="flex-1 overflow-y-auto px-4 py-3 space-y-4 min-h-[200px] max-h-[calc(70vh-130px)] scrollbar-none" style={{ scrollbarWidth: "none" }}>
             {messages.length === 0 && !streaming && (
               <div className="space-y-3 py-4">
                 <div className="flex items-center gap-2 text-muted-foreground/40">
