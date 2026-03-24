@@ -559,7 +559,10 @@ export const AgentActivityBar = forwardRef<AgentActivityHandle, AgentActivityBar
       abortRef.current?.abort();
       setRunning(false);
       setThinkingMsg(null);
-      setStatusLine("Agent stopped");
+      setStatusLine("Stopped — type a message or press Resume");
+
+      // Signal the server-side agent to stop
+      fetch(`/api/research/${projectId}/agent`, { method: "DELETE" }).catch(() => {});
 
       // Cancel any active remote jobs for this project
       fetch(`/api/research/remote-jobs?projectId=${projectId}`)

@@ -166,6 +166,7 @@ export interface AgentEvent {
 const runningAgents = new Map<string, {
   events: AgentEvent[];
   closed: boolean;
+  stopRequested: boolean;
   listeners: Set<(event: AgentEvent) => void>;
   startedAt: number;
 }>();
@@ -174,6 +175,16 @@ const runningAgents = new Map<string, {
 export function isAgentRunning(projectId: string): boolean {
   const state = runningAgents.get(projectId);
   return !!state && !state.closed;
+}
+
+/** Signal a running agent to stop after its current step */
+export function requestAgentStop(projectId: string): boolean {
+  const state = runningAgents.get(projectId);
+  if (state && !state.closed) {
+    state.stopRequested = true;
+    return true;
+  }
+  return false;
 }
 
 /**
@@ -196,6 +207,7 @@ export function startResearchAgent(
   const state: typeof runningAgents extends Map<string, infer V> ? V : never = {
     events: [],
     closed: false,
+    stopRequested: false,
     listeners: new Set(),
     startedAt: Date.now(),
   };
@@ -307,7 +319,13 @@ export function startResearchAgent(
         continue;
       }
 
-      // Check if project is still ACTIVE before auto-continuing
+      // Check if user requested stop or project is no longer ACTIVE
+      if (state.stopRequested) {
+        console.log(`[research-agent] Stop requested by user for project ${projectId}`);
+        trackedEmit({ type: "done", content: "Agent stopped by user." });
+        break;
+      }
+
       const project = await prisma.researchProject.findUnique({
         where: { id: projectId },
         select: { status: true },

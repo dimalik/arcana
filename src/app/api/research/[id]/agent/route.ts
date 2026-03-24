@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireUserId } from "@/lib/paper-auth";
-import { startResearchAgent, isAgentRunning } from "@/lib/research/agent";
+import { startResearchAgent, isAgentRunning, requestAgentStop } from "@/lib/research/agent";
 
 // Allow long-running SSE streams (45 minutes)
 export const maxDuration = 2700;
@@ -62,4 +62,14 @@ export async function POST(request: NextRequest, { params }: Params) {
 export async function GET(_request: NextRequest, { params }: Params) {
   const { id } = await params;
   return NextResponse.json({ running: isAgentRunning(id) });
+}
+
+/**
+ * DELETE — Request the agent to stop after the current step.
+ * The agent will finish its current LLM call/tool execution, then stop.
+ */
+export async function DELETE(_request: NextRequest, { params }: Params) {
+  const { id } = await params;
+  const stopped = requestAgentStop(id);
+  return NextResponse.json({ stopped });
 }
