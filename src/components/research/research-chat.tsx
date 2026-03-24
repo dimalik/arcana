@@ -118,10 +118,16 @@ export function ResearchChat({ projectId, projectTitle }: { projectId: string; p
         <div className="fixed bottom-20 right-6 z-40 w-[420px] max-h-[70vh] flex flex-col rounded-xl border border-border/60 bg-background shadow-2xl animate-in slide-in-from-bottom-2 fade-in-0 duration-200">
           {/* Header */}
           <div className="flex items-center justify-between px-4 py-3 border-b border-border/40">
-            <div className="min-w-0">
+            <div className="min-w-0 flex-1">
               <h3 className="text-xs font-medium truncate">{projectTitle}</h3>
               <p className="text-[10px] text-muted-foreground">Ask about methods, findings, and how to apply them</p>
             </div>
+            <button
+              onClick={() => setOpen(false)}
+              className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground/50 hover:text-foreground hover:bg-accent transition-colors shrink-0"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
           </div>
 
           {/* Messages */}
