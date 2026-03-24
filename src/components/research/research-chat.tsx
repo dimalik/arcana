@@ -100,18 +100,16 @@ export function ResearchChat({ projectId, projectTitle }: { projectId: string; p
 
   return (
     <>
-      {/* Floating button */}
-      <button
-        onClick={() => setOpen(!open)}
-        className={`fixed bottom-20 right-6 z-40 inline-flex items-center justify-center h-10 w-10 rounded-full shadow-lg transition-all duration-200 ${
-          open
-            ? "bg-foreground text-background scale-90"
-            : "bg-foreground/90 text-background hover:bg-foreground hover:scale-105"
-        }`}
-        title="Chat about this research"
-      >
-        {open ? <X className="h-4 w-4" /> : <MessageCircle className="h-4 w-4" />}
-      </button>
+      {/* Floating button — hidden when panel is open */}
+      {!open && (
+        <button
+          onClick={() => setOpen(true)}
+          className="fixed bottom-4 right-4 z-40 inline-flex items-center justify-center h-8 w-8 rounded-full bg-foreground/80 text-background shadow-md hover:bg-foreground hover:scale-105 transition-all duration-200"
+          title="Chat about this research"
+        >
+          <MessageCircle className="h-3.5 w-3.5" />
+        </button>
+      )}
 
       {/* Chat panel */}
       {open && (
