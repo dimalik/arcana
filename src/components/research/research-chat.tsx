@@ -17,10 +17,25 @@ const STARTERS = [
   "Which experiments should I reproduce?",
 ];
 
+const STORAGE_KEY = (id: string) => `research-chat-${id}`;
+
 export function ResearchChat({ projectId, projectTitle }: { projectId: string; projectTitle: string }) {
   const [open, setOpen] = useState(false);
-  const [messages, setMessages] = useState<Message[]>([]);
+  const [messages, setMessages] = useState<Message[]>(() => {
+    if (typeof window === "undefined") return [];
+    try {
+      const saved = sessionStorage.getItem(STORAGE_KEY(projectId));
+      return saved ? JSON.parse(saved) : [];
+    } catch { return []; }
+  });
   const [input, setInput] = useState("");
+
+  // Persist messages to sessionStorage
+  useEffect(() => {
+    if (messages.length > 0) {
+      sessionStorage.setItem(STORAGE_KEY(projectId), JSON.stringify(messages));
+    }
+  }, [messages, projectId]);
   const [streaming, setStreaming] = useState(false);
   const [streamingContent, setStreamingContent] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
