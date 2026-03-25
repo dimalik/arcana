@@ -298,12 +298,10 @@ function MessageActions({ projectId, content, onRegenerate }: { projectId: strin
         <Download className="h-2.5 w-2.5" />
         Export
       </button>
-      {onRegenerate && (
-        <button onClick={onRegenerate} className="inline-flex h-5 items-center gap-1 rounded px-1.5 text-[10px] text-muted-foreground/40 hover:text-muted-foreground hover:bg-muted/50 transition-colors" title="Regenerate response">
-          <RefreshCw className="h-2.5 w-2.5" />
-          Redo
-        </button>
-      )}
+      <button onClick={onRegenerate} className="inline-flex h-5 items-center gap-1 rounded px-1.5 text-[10px] text-muted-foreground/40 hover:text-muted-foreground hover:bg-muted/50 transition-colors" title="Regenerate response">
+        <RefreshCw className="h-2.5 w-2.5" />
+        Redo
+      </button>
     </div>
   );
 }
