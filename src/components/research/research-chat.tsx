@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
-import { MessageCircle, X, Send, Loader2, Sparkles, Copy, BookmarkPlus, Download, Check } from "lucide-react";
+import { MessageCircle, X, Send, Loader2, Sparkles, Copy, BookmarkPlus, Download, Check, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { MarkdownRenderer } from "@/components/ui/markdown-renderer";
 
@@ -58,13 +58,8 @@ export function ResearchChat({ projectId, projectTitle }: { projectId: string; p
     scrollToBottom();
   }, [messages, streamingContent, scrollToBottom]);
 
-  const sendMessage = async (text: string) => {
-    if (!text.trim() || streaming) return;
-
-    const userMsg: Message = { id: `u-${Date.now()}`, role: "user", content: text.trim() };
-    const newMessages = [...messages, userMsg];
-    setMessages(newMessages);
-    setInput("");
+  // Stream a response for a given message history
+  const streamResponse = async (history: Message[]) => {
     setStreaming(true);
     setStreamingContent("");
 
@@ -76,7 +71,7 @@ export function ResearchChat({ projectId, projectTitle }: { projectId: string; p
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          messages: newMessages.map((m) => ({ role: m.role, content: m.content })),
+          messages: history.map((m) => ({ role: m.role, content: m.content })),
         }),
         signal: abort.signal,
       });
@@ -105,6 +100,25 @@ export function ResearchChat({ projectId, projectTitle }: { projectId: string; p
       setStreaming(false);
       abortRef.current = null;
     }
+  };
+
+  const sendMessage = async (text: string) => {
+    if (!text.trim() || streaming) return;
+    const userMsg: Message = { id: `u-${Date.now()}`, role: "user", content: text.trim() };
+    const newMessages = [...messages, userMsg];
+    setMessages(newMessages);
+    setInput("");
+    await streamResponse(newMessages);
+  };
+
+  const regenerate = async (msgId: string) => {
+    if (streaming) return;
+    // Find the message and remove it + everything after it
+    const idx = messages.findIndex((m) => m.id === msgId);
+    if (idx < 0) return;
+    const history = messages.slice(0, idx);
+    setMessages(history);
+    await streamResponse(history);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -176,7 +190,7 @@ export function ResearchChat({ projectId, projectTitle }: { projectId: string; p
                     <div className="text-xs leading-relaxed prose prose-xs dark:prose-invert max-w-none [&_h1]:text-sm [&_h2]:text-xs [&_h3]:text-xs [&_p]:text-xs [&_li]:text-xs [&_code]:text-[10px]">
                       <MarkdownRenderer content={msg.content} />
                     </div>
-                    <MessageActions projectId={projectId} content={msg.content} />
+                    <MessageActions projectId={projectId} content={msg.content} onRegenerate={() => regenerate(msg.id)} />
                   </div>
                 )}
               </div>
@@ -229,7 +243,7 @@ export function ResearchChat({ projectId, projectTitle }: { projectId: string; p
 
 // ── Message action buttons ──────────────────────────────────────
 
-function MessageActions({ projectId, content }: { projectId: string; content: string }) {
+function MessageActions({ projectId, content, onRegenerate }: { projectId: string; content: string; onRegenerate?: () => void }) {
   const [copied, setCopied] = useState(false);
   const [saved, setSaved] = useState(false);
 
@@ -284,6 +298,12 @@ function MessageActions({ projectId, content }: { projectId: string; content: st
         <Download className="h-2.5 w-2.5" />
         Export
       </button>
+      {onRegenerate && (
+        <button onClick={onRegenerate} className="inline-flex h-5 items-center gap-1 rounded px-1.5 text-[10px] text-muted-foreground/40 hover:text-muted-foreground hover:bg-muted/50 transition-colors" title="Regenerate response">
+          <RefreshCw className="h-2.5 w-2.5" />
+          Redo
+        </button>
+      )}
     </div>
   );
 }
