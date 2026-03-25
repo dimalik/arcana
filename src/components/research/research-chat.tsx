@@ -113,10 +113,20 @@ export function ResearchChat({ projectId, projectTitle }: { projectId: string; p
 
   const regenerate = async (msgId: string) => {
     if (streaming) return;
-    // Find the message and remove it + everything after it
     const idx = messages.findIndex((m) => m.id === msgId);
     if (idx < 0) return;
     const history = messages.slice(0, idx);
+    setMessages(history);
+    await streamResponse(history);
+  };
+
+  const editAndResend = async (msgId: string, newContent: string) => {
+    if (streaming || !newContent.trim()) return;
+    const idx = messages.findIndex((m) => m.id === msgId);
+    if (idx < 0) return;
+    // Replace the user message and drop everything after it
+    const edited: Message = { ...messages[idx], content: newContent.trim() };
+    const history = [...messages.slice(0, idx), edited];
     setMessages(history);
     await streamResponse(history);
   };
@@ -182,9 +192,11 @@ export function ResearchChat({ projectId, projectTitle }: { projectId: string; p
             {messages.map((msg) => (
               <div key={msg.id} className={msg.role === "user" ? "flex justify-end" : "group/msg"}>
                 {msg.role === "user" ? (
-                  <div className="max-w-[85%] px-3 py-2 rounded-xl bg-foreground text-background text-xs leading-relaxed">
-                    {msg.content}
-                  </div>
+                  <UserBubble
+                    content={msg.content}
+                    onEdit={(text) => editAndResend(msg.id, text)}
+                    disabled={streaming}
+                  />
                 ) : (
                   <div>
                     <div className="text-xs leading-relaxed prose prose-xs dark:prose-invert max-w-none [&_h1]:text-sm [&_h2]:text-xs [&_h3]:text-xs [&_p]:text-xs [&_li]:text-xs [&_code]:text-[10px]">
@@ -238,6 +250,57 @@ export function ResearchChat({ projectId, projectTitle }: { projectId: string; p
         </div>
       )}
     </>
+  );
+}
+
+// ── Editable user message bubble ─────────────────────────────────
+
+function UserBubble({ content, onEdit, disabled }: { content: string; onEdit: (text: string) => void; disabled: boolean }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(content);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    if (editing) {
+      const el = textareaRef.current;
+      if (el) { el.focus(); el.selectionStart = el.value.length; }
+    }
+  }, [editing]);
+
+  const submit = () => {
+    if (draft.trim() && draft.trim() !== content) {
+      onEdit(draft);
+    }
+    setEditing(false);
+  };
+
+  if (editing) {
+    return (
+      <div className="max-w-[85%] space-y-1">
+        <textarea
+          ref={textareaRef}
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(); } if (e.key === "Escape") { setDraft(content); setEditing(false); } }}
+          rows={Math.min(draft.split("\n").length + 1, 6)}
+          className="w-full rounded-xl border border-foreground/20 bg-foreground/5 px-3 py-2 text-xs leading-relaxed focus:outline-none focus:border-foreground/40 resize-none"
+        />
+        <div className="flex justify-end gap-1">
+          <button onClick={() => { setDraft(content); setEditing(false); }} className="px-2 py-0.5 text-[10px] text-muted-foreground hover:text-foreground rounded transition-colors">Cancel</button>
+          <button onClick={submit} className="px-2 py-0.5 text-[10px] bg-foreground text-background rounded transition-colors">Send</button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      onClick={() => !disabled && setEditing(true)}
+      className={`max-w-[85%] px-3 py-2 rounded-xl bg-foreground text-background text-xs leading-relaxed ${disabled ? "" : "cursor-pointer hover:opacity-80"} transition-opacity`}
+      title={disabled ? undefined : "Click to edit"}
+    >
+      {content}
+    </div>
   );
 }
 
