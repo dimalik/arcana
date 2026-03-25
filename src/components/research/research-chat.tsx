@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
-import { MessageCircle, X, Send, Loader2, Sparkles, Copy, BookmarkPlus, Download, Check, RefreshCw } from "lucide-react";
+import { MessageCircle, X, Send, Loader2, Sparkles, Copy, BookmarkPlus, Download, Check, RefreshCw, Plus, Trash2, ChevronLeft } from "lucide-react";
 import { toast } from "sonner";
 import { MarkdownRenderer } from "@/components/ui/markdown-renderer";
 
@@ -11,6 +11,13 @@ interface Message {
   content: string;
 }
 
+interface ChatThread {
+  id: string;
+  title: string;
+  messages: Message[];
+  createdAt: number;
+}
+
 const STARTERS = [
   "Summarize what worked and what didn't",
   "What are the key findings so far?",
@@ -18,25 +25,172 @@ const STARTERS = [
   "Which experiments should I reproduce?",
 ];
 
-const STORAGE_KEY = (id: string) => `research-chat-${id}`;
+const STORE_KEY = (projectId: string) => `research-chats-${projectId}`;
+
+function loadThreads(projectId: string): ChatThread[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = localStorage.getItem(STORE_KEY(projectId));
+    return raw ? JSON.parse(raw) : [];
+  } catch { return []; }
+}
+
+function saveThreads(projectId: string, threads: ChatThread[]) {
+  localStorage.setItem(STORE_KEY(projectId), JSON.stringify(threads));
+}
+
+function deriveTitle(messages: Message[]): string {
+  const first = messages.find((m) => m.role === "user");
+  if (!first) return "New chat";
+  return first.content.slice(0, 40) + (first.content.length > 40 ? "..." : "");
+}
+
+// ── Main component ──────────────────────────────────────────────
 
 export function ResearchChat({ projectId, projectTitle }: { projectId: string; projectTitle: string }) {
   const [open, setOpen] = useState(false);
-  const [messages, setMessages] = useState<Message[]>(() => {
-    if (typeof window === "undefined") return [];
-    try {
-      const saved = sessionStorage.getItem(STORAGE_KEY(projectId));
-      return saved ? JSON.parse(saved) : [];
-    } catch { return []; }
-  });
-  const [input, setInput] = useState("");
+  const [threads, setThreads] = useState<ChatThread[]>(() => loadThreads(projectId));
+  const [activeThreadId, setActiveThreadId] = useState<string | null>(() => threads[0]?.id ?? null);
+  const [showList, setShowList] = useState(false);
 
-  // Persist messages to sessionStorage
-  useEffect(() => {
-    if (messages.length > 0) {
-      sessionStorage.setItem(STORAGE_KEY(projectId), JSON.stringify(messages));
+  const activeThread = threads.find((t) => t.id === activeThreadId) ?? null;
+
+  // Persist threads
+  useEffect(() => { saveThreads(projectId, threads); }, [projectId, threads]);
+
+  const createThread = () => {
+    const t: ChatThread = { id: `t-${Date.now()}`, title: "New chat", messages: [], createdAt: Date.now() };
+    setThreads((prev) => [t, ...prev]);
+    setActiveThreadId(t.id);
+    setShowList(false);
+  };
+
+  const deleteThread = (id: string) => {
+    setThreads((prev) => prev.filter((t) => t.id !== id));
+    if (activeThreadId === id) {
+      const remaining = threads.filter((t) => t.id !== id);
+      setActiveThreadId(remaining[0]?.id ?? null);
     }
-  }, [messages, projectId]);
+  };
+
+  const updateThreadMessages = (threadId: string, messages: Message[]) => {
+    setThreads((prev) => prev.map((t) =>
+      t.id === threadId ? { ...t, messages, title: deriveTitle(messages) || t.title } : t
+    ));
+  };
+
+  const handleOpen = () => {
+    setOpen(true);
+    if (threads.length === 0) createThread();
+    else if (!activeThreadId) setActiveThreadId(threads[0].id);
+  };
+
+  return (
+    <>
+      {!open && (
+        <button
+          onClick={handleOpen}
+          className="fixed bottom-16 right-8 z-40 inline-flex items-center gap-1.5 rounded-full bg-foreground/90 text-background pl-3 pr-3.5 py-1.5 text-[11px] font-medium shadow-lg hover:bg-foreground hover:shadow-xl transition-all duration-200 backdrop-blur-sm"
+          title="Chat about this research"
+        >
+          <MessageCircle className="h-3 w-3" />
+          Ask
+        </button>
+      )}
+
+      {open && (
+        <div className="fixed bottom-16 right-8 z-40 w-[400px] max-h-[70vh] flex flex-col rounded-xl border border-border/60 bg-background shadow-2xl animate-in slide-in-from-bottom-2 fade-in-0 duration-200">
+          {/* Header */}
+          <div className="relative px-4 py-2.5 border-b border-border/40">
+            <button
+              onClick={() => setOpen(false)}
+              className="absolute -top-2 -right-2 inline-flex h-5 w-5 items-center justify-center rounded-full bg-muted border border-border/60 text-muted-foreground/60 hover:text-foreground hover:bg-accent shadow-sm transition-colors z-10"
+            >
+              <X className="h-3 w-3" />
+            </button>
+            <div className="flex items-center gap-2">
+              {!showList && threads.length > 1 && (
+                <button
+                  onClick={() => setShowList(true)}
+                  className="inline-flex h-5 w-5 items-center justify-center rounded text-muted-foreground/40 hover:text-foreground hover:bg-muted/50 transition-colors shrink-0"
+                  title="All chats"
+                >
+                  <ChevronLeft className="h-3 w-3" />
+                </button>
+              )}
+              <div className="min-w-0 flex-1">
+                <h3 className="text-xs font-medium truncate pr-6">
+                  {showList ? "Chats" : (activeThread?.title || projectTitle)}
+                </h3>
+                {!showList && (
+                  <p className="text-[10px] text-muted-foreground">Ask about methods, findings, and how to apply them</p>
+                )}
+              </div>
+              <button
+                onClick={createThread}
+                className="inline-flex h-5 w-5 items-center justify-center rounded text-muted-foreground/40 hover:text-foreground hover:bg-muted/50 transition-colors shrink-0"
+                title="New chat"
+              >
+                <Plus className="h-3 w-3" />
+              </button>
+            </div>
+          </div>
+
+          {showList ? (
+            /* Thread list */
+            <div className="flex-1 overflow-y-auto min-h-[200px] max-h-[calc(70vh-80px)] scrollbar-none" style={{ scrollbarWidth: "none" }}>
+              {threads.length === 0 ? (
+                <div className="p-4 text-center text-xs text-muted-foreground/40">No chats yet</div>
+              ) : (
+                <div className="py-1">
+                  {threads.map((t) => (
+                    <div
+                      key={t.id}
+                      className={`flex items-center gap-2 px-4 py-2 cursor-pointer hover:bg-muted/30 transition-colors group/thread ${t.id === activeThreadId ? "bg-muted/20" : ""}`}
+                      onClick={() => { setActiveThreadId(t.id); setShowList(false); }}
+                    >
+                      <MessageCircle className="h-3 w-3 text-muted-foreground/30 shrink-0" />
+                      <div className="min-w-0 flex-1">
+                        <p className="text-xs truncate">{t.title}</p>
+                        <p className="text-[10px] text-muted-foreground/40">{t.messages.length} messages</p>
+                      </div>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); deleteThread(t.id); }}
+                        className="h-5 w-5 inline-flex items-center justify-center rounded opacity-0 group-hover/thread:opacity-100 text-muted-foreground/30 hover:text-destructive hover:bg-destructive/10 transition-all"
+                      >
+                        <Trash2 className="h-2.5 w-2.5" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          ) : activeThread ? (
+            <ChatView
+              projectId={projectId}
+              thread={activeThread}
+              onUpdateMessages={(msgs) => updateThreadMessages(activeThread.id, msgs)}
+            />
+          ) : (
+            <div className="p-4 text-center text-xs text-muted-foreground/40">
+              Create a new chat to get started
+            </div>
+          )}
+        </div>
+      )}
+    </>
+  );
+}
+
+// ── Chat view (single thread) ───────────────────────────────────
+
+function ChatView({ projectId, thread, onUpdateMessages }: {
+  projectId: string;
+  thread: ChatThread;
+  onUpdateMessages: (messages: Message[]) => void;
+}) {
+  const messages = thread.messages;
+  const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
   const [streamingContent, setStreamingContent] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -47,22 +201,12 @@ export function ResearchChat({ projectId, projectTitle }: { projectId: string; p
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, []);
 
-  useEffect(() => {
-    if (open) {
-      setTimeout(() => inputRef.current?.focus(), 100);
-      scrollToBottom();
-    }
-  }, [open, scrollToBottom]);
+  useEffect(() => { setTimeout(() => inputRef.current?.focus(), 100); }, [thread.id]);
+  useEffect(() => { scrollToBottom(); }, [messages, streamingContent, scrollToBottom]);
 
-  useEffect(() => {
-    scrollToBottom();
-  }, [messages, streamingContent, scrollToBottom]);
-
-  // Stream a response for a given message history
   const streamResponse = async (history: Message[]) => {
     setStreaming(true);
     setStreamingContent("");
-
     const abort = new AbortController();
     abortRef.current = abort;
 
@@ -70,18 +214,14 @@ export function ResearchChat({ projectId, projectTitle }: { projectId: string; p
       const res = await fetch(`/api/research/${projectId}/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          messages: history.map((m) => ({ role: m.role, content: m.content })),
-        }),
+        body: JSON.stringify({ messages: history.map((m) => ({ role: m.role, content: m.content })) }),
         signal: abort.signal,
       });
-
       if (!res.ok || !res.body) throw new Error("Chat failed");
 
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let accumulated = "";
-
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
@@ -89,12 +229,12 @@ export function ResearchChat({ projectId, projectTitle }: { projectId: string; p
         setStreamingContent(accumulated);
       }
 
-      const assistantMsg: Message = { id: `a-${Date.now()}`, role: "assistant", content: accumulated };
-      setMessages((prev) => [...prev, assistantMsg]);
+      const newMsgs = [...history, { id: `a-${Date.now()}`, role: "assistant" as const, content: accumulated }];
+      onUpdateMessages(newMsgs);
       setStreamingContent("");
     } catch (err) {
       if ((err as Error).name !== "AbortError") {
-        setMessages((prev) => [...prev, { id: `e-${Date.now()}`, role: "assistant", content: "Sorry, something went wrong. Try again." }]);
+        onUpdateMessages([...history, { id: `e-${Date.now()}`, role: "assistant", content: "Something went wrong. Try again." }]);
       }
     } finally {
       setStreaming(false);
@@ -104,11 +244,10 @@ export function ResearchChat({ projectId, projectTitle }: { projectId: string; p
 
   const sendMessage = async (text: string) => {
     if (!text.trim() || streaming) return;
-    const userMsg: Message = { id: `u-${Date.now()}`, role: "user", content: text.trim() };
-    const newMessages = [...messages, userMsg];
-    setMessages(newMessages);
+    const newMsgs = [...messages, { id: `u-${Date.now()}`, role: "user" as const, content: text.trim() }];
+    onUpdateMessages(newMsgs);
     setInput("");
-    await streamResponse(newMessages);
+    await streamResponse(newMsgs);
   };
 
   const regenerate = async (msgId: string) => {
@@ -116,7 +255,7 @@ export function ResearchChat({ projectId, projectTitle }: { projectId: string; p
     const idx = messages.findIndex((m) => m.id === msgId);
     if (idx < 0) return;
     const history = messages.slice(0, idx);
-    setMessages(history);
+    onUpdateMessages(history);
     await streamResponse(history);
   };
 
@@ -124,131 +263,83 @@ export function ResearchChat({ projectId, projectTitle }: { projectId: string; p
     if (streaming || !newContent.trim()) return;
     const idx = messages.findIndex((m) => m.id === msgId);
     if (idx < 0) return;
-    // Replace the user message and drop everything after it
-    const edited: Message = { ...messages[idx], content: newContent.trim() };
-    const history = [...messages.slice(0, idx), edited];
-    setMessages(history);
+    const history = [...messages.slice(0, idx), { ...messages[idx], content: newContent.trim() }];
+    onUpdateMessages(history);
     await streamResponse(history);
-  };
-
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      sendMessage(input);
-    }
   };
 
   return (
     <>
-      {/* Floating button — hidden when panel is open */}
-      {!open && (
-        <button
-          onClick={() => setOpen(true)}
-          className="fixed bottom-16 right-8 z-40 inline-flex items-center gap-1.5 rounded-full bg-foreground/90 text-background pl-3 pr-3.5 py-1.5 text-[11px] font-medium shadow-lg hover:bg-foreground hover:shadow-xl transition-all duration-200 backdrop-blur-sm"
-          title="Chat about this research"
-        >
-          <MessageCircle className="h-3 w-3" />
-          Ask
-        </button>
-      )}
-
-      {/* Chat panel */}
-      {open && (
-        <div className="fixed bottom-16 right-8 z-40 w-[400px] max-h-[70vh] flex flex-col rounded-xl border border-border/60 bg-background shadow-2xl animate-in slide-in-from-bottom-2 fade-in-0 duration-200">
-          {/* Header */}
-          <div className="relative px-4 py-3 border-b border-border/40">
-            <button
-              onClick={() => setOpen(false)}
-              className="absolute -top-2 -right-2 inline-flex h-5 w-5 items-center justify-center rounded-full bg-muted border border-border/60 text-muted-foreground/60 hover:text-foreground hover:bg-accent shadow-sm transition-colors z-10"
-            >
-              <X className="h-3 w-3" />
-            </button>
-            <h3 className="text-xs font-medium truncate pr-4">{projectTitle}</h3>
-            <p className="text-[10px] text-muted-foreground">Ask about methods, findings, and how to apply them</p>
-          </div>
-
-          {/* Messages */}
-          <div className="flex-1 overflow-y-auto px-4 py-3 space-y-4 min-h-[200px] max-h-[calc(70vh-130px)] scrollbar-none" style={{ scrollbarWidth: "none" }}>
-            {messages.length === 0 && !streaming && (
-              <div className="space-y-3 py-4">
-                <div className="flex items-center gap-2 text-muted-foreground/40">
-                  <Sparkles className="h-3.5 w-3.5" />
-                  <span className="text-[11px]">Try asking</span>
-                </div>
-                <div className="grid grid-cols-1 gap-1.5">
-                  {STARTERS.map((s) => (
-                    <button
-                      key={s}
-                      onClick={() => sendMessage(s)}
-                      className="text-left text-xs text-muted-foreground/60 hover:text-foreground px-3 py-2 rounded-lg border border-border/30 hover:border-border/60 hover:bg-muted/30 transition-all"
-                    >
-                      {s}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {messages.map((msg) => (
-              <div key={msg.id} className={msg.role === "user" ? "flex justify-end" : "group/msg"}>
-                {msg.role === "user" ? (
-                  <UserBubble
-                    content={msg.content}
-                    onEdit={(text) => editAndResend(msg.id, text)}
-                    disabled={streaming}
-                  />
-                ) : (
-                  <div>
-                    <div className="text-xs leading-relaxed prose prose-xs dark:prose-invert max-w-none [&_h1]:text-sm [&_h2]:text-xs [&_h3]:text-xs [&_p]:text-xs [&_li]:text-xs [&_code]:text-[10px]">
-                      <MarkdownRenderer content={msg.content} />
-                    </div>
-                    <MessageActions projectId={projectId} content={msg.content} onRegenerate={() => regenerate(msg.id)} />
-                  </div>
-                )}
-              </div>
-            ))}
-
-            {streaming && streamingContent && (
-              <div className="text-xs leading-relaxed prose prose-xs dark:prose-invert max-w-none [&_h1]:text-sm [&_h2]:text-xs [&_h3]:text-xs [&_p]:text-xs [&_li]:text-xs [&_code]:text-[10px]">
-                <MarkdownRenderer content={streamingContent} />
-                <span className="inline-block w-1.5 h-3 bg-foreground/60 animate-pulse ml-0.5" />
-              </div>
-            )}
-
-            {streaming && !streamingContent && (
-              <div className="flex items-center gap-2 text-muted-foreground/40">
-                <Loader2 className="h-3 w-3 animate-spin" />
-                <span className="text-[10px]">Thinking...</span>
-              </div>
-            )}
-
-            <div ref={messagesEndRef} />
-          </div>
-
-          {/* Input */}
-          <div className="px-3 py-2.5 border-t border-border/40">
-            <div className="flex items-end gap-2">
-              <textarea
-                ref={inputRef}
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={handleKeyDown}
-                placeholder="Ask about this research..."
-                rows={1}
-                className="flex-1 resize-none rounded-lg border border-border/40 bg-muted/20 px-3 py-2 text-xs placeholder:text-muted-foreground/30 focus:outline-none focus:border-foreground/20 transition-all"
-                disabled={streaming}
-              />
-              <button
-                onClick={() => sendMessage(input)}
-                disabled={streaming || !input.trim()}
-                className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-foreground text-background hover:bg-foreground/90 transition-colors disabled:opacity-30 shrink-0"
-              >
-                {streaming ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
-              </button>
+      <div className="flex-1 overflow-y-auto px-4 py-3 space-y-4 min-h-[200px] max-h-[calc(70vh-130px)] scrollbar-none" style={{ scrollbarWidth: "none" }}>
+        {messages.length === 0 && !streaming && (
+          <div className="space-y-3 py-4">
+            <div className="flex items-center gap-2 text-muted-foreground/40">
+              <Sparkles className="h-3.5 w-3.5" />
+              <span className="text-[11px]">Try asking</span>
+            </div>
+            <div className="grid grid-cols-1 gap-1.5">
+              {STARTERS.map((s) => (
+                <button key={s} onClick={() => sendMessage(s)} className="text-left text-xs text-muted-foreground/60 hover:text-foreground px-3 py-2 rounded-lg border border-border/30 hover:border-border/60 hover:bg-muted/30 transition-all">
+                  {s}
+                </button>
+              ))}
             </div>
           </div>
+        )}
+
+        {messages.map((msg) => (
+          <div key={msg.id} className={msg.role === "user" ? "flex justify-end" : "group/msg"}>
+            {msg.role === "user" ? (
+              <UserBubble content={msg.content} onEdit={(text) => editAndResend(msg.id, text)} disabled={streaming} />
+            ) : (
+              <div>
+                <div className="text-xs leading-relaxed prose prose-xs dark:prose-invert max-w-none [&_h1]:text-sm [&_h2]:text-xs [&_h3]:text-xs [&_p]:text-xs [&_li]:text-xs [&_code]:text-[10px]">
+                  <MarkdownRenderer content={msg.content} />
+                </div>
+                <MessageActions projectId={projectId} content={msg.content} onRegenerate={() => regenerate(msg.id)} />
+              </div>
+            )}
+          </div>
+        ))}
+
+        {streaming && streamingContent && (
+          <div className="text-xs leading-relaxed prose prose-xs dark:prose-invert max-w-none [&_h1]:text-sm [&_h2]:text-xs [&_h3]:text-xs [&_p]:text-xs [&_li]:text-xs [&_code]:text-[10px]">
+            <MarkdownRenderer content={streamingContent} />
+            <span className="inline-block w-1.5 h-3 bg-foreground/60 animate-pulse ml-0.5" />
+          </div>
+        )}
+
+        {streaming && !streamingContent && (
+          <div className="flex items-center gap-2 text-muted-foreground/40">
+            <Loader2 className="h-3 w-3 animate-spin" />
+            <span className="text-[10px]">Thinking...</span>
+          </div>
+        )}
+
+        <div ref={messagesEndRef} />
+      </div>
+
+      <div className="px-3 py-2.5 border-t border-border/40">
+        <div className="flex items-end gap-2">
+          <textarea
+            ref={inputRef}
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(input); } }}
+            placeholder="Ask about this research..."
+            rows={1}
+            className="flex-1 resize-none rounded-lg border border-border/40 bg-muted/20 px-3 py-2 text-xs placeholder:text-muted-foreground/30 focus:outline-none focus:border-foreground/20 transition-all"
+            disabled={streaming}
+          />
+          <button
+            onClick={() => sendMessage(input)}
+            disabled={streaming || !input.trim()}
+            className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-foreground text-background hover:bg-foreground/90 transition-colors disabled:opacity-30 shrink-0"
+          >
+            {streaming ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
+          </button>
         </div>
-      )}
+      </div>
     </>
   );
 }
@@ -268,9 +359,7 @@ function UserBubble({ content, onEdit, disabled }: { content: string; onEdit: (t
   }, [editing]);
 
   const submit = () => {
-    if (draft.trim() && draft.trim() !== content) {
-      onEdit(draft);
-    }
+    if (draft.trim() && draft.trim() !== content) onEdit(draft);
     setEditing(false);
   };
 
