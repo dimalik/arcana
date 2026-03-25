@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
-import { MessageCircle, X, Send, Loader2, Sparkles, ArrowDown } from "lucide-react";
+import { MessageCircle, X, Send, Loader2, Sparkles, Copy, BookmarkPlus, Download, Check } from "lucide-react";
+import { toast } from "sonner";
 import { MarkdownRenderer } from "@/components/ui/markdown-renderer";
 
 interface Message {
@@ -165,14 +166,17 @@ export function ResearchChat({ projectId, projectTitle }: { projectId: string; p
             )}
 
             {messages.map((msg) => (
-              <div key={msg.id} className={msg.role === "user" ? "flex justify-end" : ""}>
+              <div key={msg.id} className={msg.role === "user" ? "flex justify-end" : "group/msg"}>
                 {msg.role === "user" ? (
                   <div className="max-w-[85%] px-3 py-2 rounded-xl bg-foreground text-background text-xs leading-relaxed">
                     {msg.content}
                   </div>
                 ) : (
-                  <div className="text-xs leading-relaxed prose prose-xs dark:prose-invert max-w-none [&_h1]:text-sm [&_h2]:text-xs [&_h3]:text-xs [&_p]:text-xs [&_li]:text-xs [&_code]:text-[10px]">
-                    <MarkdownRenderer content={msg.content} />
+                  <div>
+                    <div className="text-xs leading-relaxed prose prose-xs dark:prose-invert max-w-none [&_h1]:text-sm [&_h2]:text-xs [&_h3]:text-xs [&_p]:text-xs [&_li]:text-xs [&_code]:text-[10px]">
+                      <MarkdownRenderer content={msg.content} />
+                    </div>
+                    <MessageActions projectId={projectId} content={msg.content} />
                   </div>
                 )}
               </div>
@@ -220,5 +224,66 @@ export function ResearchChat({ projectId, projectTitle }: { projectId: string; p
         </div>
       )}
     </>
+  );
+}
+
+// ── Message action buttons ──────────────────────────────────────
+
+function MessageActions({ projectId, content }: { projectId: string; content: string }) {
+  const [copied, setCopied] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  const handleCopy = async () => {
+    await navigator.clipboard.writeText(content);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  const handleSaveToLog = async () => {
+    try {
+      const res = await fetch(`/api/research/${projectId}/log`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: "decision", content: content.slice(0, 2000) }),
+      });
+      if (res.ok) {
+        setSaved(true);
+        toast.success("Saved to research log");
+        setTimeout(() => setSaved(false), 3000);
+      } else {
+        toast.error("Failed to save");
+      }
+    } catch {
+      toast.error("Failed to save");
+    }
+  };
+
+  const handleExport = () => {
+    const blob = new Blob([content], { type: "text/markdown" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `research-chat-${new Date().toISOString().slice(0, 10)}.md`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  };
+
+  return (
+    <div className="flex items-center gap-0.5 mt-1 opacity-0 group-hover/msg:opacity-100 transition-opacity">
+      <button onClick={handleCopy} className="inline-flex h-5 items-center gap-1 rounded px-1.5 text-[10px] text-muted-foreground/40 hover:text-muted-foreground hover:bg-muted/50 transition-colors" title="Copy">
+        {copied ? <Check className="h-2.5 w-2.5 text-emerald-500" /> : <Copy className="h-2.5 w-2.5" />}
+        {copied ? "Copied" : "Copy"}
+      </button>
+      <button onClick={handleSaveToLog} className="inline-flex h-5 items-center gap-1 rounded px-1.5 text-[10px] text-muted-foreground/40 hover:text-muted-foreground hover:bg-muted/50 transition-colors" title="Save to research log">
+        {saved ? <Check className="h-2.5 w-2.5 text-emerald-500" /> : <BookmarkPlus className="h-2.5 w-2.5" />}
+        {saved ? "Saved" : "Save to log"}
+      </button>
+      <button onClick={handleExport} className="inline-flex h-5 items-center gap-1 rounded px-1.5 text-[10px] text-muted-foreground/40 hover:text-muted-foreground hover:bg-muted/50 transition-colors" title="Export as markdown">
+        <Download className="h-2.5 w-2.5" />
+        Export
+      </button>
+    </div>
   );
 }
