@@ -38,8 +38,7 @@ export async function POST(request: NextRequest, { params }: Params) {
         hypotheses: { orderBy: { createdAt: "desc" } },
         log: {
           orderBy: { createdAt: "desc" },
-          take: 100,
-          where: { type: { in: ["observation", "breakthrough", "dead_end", "decision"] } },
+          take: 200,
         },
         collection: {
           include: {
@@ -90,7 +89,7 @@ export async function POST(request: NextRequest, { params }: Params) {
       }
     }
 
-    // Experiment results
+    // All steps across iterations
     const allSteps: { type: string; title: string; status: string; output: string | null; iteration: number }[] = [];
     for (const iter of project.iterations) {
       for (const step of iter.steps) {
@@ -112,6 +111,27 @@ export async function POST(request: NextRequest, { params }: Params) {
           } catch {
             contextParts.push(`  Output: ${exp.output.slice(0, 500)}`);
           }
+        }
+      }
+    }
+
+    // Remote job results (experiments run on GPU servers)
+    const remoteJobs = await prisma.remoteJob.findMany({
+      where: { projectId: id },
+      orderBy: { createdAt: "desc" },
+      take: 30,
+      select: { command: true, status: true, exitCode: true, stdout: true, stderr: true, completedAt: true },
+    });
+    if (remoteJobs.length > 0) {
+      contextParts.push(`\n## Remote Jobs (${remoteJobs.length} recent)`);
+      for (const job of remoteJobs) {
+        const script = job.command?.match(/python3?\s+(\S+\.py)/)?.[1] || job.command?.slice(0, 60) || "?";
+        contextParts.push(`- ${script} — ${job.status}${job.exitCode != null ? ` (exit ${job.exitCode})` : ""}`);
+        if (job.stdout && job.status === "COMPLETED") {
+          contextParts.push(`  Output: ${job.stdout.slice(-600)}`);
+        }
+        if (job.stderr && job.status === "FAILED") {
+          contextParts.push(`  Error: ${job.stderr.slice(-400)}`);
         }
       }
     }
