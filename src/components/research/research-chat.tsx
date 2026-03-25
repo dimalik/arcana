@@ -50,7 +50,7 @@ function loadThreads(projectId: string): ChatThread[] {
       }
     }
 
-    return threads;
+    return threads.filter((t) => t.messages.length > 0);
   } catch { return []; }
 }
 
@@ -74,8 +74,11 @@ export function ResearchChat({ projectId, projectTitle }: { projectId: string; p
 
   const activeThread = threads.find((t) => t.id === activeThreadId) ?? null;
 
-  // Persist threads
-  useEffect(() => { saveThreads(projectId, threads); }, [projectId, threads]);
+  // Persist threads (skip empty ones)
+  useEffect(() => {
+    const nonEmpty = threads.filter((t) => t.messages.length > 0);
+    saveThreads(projectId, nonEmpty);
+  }, [projectId, threads]);
 
   const createThread = () => {
     const t: ChatThread = { id: `t-${Date.now()}`, title: "New chat", messages: [], createdAt: Date.now() };
