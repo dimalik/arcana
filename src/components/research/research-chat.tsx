@@ -276,14 +276,14 @@ function UserBubble({ content, onEdit, disabled }: { content: string; onEdit: (t
 
   if (editing) {
     return (
-      <div className="max-w-[85%] space-y-1">
+      <div className="w-full space-y-1">
         <textarea
           ref={textareaRef}
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(); } if (e.key === "Escape") { setDraft(content); setEditing(false); } }}
-          rows={Math.min(draft.split("\n").length + 1, 6)}
-          className="w-full rounded-xl border border-foreground/20 bg-foreground/5 px-3 py-2 text-xs leading-relaxed focus:outline-none focus:border-foreground/40 resize-none"
+          rows={Math.max(3, Math.min(draft.split("\n").length + 1, 10))}
+          className="w-full rounded-xl border border-foreground/20 bg-foreground/5 px-3 py-2 text-xs leading-relaxed focus:outline-none focus:border-foreground/40 resize-y min-h-[80px]"
         />
         <div className="flex justify-end gap-1">
           <button onClick={() => { setDraft(content); setEditing(false); }} className="px-2 py-0.5 text-[10px] text-muted-foreground hover:text-foreground rounded transition-colors">Cancel</button>
