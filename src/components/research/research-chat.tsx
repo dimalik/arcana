@@ -31,7 +31,26 @@ function loadThreads(projectId: string): ChatThread[] {
   if (typeof window === "undefined") return [];
   try {
     const raw = localStorage.getItem(STORE_KEY(projectId));
-    return raw ? JSON.parse(raw) : [];
+    const threads: ChatThread[] = raw ? JSON.parse(raw) : [];
+
+    // Migrate old single-chat from sessionStorage
+    const oldKey = `research-chat-${projectId}`;
+    const oldRaw = sessionStorage.getItem(oldKey);
+    if (oldRaw && threads.length === 0) {
+      const oldMessages: Message[] = JSON.parse(oldRaw);
+      if (oldMessages.length > 0) {
+        threads.push({
+          id: `t-migrated-${Date.now()}`,
+          title: deriveTitle(oldMessages),
+          messages: oldMessages,
+          createdAt: Date.now(),
+        });
+        localStorage.setItem(STORE_KEY(projectId), JSON.stringify(threads));
+        sessionStorage.removeItem(oldKey);
+      }
+    }
+
+    return threads;
   } catch { return []; }
 }
 
