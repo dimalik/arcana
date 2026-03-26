@@ -43,6 +43,35 @@ export function PaperChat({ paperId, hasText, initialConversationId, className, 
     undefined
   );
   const [listRefreshKey, setListRefreshKey] = useState(0);
+  const [chatWidth, setChatWidth] = useState(() => {
+    if (typeof window === "undefined") return 380;
+    return parseInt(localStorage.getItem("paper-chat-width") || "380") || 380;
+  });
+
+  const startResize = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startWidth = chatWidth;
+    const onMove = (ev: MouseEvent) => {
+      const newWidth = Math.max(300, Math.min(700, startWidth + (startX - ev.clientX)));
+      setChatWidth(newWidth);
+    };
+    const onUp = () => {
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      localStorage.setItem("paper-chat-width", String(chatWidth));
+    };
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+  }, [chatWidth]);
+
+  // Persist width on change
+  useEffect(() => { localStorage.setItem("paper-chat-width", String(chatWidth)); }, [chatWidth]);
+
   // Suppresses auto-create when user is intentionally browsing history
   const browsingHistory = useRef(false);
 
@@ -445,7 +474,12 @@ export function PaperChat({ paperId, hasText, initialConversationId, className, 
       {/* ── Docked mode — fixed panel left of right strip ── */}
       {docked ? (
         dockedOpen && (
-          <div className="fixed top-12 bottom-0 right-10 z-30 flex flex-col border-l bg-card shadow-lg" style={{ width: 380 }}>
+          <div className="fixed top-12 bottom-0 right-10 z-30 flex flex-col border-l bg-card shadow-lg" style={{ width: chatWidth }}>
+            {/* Resize handle */}
+            <div
+              onMouseDown={startResize}
+              className="absolute left-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-primary/20 active:bg-primary/30 transition-colors z-10"
+            />
             {view === "list" ? (
               <ConversationList
                 paperId={paperId}

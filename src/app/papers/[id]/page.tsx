@@ -164,6 +164,25 @@ export default function PaperDetailPage() {
   const [metadataOpen, setMetadataOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
+  const [chatWidth, setChatWidth] = useState(() => {
+    if (typeof window === "undefined") return 380;
+    return parseInt(localStorage.getItem("paper-chat-width") || "380") || 380;
+  });
+
+  // Listen for chat width changes from the resize handle
+  useEffect(() => {
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === "paper-chat-width" && e.newValue) setChatWidth(parseInt(e.newValue) || 380);
+    };
+    window.addEventListener("storage", onStorage);
+    // Also poll for same-tab changes (storage event only fires cross-tab)
+    if (!chatOpen) return;
+    const interval = setInterval(() => {
+      const w = parseInt(localStorage.getItem("paper-chat-width") || "380") || 380;
+      setChatWidth((prev) => prev !== w ? w : prev);
+    }, 100);
+    return () => { window.removeEventListener("storage", onStorage); clearInterval(interval); };
+  }, [chatOpen]);
   const [locatingPdf, setLocatingPdf] = useState(false);
   const [activeView, setActiveView] = useState<ViewTab>("review");
   const [relatedPaperMap, setRelatedPaperMap] = useState<Record<string, string>>({});
@@ -588,7 +607,7 @@ export default function PaperDetailPage() {
     <TooltipProvider>
       <div
         className="flex flex-col h-[calc(100vh-48px)] overflow-hidden transition-[margin-right] duration-200 -my-5"
-        style={{ marginRight: chatOpen ? 380 : 0 }}
+        style={{ marginRight: chatOpen ? chatWidth : 0 }}
       >
         {/* ── Missing PDF banner ── */}
         {!paper.filePath && (paper.processingStatus === "COMPLETED" || paper.processingStatus === "PENDING") && (
