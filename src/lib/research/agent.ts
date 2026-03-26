@@ -953,6 +953,12 @@ Call \`dispatch_architect\` with the synthesizer's output, any analyst data, and
 
 **Adversarial review — use \`adversarial_review\` for quick inline critique or \`dispatch_reviewer\` for deep background review.**
 
+**Provocateur — use \`dispatch_provocateur\` when you need creative lateral thinking:**
+Call it when you're stuck in a rut, when results plateau, or after 2+ experiments in the same direction without a breakthrough. The provocateur searches OUTSIDE the current research trajectory — different fields, unconventional approaches, counterintuitive ideas. It has web search access beyond academic papers.
+
+**Training monitor — use \`monitor_experiment\` DURING long-running experiments:**
+While an experiment runs on a remote server, call \`monitor_experiment\` periodically (every few steps) to check for NaN, loss divergence, gradient explosion, plateaus, and other anomalies. Don't wait until the experiment finishes to discover it diverged at step 100. Monitor early, catch problems early.
+
 **The full research pipeline:**
 1. \`dispatch_scouts\` (3 angles) → read existing papers while scouts work
 2. \`collect_results\` → import best papers → \`dispatch_synthesizer\`
@@ -1393,6 +1399,10 @@ function thinkingHint(toolCalls?: { toolName: string; input: unknown }[]): strin
     //   return "Analyst is running diagnostics in the background...";
     case "dispatch_architect":
       return "Architect is designing novel approaches in the background...";
+    case "dispatch_provocateur":
+      return "Provocateur is thinking laterally in the background...";
+    case "monitor_experiment":
+      return "Checking experiment health...";
     case "collect_results":
       return "Reviewing sub-agent findings...";
     case "adversarial_review":
@@ -2643,8 +2653,160 @@ function createTools(
       },
     }),
 
+    dispatch_provocateur: tool({
+      description: "Launch a creative provocateur (runs on Opus) to suggest WILDLY DIFFERENT approaches from outside the current trajectory. The provocateur searches the web for inspiration from other fields (biology, physics, economics, etc.) and proposes lateral-thinking directions with concrete experiments. Use when you're stuck, when results plateau, or after 2+ experiments in the same direction without breakthrough.",
+      inputSchema: z.object({
+        goal: z.string().describe("The research goal"),
+        trajectory: z.string().describe("What has been tried so far — approaches, results, and direction"),
+        stuck_on: z.string().optional().describe("What specific problem you're stuck on, if any"),
+      }),
+      execute: async ({ goal, trajectory, stuck_on }: { goal: string; trajectory: string; stuck_on?: string }) => {
+        if (!(prisma as unknown as Record<string, unknown>).agentTask) {
+          return "Sub-agent tasks not available. Restart the dev server to pick up schema changes.";
+        }
+        emit({ type: "tool_progress", toolName: "dispatch_provocateur", content: `Launching provocateur: thinking laterally...` });
+
+        const task = await prisma.agentTask.create({
+          data: {
+            projectId,
+            role: "provocateur",
+            goal: `Break from trajectory: ${goal.slice(0, 200)}`,
+            status: "PENDING",
+            input: JSON.stringify({ trajectory, stuck_on, goal, userId }),
+          },
+        });
+
+        import("./sub-agent").then(({ runSubAgent }) => {
+          runSubAgent(task.id).catch((err) => {
+            console.error(`[dispatch_provocateur] Provocateur ${task.id} failed:`, err);
+          });
+        });
+
+        emit({ type: "tool_output", toolName: "dispatch_provocateur", content: `Provocateur launched (${task.id.slice(0, 8)})` });
+        return `Launched provocateur (ID: ${task.id.slice(0, 8)}): thinking laterally about "${goal.slice(0, 60)}"\n\nThe provocateur has web search + library access and will propose approaches from outside your current trajectory. **Continue with other work** and use \`collect_results\` with ["${task.id}"] when ready.`;
+      },
+    }),
+
+    monitor_experiment: tool({
+      description: "Parse live training output from a running experiment and flag anomalies. Call this periodically while experiments run on remote servers — it reads the latest stdout from check_job and detects NaN, divergence, plateaus, and suspicious values. Use DURING training, not after.",
+      inputSchema: z.object({
+        job_id: z.string().describe("Remote job ID to monitor"),
+        expected_loss_range: z.array(z.number()).optional().describe("Expected [min, max] loss range based on literature baselines"),
+      }),
+      execute: async ({ job_id, expected_loss_range }: { job_id: string; expected_loss_range?: number[] }) => {
+        const job = await prisma.remoteJob.findUnique({
+          where: { id: job_id },
+          select: { status: true, stdout: true, stderr: true, command: true },
+        });
+        if (!job) return `Job ${job_id} not found.`;
+        if (job.status !== "RUNNING" && job.status !== "SYNCING" && job.status !== "QUEUED") {
+          return `Job ${job_id} is ${job.status}, not running. Use check_job for final results.`;
+        }
+
+        const stdout = job.stdout || "";
+        if (!stdout.trim()) return `Job ${job_id} is ${job.status} but has no output yet. Check back in a minute.`;
+
+        const lines = stdout.split("\n").filter(Boolean);
+        const issues: string[] = [];
+        const metrics: { step?: number; loss?: number; acc?: number; lr?: number; gradNorm?: number }[] = [];
+
+        // Parse training metrics from stdout
+        for (const line of lines.slice(-100)) { // last 100 lines
+          // Detect NaN/Inf
+          if (/\bnan\b/i.test(line) && /loss|grad|norm|acc/i.test(line)) {
+            issues.push(`NaN detected: ${line.trim().slice(0, 120)}`);
+          }
+          if (/\binf\b/i.test(line) && /loss|grad|norm/i.test(line)) {
+            issues.push(`Inf detected: ${line.trim().slice(0, 120)}`);
+          }
+
+          // Extract numeric metrics
+          const lossMatch = line.match(/loss[:\s=]+([0-9.e+-]+)/i);
+          const accMatch = line.match(/acc(?:uracy)?[:\s=]+([0-9.]+)/i);
+          const stepMatch = line.match(/(?:step|epoch|iter)[:\s=]+(\d+)/i);
+          const gradMatch = line.match(/grad(?:_?norm)?[:\s=]+([0-9.e+-]+)/i);
+          const lrMatch = line.match(/(?:lr|learning.?rate)[:\s=]+([0-9.e+-]+)/i);
+
+          if (lossMatch || accMatch) {
+            metrics.push({
+              step: stepMatch ? parseInt(stepMatch[1]) : undefined,
+              loss: lossMatch ? parseFloat(lossMatch[1]) : undefined,
+              acc: accMatch ? parseFloat(accMatch[1]) : undefined,
+              lr: lrMatch ? parseFloat(lrMatch[1]) : undefined,
+              gradNorm: gradMatch ? parseFloat(gradMatch[1]) : undefined,
+            });
+          }
+        }
+
+        // Analyze trends
+        const losses = metrics.map((m) => m.loss).filter((l): l is number => l != null && !isNaN(l));
+        if (losses.length >= 3) {
+          const recent = losses.slice(-5);
+          const earlier = losses.slice(0, Math.max(1, losses.length - 5));
+
+          // Check for divergence (loss increasing significantly)
+          const recentAvg = recent.reduce((s, v) => s + v, 0) / recent.length;
+          const earlierAvg = earlier.reduce((s, v) => s + v, 0) / earlier.length;
+          if (recentAvg > earlierAvg * 1.5 && losses.length > 10) {
+            issues.push(`Loss diverging: earlier avg ${earlierAvg.toFixed(4)} → recent avg ${recentAvg.toFixed(4)} (+${((recentAvg / earlierAvg - 1) * 100).toFixed(0)}%)`);
+          }
+
+          // Check for plateau
+          const variance = recent.reduce((s, v) => s + (v - recentAvg) ** 2, 0) / recent.length;
+          if (variance < 0.0001 && losses.length > 20) {
+            issues.push(`Loss plateaued at ~${recentAvg.toFixed(4)} (variance ${variance.toExponential(2)})`);
+          }
+
+          // Check expected range
+          if (expected_loss_range && expected_loss_range.length === 2) {
+            const [min, max] = expected_loss_range;
+            if (recentAvg > max) issues.push(`Loss ${recentAvg.toFixed(4)} is ABOVE expected range [${min}, ${max}]`);
+            if (recentAvg < min * 0.5) issues.push(`Loss ${recentAvg.toFixed(4)} is suspiciously LOW (expected [${min}, ${max}])`);
+          }
+        }
+
+        // Check gradient norms
+        const grads = metrics.map((m) => m.gradNorm).filter((g): g is number => g != null && !isNaN(g));
+        if (grads.length >= 3) {
+          const maxGrad = Math.max(...grads.slice(-10));
+          if (maxGrad > 100) issues.push(`Gradient explosion: norm reached ${maxGrad.toFixed(2)} — consider gradient clipping`);
+          const minGrad = Math.min(...grads.slice(-10));
+          if (minGrad < 1e-7 && grads.length > 5) issues.push(`Vanishing gradients: norm dropped to ${minGrad.toExponential(2)}`);
+        }
+
+        // Build report
+        const parts: string[] = [`## Experiment Monitor: ${job.command?.match(/python3?\s+(\S+\.py)/)?.[1] || "experiment"}`];
+        parts.push(`Status: ${job.status}, ${lines.length} output lines`);
+
+        if (metrics.length > 0) {
+          const last = metrics[metrics.length - 1];
+          parts.push(`\nLatest metrics: ${[
+            last.step != null ? `step=${last.step}` : "",
+            last.loss != null ? `loss=${last.loss.toFixed(4)}` : "",
+            last.acc != null ? `acc=${(last.acc * 100).toFixed(1)}%` : "",
+            last.gradNorm != null ? `grad_norm=${last.gradNorm.toFixed(4)}` : "",
+            last.lr != null ? `lr=${last.lr.toExponential(2)}` : "",
+          ].filter(Boolean).join(", ")}`);
+
+          if (losses.length >= 2) {
+            parts.push(`Loss trend: ${losses[0].toFixed(4)} → ${losses[losses.length - 1].toFixed(4)} over ${losses.length} measurements`);
+          }
+        }
+
+        if (issues.length > 0) {
+          parts.push(`\n**ISSUES DETECTED (${issues.length}):**`);
+          for (const issue of issues) parts.push(`- ${issue}`);
+          parts.push(`\n**ACTION NEEDED:** Review the issues above. Consider stopping the experiment if you see NaN/divergence.`);
+        } else {
+          parts.push(`\nNo anomalies detected. Training appears healthy.`);
+        }
+
+        return parts.join("\n");
+      },
+    }),
+
     collect_results: tool({
-      description: "Collect findings from dispatched sub-agents (scouts, reviewers, experimenters, synthesizers, analysts, architects). Returns completed outputs and status of pending ones. Automatically detects and re-launches zombie tasks that got stuck. Call this after doing other work.",
+      description: "Collect findings from dispatched sub-agents (scouts, reviewers, synthesizers, architects, provocateurs). Returns completed outputs and status of pending ones. Automatically detects and re-launches zombie tasks that got stuck. Call this after doing other work.",
       inputSchema: z.object({
         task_ids: z.array(z.string()).describe("Task IDs from any dispatch tool"),
       }),

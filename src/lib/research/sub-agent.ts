@@ -259,6 +259,26 @@ function libraryTools(userId: string) {
   };
 }
 
+// ── Provocateur tools (library + web search) ─────────────────────
+
+function provocateurTools(userId: string) {
+  const { searchDuckDuckGo } = require("@/lib/import/web-search") as typeof import("@/lib/import/web-search");
+  return {
+    ...libraryTools(userId),
+    web_search: tool({
+      description: "Search the web for techniques, concepts, and approaches from ANY field — not just ML papers. Use this to find inspiration from biology, physics, economics, control theory, etc.",
+      inputSchema: z.object({
+        query: z.string().describe("Search query — be creative, search outside ML"),
+      }),
+      execute: async ({ query }: { query: string }) => {
+        const results = await searchDuckDuckGo(query, 6);
+        if (results.length === 0) return `No results for "${query}".`;
+        return results.map((r, i) => `${i + 1}. ${r.title}\n   ${r.url}\n   ${r.snippet}`).join("\n\n");
+      },
+    }),
+  };
+}
+
 // ── Reviewer system prompt ───────────────────────────────────────
 
 function reviewerSystemPrompt(focus: string): string {
@@ -531,6 +551,42 @@ End with:
 **Recommendation**: Which approach to try first and why. Always recommend starting with the cheapest validation experiment.`;
 }
 
+// ── Provocateur system prompt ────────────────────────────────────
+
+function provocateurSystemPrompt(currentTrajectory: string): string {
+  return `You are a creative research provocateur — a lateral thinker who deliberately breaks from conventional trajectories. The researchers have been following a specific path. Your job is to suggest approaches they would NEVER think of on their own.
+
+## The Current Trajectory
+${currentTrajectory}
+
+## Your Mission
+Propose 3 wildly different directions. For each:
+- Draw from a DIFFERENT field (biology, physics, economics, art, control theory, game theory, information theory, ecology, etc.)
+- Find a specific analogy or technique from that field that maps to this problem
+- Be concrete: name the technique, cite real work (even outside ML), sketch how it would be applied
+
+## Rules
+- Do NOT suggest incremental improvements to the current approach
+- Do NOT suggest things the researchers probably already know (standard ML techniques, obvious baselines)
+- DO search the web for inspiration from other fields — the best ideas come from unexpected connections
+- DO search the library to understand what's already been tried, so you can avoid repeating it
+- Be bold. Some ideas should make the researchers uncomfortable. That's the point.
+- For each idea, include: WHY it might work (the conceptual bridge), and a quick 1-day experiment to test the core insight
+
+## Output Format
+For each direction:
+
+**Direction N: [Provocative Name]**
+- **Inspired by**: [Field] — [specific technique/paper/concept]
+- **The Analogy**: How this maps to the current research problem (1-2 sentences)
+- **The Idea**: What to actually do (be specific enough to implement)
+- **Why This Might Work**: The conceptual bridge (why the analogy is more than superficial)
+- **Why This Might Fail**: Be honest about the risks
+- **Quick Test**: A 1-day experiment to check the core insight
+
+End with: **My top pick and why** — which direction has the best risk/reward ratio.`;
+}
+
 // ── Role configuration ──────────────────────────────────────────
 
 type ModelTier = "reasoning" | "standard";
@@ -620,6 +676,18 @@ const ROLE_CONFIG: Record<string, RoleConfig> = {
       if (input.diagnostics) parts.push(`\n## Diagnostic Data\n${input.diagnostics}`);
       if (input.current_approach) parts.push(`\n## Current Approach & Results\n${input.current_approach}`);
       return parts.join("\n");
+    },
+  },
+  provocateur: {
+    tier: "reasoning",
+    maxSteps: 12,
+    getTools: (input) => provocateurTools(input.userId || "system"),
+    getSystemPrompt: (input, goal) => provocateurSystemPrompt(input.trajectory || goal),
+    getUserMessage: (input, goal) => {
+      const parts = [`Research area: ${goal}`];
+      if (input.trajectory) parts.push(`\n## Current Trajectory\n${input.trajectory}`);
+      if (input.stuck_on) parts.push(`\n## Stuck On\n${input.stuck_on}`);
+      return parts.join("\n") + "\n\nBreak the mold. Surprise me.";
     },
   },
 };
