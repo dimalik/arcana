@@ -951,9 +951,6 @@ Call \`dispatch_synthesizer\` with the imported paper titles and a focus area. T
 **Architect — use it AFTER getting synthesis (and optionally diagnostics):**
 Call \`dispatch_architect\` with the synthesizer's output, any analyst data, and your research goal. The architect (Opus) proposes 2-3 novel approaches with risk ratings and validation experiments. **Always run the cheapest validation experiment first.**
 
-**Analyst — use it AFTER experiments complete:**
-Call \`dispatch_analyst\` to run diagnostic scripts on experiment results (attention analysis, gradient flow, error patterns). It produces raw data — feed this to \`dispatch_architect\` for interpretation.
-
 **Adversarial review — use \`adversarial_review\` for quick inline critique or \`dispatch_reviewer\` for deep background review.**
 
 **The full research pipeline:**
@@ -961,8 +958,7 @@ Call \`dispatch_analyst\` to run diagnostic scripts on experiment results (atten
 2. \`collect_results\` → import best papers → \`dispatch_synthesizer\`
 3. \`collect_results\` (synthesis) → \`dispatch_architect\` with synthesis
 4. \`collect_results\` (architect proposals) → implement cheapest validation experiment
-5. Run experiment → \`dispatch_analyst\` on results
-6. \`collect_results\` (diagnostics) → \`dispatch_architect\` with synthesis + diagnostics → iterate
+5. Run experiment → analyze results yourself → \`dispatch_architect\` with synthesis + results → iterate
 
 ${!resourcePreferences || resourcePreferences.length === 0 ? "**Default: use execute_remote for running experiments** (training, evaluation). Use execute_command for local-only tasks.\n" : ""}### Environment Setup (AUTOMATIC — but validate first!)
 The remote execution system **automatically handles Python environments**:
@@ -1162,19 +1158,14 @@ ${(() => {
 - Run the experiment. If it fails, FIX it and re-run. Never move on from a failure.
 - For remote execution: just write requirements.txt and run \`python3 script.py\` — the system handles venv and packages automatically (see Environment Setup above).
 
-### Phase 3: Diagnostics & Critique (THIS IS THE MOST IMPORTANT PHASE)
-After an experiment completes, do BOTH of these:
+### Phase 3: Critique & Next Steps (THIS IS THE MOST IMPORTANT PHASE)
+After an experiment completes, do ALL of these:
 
-1. **\`dispatch_analyst\`** — run diagnostic scripts on the experiment results. Choose the right type:
-   - \`attention\`: if the model uses attention (head importance, redundancy, entropy)
-   - \`gradient\`: if training is unstable or slow (gradient norms, dead neurons)
-   - \`errors\`: if accuracy is disappointing (confusion matrix, worst examples)
-   - \`general\`: if unsure — runs abbreviated versions of all
-   The analyst produces RAW DATA (numbers, not interpretations). Feed this to the architect.
+1. **Analyze results yourself** — read the output, compute metrics, compare to baselines from the literature. Don't just glance at the numbers — dig into what they mean.
 
 2. **\`adversarial_review\` or \`dispatch_reviewer\`** — get independent critique of your hypotheses, methods, and findings. Use \`adversarial_review\` for quick inline feedback, or \`dispatch_reviewer\` for deep background review (Opus with library access).
 
-3. **\`dispatch_architect\`** with the synthesis (from Phase 1) + analyst diagnostics + current results → the architect interprets the raw diagnostic data in context of the literature and proposes novel approaches for the next iteration.
+3. **\`dispatch_architect\`** with the synthesis (from Phase 1) + your analysis + current results → the architect proposes novel approaches for the next iteration.
 
 After EVERY successful experiment, ask yourself:
 - **Are the results statistically meaningful?** If no error bars, standard deviations, or multiple runs — your results are unreliable. Re-run with proper statistical rigor.
@@ -1394,12 +1385,12 @@ function thinkingHint(toolCalls?: { toolName: string; input: unknown }[]): strin
       return "Literature scouts are searching in the background...";
     case "dispatch_reviewer":
       return "Adversarial reviewer is analyzing in the background...";
-    case "dispatch_experimenter":
-      return "Experiment runner is working in the background...";
+    // case "dispatch_experimenter": (disabled)
+    //   return "Experiment runner is working in the background...";
     case "dispatch_synthesizer":
       return "Synthesizer is analyzing papers in the background...";
-    case "dispatch_analyst":
-      return "Analyst is running diagnostics in the background...";
+    // case "dispatch_analyst": (disabled)
+    //   return "Analyst is running diagnostics in the background...";
     case "dispatch_architect":
       return "Architect is designing novel approaches in the background...";
     case "collect_results":
@@ -2569,40 +2560,8 @@ function createTools(
       },
     }),
 
-    dispatch_experimenter: tool({
-      description: "Launch a background experiment runner to execute a specific experiment autonomously. The experimenter can write scripts, run commands, and read results in the project directory. Use this to run independent experiments in parallel while you do other work. Returns a task ID — collect results with collect_results.",
-      inputSchema: z.object({
-        goal: z.string().describe("What the experiment should accomplish (e.g., 'Run ablation study removing attention heads 4,5,6 and measure perplexity')"),
-        instructions: z.string().describe("Detailed instructions: what script to run, what parameters to use, what output to produce. Be specific."),
-      }),
-      execute: async ({ goal, instructions }: { goal: string; instructions: string }) => {
-        if (!(prisma as unknown as Record<string, unknown>).agentTask) {
-          return "Sub-agent tasks not available. Restart the dev server to pick up schema changes.";
-        }
-        emit({ type: "tool_progress", toolName: "dispatch_experimenter", content: `Launching experimenter: ${goal.slice(0, 60)}...` });
-
-        const task = await prisma.agentTask.create({
-          data: {
-            projectId,
-            role: "experimenter",
-            goal,
-            status: "PENDING",
-            input: JSON.stringify({ instructions, workDir, userId }),
-          },
-        });
-
-        import("./sub-agent").then(({ runSubAgent }) => {
-          runSubAgent(task.id).catch((err) => {
-            console.error(`[dispatch_experimenter] Experimenter ${task.id} failed:`, err);
-          });
-        });
-
-        emit({ type: "tool_output", toolName: "dispatch_experimenter", content: `Experimenter launched: ${goal.slice(0, 60)} (${task.id.slice(0, 8)})` });
-        await recordStep("run_experiment", `Dispatched experimenter: ${goal.slice(0, 80)}`, "COMPLETED", { taskId: task.id, goal }, "experiment");
-
-        return `Launched experimenter (ID: ${task.id.slice(0, 8)}): "${goal}"\n\nThe experimenter will run autonomously in ${workDir}. **Continue with other work** and use \`collect_results\` with ["${task.id}"] when ready.`;
-      },
-    }),
+    // dispatch_experimenter: Disabled — the main agent handles experiments directly.
+    // Revisit if we need truly independent background experiment runners.
 
     dispatch_synthesizer: tool({
       description: "Launch a background synthesizer (runs on Opus) to do deep cross-paper analysis. Given paper titles from your library, the synthesizer reads them all and finds contradictions, complementary techniques, and unexplored combinations that individual readings miss. Returns a task ID — collect with collect_results. Feed its output to dispatch_architect.",
@@ -2642,55 +2601,11 @@ function createTools(
       },
     }),
 
-    dispatch_analyst: tool({
-      description: "Launch a background experiment analyst to run diagnostic scripts on a completed experiment. The analyst writes and runs diagnostic code (attention analysis, gradient flow, error patterns) and reports RAW DATA — numbers, not interpretations. Feed its output to dispatch_architect for interpretation in context of the literature.",
-      inputSchema: z.object({
-        goal: z.string().describe("What to diagnose (e.g., 'Model achieves 72% accuracy — diagnose why attention mechanism underperforms')"),
-        diagnosis_type: z.enum(["attention", "gradient", "errors", "general"]).default("general").optional()
-          .describe("What type of diagnostics to run"),
-        experiment_script: z.string().optional().describe("Path to the experiment script (relative to workDir)"),
-        results_path: z.string().optional().describe("Path to results file"),
-        model_path: z.string().optional().describe("Path to model checkpoint"),
-        instructions: z.string().optional().describe("Additional instructions for the analyst"),
-      }),
-      execute: async ({ goal, diagnosis_type, experiment_script, results_path, model_path, instructions }: {
-        goal: string; diagnosis_type?: string; experiment_script?: string;
-        results_path?: string; model_path?: string; instructions?: string;
-      }) => {
-        if (!(prisma as unknown as Record<string, unknown>).agentTask) {
-          return "Sub-agent tasks not available. Restart the dev server to pick up schema changes.";
-        }
-        const diagType = diagnosis_type || "general";
-        emit({ type: "tool_progress", toolName: "dispatch_analyst", content: `Launching analyst (${diagType}): ${goal.slice(0, 60)}...` });
-
-        const task = await prisma.agentTask.create({
-          data: {
-            projectId,
-            role: "analyst",
-            goal,
-            status: "PENDING",
-            input: JSON.stringify({
-              workDir, userId, diagnosis_type: diagType,
-              experiment_script, results_path, model_path, instructions,
-            }),
-          },
-        });
-
-        import("./sub-agent").then(({ runSubAgent }) => {
-          runSubAgent(task.id).catch((err) => {
-            console.error(`[dispatch_analyst] Analyst ${task.id} failed:`, err);
-          });
-        });
-
-        emit({ type: "tool_output", toolName: "dispatch_analyst", content: `Analyst launched (${task.id.slice(0, 8)})` });
-        await recordStep("analyze_results", `Dispatched analyst (${diagType}): ${goal.slice(0, 80)}`, "COMPLETED", { taskId: task.id, diagType }, "experiment");
-
-        return `Launched analyst (ID: ${task.id.slice(0, 8)}, type: ${diagType}): "${goal}"\n\nThe analyst will run diagnostic scripts in ${workDir} and report raw data. **Continue with other work** and use \`collect_results\` with ["${task.id}"] when ready. Feed its raw data to \`dispatch_architect\` for interpretation.`;
-      },
-    }),
+    // dispatch_analyst: Disabled — never used in practice. The main agent reads results directly.
+    // Revisit if we need structured diagnostic pipelines.
 
     dispatch_architect: tool({
-      description: "Launch a background research architect (runs on Opus) to propose novel approaches. The architect combines synthesis reports (from dispatch_synthesizer) and diagnostic data (from dispatch_analyst) to propose 2-3 creative approaches with risk ratings and validation experiments. Call this AFTER you have synthesis output and optionally analyst data.",
+      description: "Launch a background research architect (runs on Opus) to propose novel approaches. The architect combines synthesis reports (from dispatch_synthesizer) and your experiment results to propose 2-3 creative approaches with risk ratings and validation experiments. Call this AFTER you have synthesis output and experiment results.",
       inputSchema: z.object({
         goal: z.string().describe("The research goal (e.g., 'Improve attention efficiency for long-sequence modeling')"),
         synthesis: z.string().describe("Output from the synthesizer sub-agent (cross-paper analysis)"),

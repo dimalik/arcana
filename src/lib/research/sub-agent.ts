@@ -565,16 +565,18 @@ const ROLE_CONFIG: Record<string, RoleConfig> = {
     getSystemPrompt: (input) => reviewerSystemPrompt(input.focus || "general"),
     getUserMessage: (input, goal) => input.content || goal,
   },
-  experimenter: {
-    tier: "standard",
-    maxSteps: 20,
-    getTools: (input) => {
-      if (!input.workDir) throw new Error("Experimenter requires workDir in input");
-      return workdirTools(input.workDir);
-    },
-    getSystemPrompt: (input, goal) => experimenterSystemPrompt(goal, input.workDir),
-    getUserMessage: (input, goal) => input.instructions || goal,
-  },
+  // experimenter: Disabled — the main agent handles experiments directly via execute_command/execute_remote.
+  // Revisit if we need truly independent background experiment runners.
+  // experimenter: {
+  //   tier: "standard",
+  //   maxSteps: 20,
+  //   getTools: (input) => {
+  //     if (!input.workDir) throw new Error("Experimenter requires workDir in input");
+  //     return workdirTools(input.workDir);
+  //   },
+  //   getSystemPrompt: (input, goal) => experimenterSystemPrompt(goal, input.workDir),
+  //   getUserMessage: (input, goal) => input.instructions || goal,
+  // },
   synthesizer: {
     tier: "reasoning",
     maxSteps: 15,
@@ -588,23 +590,25 @@ const ROLE_CONFIG: Record<string, RoleConfig> = {
         : `Find and synthesize papers related to: ${focus}`;
     },
   },
-  analyst: {
-    tier: "standard",
-    maxSteps: 20,
-    getTools: (input) => {
-      if (!input.workDir) throw new Error("Analyst requires workDir in input");
-      return workdirTools(input.workDir);
-    },
-    getSystemPrompt: (input, _goal) => analystSystemPrompt(input.diagnosis_type || "general", input.workDir),
-    getUserMessage: (input, goal) => {
-      const parts = [goal];
-      if (input.experiment_script) parts.push(`Experiment script: ${input.experiment_script}`);
-      if (input.results_path) parts.push(`Results file: ${input.results_path}`);
-      if (input.model_path) parts.push(`Model checkpoint: ${input.model_path}`);
-      if (input.instructions) parts.push(`\nAdditional instructions: ${input.instructions}`);
-      return parts.join("\n");
-    },
-  },
+  // analyst: Disabled — never used in practice. The main agent reads experiment results directly.
+  // Revisit if we need structured diagnostic pipelines (attention analysis, gradient flow, etc.)
+  // analyst: {
+  //   tier: "standard",
+  //   maxSteps: 20,
+  //   getTools: (input) => {
+  //     if (!input.workDir) throw new Error("Analyst requires workDir in input");
+  //     return workdirTools(input.workDir);
+  //   },
+  //   getSystemPrompt: (input, _goal) => analystSystemPrompt(input.diagnosis_type || "general", input.workDir),
+  //   getUserMessage: (input, goal) => {
+  //     const parts = [goal];
+  //     if (input.experiment_script) parts.push(`Experiment script: ${input.experiment_script}`);
+  //     if (input.results_path) parts.push(`Results file: ${input.results_path}`);
+  //     if (input.model_path) parts.push(`Model checkpoint: ${input.model_path}`);
+  //     if (input.instructions) parts.push(`\nAdditional instructions: ${input.instructions}`);
+  //     return parts.join("\n");
+  //   },
+  // },
   architect: {
     tier: "reasoning",
     maxSteps: 12,
