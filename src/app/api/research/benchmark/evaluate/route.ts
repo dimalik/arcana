@@ -34,9 +34,7 @@ export async function POST(request: NextRequest) {
           },
         },
         log: {
-          where: { type: { in: ["observation", "breakthrough", "decision"] } },
           orderBy: { createdAt: "desc" },
-          take: 30,
           select: { type: true, content: true, metadata: true },
         },
         collection: {
