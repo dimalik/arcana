@@ -235,7 +235,7 @@ export function RemoteHostsManager() {
 
   const handleTestEnv = async (id: string) => {
     setTestingEnv(id);
-    setEnvTestResults((prev) => ({ ...prev, [id]: { ok: false } }));
+    setEnvTestResults((prev) => { const next = { ...prev }; delete next[id]; return next; });
     try {
       // Save pending edits first so the test uses latest baseRequirements
       if (pendingEdits[id]) await handleSaveAll(id);
@@ -517,7 +517,8 @@ export function RemoteHostsManager() {
 
                 {/* Expanded config */}
                 {isExpanded && (
-                  <div className="px-3 pb-3 pt-1 border-t border-border/50 space-y-1.5">
+                  <div className="px-3 pb-3 pt-1 border-t border-border/50 space-y-3">
+                    {/* Connection settings */}
                     <div className="grid grid-cols-2 gap-1.5">
                       <div>
                         <label className="text-[9px] text-muted-foreground uppercase tracking-wide">Work Dir</label>
@@ -528,11 +529,11 @@ export function RemoteHostsManager() {
                         />
                       </div>
                       <div>
-                        <label className="text-[9px] text-muted-foreground uppercase tracking-wide">Conda Env</label>
+                        <label className="text-[9px] text-muted-foreground uppercase tracking-wide">Python / Conda Env</label>
                         <input
                           defaultValue={h.conda || ""}
                           onBlur={(e) => handleUpdateField(h.id, "conda", e.target.value)}
-                          placeholder="none"
+                          placeholder="/opt/venv/bin/python or conda env name"
                           className="w-full rounded border border-input bg-background px-2 py-1 text-[11px] focus:outline-none focus:ring-1 focus:ring-ring"
                         />
                       </div>
@@ -546,52 +547,16 @@ export function RemoteHostsManager() {
                         className="w-full rounded border border-input bg-background px-2 py-1 text-[11px] focus:outline-none focus:ring-1 focus:ring-ring"
                       />
                     </div>
-                    <div className="space-y-1">
-                      <label className="text-[9px] text-muted-foreground uppercase tracking-wide">Base Requirements</label>
-                      <textarea
-                        defaultValue={h.baseRequirements || ""}
-                        onChange={(e) => setPendingEdit(h.id, "baseRequirements", e.target.value)}
-                        placeholder={"# Tested base packages (one per line)\ntorch==2.3.1\ntransformers>=4.40\naccelerate\ndatasets"}
-                        className="w-full rounded border border-input bg-background px-2 py-1 text-[11px] font-mono placeholder:text-muted-foreground/25 focus:outline-none focus:ring-1 focus:ring-ring resize-y min-h-[100px]"
-                        rows={6}
-                      />
-                      <p className="text-[10px] text-muted-foreground/50">
-                        Packages here are auto-merged into every project&apos;s requirements.txt. Test them manually first.
-                      </p>
-                    </div>
-                    <div className="space-y-1">
-                      <div className="flex items-center justify-between">
-                        <label className="text-[9px] text-muted-foreground uppercase tracking-wide">Environment Notes</label>
-                        <button
-                          onClick={() => handleProbeEnvNotes(h.id)}
-                          disabled={probing === h.id}
-                          className="text-[9px] text-muted-foreground/50 hover:text-foreground transition-colors disabled:opacity-50"
-                        >
-                          {probing === h.id ? "Detecting..." : "Auto-detect"}
-                        </button>
-                      </div>
-                      <textarea
-                        data-env-notes={h.id}
-                        defaultValue={h.envNotes || ""}
-                        onChange={(e) => setPendingEdit(h.id, "envNotes", e.target.value)}
-                        placeholder="e.g., flash-attn works with CUDA 12.1, use fp16 not bf16, conda activate myenv first"
-                        className="w-full rounded border border-input bg-background px-2 py-1 text-[11px] placeholder:text-muted-foreground/25 focus:outline-none focus:ring-1 focus:ring-ring resize-y"
-                        rows={3}
-                      />
-                      <p className="text-[10px] text-muted-foreground/50">
-                        Free-text notes shown to the research agent. Include any quirks or gotchas.
-                      </p>
-                    </div>
 
-                    {/* Action buttons */}
-                    <div className="flex items-center gap-2 pt-2 border-t border-border/30">
+                    {/* Action bar — prominent, right after connection settings */}
+                    <div className="flex items-center gap-2 py-2 border-y border-border/30">
                       <button
-                        onClick={() => handleSaveAll(h.id)}
-                        disabled={saving === h.id || !pendingEdits[h.id]}
-                        className="inline-flex items-center gap-1.5 rounded-md bg-foreground text-background px-3 py-1.5 text-[11px] font-medium hover:bg-foreground/90 transition-colors disabled:opacity-30"
+                        onClick={() => handleProbeEnvNotes(h.id)}
+                        disabled={probing === h.id}
+                        className="inline-flex items-center gap-1.5 rounded-md border border-border/60 px-3 py-1.5 text-[11px] hover:bg-muted/50 transition-colors disabled:opacity-50"
                       >
-                        {saving === h.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Save className="h-3 w-3" />}
-                        Save Changes
+                        {probing === h.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Cpu className="h-3 w-3" />}
+                        {probing === h.id ? "Detecting..." : "Detect Environment"}
                       </button>
                       <button
                         onClick={() => handleTestEnv(h.id)}
@@ -599,7 +564,16 @@ export function RemoteHostsManager() {
                         className="inline-flex items-center gap-1.5 rounded-md border border-border/60 px-3 py-1.5 text-[11px] hover:bg-muted/50 transition-colors disabled:opacity-50"
                       >
                         {testingEnv === h.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <FlaskConical className="h-3 w-3" />}
-                        Test Environment
+                        {testingEnv === h.id ? "Testing..." : "Test Packages"}
+                      </button>
+                      <div className="flex-1" />
+                      <button
+                        onClick={() => handleSaveAll(h.id)}
+                        disabled={saving === h.id || !pendingEdits[h.id]}
+                        className="inline-flex items-center gap-1.5 rounded-md bg-foreground text-background px-3 py-1.5 text-[11px] font-medium hover:bg-foreground/90 transition-colors disabled:opacity-30"
+                      >
+                        {saving === h.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Save className="h-3 w-3" />}
+                        Save
                       </button>
                       {envTestResults[h.id] && (
                         <span className={`text-[10px] ${envTestResults[h.id].ok ? "text-emerald-500" : "text-destructive"}`}>
@@ -607,11 +581,44 @@ export function RemoteHostsManager() {
                         </span>
                       )}
                     </div>
+
+                    {/* Test output */}
                     {envTestResults[h.id]?.output && (
                       <pre className="text-[10px] text-muted-foreground/60 bg-muted/30 rounded p-2 max-h-32 overflow-auto font-mono whitespace-pre-wrap">
                         {envTestResults[h.id].output}
                       </pre>
                     )}
+
+                    {/* Base Requirements — auto-populated by Detect Environment */}
+                    <div className="space-y-1">
+                      <label className="text-[9px] text-muted-foreground uppercase tracking-wide">Base Requirements</label>
+                      <textarea
+                        defaultValue={h.baseRequirements || ""}
+                        onChange={(e) => setPendingEdit(h.id, "baseRequirements", e.target.value)}
+                        placeholder={"Click 'Detect Environment' above to auto-populate, or add manually:\ntorch==2.3.1\ntransformers>=4.40\naccelerate"}
+                        className="w-full rounded border border-input bg-background px-2 py-1 text-[11px] font-mono placeholder:text-muted-foreground/25 focus:outline-none focus:ring-1 focus:ring-ring resize-y min-h-[80px]"
+                        rows={5}
+                      />
+                      <p className="text-[10px] text-muted-foreground/50">
+                        Auto-merged into every project. Agent cannot override these versions.
+                      </p>
+                    </div>
+
+                    {/* Environment Notes — auto-populated by Detect Environment */}
+                    <div className="space-y-1">
+                      <label className="text-[9px] text-muted-foreground uppercase tracking-wide">Environment Notes</label>
+                      <textarea
+                        data-env-notes={h.id}
+                        defaultValue={h.envNotes || ""}
+                        onChange={(e) => setPendingEdit(h.id, "envNotes", e.target.value)}
+                        placeholder="Click 'Detect Environment' above to auto-populate with OS, GPU, CUDA, packages..."
+                        className="w-full rounded border border-input bg-background px-2 py-1 text-[11px] placeholder:text-muted-foreground/25 focus:outline-none focus:ring-1 focus:ring-ring resize-y"
+                        rows={6}
+                      />
+                      <p className="text-[10px] text-muted-foreground/50">
+                        Shown to the research agent. Includes hardware, packages, and quirks.
+                      </p>
+                    </div>
 
                     {h._count.jobs > 0 && (
                       <p className="text-[10px] text-muted-foreground">{h._count.jobs} job{h._count.jobs !== 1 ? "s" : ""} run on this host</p>
