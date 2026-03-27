@@ -577,24 +577,31 @@ async function runAgent(
     researchLog = initial;
   }
 
+  // Check if this is a benchmark project — benchmarks get NO process memories and NO mind palace
+  const isBenchmarkProject = bannedPapers.length > 0;
+
   // 5b. Load process memories (practical learnings from previous experiments)
+  // SKIP for benchmarks — they must start with zero prior knowledge
   let processMemories: { id: string; category: string; lesson: string; context: string | null }[] = [];
-  try {
-    processMemories = await prisma.agentMemory.findMany({
-      where: { userId },
-      select: { id: true, category: true, lesson: true, context: true },
-      orderBy: { usageCount: "desc" },
-      take: 50,
-    });
-    // Bump usage count for loaded memories
-    if (processMemories.length > 0) {
-      await prisma.agentMemory.updateMany({
-        where: { id: { in: processMemories.map((m) => m.id) } },
-        data: { usageCount: { increment: 1 } },
+  if (!isBenchmarkProject) {
+    try {
+      processMemories = await prisma.agentMemory.findMany({
+        where: { userId },
+        select: { id: true, category: true, lesson: true, context: true },
+        orderBy: { usageCount: "desc" },
+        take: 50,
       });
+      if (processMemories.length > 0) {
+        await prisma.agentMemory.updateMany({
+          where: { id: { in: processMemories.map((m) => m.id) } },
+          data: { usageCount: { increment: 1 } },
+        });
+      }
+    } catch (err) {
+      console.warn("[research-agent] Could not load process memories:", (err as Error).message);
     }
-  } catch (err) {
-    console.warn("[research-agent] Could not load process memories:", (err as Error).message);
+  } else {
+    console.log(`[research-agent] Benchmark mode — skipping process memories and Mind Palace`);
   }
 
   // 5c. Load resource preferences
@@ -650,7 +657,7 @@ async function runAgent(
   };
   const expCounter = { value: experimentCounter };
   const searchCounter = { value: 0 };
-  const rawTools = createTools(projectId, userId, workDir, emit, remoteHosts, recordStep, { id: iterationId, number: iteration.number }, sharedDir, onIterationAdvance, model, expCounter, searchCounter, gpuInfo?.map((g) => ({ alias: g.alias, gpuCount: g.gpuCount })), bannedPapers);
+  const rawTools = createTools(projectId, userId, workDir, emit, remoteHosts, recordStep, { id: iterationId, number: iteration.number }, sharedDir, onIterationAdvance, model, expCounter, searchCounter, gpuInfo?.map((g) => ({ alias: g.alias, gpuCount: g.gpuCount })), bannedPapers, isBenchmarkProject);
 
   // Wrap every tool's execute to sanitize return values — prevents invalid Unicode
   // surrogates from entering the LLM message history and causing API errors
@@ -1602,6 +1609,7 @@ function createTools(
   searchCounter?: { value: number },
   cachedGpuInfo?: { alias: string; gpuCount: number }[],
   bannedPapers?: { title: string; doi?: string | null; arxivId?: string | null }[],
+  isBenchmarkProject?: boolean,
 ) {
   // Helper: check if a paper is banned (for benchmarks)
   const isBanned = (r: { title: string; doi?: string | null; arxivId?: string | null }) => {
@@ -3449,6 +3457,9 @@ Be harsh but fair. Vague praise is useless. Specific criticism saves months of w
         context: z.string().optional().describe("Brief context: what error or situation led to this lesson"),
       }),
       execute: async ({ category, lesson, context }: { category: string; lesson: string; context?: string }) => {
+        // Benchmarks don't save lessons — prevents contaminating future benchmark runs
+        if (isBenchmarkProject) return "Lesson noted (not saved — benchmark mode).";
+
         // Check for duplicates (similar lesson already exists)
         const existing = await prisma.agentMemory.findMany({
           where: { userId },
@@ -3692,6 +3703,9 @@ Be harsh but fair. Vague praise is useless. Specific criticism saves months of w
         max_results: z.number().min(1).max(15).default(8).optional(),
       }),
       execute: async ({ query, max_results }: { query: string; max_results?: number }) => {
+        // Benchmarks get no Mind Palace access — prevents knowledge leakage
+        if (isBenchmarkProject) return "Mind Palace is not available in benchmark mode. Use search_papers and search_library instead.";
+
         const maxResults = max_results || 8;
         emit({ type: "tool_progress", toolName: "query_insights", content: `Searching Mind Palace for: "${query.slice(0, 60)}..."` });
 
