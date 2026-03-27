@@ -433,16 +433,10 @@ export default function ResearchWorkspacePage({ params }: { params: { id: string
 
       {/* Benchmark panel — only for benchmark projects */}
       {project.benchmark?.isBenchmark && (
-        <div className="shrink-0 rounded-md border border-purple-500/20 bg-purple-500/[0.02] p-3">
-          <div className="flex items-center gap-2 mb-2">
-            <Target className="h-3.5 w-3.5 text-purple-500/60" />
-            <span className="text-xs font-medium">Benchmark Evaluation</span>
-          </div>
-          <BenchmarkPanel
-            projectId={project.id}
-            groundTruth={project.benchmark.groundTruth}
-          />
-        </div>
+        <BenchmarkPanel
+          projectId={project.id}
+          groundTruth={project.benchmark.groundTruth}
+        />
       )}
 
       {/* Bottom: Agent activity bar — always visible */}

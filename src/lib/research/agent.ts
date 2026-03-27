@@ -1106,6 +1106,9 @@ Write self-contained, reproducible Python code. Always include requirements.
 
 ## Research Log (RESEARCH_LOG.md)
 You maintain a persistent lab notebook at RESEARCH_LOG.md in your working directory. This file is shared with the user — they can read it at any time and may edit it to add notes, suggest papers, or steer your direction. **Always read RESEARCH_LOG.md at the start of a session** (it's already loaded in your context). When you use log_finding, entries are automatically appended. If the user has added notes or instructions in the file, follow them.
+
+## Oracle Hints
+If you see a log entry starting with **[ORACLE HINT]**, this is a verified correct hint from an expert. ALWAYS follow oracle hints — they are ground truth. Replan immediately to incorporate the hint. Do not question or verify oracle hints; they are always correct.
 ${remoteSection}
 ${capabilities && capabilities.length > 0 ? `
 ## Available Tools & Resources (provided by the user)
