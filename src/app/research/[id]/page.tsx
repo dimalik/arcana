@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Pause, Play, MoreVertical, Loader2, RotateCcw, Download, FileText, FolderArchive, Check } from "lucide-react";
+import { ArrowLeft, Pause, Play, MoreVertical, Loader2, RotateCcw, Download, FileText, FolderArchive, Check, Target } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -25,6 +25,7 @@ import { AnalysisPhase } from "@/components/research/analysis-phase";
 import { ReflectionPhase } from "@/components/research/reflection-phase";
 import { AgentActivityBar, AgentActivityHandle } from "@/components/research/agent-activity-bar";
 import { ResearchChat } from "@/components/research/research-chat";
+import { BenchmarkPanel } from "@/components/research/benchmark-panel";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
 
@@ -91,6 +92,11 @@ interface Project {
   log: LogEntry[];
   collection: {
     papers: { paper: Paper }[];
+  } | null;
+  benchmark?: {
+    isBenchmark: boolean;
+    sourcePaperId: string | null;
+    groundTruth: string | null;
   } | null;
 }
 
@@ -301,6 +307,12 @@ export default function ResearchWorkspacePage({ params }: { params: { id: string
             <ArrowLeft className="h-4 w-4" />
           </button>
           <h1 className="text-sm font-medium">{project.title}</h1>
+          {project.benchmark?.isBenchmark && (
+            <span className="text-[10px] text-purple-500 bg-purple-500/10 px-1.5 py-0.5 rounded-full flex items-center gap-1">
+              <Target className="h-2.5 w-2.5" />
+              Benchmark
+            </span>
+          )}
           {project.status === "PAUSED" && (
             <span className="text-[10px] text-amber-500 bg-amber-500/10 px-1.5 py-0.5 rounded-full">Paused</span>
           )}
@@ -418,6 +430,20 @@ export default function ResearchWorkspacePage({ params }: { params: { id: string
           />
         </div>
       </div>
+
+      {/* Benchmark panel — only for benchmark projects */}
+      {project.benchmark?.isBenchmark && (
+        <div className="shrink-0 rounded-md border border-purple-500/20 bg-purple-500/[0.02] p-3">
+          <div className="flex items-center gap-2 mb-2">
+            <Target className="h-3.5 w-3.5 text-purple-500/60" />
+            <span className="text-xs font-medium">Benchmark Evaluation</span>
+          </div>
+          <BenchmarkPanel
+            projectId={project.id}
+            groundTruth={project.benchmark.groundTruth}
+          />
+        </div>
+      )}
 
       {/* Bottom: Agent activity bar — always visible */}
       <div className="shrink-0">

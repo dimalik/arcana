@@ -59,7 +59,23 @@ export async function GET(_request: NextRequest, { params }: Params) {
       return NextResponse.json({ error: "Project not found" }, { status: 404 });
     }
 
-    return NextResponse.json(project);
+    // Check if this is a benchmark project
+    const benchmarkLog = project.log.find((l: { metadata?: string | null }) => {
+      if (!l.metadata) return false;
+      try { return JSON.parse(l.metadata).benchmarkPaperId; } catch { return false; }
+    });
+    const groundTruthLog = project.log.find((l: { metadata?: string | null }) => {
+      if (!l.metadata) return false;
+      try { return JSON.parse(l.metadata).groundTruth === true; } catch { return false; }
+    });
+
+    const benchmark = benchmarkLog ? {
+      isBenchmark: true,
+      sourcePaperId: (() => { try { return JSON.parse(benchmarkLog.metadata!).benchmarkPaperId; } catch { return null; } })(),
+      groundTruth: groundTruthLog ? groundTruthLog.content.replace("[GROUND TRUTH — HIDDEN FROM AGENT]\n", "") : null,
+    } : null;
+
+    return NextResponse.json({ ...project, benchmark });
   } catch (err) {
     console.error("[api/research/[id]] GET error:", err);
     return NextResponse.json({ error: "Failed to fetch project" }, { status: 500 });

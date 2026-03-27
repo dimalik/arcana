@@ -5,7 +5,7 @@ import Link from "next/link";
 import {
   BookOpen, FlaskConical, Lightbulb, BarChart3, IterationCcw,
   Pause, Play, Trash2, Search, Compass, ChevronDown,
-  FileText, Beaker, Activity, CheckCircle, MoreVertical, Archive, Download,
+  FileText, Beaker, Activity, CheckCircle, MoreVertical, Archive, Download, Target,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -59,6 +59,7 @@ export function ProjectCard({ project, onDelete, onStatusChange, onExport }: Pro
     try { return JSON.parse(project.brief); } catch { return {}; }
   })();
   const paperCount = project.collection?._count?.papers || 0;
+  const isBenchmark = Array.isArray(brief.bannedPapers) && brief.bannedPapers.length > 0;
   const isActive = project.status === "ACTIVE";
   const isPaused = project.status === "PAUSED";
   const phaseIdx = PHASES.indexOf(project.currentPhase as typeof PHASES[number]);
@@ -141,9 +142,12 @@ export function ProjectCard({ project, onDelete, onStatusChange, onExport }: Pro
           {/* Top row: title + time + actions */}
           <div className="flex items-start justify-between gap-3">
             <Link href={`/research/${project.id}`} className="min-w-0 flex-1">
-              <h3 className="text-[13px] font-medium truncate group-hover:text-foreground transition-colors">
-                {project.title}
-              </h3>
+              <div className="flex items-center gap-1.5">
+                {isBenchmark && <Target className="h-3 w-3 text-purple-500/60 shrink-0" />}
+                <h3 className="text-[13px] font-medium truncate group-hover:text-foreground transition-colors">
+                  {project.title}
+                </h3>
+              </div>
             </Link>
             <div className="flex items-center gap-1.5 shrink-0 mt-0.5">
               {isPaused && (
