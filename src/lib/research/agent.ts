@@ -783,9 +783,19 @@ async function runAgent(
           stepBudget.design++;
         } else if (["execute_remote", "validate_environment"].includes(tc.toolName)) {
           stepBudget.experiment++;
-        } else if (["check_job", "monitor_experiment", "read_file"].includes(tc.toolName)) {
+        } else if (["check_job", "monitor_experiment", "read_file", "get_workspace"].includes(tc.toolName)) {
           stepBudget.analysis++;
-        } else if (["check_remote", "execute_command"].includes(tc.toolName)) {
+        } else if (tc.toolName === "check_remote") {
+          // Classify check_remote by content: reading results/logs = analysis, ls/find/pip = infra
+          const args = tc.input as { command?: string } | undefined;
+          const cmd = args?.command || "";
+          const isResultRead = /cat.*result|cat.*stdout|cat.*stderr|cat.*\.json|cat.*\.csv|tail.*log|head.*log/.test(cmd);
+          if (isResultRead) {
+            stepBudget.analysis++;
+          } else {
+            stepBudget.infraDebug++;
+          }
+        } else if (tc.toolName === "execute_command") {
           stepBudget.infraDebug++;
         }
       }
@@ -1048,24 +1058,14 @@ The remote execution system **automatically handles Python environments**:
 - Skips installation on subsequent runs if requirements haven't changed
 - Activates the venv before running your command
 
-**IMPORTANT: Validate before your first experiment:**
-1. Write a \`requirements.txt\` with your dependencies using \`write_file\`
-2. Call \`validate_environment\` to test that all packages install correctly on the remote host
-3. If validation FAILS: read the error carefully, fix requirements.txt, and try again. If you cannot fix it (missing system libraries, CUDA version mismatch), **tell the user** what needs to be installed on the remote host and wait for their confirmation.
-4. Once validated: write your experiment script and run with \`execute_remote\`
+**Do NOT include** venv creation, pip install, or activation in your command — the system handles all of that.
 
-**Do NOT include** venv creation, pip install, or activation in your command — the system does it all.
-
-**requirements.txt best practices:**
-- Check the "Pre-installed" packages listed above — if torch/transformers/etc are already on the host, pin compatible versions (don't blindly install a different torch version that breaks CUDA)
-- Include commonly useful packages that improve experiment quality:
-  - \`flash-attn\` for efficient attention (if the host has CUDA 11.8+)
-  - \`accelerate\` for multi-GPU training
-  - \`wandb\` or \`tensorboard\` for experiment tracking
-  - \`bitsandbytes\` for quantization
-  - \`einops\` for tensor operations
-  - \`scipy\` and \`scikit-learn\` for statistical tests
-- Match torch version to the host's CUDA version (check the CUDA info above)
+**requirements.txt rules:**
+- Check the "Pre-installed" packages listed above in the host profile
+- If the host already has torch, transformers, accelerate etc. installed: **do NOT write a requirements.txt** — the existing environment has everything you need
+- Only write requirements.txt if you need a package that is NOT pre-installed (e.g., a niche library)
+- If you do write one, include ONLY the packages that are missing — never re-list packages already in the environment
+- **NEVER include torch, transformers, accelerate, or deepspeed** in requirements.txt if they show up in the Pre-installed list — reinstalling them will break the CUDA setup
 
 **When environment issues occur:**
 - **NEVER simplify your experiment to avoid a dependency.** If torch + deepspeed + accelerate fails, fix the installation — don't rewrite without multi-GPU support.
