@@ -17,6 +17,7 @@ Commands:
   kill <workdir>                  Kill experiment process group
   setup-env <workdir>            Setup venv + install requirements
   info                           Host info (RAM, GPUs, disk)
+  manifest <workdir>             Structured workspace manifest (files, results, packages)
   version                        Print helper version
 """
 
@@ -30,7 +31,7 @@ import time
 import hashlib
 from pathlib import Path
 
-HELPER_VERSION = "2"
+HELPER_VERSION = "3"
 ARCANA_DIR = ".arcana"
 STATUS_FILE = "status.json"
 REQS_HASH_FILE = "reqs_hash"
@@ -709,6 +710,66 @@ def cmd_info():
     })
 
 
+def cmd_manifest(workdir):
+    """Return structured workspace manifest: files, sizes, recent results."""
+    workdir = os.path.abspath(workdir)
+    if not os.path.isdir(workdir):
+        json_err(f"Workdir does not exist: {workdir}")
+
+    files = []
+    results = []
+    for root, dirs, filenames in os.walk(workdir):
+        dirs[:] = [d for d in dirs if not d.startswith('.') and d != '.venv' and d != '__pycache__' and d != '.arcana']
+        rel_root = os.path.relpath(root, workdir)
+        for fname in filenames:
+            fpath = os.path.join(root, fname)
+            rel_path = os.path.join(rel_root, fname) if rel_root != '.' else fname
+            try:
+                st = os.stat(fpath)
+                entry = {
+                    "path": rel_path,
+                    "size": st.st_size,
+                    "modified": time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(st.st_mtime)),
+                }
+                files.append(entry)
+                if fname.endswith('.json') and ('result' in fname.lower() or 'metric' in fname.lower()):
+                    try:
+                        with open(fpath) as f:
+                            content = f.read(5000)
+                        results.append({"path": rel_path, "content": content})
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+    packages = []
+    pip_path = os.path.join(workdir, ".venv", "bin", "pip3")
+    if not os.path.exists(pip_path):
+        pip_path = os.path.join(workdir, ".venv", "bin", "pip")
+    if os.path.exists(pip_path):
+        try:
+            out = subprocess.check_output(
+                [pip_path, "list", "--format=freeze"],
+                timeout=15, stderr=subprocess.DEVNULL, text=True,
+            )
+            packages = [line.strip() for line in out.strip().split("\n") if line.strip()]
+        except Exception:
+            pass
+
+    status = read_status(workdir) or {}
+
+    json_out({
+        "ok": True,
+        "files": sorted(files, key=lambda f: f["modified"], reverse=True),
+        "file_count": len(files),
+        "results": results[:10],
+        "packages": packages,
+        "job_status": status.get("status"),
+        "job_exit_code": status.get("exit_code"),
+        "oom_detected": status.get("oom_detected", False),
+    })
+
+
 def cmd_version():
     """Print version."""
     json_out({"ok": True, "version": HELPER_VERSION})
@@ -764,6 +825,10 @@ def main():
             if len(sys.argv) < 3:
                 json_err("Usage: setup-env <workdir>")
             cmd_setup_env(sys.argv[2])
+        elif cmd == "manifest":
+            if len(sys.argv) < 3:
+                json_err("Usage: manifest <workdir>")
+            cmd_manifest(sys.argv[2])
         elif cmd == "_monitor":
             # Internal: _monitor <workdir> <pid> <pgid>
             if len(sys.argv) < 5:
