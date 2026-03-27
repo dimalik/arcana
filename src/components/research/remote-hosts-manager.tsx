@@ -247,7 +247,8 @@ export function RemoteHostsManager() {
       const data = await res.json();
       setEnvTestResults((prev) => ({ ...prev, [id]: data }));
       if (data.ok) {
-        toast.success("Environment test passed");
+        toast.success(data.autoPopulated ? "Environment detected — base requirements auto-populated" : "Environment test passed");
+        fetchHosts(); // Refresh to show auto-populated base requirements
       } else {
         toast.error("Environment test failed");
       }
