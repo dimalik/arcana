@@ -144,7 +144,7 @@ Return JSON:
         brief,
         methodology: "experimental",
         collectionId: collection.id,
-        status: "SETUP", // don't auto-start
+        status: "ACTIVE",
         iterations: {
           create: {
             number: 1,
