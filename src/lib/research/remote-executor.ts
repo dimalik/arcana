@@ -586,6 +586,11 @@ async function runAndPoll(
           metadata: JSON.stringify({ remoteJobId: jobId }),
         },
       });
+
+      // Invalidate workspace cache after job completes
+      import("./workspace").then(({ invalidateWorkspace }) => {
+        if (job.projectId) invalidateWorkspace(job.projectId);
+      }).catch(() => {});
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : "Remote execution failed";

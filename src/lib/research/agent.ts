@@ -19,6 +19,7 @@ import { submitRemoteJob, probeGpus, quickRemoteCommand } from "./remote-executo
 import { classifyTaskCategory } from "./task-classifier";
 import { processQuery, scoreWeighted, scoreText, filterByRelevance } from "./search-utils";
 import { getAllResourcePreferences, recordResourceChoice, CONFIDENCE_THRESHOLD } from "./resource-preferences";
+import { getWorkspaceState, formatWorkspace, invalidateWorkspace } from "./workspace";
 import { exec, spawn } from "child_process";
 import { promisify } from "util";
 import { writeFile, mkdir, readFile, readdir, stat, appendFile } from "fs/promises";
@@ -961,7 +962,8 @@ ${prefSection}
 - \`execute_remote\` → submit experiments to GPU servers (syncs files, starts job, returns IMMEDIATELY). The job runs in the background — you can do other work while it runs.
 - \`check_job\` → check status of a background job (quick, non-blocking). Call periodically to monitor progress.
 - \`wait_for_jobs\` → block until specific jobs complete (use when you need results before proceeding, e.g., to compare outputs).
-- \`check_remote\` → read files/logs on remote, list results, check status (SSH only, instant)
+- \`get_workspace\` → PREFERRED: structured view of all files, results, packages, job status (cached, fast)
+- \`check_remote\` → LAST RESORT: run a specific command only when get_workspace doesn't have what you need (e.g., reading a specific log file line range). Limited to 3 consecutive calls.
 - \`execute_command\` → local tasks (editing files, data prep, lightweight compute)
 
 ### Parallel Workflow (YOU MUST DO THIS — NOT OPTIONAL)
@@ -2127,6 +2129,27 @@ function createTools(
             resolve(`Command error: ${err.message}`);
           });
         });
+      },
+    }),
+
+    get_workspace: tool({
+      description: "Get a complete, structured view of the remote experiment workspace: all files with sizes and timestamps, result file contents, installed packages, and job status. This is MUCH faster than running multiple check_remote ls/cat commands. Use this FIRST when you need to understand the current state of the workspace.",
+      inputSchema: z.object({
+        refresh: z.boolean().default(false).optional().describe("Force refresh from remote (default: use 30s cache)"),
+      }),
+      execute: async ({ refresh }: { refresh?: boolean }) => {
+        consecutiveCheckRemote = 0;
+        const hostWhere = { isDefault: true as const };
+        let host = await prisma.remoteHost.findFirst({ where: hostWhere });
+        if (!host) host = await prisma.remoteHost.findFirst();
+        if (!host) return "No remote hosts configured.";
+
+        emit({ type: "tool_progress", toolName: "get_workspace", content: "Fetching workspace state..." });
+
+        const state = await getWorkspaceState(projectId, host.id, refresh || false);
+        if (!state) return "Could not fetch workspace state. The remote directory may not exist yet — run an experiment first.";
+
+        return formatWorkspace(state);
       },
     }),
 
