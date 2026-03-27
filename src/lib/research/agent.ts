@@ -1839,11 +1839,20 @@ function createTools(
           }
         }
         emit({ type: "tool_progress", toolName: "read_paper", content: `Looking up "${title.slice(0, 60)}..."` });
+
+        // In benchmark mode, only read papers from the project collection
+        const readWhere: Record<string, unknown> = { title: { contains: title } };
+        if (isBenchmarkProject) {
+          const proj = await prisma.researchProject.findUnique({ where: { id: projectId }, select: { collectionId: true } });
+          if (proj?.collectionId) {
+            readWhere.collections = { some: { collectionId: proj.collectionId } };
+          }
+        } else {
+          readWhere.userId = userId;
+        }
+
         const paper = await prisma.paper.findFirst({
-          where: {
-            userId,
-            title: { contains: title },
-          },
+          where: readWhere,
           select: {
             id: true, title: true, abstract: true, authors: true,
             year: true, venue: true, summary: true, fullText: true,
@@ -1905,8 +1914,8 @@ function createTools(
           } catch { /* not JSON */ }
         }
 
-        // ── Mind Palace Insights ──
-        if (paper.insights.length > 0) {
+        // ── Mind Palace Insights (skip in benchmark mode) ──
+        if (!isBenchmarkProject && paper.insights.length > 0) {
           const insightLines = paper.insights.map((ins) => {
             let line = `- [${ins.room.name}] ${ins.learning}`;
             if (ins.significance) line += `\n  Significance: ${ins.significance}`;
@@ -3526,9 +3535,14 @@ Be harsh but fair. Vague praise is useless. Specific criticism saves months of w
           collPapers.forEach((cp) => paperIds.add(cp.paperId));
         }
 
-        // Fetch all user papers with full processed intelligence
+        // In benchmark mode, only search the project's own collection (seed papers)
+        // to prevent knowledge leakage from prior runs
+        const paperWhere: Record<string, unknown> = isBenchmarkProject && proj?.collectionId
+          ? { collections: { some: { collectionId: proj.collectionId } } }
+          : { userId };
+
         const allPapers = await prisma.paper.findMany({
-          where: { userId },
+          where: paperWhere,
           select: {
             id: true, title: true, abstract: true, summary: true, fullText: true,
             year: true, venue: true, authors: true, keyFindings: true, doi: true, arxivId: true,
@@ -3568,9 +3582,11 @@ Be harsh but fair. Vague praise is useless. Specific criticism saves months of w
             { text: (paper.fullText || "").slice(0, 30000), weight: 1 },
           ];
 
-          // Add insights (high value — distilled knowledge)
-          for (const ins of paper.insights) {
-            weighted.push({ text: `${ins.learning} ${ins.significance} ${ins.applications || ""}`, weight: 2.5 });
+          // Add insights (high value — distilled knowledge) — skip in benchmark mode
+          if (!isBenchmarkProject) {
+            for (const ins of paper.insights) {
+              weighted.push({ text: `${ins.learning} ${ins.significance} ${ins.applications || ""}`, weight: 2.5 });
+            }
           }
 
           // Add relation descriptions
@@ -3621,8 +3637,8 @@ Be harsh but fair. Vague praise is useless. Specific criticism saves months of w
             parts.push(`   Key Findings: ${p.keyFindings.slice(0, 300)}`);
           }
 
-          // Matching insights
-          if (p.insights.length > 0) {
+          // Matching insights (skip in benchmark mode)
+          if (!isBenchmarkProject && p.insights.length > 0) {
             const matchingInsights = p.insights
               .filter((ins) => {
                 const text = `${ins.learning} ${ins.significance} ${ins.applications || ""}`;
