@@ -97,6 +97,7 @@ export interface HelperStatus {
   }>;
   stdout_tail: string;
   stderr_tail: string;
+  diagnosis?: string;
   error?: string;
 }
 
@@ -512,6 +513,11 @@ async function runAndPoll(
       finalStderr = `${finalStderr}\n\n[OOM DETECTED] ${oomDetail}`.trim();
     }
 
+    // Prepend structured diagnosis so the agent sees actionable suggestions first
+    if (finalStatus?.diagnosis) {
+      finalStderr = `[DIAGNOSIS] ${finalStatus.diagnosis}\n\n${finalStderr}`;
+    }
+
     const failed = oomDetected || (exitCode !== null && exitCode !== 0);
     // If we couldn't determine exit code at all (SSH failures, no status file),
     // don't guess — mark as FAILED so the user knows to check manually.
@@ -709,6 +715,11 @@ export async function cleanupStaleJobs(projectId?: string): Promise<number> {
     // Append OOM info if detected
     if (helperResult?.oom_detected && helperResult.oom_detail) {
       finalStderr = `${finalStderr}\n\n[OOM DETECTED] ${helperResult.oom_detail}`.trim();
+    }
+
+    // Prepend structured diagnosis so the agent sees actionable suggestions first
+    if (helperResult?.diagnosis) {
+      finalStderr = `[DIAGNOSIS] ${helperResult.diagnosis}\n\n${finalStderr}`;
     }
 
     // Determine status — use exit code when available, don't guess from stdout emptiness

@@ -481,6 +481,7 @@ def cmd_monitor(workdir, pid, pgid):
     # OOM detection — both kernel OOM (SIGKILL, exit 137) and CUDA OOM (exit 1 + stderr)
     oom_detected = False
     oom_detail = ""
+    stderr_content = ""
     if exit_code == 137:  # 128 + 9 (SIGKILL) — kernel OOM
         oom_detected = True
         oom_detail = "Process received SIGKILL (exit 137) — likely OOM killed"
@@ -510,12 +511,39 @@ def cmd_monitor(workdir, pid, pgid):
     snapshots = status.get("resource_snapshots", [])
     snapshots.append(take_snapshot())
 
+    # Structured failure diagnosis
+    diagnosis = ""
+    if final_status != "completed":
+        if oom_detected:
+            last_snap = snapshots[-1] if snapshots else {}
+            gpu_mem = last_snap.get("gpu_mem", [])
+            gpu_usage = ", ".join(f"GPU{g['idx']}: {g['used_mb']}MB/{g['total_mb']}MB" for g in gpu_mem) if gpu_mem else "unknown"
+            diagnosis = f"OOM KILL — Process killed by kernel. GPU memory at crash: {gpu_usage}. "
+            diagnosis += "Suggestions: (1) Use 4-bit quantization (bitsandbytes), (2) Use a smaller model, (3) Reduce batch size, (4) Use gradient checkpointing."
+        elif exit_code == 1 and stderr_content:
+            if "ModuleNotFoundError" in stderr_content or "ImportError" in stderr_content:
+                module = ""
+                for line in stderr_content.split("\n"):
+                    if "ModuleNotFoundError" in line or "ImportError" in line:
+                        module = line.strip()
+                        break
+                diagnosis = f"IMPORT ERROR — {module}. Add the missing package to requirements.txt and re-run."
+            elif "CUDA" in stderr_content or "CUBLAS" in stderr_content:
+                diagnosis = "CUDA ERROR — GPU operation failed. Check: (1) bf16 not supported on this GPU? Use fp16. (2) CUDA version mismatch? Check host profile. (3) GPU memory fragmentation? Restart and try again."
+            elif "RuntimeError" in stderr_content:
+                diagnosis = "RUNTIME ERROR — Check the traceback above. This is likely a code bug, not an infrastructure issue."
+            else:
+                diagnosis = "SCRIPT ERROR — Non-zero exit code. Check stderr for details."
+        elif exit_code == 137:
+            diagnosis = "SIGKILL — Process was killed externally (likely OOM killer or resource limit)."
+
     status.update({
         "status": final_status,
         "exit_code": exit_code,
         "completed_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
         "oom_detected": oom_detected,
         "oom_detail": oom_detail,
+        "diagnosis": diagnosis,
         "resource_snapshots": snapshots[-MAX_SNAPSHOTS:],
         "stdout_tail": tail_file(os.path.join(workdir, "stdout.log"), 100),
         "stderr_tail": tail_file(os.path.join(workdir, "stderr.log"), 50),
