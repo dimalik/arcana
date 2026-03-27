@@ -2329,6 +2329,58 @@ function createTools(
           console.warn("[agent] preflight validation error:", preflightErr);
         }
 
+        // ── Auto environment check: verify packages before submission ──
+        // If host has a pre-existing env, check that required packages are importable
+        // This replaces the need for the agent to manually call validate_environment
+        if (host.conda?.trim()) {
+          try {
+            const reqPath = path.join(workDir, "requirements.txt");
+            const reqContent = await readFile(reqPath, "utf-8").catch(() => "");
+            if (reqContent.trim()) {
+              const pkgNames = reqContent.split("\n")
+                .map((l) => l.trim().split(/[>=<!\[]/)[0].trim().replace(/-/g, "_"))
+                .filter((p) => p && !p.startsWith("#"));
+
+              if (pkgNames.length > 0) {
+                emit({ type: "tool_progress", toolName: "execute_remote", content: `Checking packages on ${host.alias}...` });
+
+                const condaVal = host.conda.trim();
+                let activateCmd = "";
+                if (condaVal.endsWith("/activate")) activateCmd = `source ${condaVal}`;
+                else if (condaVal.endsWith("/python") || condaVal.endsWith("/python3")) {
+                  const binDir = condaVal.replace(/\/python3?$/, "");
+                  activateCmd = `source ${binDir}/activate 2>/dev/null || export PATH=${binDir}:$PATH`;
+                } else activateCmd = `conda activate ${condaVal} 2>/dev/null || source ${condaVal} 2>/dev/null`;
+
+                const checkResult = await quickRemoteCommand(host.id,
+                  `${activateCmd} && python3 -c "
+missing = []
+for p in ${JSON.stringify(pkgNames)}:
+    try: __import__(p)
+    except ImportError: missing.append(p)
+if missing: print('MISSING:' + ','.join(missing))
+else: print('OK')
+" 2>&1`
+                );
+
+                const output = checkResult.output?.trim() || "";
+                if (output.startsWith("MISSING:")) {
+                  const missing = output.replace("MISSING:", "").split(",").map(s => s.trim());
+                  emit({ type: "tool_output", toolName: "execute_remote", content: `⚠ Missing packages: ${missing.join(", ")}` });
+                  return `BLOCKED — The following packages from requirements.txt are not available in the host's environment:\n\n${missing.map(m => `  - ${m}`).join("\n")}\n\n` +
+                    `The host "${host.alias}" uses a pre-configured environment (${host.conda}). ` +
+                    `Either remove these from requirements.txt (if the host already has equivalents), ` +
+                    `or ask the user to install them in the host environment.\n\n` +
+                    `Available packages can be seen with get_workspace.`;
+                }
+              }
+            }
+          } catch (envErr) {
+            // Don't block on env check failures — let the job attempt to run
+            console.warn("[agent] auto env check failed:", envErr);
+          }
+        }
+
         emit({ type: "tool_output", toolName: "execute_remote", content: `$ [${host.alias}] ${sanitized}` });
         emit({ type: "tool_progress", toolName: "execute_remote", content: `Syncing files to ${host.alias}...` });
 
