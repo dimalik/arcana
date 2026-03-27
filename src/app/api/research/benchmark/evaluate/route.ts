@@ -98,13 +98,13 @@ export async function POST(request: NextRequest) {
 
     const evaluationSchema = z.object({
       scores: z.object({
-        problemId: z.number().min(1).max(5),
-        methodProximity: z.number().min(1).max(5),
-        insightDiscovery: z.number().min(1).max(5),
-        experimentalDesign: z.number().min(1).max(5),
-        novelContributions: z.number().min(1).max(5),
+        problemId: z.number().describe("1-5 score"),
+        methodProximity: z.number().describe("1-5 score"),
+        insightDiscovery: z.number().describe("1-5 score"),
+        experimentalDesign: z.number().describe("1-5 score"),
+        novelContributions: z.number().describe("1-5 score"),
       }),
-      overallScore: z.number().min(1).max(5),
+      overallScore: z.number().describe("1-5 average"),
       summary: z.string(),
       whatMatched: z.array(z.string()),
       whatMissed: z.array(z.string()),

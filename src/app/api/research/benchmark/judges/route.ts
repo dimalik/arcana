@@ -219,12 +219,12 @@ Return JSON: { "verdicts": [{"move": 1, "score": N, "label": "hot|warm|neutral|c
     const verdictSchema = z.object({
       verdicts: z.array(z.object({
         move: z.number(),
-        score: z.number().min(-2).max(2),
+        score: z.number().describe("-2 to +2"),
         label: z.enum(["hot", "warm", "neutral", "cool", "cold"]),
         comment: z.string(),
       })),
       summary: z.string(),
-      overallScore: z.number().min(1).max(5),
+      overallScore: z.number().describe("1-5"),
     });
 
     const model = await getModel(provider, modelId, proxyConfig);
