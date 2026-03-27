@@ -1639,6 +1639,7 @@ function createTools(
   const activeJobIds = new Set<string>();
   const consecutiveSearches = searchCounter || { value: 0 };
   let consecutiveCheckRemote = 0;
+  const scriptFailureCounts = new Map<string, number>(); // Track per-script failures
   // Experiment counter for sequential naming (shared with caller via ref object)
   const experimentCount = expCounter || { value: 0 };
 
@@ -2421,6 +2422,34 @@ else: print('OK')
           }
         }
 
+        // ── Auto-kill stale processes before submission ──
+        // Prevents "already running" failures without the agent needing to manually pkill
+        try {
+          await quickRemoteCommand(host.id,
+            `python3 ~/.arcana/helper.py kill ${host.workDir}/*${projectId.slice(0, 8)}* 2>/dev/null || true`
+          );
+        } catch { /* ignore — may not have anything running */ }
+
+        // ── Verify the script exists locally before syncing ──
+        const scriptMatch = sanitized.match(/python3?\s+(\S+\.py)/);
+        if (scriptMatch) {
+          const scriptName = scriptMatch[1];
+          const scriptPath = path.join(workDir, scriptName);
+          try {
+            await stat(scriptPath);
+          } catch {
+            return `BLOCKED — Script "${scriptName}" does not exist in the experiment directory. Write it first with write_file.`;
+          }
+
+          // ── Check for excessive retries of the same script ──
+          const failCount = scriptFailureCounts.get(scriptName) || 0;
+          if (failCount >= 2) {
+            return `BLOCKED — "${scriptName}" has failed ${failCount} times. Do NOT retry the same script. ` +
+              `Rewrite it from scratch or try a completely different approach. ` +
+              `Read the previous errors, understand the root cause, and create a NEW script with a different name.`;
+          }
+        }
+
         emit({ type: "tool_output", toolName: "execute_remote", content: `$ [${host.alias}] ${sanitized}` });
         emit({ type: "tool_progress", toolName: "execute_remote", content: `Syncing files to ${host.alias}...` });
 
@@ -2615,6 +2644,12 @@ else: print('OK')
             ? "\n\n⚠ OOM KILL DETECTED — the process ran out of memory. To fix:\n1. Reduce per_device_train_batch_size (try halving it)\n2. Enable gradient_checkpointing=True\n3. Use DeepSpeed ZeRO stage 2 or 3 (add deepspeed config)\n4. Use accelerate with device_map='auto' for model sharding\n5. Use mixed precision (fp16=True or bf16=True)\nDo NOT reduce the dataset or simplify the model — fix memory usage instead."
             : "";
 
+          // Track script failure count for retry prevention
+          const failedScript = job.command?.match(/python3?\s+(\S+\.py)/)?.[1];
+          if (failedScript) {
+            scriptFailureCounts.set(failedScript, (scriptFailureCounts.get(failedScript) || 0) + 1);
+          }
+
           return `EXPERIMENT FAILED (exit ${job.exitCode ?? "?"}) on ${job.host.alias}${elapsedStr}. Fix the code and re-run.\n\nstdout:\n${(job.stdout || "").slice(-3000)}\n\nstderr:\n${(job.stderr || "").slice(-2000)}${partialResults}${oomGuidance}`;
         }
 
@@ -2690,20 +2725,28 @@ else: print('OK')
     }),
 
     wait_for_jobs: tool({
-      description: "Wait for one or more background jobs to complete. Use this when you genuinely need results before proceeding (e.g., to compare experiment outputs). Polls all listed jobs until all complete or timeout. Prefer check_job for non-blocking status checks.",
+      description: "Wait for one or more background jobs to complete. Use this when you genuinely need results before proceeding (e.g., to compare experiment outputs). Polls all listed jobs until all complete or timeout. Uses soft timeout — if a job is still producing output, the wait extends automatically. Prefer check_job for non-blocking status checks.",
       inputSchema: z.object({
         job_ids: z.array(z.string()).describe("Job IDs to wait for"),
-        timeout_minutes: z.number().default(120).optional().describe("Max wait time in minutes (default 120 — ML training can take hours)"),
+        timeout_minutes: z.number().default(120).optional().describe("Soft timeout in minutes (default 120). Extended automatically if job is still producing output. Hard max: 480 min (8h)."),
       }),
       execute: async ({ job_ids, timeout_minutes }: { job_ids: string[]; timeout_minutes?: number }) => {
-        const timeoutMs = (timeout_minutes || 120) * 60 * 1000;
+        const softTimeoutMs = (timeout_minutes || 120) * 60 * 1000;
+        const hardTimeoutMs = 480 * 60 * 1000; // 8 hours absolute max
         const start = Date.now();
         const results: Record<string, { status: string; stdout: string; stderr: string; exitCode: number | null }> = {};
+        const lastOutputLength: Record<string, number> = {}; // Track output growth for soft timeout
 
         emit({ type: "tool_progress", toolName: "wait_for_jobs", content: `Waiting for ${job_ids.length} job(s)...` });
 
-        while (Date.now() - start < timeoutMs) {
+        while (true) {
+          const elapsed = Date.now() - start;
+
+          // Hard timeout — absolute maximum
+          if (elapsed > hardTimeoutMs) break;
+
           let allDone = true;
+          let anyProgress = false;
 
           for (const jid of job_ids) {
             if (results[jid]) continue; // Already finished
@@ -2746,16 +2789,30 @@ else: print('OK')
               emit({ type: "tool_output", toolName: "wait_for_jobs", content: `${emoji} Job ${jid.slice(0, 8)} ${job.status.toLowerCase()} on ${job.host.alias}` });
             } else {
               allDone = false;
+              // Track output growth for soft timeout extension
+              const currentLen = (job.stdout || "").length;
+              const prevLen = lastOutputLength[jid] || 0;
+              if (currentLen > prevLen) {
+                anyProgress = true;
+                lastOutputLength[jid] = currentLen;
+              }
             }
           }
 
           if (allDone) break;
 
-          const elapsed = Math.floor((Date.now() - start) / 1000);
-          const pending = job_ids.filter((jid) => !results[jid]).length;
-          emit({ type: "tool_progress", toolName: "wait_for_jobs", content: `${pending} job(s) still running (${elapsed}s)...` });
+          // Soft timeout: if past the soft limit but jobs are still producing output, keep waiting
+          if (elapsed > softTimeoutMs && !anyProgress) {
+            emit({ type: "tool_output", toolName: "wait_for_jobs", content: `Soft timeout reached (${Math.round(softTimeoutMs / 60000)}min) and jobs are not producing new output. Returning current state.` });
+            break;
+          }
 
-          await new Promise((r) => setTimeout(r, 5_000));
+          const elapsedSec = Math.floor(elapsed / 1000);
+          const pending = job_ids.filter((jid) => !results[jid]).length;
+          const progressNote = elapsed > softTimeoutMs ? " (extending — still producing output)" : "";
+          emit({ type: "tool_progress", toolName: "wait_for_jobs", content: `${pending} job(s) still running (${elapsedSec}s)${progressNote}...` });
+
+          await new Promise((r) => setTimeout(r, 10_000));
         }
 
         // Build summary
