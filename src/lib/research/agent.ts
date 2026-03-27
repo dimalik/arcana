@@ -2364,7 +2364,7 @@ function createTools(
     }),
 
     validate_environment: tool({
-      description: "Test that requirements.txt can be installed on a remote host WITHOUT running an experiment. Use this BEFORE running your first experiment to catch dependency issues early. If installation fails, show the error to the user and ask them for help. Returns the pip install output so you can diagnose problems.",
+      description: "Verify that all packages in requirements.txt are available on the remote host. If the host has a pre-configured environment (venv/conda), checks packages are importable there. Otherwise creates a temp venv and installs. Use BEFORE your first experiment to catch missing packages early.",
       inputSchema: z.object({
         host_alias: z.string().optional().describe("Remote host alias. Omit to use the default host."),
       }),
@@ -2383,10 +2383,8 @@ function createTools(
           return "No requirements.txt found in the experiment directory. Write one first with write_file.";
         }
 
-        emit({ type: "tool_progress", toolName: "validate_environment", content: `Testing pip install on ${host.alias}...` });
+        emit({ type: "tool_progress", toolName: "validate_environment", content: `Validating environment on ${host.alias}...` });
 
-        // Phase 1: Install packages in isolated venv
-        // Phase 2: Smoke test — import all packages and check CUDA access
         try {
           // Extract package names from requirements.txt for import test
           const pkgNames = reqContent.split("\n")
@@ -2397,15 +2395,36 @@ function createTools(
             ? `python3 -c "\nimport sys; failed = []\nfor p in ${JSON.stringify(pkgNames)}:\n    try:\n        __import__(p)\n    except ImportError as e:\n        failed.append(f'{p}: {e}')\nif failed:\n    print('IMPORT FAILURES:'); [print(f'  - {f}') for f in failed]; sys.exit(1)\nelse:\n    print('All packages import OK')\nimport torch; print(f'PyTorch: {torch.__version__}, CUDA: {torch.cuda.is_available()}, GPUs: {torch.cuda.device_count()}')\n" 2>&1`
             : `echo "No packages to test"`;
 
-          emit({ type: "tool_progress", toolName: "validate_environment", content: `Installing packages on ${host.alias}...` });
+          // Determine environment activation — respect host's existing venv/conda
+          const condaVal = host.conda?.trim() || "";
+          let activateCmd = "";
+          if (condaVal.endsWith("/activate")) {
+            activateCmd = `source ${condaVal} && `;
+          } else if (condaVal.endsWith("/python") || condaVal.endsWith("/python3")) {
+            const binDir = condaVal.replace(/\/python3?$/, "");
+            activateCmd = `source ${binDir}/activate 2>/dev/null && ` || `export PATH=${binDir}:$PATH && `;
+          } else if (condaVal) {
+            activateCmd = `conda activate ${condaVal} 2>/dev/null && ` || `source ${condaVal} 2>/dev/null && `;
+          }
 
-          const result = await quickRemoteCommand(host.id,
-            `cd ${host.workDir} && mkdir -p _env_test && cat > _env_test/requirements.txt << 'EOF'\n${reqContent}\nEOF\n` +
-            `cd _env_test && python3 -m venv .venv 2>&1 && source .venv/bin/activate && ` +
-            `pip3 install --upgrade pip -q 2>&1 && pip3 install -r requirements.txt 2>&1 && ` +
-            `echo "=== SMOKE TEST ===" && ${smokeTest}; ` +
-            `EXIT=$?; rm -rf ${host.workDir}/_env_test; exit $EXIT`
-          );
+          let result;
+          if (activateCmd) {
+            // Has existing env — just verify packages are importable, don't install
+            emit({ type: "tool_progress", toolName: "validate_environment", content: `Checking packages in existing env on ${host.alias}...` });
+            result = await quickRemoteCommand(host.id,
+              `${activateCmd}echo "=== SMOKE TEST ===" && ${smokeTest}`
+            );
+          } else {
+            // No existing env — install in temp venv
+            emit({ type: "tool_progress", toolName: "validate_environment", content: `Installing packages on ${host.alias}...` });
+            result = await quickRemoteCommand(host.id,
+              `cd ${host.workDir} && mkdir -p _env_test && cat > _env_test/requirements.txt << 'EOF'\n${reqContent}\nEOF\n` +
+              `cd _env_test && python3 -m venv .venv 2>&1 && source .venv/bin/activate && ` +
+              `pip3 install --upgrade pip -q 2>&1 && pip3 install -r requirements.txt 2>&1 && ` +
+              `echo "=== SMOKE TEST ===" && ${smokeTest}; ` +
+              `EXIT=$?; rm -rf ${host.workDir}/_env_test; exit $EXIT`
+            );
+          }
 
           if (result.ok) {
             emit({ type: "tool_output", toolName: "validate_environment", content: `Environment validated on ${host.alias}` });
