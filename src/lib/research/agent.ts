@@ -902,6 +902,36 @@ To prevent this:
 5. Try a smaller model variant — but NEVER reduce dataset size`}`;
   }
 
+  // Known GPU quirks based on hardware profile
+  const quirks: string[] = [];
+  if (gpuInfo) {
+    for (const h of gpuInfo) {
+      const gpuName = h.gpus[0]?.name?.toLowerCase() || "";
+      const cuda = h.cudaVersion ? parseFloat(h.cudaVersion) : 0;
+
+      if (gpuName.includes("v100") || gpuName.includes("t4") || gpuName.includes("2080") || gpuName.includes("1080")) {
+        quirks.push(`"${h.alias}": NO bf16 support — use fp16 instead. bf16 operations will cause CUBLAS_STATUS_INVALID_VALUE errors.`);
+      }
+
+      if (cuda > 0 && cuda < 11.6) {
+        quirks.push(`"${h.alias}": CUDA ${h.cudaVersion} — flash-attn requires CUDA 11.6+. Do not include flash-attn in requirements.`);
+      }
+
+      if (cuda >= 12.0) {
+        quirks.push(`"${h.alias}": CUDA ${h.cudaVersion} — use torch 2.2+ (older torch doesn't support CUDA 12).`);
+      }
+
+      const totalGpuMem = h.gpus.reduce((s, g) => s + parseInt(g.memoryTotal), 0);
+      if (totalGpuMem > 0 && totalGpuMem < 24000) {
+        quirks.push(`"${h.alias}": Only ${Math.round(totalGpuMem / 1024)}GB GPU memory — use 4-bit quantization for models >7B params.`);
+      }
+    }
+  }
+
+  if (quirks.length > 0) {
+    gpuSection += `\n### Known Hardware Quirks\n${quirks.map(q => `- ${q}`).join("\n")}\n`;
+  }
+
   // Build resource preference guidance
   const prefSection = (() => {
     if (!resourcePreferences || resourcePreferences.length === 0) return "";
@@ -2123,6 +2153,14 @@ function createTools(
 
         // Strip unnecessary timeout wrapper — check_remote has its own SSH timeout
         const cleanCmd = command.replace(/^timeout\s+\d+\s+/, "");
+
+        // Isolate: block access to other projects' remote directories
+        const projectSlug = path.basename(workDir);
+        const refsExperimentsDir = /~\/experiments\/|\/home\/.*\/experiments\//.test(cleanCmd);
+        const refsOurProject = cleanCmd.includes(projectSlug);
+        if (refsExperimentsDir && !refsOurProject) {
+          return "You can only access this project's remote directory. Other projects' files are off-limits.";
+        }
 
         emit({ type: "tool_progress", toolName: "check_remote", content: `$ [${host.alias}] ${cleanCmd.slice(0, 80)}` });
 
