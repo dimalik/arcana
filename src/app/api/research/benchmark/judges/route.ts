@@ -40,7 +40,12 @@ interface JudgeReport {
 export async function POST(request: NextRequest) {
   try {
     const userId = await requireUserId();
-    const { projectId } = await request.json();
+    const body = await request.json();
+    const { projectId, previousVerdicts, previousMoveCount } = body as {
+      projectId: string;
+      previousVerdicts?: Record<string, JudgeVerdict[]>; // judge name → prior verdicts
+      previousMoveCount?: number; // how many moves were already judged
+    };
 
     // Load project with all data
     const project = await prisma.researchProject.findFirst({
@@ -133,7 +138,19 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "No moves to evaluate yet — let the agent run first" }, { status: 400 });
     }
 
-    const moveSummary = moves.map((m) => `Move ${m.step} [${m.type}]: ${m.content.slice(0, 200)}`).join("\n\n");
+    // Incremental: only judge new moves (skip already-judged ones)
+    const startFrom = previousMoveCount || 0;
+    const newMoves = moves.filter((m) => m.step > startFrom);
+
+    if (newMoves.length === 0 && startFrom > 0) {
+      return NextResponse.json({ error: `No new moves since last judge run (${startFrom} already judged)` }, { status: 400 });
+    }
+
+    // Build context: summary of prior moves + full detail of new moves
+    const priorSummary = startFrom > 0
+      ? `[Moves 1-${startFrom} were already judged. Summary of the trajectory so far: the agent has taken ${startFrom} steps.]\n\n`
+      : "";
+    const moveSummary = priorSummary + newMoves.map((m) => `Move ${m.step} [${m.type}]: ${m.content.slice(0, 200)}`).join("\n\n");
 
     // Run all 4 judges in parallel
     const { provider, modelId, proxyConfig } = await getModelForTier("standard");
@@ -217,7 +234,12 @@ Return JSON: { "verdicts": [{"move": 1, "score": N, "label": "hot|warm|neutral|c
             jsonStr = jsonStr.slice(firstBrace, lastBrace + 1);
           }
           const parsed = JSON.parse(jsonStr);
-          return { judge: judge.name, ...parsed } as JudgeReport;
+
+          // Merge with previous verdicts if incremental
+          const priorVerdicts = previousVerdicts?.[judge.name] || [];
+          const mergedVerdicts = [...priorVerdicts, ...(parsed.verdicts || [])];
+
+          return { judge: judge.name, verdicts: mergedVerdicts, summary: parsed.summary, overallScore: parsed.overallScore } as JudgeReport;
         } catch (err) {
           return { judge: judge.name, verdicts: [], summary: `Judge failed: ${(err as Error).message}`, overallScore: 0 } as JudgeReport;
         }

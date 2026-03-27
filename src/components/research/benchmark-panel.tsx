@@ -119,10 +119,21 @@ export function BenchmarkPanel({ projectId, groundTruth }: Props) {
   const runJudges = async () => {
     setJudging(true);
     try {
+      // Find the most recent judge run for incremental evaluation
+      const lastJudgeRun = runs.find((r) => r.type === "judges");
+      const previousVerdicts: Record<string, { move: number; score: number; label: string; comment: string }[]> = {};
+      let previousMoveCount = 0;
+      if (lastJudgeRun?.data.judges) {
+        for (const j of lastJudgeRun.data.judges) {
+          previousVerdicts[j.judge] = j.verdicts;
+        }
+        previousMoveCount = lastJudgeRun.stepCount;
+      }
+
       const res = await fetch("/api/research/benchmark/judges", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ projectId }),
+        body: JSON.stringify({ projectId, previousVerdicts, previousMoveCount }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
