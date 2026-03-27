@@ -13,6 +13,8 @@ import {
   Cpu,
   ChevronDown,
   ChevronRight,
+  Save,
+  FlaskConical,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { toast } from "sonner";
@@ -58,6 +60,10 @@ export function RemoteHostsManager() {
   const [adding, setAdding] = useState(false);
   const [testing, setTesting] = useState<string | null>(null);
   const [testResults, setTestResults] = useState<Record<string, TestResult>>({});
+  const [testingEnv, setTestingEnv] = useState<string | null>(null);
+  const [envTestResults, setEnvTestResults] = useState<Record<string, { ok: boolean; output?: string; error?: string }>>({});
+  const [saving, setSaving] = useState<string | null>(null);
+  const [pendingEdits, setPendingEdits] = useState<Record<string, Record<string, string>>>({});
   const [sshHosts, setSSHHosts] = useState<SSHConfigEntry[]>([]);
   const [expandedHost, setExpandedHost] = useState<string | null>(null);
 
@@ -192,6 +198,64 @@ export function RemoteHostsManager() {
       fetchHosts();
     } catch {
       toast.error("Failed to set default");
+    }
+  };
+
+  const setPendingEdit = (hostId: string, field: string, value: string) => {
+    setPendingEdits((prev) => ({ ...prev, [hostId]: { ...prev[hostId], [field]: value } }));
+  };
+
+  const handleSaveAll = async (id: string) => {
+    const edits = pendingEdits[id];
+    if (!edits || Object.keys(edits).length === 0) {
+      toast.success("No changes to save");
+      return;
+    }
+    setSaving(id);
+    try {
+      const body: Record<string, string | null> = {};
+      for (const [key, val] of Object.entries(edits)) {
+        body[key] = val || null;
+      }
+      await fetch(`/api/research/remote-hosts/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      setPendingEdits((prev) => { const next = { ...prev }; delete next[id]; return next; });
+      fetchHosts();
+      toast.success("Changes saved");
+    } catch {
+      toast.error("Failed to save changes");
+    } finally {
+      setSaving(null);
+    }
+  };
+
+  const handleTestEnv = async (id: string) => {
+    setTestingEnv(id);
+    setEnvTestResults((prev) => ({ ...prev, [id]: { ok: false } }));
+    try {
+      // Save pending edits first so the test uses latest baseRequirements
+      if (pendingEdits[id]) await handleSaveAll(id);
+
+      const res = await fetch(`/api/research/remote-hosts/${id}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ testEnv: true }),
+      });
+      const data = await res.json();
+      setEnvTestResults((prev) => ({ ...prev, [id]: data }));
+      if (data.ok) {
+        toast.success("Environment test passed");
+      } else {
+        toast.error("Environment test failed");
+      }
+    } catch {
+      setEnvTestResults((prev) => ({ ...prev, [id]: { ok: false, error: "Request failed" } }));
+      toast.error("Environment test failed");
+    } finally {
+      setTestingEnv(null);
     }
   };
 
@@ -463,7 +527,7 @@ export function RemoteHostsManager() {
                       <label className="text-[9px] text-muted-foreground uppercase tracking-wide">Base Requirements</label>
                       <textarea
                         defaultValue={h.baseRequirements || ""}
-                        onBlur={(e) => handleUpdateField(h.id, "baseRequirements", e.target.value)}
+                        onChange={(e) => setPendingEdit(h.id, "baseRequirements", e.target.value)}
                         placeholder={"# Tested base packages (one per line)\ntorch==2.3.1\ntransformers>=4.40\naccelerate\ndatasets"}
                         className="w-full rounded border border-input bg-background px-2 py-1 text-[11px] font-mono placeholder:text-muted-foreground/25 focus:outline-none focus:ring-1 focus:ring-ring resize-y min-h-[100px]"
                         rows={6}
@@ -476,7 +540,7 @@ export function RemoteHostsManager() {
                       <label className="text-[9px] text-muted-foreground uppercase tracking-wide">Environment Notes</label>
                       <textarea
                         defaultValue={h.envNotes || ""}
-                        onBlur={(e) => handleUpdateField(h.id, "envNotes", e.target.value)}
+                        onChange={(e) => setPendingEdit(h.id, "envNotes", e.target.value)}
                         placeholder="e.g., flash-attn works with CUDA 12.1, use fp16 not bf16, conda activate myenv first"
                         className="w-full rounded border border-input bg-background px-2 py-1 text-[11px] placeholder:text-muted-foreground/25 focus:outline-none focus:ring-1 focus:ring-ring resize-y"
                         rows={3}
@@ -485,6 +549,37 @@ export function RemoteHostsManager() {
                         Free-text notes shown to the research agent. Include any quirks or gotchas.
                       </p>
                     </div>
+
+                    {/* Action buttons */}
+                    <div className="flex items-center gap-2 pt-2 border-t border-border/30">
+                      <button
+                        onClick={() => handleSaveAll(h.id)}
+                        disabled={saving === h.id || !pendingEdits[h.id]}
+                        className="inline-flex items-center gap-1.5 rounded-md bg-foreground text-background px-3 py-1.5 text-[11px] font-medium hover:bg-foreground/90 transition-colors disabled:opacity-30"
+                      >
+                        {saving === h.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Save className="h-3 w-3" />}
+                        Save Changes
+                      </button>
+                      <button
+                        onClick={() => handleTestEnv(h.id)}
+                        disabled={testingEnv === h.id}
+                        className="inline-flex items-center gap-1.5 rounded-md border border-border/60 px-3 py-1.5 text-[11px] hover:bg-muted/50 transition-colors disabled:opacity-50"
+                      >
+                        {testingEnv === h.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <FlaskConical className="h-3 w-3" />}
+                        Test Environment
+                      </button>
+                      {envTestResults[h.id] && (
+                        <span className={`text-[10px] ${envTestResults[h.id].ok ? "text-emerald-500" : "text-destructive"}`}>
+                          {envTestResults[h.id].ok ? "Passed" : envTestResults[h.id].error || "Failed"}
+                        </span>
+                      )}
+                    </div>
+                    {envTestResults[h.id]?.output && (
+                      <pre className="text-[10px] text-muted-foreground/60 bg-muted/30 rounded p-2 max-h-32 overflow-auto font-mono whitespace-pre-wrap">
+                        {envTestResults[h.id].output}
+                      </pre>
+                    )}
+
                     {h._count.jobs > 0 && (
                       <p className="text-[10px] text-muted-foreground">{h._count.jobs} job{h._count.jobs !== 1 ? "s" : ""} run on this host</p>
                     )}
