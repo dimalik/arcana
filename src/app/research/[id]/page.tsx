@@ -26,6 +26,7 @@ import { ReflectionPhase } from "@/components/research/reflection-phase";
 import { AgentActivityBar, AgentActivityHandle } from "@/components/research/agent-activity-bar";
 import { ResearchChat } from "@/components/research/research-chat";
 import { BenchmarkPanel } from "@/components/research/benchmark-panel";
+import { AttentionQueue } from "@/components/research/attention-queue";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
 
@@ -438,6 +439,9 @@ export default function ResearchWorkspacePage({ params }: { params: { id: string
           groundTruth={project.benchmark.groundTruth}
         />
       )}
+
+      {/* Attention queue — user-resolvable issues */}
+      <AttentionQueue projectId={project.id} />
 
       {/* Bottom: Agent activity bar — always visible */}
       <div className="shrink-0">

@@ -549,6 +549,26 @@ async function runAndPoll(
       },
     });
 
+    // Auto-create help requests for user-fixable failures
+    const jobRecord = await prisma.remoteJob.findUnique({ where: { id: jobId }, select: { projectId: true } });
+    if (finalJobStatus === "FAILED" && jobRecord?.projectId) {
+      const diag = finalStatus?.diagnosis || "";
+      if (diag.includes("IMPORT ERROR") || diag.includes("OOM KILL")) {
+        const category = diag.includes("OOM") ? "env_issue" : "package";
+        const title = diag.includes("OOM")
+          ? "Experiment OOM — needs smaller model or quantization"
+          : `Missing package on ${config.host}`;
+        prisma.researchLogEntry.create({
+          data: {
+            projectId: jobRecord.projectId,
+            type: "help_request",
+            content: diag,
+            metadata: JSON.stringify({ category, title, suggestion: diag.split("Suggestions:")[1]?.trim() || "", resolved: false }),
+          },
+        }).catch(() => {});
+      }
+    }
+
     // Update linked research step if any
     const job = await prisma.remoteJob.findUnique({ where: { id: jobId } });
     if (job?.stepId) {

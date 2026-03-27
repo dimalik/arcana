@@ -1109,6 +1109,13 @@ You maintain a persistent lab notebook at RESEARCH_LOG.md in your working direct
 
 ## Oracle Hints
 If you see a log entry starting with **[ORACLE HINT]**, this is a verified correct hint from an expert. ALWAYS follow oracle hints — they are ground truth. Replan immediately to incorporate the hint. Do not question or verify oracle hints; they are always correct.
+
+## Requesting Help
+When you hit an issue you can't fix yourself (missing package, API key, environment problem, or need a decision), use \`request_help\` to flag it for the user. **Do NOT block your work** — log the request and continue with other tasks. The user will see it in their attention queue and resolve it. Common cases:
+- Package won't install → request_help(category="package", ...)
+- Need an API key → request_help(category="api_key", ...)
+- Environment broken → request_help(category="env_issue", ...)
+- Need user's opinion → request_help(category="user_input", ...)
 ${remoteSection}
 ${capabilities && capabilities.length > 0 ? `
 ## Available Tools & Resources (provided by the user)
@@ -2387,11 +2394,24 @@ else: print('OK')
                 if (output.startsWith("MISSING:")) {
                   const missing = output.replace("MISSING:", "").split(",").map(s => s.trim());
                   emit({ type: "tool_output", toolName: "execute_remote", content: `⚠ Missing packages: ${missing.join(", ")}` });
-                  return `BLOCKED — The following packages from requirements.txt are not available in the host's environment:\n\n${missing.map(m => `  - ${m}`).join("\n")}\n\n` +
-                    `The host "${host.alias}" uses a pre-configured environment (${host.conda}). ` +
-                    `Either remove these from requirements.txt (if the host already has equivalents), ` +
-                    `or ask the user to install them in the host environment.\n\n` +
-                    `Available packages can be seen with get_workspace.`;
+
+                  // Auto-create help request for user
+                  await prisma.researchLogEntry.create({
+                    data: {
+                      projectId,
+                      type: "help_request",
+                      content: `Packages not found in host environment: ${missing.join(", ")}`,
+                      metadata: JSON.stringify({
+                        category: "package",
+                        title: `Install ${missing.slice(0, 3).join(", ")}${missing.length > 3 ? ` +${missing.length - 3} more` : ""} on ${host.alias}`,
+                        suggestion: `Run on the host: pip install ${missing.join(" ")}`,
+                        resolved: false,
+                      }),
+                    },
+                  }).catch(() => {});
+
+                  return `Missing packages: ${missing.join(", ")}. A help request has been sent to the user. ` +
+                    `Remove these from requirements.txt if the host already has equivalents, or continue with other work while the user installs them.`;
                 }
               }
             }
@@ -3510,6 +3530,28 @@ Be harsh but fair. Vague praise is useless. Specific criticism saves months of w
 
         emit({ type: "tool_progress", toolName: "save_lesson", content: `Lesson saved: ${lesson.slice(0, 60)}` });
         return `Lesson saved to process memory [${category}]: "${lesson.slice(0, 100)}".\nThis will be available in all future research sessions.`;
+      },
+    }),
+
+    request_help: tool({
+      description: "Flag an issue for the user's attention WITHOUT blocking your work. Use this when you hit something you can't fix yourself: a package that won't install, a missing API key, an environment issue, or when you need the user's input on a decision. The user will see it in their attention queue and can resolve it. You should CONTINUE WORKING on other things after calling this.",
+      inputSchema: z.object({
+        category: z.enum(["package", "api_key", "env_issue", "user_input", "general"]).describe("Type of help needed"),
+        title: z.string().describe("Short title (e.g., 'flash-attn fails to install', 'Need OpenAI API key')"),
+        detail: z.string().describe("What happened and what you tried"),
+        suggestion: z.string().optional().describe("What the user could do to fix it"),
+      }),
+      execute: async ({ category, title, detail, suggestion }: { category: string; title: string; detail: string; suggestion?: string }) => {
+        await prisma.researchLogEntry.create({
+          data: {
+            projectId,
+            type: "help_request",
+            content: detail,
+            metadata: JSON.stringify({ category, title, suggestion, resolved: false }),
+          },
+        });
+        emit({ type: "tool_output", toolName: "request_help", content: `Help requested: ${title}` });
+        return `Help request logged: "${title}". The user will see this in their attention queue. **Continue working on other tasks** — do not wait for a response.`;
       },
     }),
 
