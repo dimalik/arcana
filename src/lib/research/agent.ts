@@ -691,6 +691,7 @@ async function runAgent(
   // 6. Stream with tool use
   const MAX_STEPS = 80;
   let stepCount = 0;
+  const emittedHints = new Set<string>();
 
   // Track tool usage for nudges
   let experimentsSinceLastLitReview = 0;
@@ -778,6 +779,30 @@ async function runAgent(
       // Replan nudge every 20 steps
       if (stepCount % 20 === 0 && stepCount > 0) {
         emit({ type: "text", content: "\n\n[System: You've completed 20 steps since your last plan. Write an updated plan to RESEARCH_LOG.md before continuing.]\n\n" });
+      }
+
+      // Check for new oracle hints every step
+      try {
+        const newHints = await prisma.researchLogEntry.findMany({
+          where: { projectId, metadata: { contains: '"oracleHint":true' } },
+          select: { content: true },
+          orderBy: { createdAt: "desc" },
+          take: 3,
+        });
+        for (const hint of newHints) {
+          if (!emittedHints.has(hint.content)) {
+            emittedHints.add(hint.content);
+            emit({ type: "text", content: `\n\n⚡ **ORACLE HINT (from expert — follow immediately):**\n${hint.content}\n\n**REPLAN NOW** to incorporate this hint.\n\n` });
+          }
+        }
+      } catch { /* non-critical */ }
+
+      // Mandatory sub-agent dispatch reminders
+      if (totalExperimentsRun > 0 && totalExperimentsRun % 2 === 0 && stepCount > 5) {
+        emit({ type: "text", content: "\n\n[System: You've completed 2+ experiments without an adversarial review. Use adversarial_review or dispatch_reviewer before your next experiment.]\n\n" });
+      }
+      if (experimentsSinceLastLitReview >= 4) {
+        emit({ type: "text", content: "\n\n[System: 4 experiments without consulting literature. Use dispatch_scouts or search_library to check if someone has already solved your current problem.]\n\n" });
       }
 
       // Iteration advancement nudge — internal only
@@ -1217,6 +1242,13 @@ This is not optional. A plan that is never revised is a bad plan. The act of rep
 
 ## The Research Cycle (repeat this loop — NEVER stop after one experiment)
 
+**Phase stability:** Do NOT switch phases unless you've spent at least:
+- Literature: 5 steps before moving to Hypothesis
+- Hypothesis: 3 steps before moving to Experiment
+- Experiment: 10 steps before moving to Analysis
+- Analysis: 3 steps before moving to the next cycle
+Constant phase-switching (13 changes in one project) wastes context and prevents deep work.
+
 ### Phase 1: Literature, Synthesis & Hypotheses
 **IMPORTANT: Use \`dispatch_scouts\` for all bulk literature search — do NOT call \`search_papers\` more than twice in a row.** Scouts run in parallel and are much faster. Use \`search_papers\` only for targeted follow-up queries on a specific sub-question.
 
@@ -1305,7 +1337,13 @@ Your mechanism design document should include:
 2. **Bootstrap confidence intervals** for final metrics.
 3. **Compare against baselines** from the literature with the same datasets and metrics.
 
-**Experiment naming:** Every experiment script MUST be named \`exp_NNN_descriptive_name.py\` (e.g., \`exp_001_baseline_gpt2.py\`, \`exp_002_finetune_lora.py\`). The system auto-numbers if you forget, but use consistent naming so experiments can be ordered and compared. Helper scripts (data loaders, utils) don't need numbering.
+**Script reuse over script creation:**
+- NEVER write a new script if an existing one can be modified. Use command-line arguments (--method, --seed, --lr, --epochs) to parameterize experiments.
+- Pattern: ONE master experiment script with argparse, not 76 one-off scripts. Example: \`python3 exp_credit_comparison.py --method traca --seed 42 --lr 3e-6\`
+- Before writing a new \`exp_NNN\` or \`poc_NNN\` script, check if an existing script already does 80% of what you need. If so, add a flag to it.
+- Exception: fundamentally different experiments (e.g., diagnostic vs training) CAN be separate scripts.
+
+**Experiment naming:** Use \`poc_NNN_name.py\` for proof-of-concept and \`exp_NNN_name.py\` for full experiments. But prefer FEWER scripts with MORE arguments over MANY scripts with slight variations.
 
 - **Before EVERY experiment, check the literature.** Use \`search_library\` to find relevant techniques in papers you already have. Use \`search_papers\` when you need new papers on a specific sub-problem. Use \`read_paper\` to extract exact methods, hyperparameters, and baselines from the most relevant papers. The experiment you design should cite at least one paper's approach. Never design an experiment from scratch when a paper has already solved part of the problem — build on their work.
 - **Before writing code, search the web for existing tools.** Use \`web_search\` to find libraries that already do what you need (e.g., \`trl\` for RLHF, \`peft\` for parameter-efficient fine-tuning, \`accelerate\` for distributed training). Read their documentation with \`fetch_webpage\`. Don't rewrite from scratch what a mature library already provides — use pip packages.
@@ -1679,7 +1717,43 @@ function createTools(
     return null;
   }
 
+  let committedApproachInner: string | null = null;
+
   return {
+    commit_to_approach: tool({
+      description: "Commit to a specific approach/mechanism design. Once committed, you cannot redesign from scratch — only iterate and improve. Use this after your mechanism design is written and you're confident in the direction. To change approaches later, you must explicitly call abandon_approach with evidence.",
+      inputSchema: z.object({
+        approach: z.string().describe("Name/description of the approach you're committing to"),
+        rationale: z.string().describe("Why this approach and not alternatives"),
+      }),
+      execute: async ({ approach, rationale }: { approach: string; rationale: string }) => {
+        committedApproachInner = approach;
+        await prisma.researchLogEntry.create({
+          data: { projectId, type: "decision", content: `COMMITTED TO APPROACH: ${approach}\nRationale: ${rationale}` },
+        });
+        return `Committed to "${approach}". You are now locked into iterating on this approach. To change direction, you must call abandon_approach with evidence that this approach is fundamentally flawed.`;
+      },
+    }),
+
+    abandon_approach: tool({
+      description: "Abandon the current committed approach. Requires strong evidence that the approach is fundamentally flawed (not just 'needs more tuning'). After abandoning, you must commit to a new approach before running more experiments.",
+      inputSchema: z.object({
+        evidence: z.string().describe("Concrete evidence why the approach is fundamentally flawed"),
+        experiments_tried: z.number().describe("How many experiments you ran with this approach"),
+      }),
+      execute: async ({ evidence, experiments_tried }: { evidence: string; experiments_tried: number }) => {
+        if (experiments_tried < 3) {
+          return `BLOCKED — You've only run ${experiments_tried} experiment(s) with the current approach. Run at least 3 before abandoning. Iterate and debug, don't give up early.`;
+        }
+        const prev = committedApproachInner;
+        committedApproachInner = null;
+        await prisma.researchLogEntry.create({
+          data: { projectId, type: "decision", content: `ABANDONED APPROACH: ${prev}\nEvidence: ${evidence}\nExperiments tried: ${experiments_tried}` },
+        });
+        return `Abandoned "${prev}". You must now commit_to_approach with a new direction before running more experiments.`;
+      },
+    }),
+
     search_papers: tool({
       description: "Search academic databases (OpenAlex, Semantic Scholar, CrossRef) for papers on a topic. Only imports papers relevant to your query — irrelevant results are filtered out. Papers are added to the project collection (not your main library).",
       inputSchema: z.object({
@@ -2471,6 +2545,17 @@ else: print('OK')
             return `BLOCKED — "${scriptName}" has failed ${failCount} times. Do NOT retry the same script. ` +
               `Rewrite it from scratch or try a completely different approach. ` +
               `Read the previous errors, understand the root cause, and create a NEW script with a different name.`;
+          }
+
+          // ── PoC gate: require a successful PoC before full-scale experiments ──
+          if (scriptName.startsWith("exp_") && !scriptName.includes("debug")) {
+            // Check if any poc_ script has succeeded for this project
+            const successfulPocs = await prisma.remoteJob.count({
+              where: { projectId, status: "COMPLETED", command: { contains: "poc_" } },
+            });
+            if (successfulPocs === 0) {
+              return `BLOCKED — No successful PoC experiments yet. Run a poc_NNN script first to validate your approach before scaling to a full exp_NNN experiment.`;
+            }
           }
         }
 
