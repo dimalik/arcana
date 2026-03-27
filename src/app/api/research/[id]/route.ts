@@ -59,14 +59,17 @@ export async function GET(_request: NextRequest, { params }: Params) {
       return NextResponse.json({ error: "Project not found" }, { status: 404 });
     }
 
-    // Check if this is a benchmark project
-    const benchmarkLog = project.log.find((l: { metadata?: string | null }) => {
-      if (!l.metadata) return false;
-      try { return JSON.parse(l.metadata).benchmarkPaperId; } catch { return false; }
+    // Check if this is a benchmark project (separate query — log take:50 may not include oldest entries)
+    const benchmarkLogs = await prisma.researchLogEntry.findMany({
+      where: { projectId: id, metadata: { contains: "benchmarkPaperId" } },
+      select: { content: true, metadata: true },
+      take: 2,
     });
-    const groundTruthLog = project.log.find((l: { metadata?: string | null }) => {
-      if (!l.metadata) return false;
-      try { return JSON.parse(l.metadata).groundTruth === true; } catch { return false; }
+    const benchmarkLog = benchmarkLogs.find((l) => {
+      try { return JSON.parse(l.metadata!).benchmarkPaperId && !JSON.parse(l.metadata!).groundTruth; } catch { return false; }
+    });
+    const groundTruthLog = benchmarkLogs.find((l) => {
+      try { return JSON.parse(l.metadata!).groundTruth === true; } catch { return false; }
     });
 
     const benchmark = benchmarkLog ? {

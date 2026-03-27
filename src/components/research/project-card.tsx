@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useState, lazy, Suspense } from "react";
 import Link from "next/link";
+const LazyBenchmarkPanel = lazy(() => import("./benchmark-panel").then(m => ({ default: m.BenchmarkPanel })));
 import {
   BookOpen, FlaskConical, Lightbulb, BarChart3, IterationCcw,
   Pause, Play, Trash2, Search, Compass, ChevronDown,
@@ -280,20 +281,21 @@ export function ProjectCard({ project, onDelete, onStatusChange, onExport }: Pro
                 {project._count.hypotheses}
               </span>
             )}
-            {/* Expand button for details */}
-            {hasDetails && (
+            {/* Expand button for details / benchmark */}
+            {(hasDetails || isBenchmark) && (
               <button
                 onClick={(e) => { e.preventDefault(); e.stopPropagation(); setExpanded(!expanded); }}
-                className="inline-flex items-center gap-0.5 ml-auto text-muted-foreground/25 hover:text-muted-foreground/50 transition-colors"
+                className={`inline-flex items-center gap-0.5 ml-auto transition-colors ${isBenchmark && !expanded ? "text-purple-500/40 hover:text-purple-500/70" : "text-muted-foreground/25 hover:text-muted-foreground/50"}`}
               >
+                {isBenchmark && !expanded && <FlaskConical className="h-2.5 w-2.5" />}
                 <ChevronDown className={`h-2.5 w-2.5 transition-transform ${expanded ? "rotate-180" : ""}`} />
               </button>
             )}
           </div>
 
           {/* Expanded details */}
-          {expanded && hasDetails && (
-            <div className="mt-2 pt-2 border-t border-border/30 space-y-1.5 animate-in fade-in-0 slide-in-from-top-1 duration-100">
+          {expanded && (hasDetails || isBenchmark) && (
+            <div className="mt-2 pt-2 border-t border-border/30 space-y-2 animate-in fade-in-0 slide-in-from-top-1 duration-100">
               {brief.question && brief.question !== project.title && (
                 <p className="text-[11px] text-muted-foreground/50 leading-relaxed">{brief.question}</p>
               )}
@@ -302,6 +304,11 @@ export function ProjectCard({ project, onDelete, onStatusChange, onExport }: Pro
                   <span className="text-muted-foreground/30 uppercase tracking-wider">Constraints</span>
                   <p className="text-muted-foreground/50 mt-0.5">{constraints}</p>
                 </div>
+              )}
+              {isBenchmark && (
+                <Suspense fallback={<div className="text-[10px] text-muted-foreground/30">Loading judges...</div>}>
+                  <LazyBenchmarkPanel projectId={project.id} groundTruth={null} />
+                </Suspense>
               )}
             </div>
           )}
