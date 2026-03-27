@@ -201,13 +201,22 @@ Return JSON: { "verdicts": [{"move": 1, "score": N, "label": "hot|warm|neutral|c
         try {
           const result = await generateLLMResponse({
             provider, modelId, proxyConfig,
-            system: judge.system,
-            prompt: `## Ground Truth (the actual paper's method — HIDDEN from the agent)\n${groundTruth}\n\n## Agent's Moves (in chronological order)\n${moveSummary}`,
+            system: judge.system + `\n\nCRITICAL: You MUST respond with ONLY valid JSON. No preamble, no explanation, no markdown fences. Start your response with { and end with }. Do NOT write anything before or after the JSON object.`,
+            prompt: `## Ground Truth (the actual paper's method — HIDDEN from the agent)\n${groundTruth}\n\n## Agent's Moves (in chronological order)\n${moveSummary}\n\nRespond with JSON only:`,
             maxTokens: 4000,
           });
 
-          const cleaned = result.replace(/```json\s*/g, "").replace(/```\s*/g, "").trim();
-          const parsed = JSON.parse(cleaned);
+          // Extract JSON from response — handle markdown fences, preamble text, etc.
+          let jsonStr = result;
+          // Strip markdown fences
+          jsonStr = jsonStr.replace(/```json\s*/g, "").replace(/```\s*/g, "");
+          // Find the first { and last } to extract JSON even if there's preamble
+          const firstBrace = jsonStr.indexOf("{");
+          const lastBrace = jsonStr.lastIndexOf("}");
+          if (firstBrace >= 0 && lastBrace > firstBrace) {
+            jsonStr = jsonStr.slice(firstBrace, lastBrace + 1);
+          }
+          const parsed = JSON.parse(jsonStr);
           return { judge: judge.name, ...parsed } as JudgeReport;
         } catch (err) {
           return { judge: judge.name, verdicts: [], summary: `Judge failed: ${(err as Error).message}`, overallScore: 0 } as JudgeReport;

@@ -110,12 +110,20 @@ Return JSON:
     const unmatchedRefs = paper.references.filter((r) => !r.matchedPaperId && (r.doi || r.arxivId));
 
     // Create the benchmark project
+    // Store banned paper identifiers so agent tools can filter it out
+    const bannedPaper = {
+      title: paper.title,
+      doi: paper.doi,
+      arxivId: paper.arxivId,
+    };
+
     const brief = JSON.stringify({
       question: parsed.blindedQuestion,
       constraints: parsed.constraints,
       subQuestions: [],
       domains: [],
       keywords: [],
+      bannedPapers: [bannedPaper],
     });
 
     const collection = await prisma.collection.create({
@@ -147,12 +155,12 @@ Return JSON:
           create: [
             {
               type: "decision",
-              content: `Benchmark created from paper: "${paper.title}"`,
-              metadata: JSON.stringify({ benchmarkPaperId: paper.id }),
+              content: `Benchmark project created`,
+              metadata: JSON.stringify({ benchmarkPaperId: paper.id, groundTruth: false }),
             },
             {
               type: "decision",
-              content: `[GROUND TRUTH — HIDDEN FROM AGENT]\n${parsed.groundTruth}`,
+              content: parsed.groundTruth,
               metadata: JSON.stringify({ groundTruth: true, benchmarkPaperId: paper.id }),
             },
           ],

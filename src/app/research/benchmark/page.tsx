@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   FlaskConical, Loader2, ArrowRight, Target, CheckCircle,
-  AlertTriangle, Sparkles, BookOpen, ChevronDown,
+  AlertTriangle, Sparkles, BookOpen, ChevronDown, Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -18,7 +18,7 @@ interface PaperOption {
 }
 
 interface BenchmarkResult {
-  projectId: string;
+  id: string;
   title: string;
   status: string;
   currentPhase: string;
@@ -35,6 +35,26 @@ interface Evaluation {
   whatMissed: string[];
   surprises: string[];
   recommendations: string[];
+}
+
+interface JudgeVerdict {
+  move: number;
+  score: number;
+  label: string;
+  comment: string;
+}
+
+interface JudgeReport {
+  judge: string;
+  verdicts: JudgeVerdict[];
+  summary: string;
+  overallScore: number;
+}
+
+interface JudgePanelData {
+  moveCount: number;
+  moves: { step: number; type: string; title: string }[];
+  judges: JudgeReport[];
 }
 
 const SCORE_LABELS: Record<string, string> = {
@@ -54,6 +74,8 @@ export default function BenchmarkPage() {
   const [selectedPaper, setSelectedPaper] = useState<string>("");
   const [evaluating, setEvaluating] = useState<string | null>(null);
   const [evaluations, setEvaluations] = useState<Record<string, Evaluation>>({});
+  const [judging, setJudging] = useState<string | null>(null);
+  const [judgePanels, setJudgePanels] = useState<Record<string, JudgePanelData>>({});
 
   useEffect(() => {
     Promise.all([
@@ -95,6 +117,23 @@ export default function BenchmarkPage() {
     setCreating(false);
   };
 
+  const handleJudgePanel = async (projectId: string) => {
+    setJudging(projectId);
+    try {
+      const res = await fetch("/api/research/benchmark/judges", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectId }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      setJudgePanels((prev) => ({ ...prev, [projectId]: data }));
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Judge panel failed");
+    }
+    setJudging(null);
+  };
+
   const handleEvaluate = async (projectId: string) => {
     setEvaluating(projectId);
     try {
@@ -110,6 +149,19 @@ export default function BenchmarkPage() {
       toast.error(err instanceof Error ? err.message : "Evaluation failed");
     }
     setEvaluating(null);
+  };
+
+  const handleDelete = async (projectId: string) => {
+    if (!confirm("Delete this benchmark project?")) return;
+    try {
+      const res = await fetch(`/api/research/${projectId}`, { method: "DELETE" });
+      if (res.ok) {
+        setBenchmarks((prev) => prev.filter((b) => b.id !== projectId));
+        toast.success("Benchmark deleted");
+      } else {
+        toast.error("Failed to delete");
+      }
+    } catch { toast.error("Failed to delete"); }
   };
 
   if (loading) {
@@ -169,13 +221,13 @@ export default function BenchmarkPage() {
         <div className="space-y-4">
           <h2 className="text-xs font-medium text-muted-foreground/60 uppercase tracking-wider">Benchmarks</h2>
           {benchmarks.map((b) => {
-            const evaluation = evaluations[b.projectId];
+            const evaluation = evaluations[b.id];
             return (
-              <div key={b.projectId} className="rounded-lg border border-border/50 overflow-hidden">
+              <div key={b.id} className="rounded-lg border border-border/50 overflow-hidden">
                 {/* Benchmark header */}
                 <div className="px-4 py-3 flex items-start justify-between gap-3">
                   <div className="min-w-0 flex-1">
-                    <Link href={`/research/${b.projectId}`} className="text-sm font-medium hover:underline">
+                    <Link href={`/research/${b.id}`} className="text-sm font-medium hover:underline">
                       {b.title}
                     </Link>
                     <div className="flex items-center gap-2 mt-1 text-[10px] text-muted-foreground/50">
@@ -184,14 +236,31 @@ export default function BenchmarkPage() {
                       <span>{b.hypotheses.length} hypotheses</span>
                     </div>
                   </div>
-                  <button
-                    onClick={() => handleEvaluate(b.projectId)}
-                    disabled={evaluating === b.projectId}
-                    className="inline-flex items-center gap-1.5 rounded-md border border-border/60 px-3 py-1.5 text-[11px] hover:bg-muted/50 transition-colors disabled:opacity-50"
-                  >
-                    {evaluating === b.projectId ? <Loader2 className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3" />}
-                    Evaluate
-                  </button>
+                  <div className="flex gap-1.5">
+                    <button
+                      onClick={() => handleJudgePanel(b.id)}
+                      disabled={judging === b.id}
+                      className="inline-flex items-center gap-1.5 rounded-md border border-border/60 px-3 py-1.5 text-[11px] hover:bg-muted/50 transition-colors disabled:opacity-50"
+                    >
+                      {judging === b.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <FlaskConical className="h-3 w-3" />}
+                      Judge Panel
+                    </button>
+                    <button
+                      onClick={() => handleEvaluate(b.id)}
+                      disabled={evaluating === b.id}
+                      className="inline-flex items-center gap-1.5 rounded-md border border-border/60 px-3 py-1.5 text-[11px] hover:bg-muted/50 transition-colors disabled:opacity-50"
+                    >
+                      {evaluating === b.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3" />}
+                      Evaluate
+                    </button>
+                    <button
+                      onClick={() => handleDelete(b.id)}
+                      className="inline-flex items-center justify-center h-7 w-7 rounded-md text-muted-foreground/30 hover:text-destructive hover:bg-destructive/10 transition-colors"
+                      title="Delete benchmark"
+                    >
+                      <Trash2 className="h-3 w-3" />
+                    </button>
+                  </div>
                 </div>
 
                 {/* Ground truth (collapsible) */}
@@ -277,6 +346,59 @@ export default function BenchmarkPage() {
                         </div>
                       )}
                     </div>
+                  </div>
+                )}
+
+                {/* Judge panel results */}
+                {judgePanels[b.id] && (
+                  <div className="border-t border-border/30 px-4 py-3 space-y-4 bg-muted/5">
+                    <div className="flex items-center gap-2">
+                      <FlaskConical className="h-3.5 w-3.5 text-muted-foreground/60" />
+                      <span className="text-xs font-medium">Judge Panel</span>
+                      <span className="text-[10px] text-muted-foreground/40">{judgePanels[b.id].moveCount} moves evaluated</span>
+                    </div>
+
+                    {judgePanels[b.id].judges.map((judge) => (
+                      <div key={judge.judge} className="space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[11px] font-medium">{judge.judge}</span>
+                          <span className="text-[10px] text-muted-foreground/50">{judge.overallScore.toFixed(1)}/5</span>
+                        </div>
+
+                        {/* Move heatmap */}
+                        <div className="flex gap-px">
+                          {judge.verdicts.map((v) => (
+                            <div
+                              key={v.move}
+                              className="group relative flex-1 min-w-[6px]"
+                            >
+                              <div
+                                className={`h-3 rounded-sm ${
+                                  v.score >= 2 ? "bg-emerald-500" :
+                                  v.score >= 1 ? "bg-emerald-500/50" :
+                                  v.score === 0 ? "bg-muted-foreground/15" :
+                                  v.score >= -1 ? "bg-amber-500/50" :
+                                  "bg-red-500"
+                                }`}
+                                title={`Move ${v.move}: ${v.comment}`}
+                              />
+                              {/* Tooltip */}
+                              <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 hidden group-hover:block z-20 w-48 p-2 rounded-md bg-popover border border-border shadow-md text-[10px]">
+                                <div className="font-medium mb-0.5">
+                                  Move {v.move} — {judgePanels[b.id].moves[v.move - 1]?.title || "?"}
+                                </div>
+                                <div className={`font-medium ${v.score > 0 ? "text-emerald-500" : v.score < 0 ? "text-red-500" : "text-muted-foreground/50"}`}>
+                                  {v.label.toUpperCase()} ({v.score > 0 ? "+" : ""}{v.score})
+                                </div>
+                                <div className="text-muted-foreground/60 mt-0.5">{v.comment}</div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+
+                        <p className="text-[10px] text-muted-foreground/50">{judge.summary}</p>
+                      </div>
+                    ))}
                   </div>
                 )}
               </div>

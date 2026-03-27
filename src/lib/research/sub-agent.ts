@@ -54,7 +54,20 @@ Be specific — include paper titles, years, and concrete numbers.`;
 
 // ── Sub-agent tool sets ─────────────────────────────────────────
 
-function scoutTools(userId: string, _projectId: string) {
+function scoutTools(userId: string, _projectId: string, bannedPapers?: { title: string; doi?: string | null; arxivId?: string | null }[]) {
+  // Filter helper for benchmark blindfolding
+  const isBannedPaper = (r: { title: string; doi?: string | null; arxivId?: string | null }) => {
+    if (!bannedPapers || bannedPapers.length === 0) return false;
+    for (const b of bannedPapers) {
+      if (b.doi && r.doi && b.doi === r.doi) return true;
+      if (b.arxivId && r.arxivId && b.arxivId === r.arxivId) return true;
+      const normB = b.title.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+      const normR = r.title.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+      if (normB.length > 20 && (normR.includes(normB) || normB.includes(normR))) return true;
+    }
+    return false;
+  };
+
   return {
     find_papers: tool({
       description: "Search academic databases and return results for evaluation. Does NOT import papers — report findings so the lead researcher can decide what to import.",
@@ -64,7 +77,8 @@ function scoutTools(userId: string, _projectId: string) {
       }),
       execute: async ({ query, max_results }: { query: string; max_results?: number }) => {
         const results = await searchAllSources(query);
-        const relevant = filterByRelevance(results, query);
+        const relevant = filterByRelevance(results, query)
+          .filter((r) => !isBannedPaper(r));
         const toShow = relevant.slice(0, max_results || 3);
         if (toShow.length === 0) {
           return results.length > 0
@@ -606,7 +620,7 @@ const ROLE_CONFIG: Record<string, RoleConfig> = {
   scout: {
     tier: "standard",
     maxSteps: 15,
-    getTools: (input) => scoutTools(input.userId || "system", input.projectId || ""),
+    getTools: (input) => scoutTools(input.userId || "system", input.projectId || "", input.bannedPapers),
     getSystemPrompt: (input, goal) => scoutSystemPrompt(input.angle || goal, input.keywords || []),
     getUserMessage: (input, goal) => {
       const angle = input.angle || goal;

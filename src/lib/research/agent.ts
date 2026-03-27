@@ -422,7 +422,7 @@ async function runAgent(
     include: {
       collection: { include: { papers: { include: { paper: true }, take: 30 } } },
       hypotheses: true,
-      log: { orderBy: { createdAt: "desc" }, take: 30 },
+      log: { orderBy: { createdAt: "desc" }, take: 30, select: { type: true, content: true, metadata: true } },
       iterations: { orderBy: { number: "desc" }, take: 1, include: { steps: true } },
     },
   });
@@ -514,9 +514,11 @@ async function runAgent(
 
   // 4. Detect remote hosts and probe GPUs (filtered by user resource preferences)
   let resourceSetting: "all" | "local" | string[] = "all";
+  let bannedPapers: { title: string; doi?: string | null; arxivId?: string | null }[] = [];
   try {
     const briefParsed = JSON.parse(project.brief);
     if (briefParsed.resources) resourceSetting = briefParsed.resources;
+    if (Array.isArray(briefParsed.bannedPapers)) bannedPapers = briefParsed.bannedPapers;
   } catch { /* plain text brief */ }
 
   const allRemoteHosts = resourceSetting === "local" ? [] : await prisma.remoteHost.findMany({ take: 5 });
@@ -647,7 +649,7 @@ async function runAgent(
   };
   const expCounter = { value: experimentCounter };
   const searchCounter = { value: 0 };
-  const rawTools = createTools(projectId, userId, workDir, emit, remoteHosts, recordStep, { id: iterationId, number: iteration.number }, sharedDir, onIterationAdvance, model, expCounter, searchCounter, gpuInfo?.map((g) => ({ alias: g.alias, gpuCount: g.gpuCount })));
+  const rawTools = createTools(projectId, userId, workDir, emit, remoteHosts, recordStep, { id: iterationId, number: iteration.number }, sharedDir, onIterationAdvance, model, expCounter, searchCounter, gpuInfo?.map((g) => ({ alias: g.alias, gpuCount: g.gpuCount })), bannedPapers);
 
   // Wrap every tool's execute to sanitize return values — prevents invalid Unicode
   // surrogates from entering the LLM message history and causing API errors
@@ -743,6 +745,10 @@ async function runAgent(
       }
       if (experimentsSinceLastLitReview >= 3) {
         console.log(`[agent] Nudge: ${experimentsSinceLastLitReview} experiments without lit review`);
+      }
+      // Replan nudge every 20 steps
+      if (stepCount % 20 === 0 && stepCount > 0) {
+        emit({ type: "text", content: "\n\n[System: You've completed 20 steps since your last plan. Write an updated plan to RESEARCH_LOG.md before continuing.]\n\n" });
       }
 
       // Iteration advancement nudge — internal only
@@ -1089,6 +1095,35 @@ ${(() => {
 - You find a workaround for a common error
 
 ` : ""}
+## PLAN FIRST, THEN EXECUTE
+
+**Before doing ANYTHING, write a plan.** This is the most important rule in this system.
+
+At the start of every new project or session, your FIRST action must be to write a structured plan to RESEARCH_LOG.md using \`write_file\` (append mode). The plan must include:
+
+\`\`\`
+## Research Plan (Session N)
+**Goal:** [one sentence]
+**Current state:** [what we know so far]
+**Open questions:** [what we need to find out]
+**Plan:**
+1. [specific action] — [why this first]
+2. [specific action] — [expected outcome]
+3. [specific action] — [what it depends on]
+...
+**Success criteria:** [how we'll know we're done with this cycle]
+\`\`\`
+
+**REPLAN after every major outcome.** When a phase completes (literature done, experiment done, review done), STOP and write an updated plan BEFORE proceeding. The plan should reflect:
+- What you just learned
+- What changed about your assumptions
+- What the REVISED next steps are
+- Whether you should change direction entirely
+
+This is not optional. A plan that is never revised is a bad plan. The act of replanning forces you to think critically about whether your current trajectory makes sense given what you've learned.
+
+**Key principle from Plan-and-Act (ICML 2025):** Agents that separate planning from execution outperform those that interleave them. Plan your strategy, THEN execute it. When results come back, replan, THEN execute again. Never freestyle.
+
 ## The Research Cycle (repeat this loop — NEVER stop after one experiment)
 
 ### Phase 1: Literature, Synthesis & Hypotheses
@@ -1108,18 +1143,42 @@ ${(() => {
 ### Phase 2: Experiment
 
 **╔══════════════════════════════════════════════════════════════════╗**
-**║  HARD GATE: READ BEFORE WRITING ANY EXPERIMENT CODE            ║**
+**║  PROOF-OF-CONCEPT FIRST — ALWAYS                               ║**
 **╚══════════════════════════════════════════════════════════════════╝**
+
+**Before any full-scale experiment, run a minimal proof-of-concept.** This is the single most important rule for experiment efficiency:
+
+1. **PoC = test the core idea in <5 minutes** on a tiny setup (small model, few examples, 1 GPU, 1-2 epochs). The goal is to verify the METHOD works, not to get publishable numbers.
+2. **Only scale up AFTER the PoC succeeds.** If the PoC shows the core idea doesn't work, you've saved hours of GPU time. Iterate on the idea, not the infrastructure.
+3. **PoC should be a separate script** (e.g., \`poc_001_test_idea.py\`) that runs locally or on a single GPU with minimal dependencies. Keep it simple — no DeepSpeed, no multi-GPU, no full datasets.
+4. **What counts as PoC success:** The core mechanism does what you expect (loss decreases, gradient flows, attention patterns change, etc.). NOT that it beats a baseline — that comes at full scale.
+
+**The PoC → Scale pipeline:**
+- \`poc_NNN_idea.py\` — minimal test, <5 min, local/1-GPU, toy data ✓
+- \`exp_NNN_full.py\` — full scale, multi-GPU, real datasets, proper baselines ✓
+- NEVER skip straight to full scale. Every hour of GPU debugging you avoid with a 5-minute PoC is an hour you can spend refining the method.
+
+**╔══════════════════════════════════════════════════════════════════╗**
+**║  INFRASTRUCTURE BUDGET: MAX 3 ATTEMPTS                         ║**
+**╚══════════════════════════════════════════════════════════════════╝**
+
+**If an experiment fails due to infrastructure (OOM, import errors, CUDA version, pip failures, decoding bugs), you get 3 attempts to fix it.** After 3 failed infrastructure fixes:
+- STOP debugging infrastructure
+- Simplify the setup (smaller model, fewer GPUs, simpler dependencies)
+- Or ASK THE USER for help
+- NEVER spend more than 5 steps debugging the same infrastructure issue
+
+**Your time is better spent iterating on the RESEARCH IDEA than fighting environment bugs.** If torch won't install, use a simpler framework. If multi-GPU crashes, run on 1 GPU first. If a large model doesn't fit, use a smaller one to test the idea. The method matters more than the scale — you can always scale up later once the idea is proven.
 
 **The system runs a PRE-FLIGHT VALIDATOR on every script before submission. It will REJECT your code if it violates these rules. Do not try to work around it — fix the underlying issue.**
 
-**DATA RULES (violations = blocked submission):**
+**DATA RULES (apply to \`exp_NNN\` full-scale scripts — PoC scripts are exempt):**
 1. **FULL DATASETS ONLY.** Use the complete train/eval/test splits. NEVER slice to [:200], [:500], or any small number. If a dataset has 50,000 examples, use all 50,000.
 2. **No artificial caps.** Never set n_train=200, max_samples=500, or similar hard limits. The point of having 8xA100 is to run at scale.
 3. **If memory is the concern, fix memory — not data.** Use streaming (\`load_dataset(..., streaming=True)\`), lazy loading, or gradient accumulation. NEVER reduce data to fit in memory.
 4. **Evaluation sets: minimum 500 samples** for any metric to be meaningful. Ideally use the full test split.
 
-**GPU RULES (violations = blocked submission):**
+**GPU RULES (apply to \`exp_NNN\` full-scale scripts — PoC scripts can use 1 GPU):**
 1. **USE ALL GPUs for training.** Use \`accelerate launch\` + DeepSpeed for any training run. This is non-negotiable.
 2. **NEVER disable DeepSpeed/accelerate.** No \`deepspeed=None\`, no \`ACCELERATE_NO_DEEPSPEED\`.
 3. **For inference across multiple models:** Use device_map="auto" for large models, or distribute models across GPUs. But training MUST use proper data parallelism (not just pinning one model per GPU).
@@ -1164,14 +1223,22 @@ ${(() => {
 - Run the experiment. If it fails, FIX it and re-run. Never move on from a failure.
 - For remote execution: just write requirements.txt and run \`python3 script.py\` — the system handles venv and packages automatically (see Environment Setup above).
 
-### Phase 3: Critique & Next Steps (THIS IS THE MOST IMPORTANT PHASE)
-After an experiment completes, do ALL of these:
+### Phase 3: Critique, Replan & Next Steps (THIS IS THE MOST IMPORTANT PHASE)
+After an experiment completes, do ALL of these IN ORDER:
 
 1. **Analyze results yourself** — read the output, compute metrics, compare to baselines from the literature. Don't just glance at the numbers — dig into what they mean.
 
 2. **\`adversarial_review\` or \`dispatch_reviewer\`** — get independent critique of your hypotheses, methods, and findings. Use \`adversarial_review\` for quick inline feedback, or \`dispatch_reviewer\` for deep background review (Opus with library access).
 
-3. **\`dispatch_architect\`** with the synthesis (from Phase 1) + your analysis + current results → the architect proposes novel approaches for the next iteration.
+3. **REPLAN** — Write an updated plan to RESEARCH_LOG.md. This is the critical step most agents skip. Based on what you just learned:
+   - What assumptions were wrong?
+   - Should you continue in this direction or pivot?
+   - What's the revised hypothesis?
+   - What specific experiment comes next and WHY?
+
+4. **\`dispatch_architect\`** with the synthesis (from Phase 1) + your analysis + current results → the architect proposes novel approaches for the next iteration.
+
+5. **If stuck for 2+ experiments**, use **\`dispatch_provocateur\`** — get wildly different ideas from outside your current trajectory.
 
 After EVERY successful experiment, ask yourself:
 - **Are the results statistically meaningful?** If no error bars, standard deviations, or multiple runs — your results are unreliable. Re-run with proper statistical rigor.
@@ -1268,7 +1335,7 @@ ${papers.length > 0 ? `Papers in collection (${papers.length}):\n${papers.map((p
 // ── Messages ─────────────────────────────────────────────────────
 
 function buildMessages(
-  project: { brief: string; hypotheses: { statement: string; status: string }[]; log: { type: string; content: string }[] },
+  project: { brief: string; hypotheses: { statement: string; status: string }[]; log: { type: string; content: string; metadata?: string | null }[] },
   papers: { title: string }[],
   userMessage: string | null,
   researchLog?: string,
@@ -1294,6 +1361,11 @@ function buildMessages(
   // Include recent DB log entries not already in the file
   const recentLog = project.log
     .filter((l) => l.type !== "agent_suggestion")
+    .filter((l) => {
+      // Exclude ground truth entries (benchmarks) from agent context
+      if (!l.metadata) return true;
+      try { return !JSON.parse(l.metadata).groundTruth; } catch { return true; }
+    })
     .slice(0, 10);
   if (recentLog.length > 0) {
     context += `\n\nRecent activity:\n${recentLog.map((l) => `[${l.type}] ${l.content}`).join("\n")}`;
@@ -1324,7 +1396,11 @@ function buildMessages(
       content: hasWork
         ? `Continue researching this topic: ${brief}${subQBlock}${constraintBlock}
 
-You already have ${papers.length} papers and prior work. Check the existing results files with list_files and read_file before starting new experiments. If experiment code already exists, review it, fix any issues, and re-run. Do NOT re-search for papers you already have.
+You already have ${papers.length} papers and prior work.
+
+**FIRST ACTION: Read RESEARCH_LOG.md and write an updated plan.** Review the previous plan, check what was accomplished, and write a revised plan for this session. What changed? What did you learn? What should the next steps be?
+
+Then: Check the existing results files with list_files and read_file before starting new experiments. If experiment code already exists, review it, fix any issues, and re-run. Do NOT re-search for papers you already have.
 
 IMPORTANT: Don't just re-run what failed. Critically examine the results so far. What's missing? What wasn't tested? What would a reviewer criticize? Design follow-up experiments that address these gaps. Your goal is to produce findings that are NOVEL — something not already known from the papers.${hasPapersNoHypotheses ? `
 
@@ -1333,14 +1409,18 @@ CRITICAL: You have ${papers.length} papers but NO hypotheses yet. Before running
 All current hypotheses have been resolved (supported or refuted). Consider: (1) formulating NEW hypotheses based on what you learned, (2) using complete_iteration to start a new research cycle with a fresh direction, or (3) running deeper experiments on the most interesting findings.` : ""}${context}`
         : `Start researching this topic: ${brief}${subQBlock}${constraintBlock}
 
-Follow the full research cycle:
-1. Search broadly for papers (2-3 different queries covering different angles)
+YOUR FIRST ACTION: Write a research plan to RESEARCH_LOG.md. Before searching papers, before running experiments — PLAN. Include your goal, initial hypotheses about what might work, what angles to search, and what a successful outcome looks like.
+
+Then follow the research cycle:
+1. Execute your plan: search broadly for papers (dispatch_scouts with 2-3 angles)
 2. Read the most relevant ones — extract specific methods, datasets, baselines, and numerical results
-3. Formulate 2-3 specific, testable hypotheses
-4. Design your first experiment WITH baselines from the literature
-5. Run it, then CRITIQUE the results ruthlessly before deciding what to do next
-6. Run follow-up experiments based on your critique
-7. Keep iterating until you have genuine findings
+3. REPLAN: update your plan based on what you found in the literature
+4. Formulate 2-3 specific, testable hypotheses
+5. Design your first experiment WITH baselines from the literature
+6. Run it, then CRITIQUE the results ruthlessly
+7. REPLAN: update your plan based on experimental results
+8. Run follow-up experiments based on your revised plan
+9. Keep iterating — each cycle starts with a plan revision
 
 Do NOT stop after one experiment. A single experiment is a first draft, not a result.${context}`,
     });
@@ -1434,7 +1514,22 @@ function createTools(
   expCounter?: { value: number },
   searchCounter?: { value: number },
   cachedGpuInfo?: { alias: string; gpuCount: number }[],
+  bannedPapers?: { title: string; doi?: string | null; arxivId?: string | null }[],
 ) {
+  // Helper: check if a paper is banned (for benchmarks)
+  const isBanned = (r: { title: string; doi?: string | null; arxivId?: string | null }) => {
+    if (!bannedPapers || bannedPapers.length === 0) return false;
+    for (const banned of bannedPapers) {
+      if (banned.doi && r.doi && banned.doi === r.doi) return true;
+      if (banned.arxivId && r.arxivId && banned.arxivId === r.arxivId) return true;
+      // Fuzzy title match — normalize and check containment
+      const normBanned = banned.title.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+      const normTitle = r.title.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+      if (normBanned.length > 20 && (normTitle.includes(normBanned) || normBanned.includes(normTitle))) return true;
+    }
+    return false;
+  };
+
   // Track active background job IDs for this session
   const activeJobIds = new Set<string>();
   const consecutiveSearches = searchCounter || { value: 0 };
@@ -1458,7 +1553,8 @@ function createTools(
         const maxResults = max_results || 5;
         const results = await searchAllSources(query);
         // Filter by relevance BEFORE importing — only papers matching the query
-        const relevant = filterByRelevance(results, query);
+        const relevant = filterByRelevance(results, query)
+          .filter((r) => !isBanned(r)); // Exclude banned papers (benchmarks)
         const toImport = relevant.slice(0, maxResults);
         if (toImport.length === 0) {
           const totalFound = results.length;
@@ -1622,6 +1718,16 @@ function createTools(
         title: z.string().describe("Title (or partial title) of the paper to read"),
       }),
       execute: async ({ title }: { title: string }) => {
+        // Check if trying to read a banned paper (benchmarks)
+        if (bannedPapers && bannedPapers.length > 0) {
+          for (const b of bannedPapers) {
+            const normB = b.title.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+            const normT = title.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+            if (normB.includes(normT) || normT.includes(normB)) {
+              return `Paper "${title}" not found in library.`;
+            }
+          }
+        }
         emit({ type: "tool_progress", toolName: "read_paper", content: `Looking up "${title.slice(0, 60)}..."` });
         const paper = await prisma.paper.findFirst({
           where: {
@@ -2057,10 +2163,15 @@ function createTools(
         // The stale job cleanup handles genuinely stuck jobs.
 
         // ── Pre-flight validation: catch antipatterns before burning GPU time ──
+        // Skip preflight for proof-of-concept scripts (poc_NNN_*.py) — they're intentionally small
+        const isPoc = /python3?\s+poc_\d+/.test(sanitized);
         const preflightGpuCount = cachedGpuInfo?.find((g: { alias: string }) => g.alias === host.alias)?.gpuCount ?? 1;
+        if (isPoc) {
+          emit({ type: "tool_output", toolName: "execute_remote", content: `PoC script detected — skipping pre-flight checks` });
+        }
         try {
           const { validateExperiment } = await import("./preflight");
-          const preflight = await validateExperiment(workDir, sanitized, preflightGpuCount);
+          const preflight = isPoc ? { ok: true, violations: [], summary: "" } : await validateExperiment(workDir, sanitized, preflightGpuCount);
           if (!preflight.ok) {
             emit({ type: "tool_output", toolName: "execute_remote", content: `\n⛔ PRE-FLIGHT CHECK FAILED\n${preflight.summary}` });
             return `BLOCKED — pre-flight validation found ${preflight.violations.filter(v => v.severity === "error").length} error(s) in the experiment code. Fix these before submitting:\n\n${preflight.summary}\n\nThe experiment was NOT submitted. Fix the code with write_file and try again.`;
@@ -2512,7 +2623,7 @@ function createTools(
               role: "scout",
               goal: facet.angle,
               status: "PENDING",
-              input: JSON.stringify({ angle: facet.angle, keywords: facet.keywords, userId }),
+              input: JSON.stringify({ angle: facet.angle, keywords: facet.keywords, userId, bannedPapers: bannedPapers || [] }),
             },
           });
           taskIds.push(task.id);
@@ -3187,7 +3298,7 @@ Be harsh but fair. Vague praise is useless. Specific criticism saves months of w
           where: { userId },
           select: {
             id: true, title: true, abstract: true, summary: true, fullText: true,
-            year: true, venue: true, authors: true, keyFindings: true,
+            year: true, venue: true, authors: true, keyFindings: true, doi: true, arxivId: true,
             tags: { include: { tag: true } },
             insights: {
               include: { room: { select: { name: true } } },
@@ -3256,6 +3367,7 @@ Be harsh but fair. Vague praise is useless. Specific criticism saves months of w
           return { paper, score };
         })
           .filter((s) => s.score > 0)
+          .filter((s) => !isBanned(s.paper)) // Exclude banned papers (benchmarks)
           .sort((a, b) => b.score - a.score)
           .slice(0, maxResults);
 
@@ -3388,6 +3500,7 @@ Be harsh but fair. Vague praise is useless. Specific criticism saves months of w
           return { insight, score: scoreText(searchable, queryTerms) };
         })
           .filter((s) => s.score > 0)
+          .filter((s) => !isBanned(s.insight.paper)) // Exclude banned papers (benchmarks)
           .sort((a, b) => b.score - a.score)
           .slice(0, maxResults);
 
