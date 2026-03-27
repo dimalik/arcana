@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { FlaskConical, Sparkles, Loader2, CheckCircle, AlertTriangle, ChevronDown, Target, Eye, EyeOff } from "lucide-react";
+import { useState, useEffect } from "react";
+import { FlaskConical, Sparkles, Loader2, CheckCircle, AlertTriangle, BookOpen, Lightbulb, Eye, EyeOff, Clock } from "lucide-react";
 import { toast } from "sonner";
 
 interface JudgeVerdict {
@@ -28,6 +28,17 @@ interface Evaluation {
   recommendations: string[];
 }
 
+interface StoredRun {
+  type: "judges" | "evaluation";
+  timestamp: number;
+  stepCount: number;
+  data: {
+    moves?: { step: number; type: string; title: string }[];
+    judges?: JudgeReport[];
+    evaluation?: Evaluation;
+  };
+}
+
 interface Props {
   projectId: string;
   groundTruth: string | null;
@@ -41,12 +52,43 @@ const SCORE_LABELS: Record<string, string> = {
   novelContributions: "Novel",
 };
 
+const STORE_KEY = (id: string) => `benchmark-runs-${id}`;
+
+function loadRuns(projectId: string): StoredRun[] {
+  try {
+    return JSON.parse(localStorage.getItem(STORE_KEY(projectId)) || "[]");
+  } catch { return []; }
+}
+
+function saveRun(projectId: string, run: StoredRun) {
+  const runs = loadRuns(projectId);
+  runs.unshift(run);
+  localStorage.setItem(STORE_KEY(projectId), JSON.stringify(runs.slice(0, 20)));
+}
+
+function timeAgo(ts: number): string {
+  const diff = Date.now() - ts;
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return `${Math.floor(hrs / 24)}d ago`;
+}
+
 export function BenchmarkPanel({ projectId, groundTruth }: Props) {
   const [judging, setJudging] = useState(false);
   const [evaluating, setEvaluating] = useState(false);
-  const [judges, setJudges] = useState<{ moves: { step: number; type: string; title: string }[]; judges: JudgeReport[] } | null>(null);
-  const [evaluation, setEvaluation] = useState<Evaluation | null>(null);
   const [showGroundTruth, setShowGroundTruth] = useState(false);
+  const [selectedVerdict, setSelectedVerdict] = useState<{ judge: string; verdict: JudgeVerdict } | null>(null);
+  const [runs, setRuns] = useState<StoredRun[]>([]);
+  const [activeRunIdx, setActiveRunIdx] = useState(0);
+
+  useEffect(() => { setRuns(loadRuns(projectId)); }, [projectId]);
+
+  const activeRun = runs[activeRunIdx] || null;
+  const judges = activeRun?.data.judges ? { moves: activeRun.data.moves || [], judges: activeRun.data.judges } : null;
+  const evaluation = activeRun?.data.evaluation || null;
 
   const runJudges = async () => {
     setJudging(true);
@@ -58,7 +100,15 @@ export function BenchmarkPanel({ projectId, groundTruth }: Props) {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
-      setJudges(data);
+      const run: StoredRun = {
+        type: "judges",
+        timestamp: Date.now(),
+        stepCount: data.moveCount || 0,
+        data: { moves: data.moves, judges: data.judges },
+      };
+      saveRun(projectId, run);
+      setRuns(loadRuns(projectId));
+      setActiveRunIdx(0);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Judge panel failed");
     }
@@ -75,7 +125,15 @@ export function BenchmarkPanel({ projectId, groundTruth }: Props) {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
-      setEvaluation(data.evaluation);
+      const run: StoredRun = {
+        type: "evaluation",
+        timestamp: Date.now(),
+        stepCount: 0,
+        data: { evaluation: data.evaluation },
+      };
+      saveRun(projectId, run);
+      setRuns(loadRuns(projectId));
+      setActiveRunIdx(0);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Evaluation failed");
     }
@@ -85,35 +143,40 @@ export function BenchmarkPanel({ projectId, groundTruth }: Props) {
   return (
     <div className="space-y-3">
       {/* Actions */}
-      <div className="flex items-center gap-2">
-        <button
-          onClick={runJudges}
-          disabled={judging}
-          className="inline-flex items-center gap-1.5 rounded-md border border-border/60 px-3 py-1.5 text-[11px] hover:bg-muted/50 transition-colors disabled:opacity-50"
-        >
+      <div className="flex items-center gap-2 flex-wrap">
+        <button onClick={runJudges} disabled={judging} className="inline-flex items-center gap-1.5 rounded-md border border-border/60 px-3 py-1.5 text-[11px] hover:bg-muted/50 transition-colors disabled:opacity-50">
           {judging ? <Loader2 className="h-3 w-3 animate-spin" /> : <FlaskConical className="h-3 w-3" />}
           Run Judges
         </button>
-        <button
-          onClick={runEval}
-          disabled={evaluating}
-          className="inline-flex items-center gap-1.5 rounded-md border border-border/60 px-3 py-1.5 text-[11px] hover:bg-muted/50 transition-colors disabled:opacity-50"
-        >
+        <button onClick={runEval} disabled={evaluating} className="inline-flex items-center gap-1.5 rounded-md border border-border/60 px-3 py-1.5 text-[11px] hover:bg-muted/50 transition-colors disabled:opacity-50">
           {evaluating ? <Loader2 className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3" />}
           Evaluate
         </button>
         {groundTruth && (
-          <button
-            onClick={() => setShowGroundTruth(!showGroundTruth)}
-            className="inline-flex items-center gap-1.5 rounded-md border border-border/60 px-3 py-1.5 text-[11px] hover:bg-muted/50 transition-colors ml-auto"
-          >
+          <button onClick={() => setShowGroundTruth(!showGroundTruth)} className="inline-flex items-center gap-1.5 rounded-md border border-border/60 px-3 py-1.5 text-[11px] hover:bg-muted/50 transition-colors ml-auto">
             {showGroundTruth ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
             {showGroundTruth ? "Hide" : "Show"} Ground Truth
           </button>
         )}
       </div>
 
-      {/* Ground truth (collapsible) */}
+      {/* Previous runs selector */}
+      {runs.length > 1 && (
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <Clock className="h-3 w-3 text-muted-foreground/30" />
+          {runs.map((run, idx) => (
+            <button
+              key={idx}
+              onClick={() => { setActiveRunIdx(idx); setSelectedVerdict(null); }}
+              className={`text-[9px] px-1.5 py-0.5 rounded transition-colors ${idx === activeRunIdx ? "bg-foreground/10 text-foreground" : "text-muted-foreground/40 hover:text-muted-foreground"}`}
+            >
+              {run.type === "judges" ? "J" : "E"} {timeAgo(run.timestamp)}{run.stepCount > 0 ? ` (${run.stepCount} steps)` : ""}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Ground truth */}
       {showGroundTruth && groundTruth && (
         <div className="rounded-md border border-amber-500/20 bg-amber-500/5 p-3">
           <p className="text-[10px] text-amber-500/70 font-medium mb-1">Ground Truth (spoiler)</p>
@@ -145,24 +208,28 @@ export function BenchmarkPanel({ projectId, groundTruth }: Props) {
           </div>
           <p className="text-xs text-muted-foreground/70">{evaluation.summary}</p>
           <div className="grid grid-cols-2 gap-3 text-[11px]">
-            {evaluation.whatMatched.length > 0 && (
+            {evaluation.whatMatched?.length > 0 && (
               <div>
-                <span className="text-emerald-500/70 font-medium flex items-center gap-1 mb-1">
-                  <CheckCircle className="h-3 w-3" /> Matched
-                </span>
-                <ul className="space-y-0.5 text-muted-foreground/60">
-                  {evaluation.whatMatched.map((m, i) => <li key={i}>- {m}</li>)}
-                </ul>
+                <span className="text-emerald-500/70 font-medium flex items-center gap-1 mb-1"><CheckCircle className="h-3 w-3" /> Matched</span>
+                <ul className="space-y-0.5 text-muted-foreground/60">{evaluation.whatMatched.map((m, i) => <li key={i}>- {m}</li>)}</ul>
               </div>
             )}
-            {evaluation.whatMissed.length > 0 && (
+            {evaluation.whatMissed?.length > 0 && (
               <div>
-                <span className="text-amber-500/70 font-medium flex items-center gap-1 mb-1">
-                  <AlertTriangle className="h-3 w-3" /> Missed
-                </span>
-                <ul className="space-y-0.5 text-muted-foreground/60">
-                  {evaluation.whatMissed.map((m, i) => <li key={i}>- {m}</li>)}
-                </ul>
+                <span className="text-amber-500/70 font-medium flex items-center gap-1 mb-1"><AlertTriangle className="h-3 w-3" /> Missed</span>
+                <ul className="space-y-0.5 text-muted-foreground/60">{evaluation.whatMissed.map((m, i) => <li key={i}>- {m}</li>)}</ul>
+              </div>
+            )}
+            {evaluation.surprises?.length > 0 && (
+              <div>
+                <span className="text-purple-500/70 font-medium flex items-center gap-1 mb-1"><Lightbulb className="h-3 w-3" /> Surprises</span>
+                <ul className="space-y-0.5 text-muted-foreground/60">{evaluation.surprises.map((s, i) => <li key={i}>- {s}</li>)}</ul>
+              </div>
+            )}
+            {evaluation.recommendations?.length > 0 && (
+              <div>
+                <span className="text-blue-500/70 font-medium flex items-center gap-1 mb-1"><BookOpen className="h-3 w-3" /> Improve</span>
+                <ul className="space-y-0.5 text-muted-foreground/60">{evaluation.recommendations.map((r, i) => <li key={i}>- {r}</li>)}</ul>
               </div>
             )}
           </div>
@@ -170,7 +237,7 @@ export function BenchmarkPanel({ projectId, groundTruth }: Props) {
       )}
 
       {/* Judge heatmaps */}
-      {judges && (
+      {judges && judges.judges.length > 0 && (
         <div className="space-y-3">
           {judges.judges.map((judge) => (
             <div key={judge.judge} className="space-y-1.5">
@@ -178,34 +245,55 @@ export function BenchmarkPanel({ projectId, groundTruth }: Props) {
                 <span className="text-[11px] font-medium">{judge.judge}</span>
                 <span className="text-[10px] text-muted-foreground/50">{judge.overallScore.toFixed(1)}/5</span>
               </div>
+              {/* Heatmap — click to select, not hover */}
               <div className="flex gap-px">
                 {judge.verdicts.map((v) => (
-                  <div key={v.move} className="group relative flex-1 min-w-[4px]">
-                    <div
-                      className={`h-3 rounded-sm ${
-                        v.score >= 2 ? "bg-emerald-500" :
-                        v.score >= 1 ? "bg-emerald-500/50" :
-                        v.score === 0 ? "bg-muted-foreground/15" :
-                        v.score >= -1 ? "bg-amber-500/50" :
-                        "bg-red-500"
-                      }`}
-                    />
-                    <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 hidden group-hover:block z-20 w-48 p-2 rounded-md bg-popover border border-border shadow-md text-[10px]">
-                      <div className="font-medium mb-0.5">
-                        Move {v.move}: {judges.moves[v.move - 1]?.title || "?"}
-                      </div>
-                      <div className={v.score > 0 ? "text-emerald-500" : v.score < 0 ? "text-red-500" : "text-muted-foreground/50"}>
-                        {v.label.toUpperCase()} ({v.score > 0 ? "+" : ""}{v.score})
-                      </div>
-                      <div className="text-muted-foreground/60 mt-0.5">{v.comment}</div>
-                    </div>
-                  </div>
+                  <button
+                    key={v.move}
+                    onClick={() => setSelectedVerdict(
+                      selectedVerdict?.judge === judge.judge && selectedVerdict?.verdict.move === v.move
+                        ? null
+                        : { judge: judge.judge, verdict: v }
+                    )}
+                    className={`flex-1 min-w-[4px] h-4 rounded-sm transition-opacity ${
+                      selectedVerdict && !(selectedVerdict.judge === judge.judge && selectedVerdict.verdict.move === v.move) ? "opacity-30" : ""
+                    } ${
+                      v.score >= 2 ? "bg-emerald-500" :
+                      v.score >= 1 ? "bg-emerald-500/50" :
+                      v.score === 0 ? "bg-muted-foreground/15" :
+                      v.score >= -1 ? "bg-amber-500/50" :
+                      "bg-red-500"
+                    }`}
+                  />
                 ))}
               </div>
               <p className="text-[10px] text-muted-foreground/40">{judge.summary}</p>
             </div>
           ))}
+
+          {/* Selected verdict detail — shown below heatmaps */}
+          {selectedVerdict && (
+            <div className="rounded-md border border-border/40 bg-muted/20 p-2.5 text-[11px] animate-in fade-in-0 duration-100">
+              <div className="flex items-center justify-between mb-1">
+                <span className="font-medium">
+                  Move {selectedVerdict.verdict.move}: {judges.moves[selectedVerdict.verdict.move - 1]?.title || "?"}
+                </span>
+                <span className="text-[9px] text-muted-foreground/40">{selectedVerdict.judge}</span>
+              </div>
+              <div className={`font-medium text-xs ${selectedVerdict.verdict.score > 0 ? "text-emerald-500" : selectedVerdict.verdict.score < 0 ? "text-red-500" : "text-muted-foreground/50"}`}>
+                {selectedVerdict.verdict.label.toUpperCase()} ({selectedVerdict.verdict.score > 0 ? "+" : ""}{selectedVerdict.verdict.score})
+              </div>
+              <p className="text-muted-foreground/60 mt-1">{selectedVerdict.verdict.comment}</p>
+            </div>
+          )}
         </div>
+      )}
+
+      {/* Empty state */}
+      {!judges && !evaluation && runs.length === 0 && (
+        <p className="text-[10px] text-muted-foreground/30 text-center py-2">
+          Run judges or evaluate to see how the agent is performing against the ground truth.
+        </p>
       )}
     </div>
   );
