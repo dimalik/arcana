@@ -1138,7 +1138,22 @@ This is not optional. A plan that is never revised is a bad plan. The act of rep
 6. **\`dispatch_architect\`** with the synthesis output and your goal → the architect (Opus) proposes novel approaches with risk ratings and validation experiments
 7. \`collect_results\` (architect proposals) → pick the cheapest validation experiment to try first
 
-- **Move to experiments quickly** — don't spend more than 12 steps on literature alone. The synthesizer and architect run in the background while you can do other work.
+- Use the synthesizer and architect in parallel while you read papers — don't wait idly.
+
+### Phase 1b: Mechanism Design (DO NOT SKIP)
+
+**Before writing ANY code, you MUST write a detailed mechanism design document to RESEARCH_LOG.md.** This is the bridge between understanding the literature and implementing experiments.
+
+Your mechanism design document should include:
+1. **Problem formulation**: What exactly are we optimizing? Write the math. What is the loss function? What are the inputs and outputs?
+2. **Proposed mechanism**: Step-by-step description of how your method works, in enough detail that someone else could implement it. Pseudocode, not Python — focus on the LOGIC, not the syntax.
+3. **Key design decisions**: For each choice (architecture, loss, optimizer, etc.), explain WHY this choice and not the alternatives. Reference specific papers.
+4. **Expected behavior**: What should happen if the mechanism works correctly? What metrics should change and by how much? What would FAILURE look like?
+5. **Baselines**: What exactly are you comparing against, and what are their published numbers on the same benchmarks?
+
+**Why this matters:** Most failed experiments fail because the mechanism was under-specified, not because the code was wrong. If you can't explain the mechanism clearly in writing, you're not ready to code it. Infrastructure debugging dominates when the agent jumps to code without understanding what it's building — then it spends 80% of its time fixing OOM/imports/decoding bugs instead of testing the actual idea.
+
+**Only proceed to Phase 2 after the mechanism design is written and logged.**
 
 ### Phase 2: Experiment
 
@@ -1169,6 +1184,14 @@ This is not optional. A plan that is never revised is a bad plan. The act of rep
 - NEVER spend more than 5 steps debugging the same infrastructure issue
 
 **Your time is better spent iterating on the RESEARCH IDEA than fighting environment bugs.** If torch won't install, use a simpler framework. If multi-GPU crashes, run on 1 GPU first. If a large model doesn't fit, use a smaller one to test the idea. The method matters more than the scale — you can always scale up later once the idea is proven.
+
+**Step budget guideline for a typical research cycle:**
+- Literature + synthesis: ~15-20% of steps (understanding the landscape)
+- Mechanism design: ~10% of steps (writing the detailed design doc)
+- PoC experiments: ~20% of steps (quick validation of core ideas)
+- Full experiments: ~30% of steps (scaling up proven ideas)
+- Analysis + critique + replanning: ~20% of steps (interpreting results, next iteration)
+- Infrastructure debugging: **<5% of steps** — if you're spending more than this on infra, simplify
 
 **The system runs a PRE-FLIGHT VALIDATOR on every script before submission. It will REJECT your code if it violates these rules. Do not try to work around it — fix the underlying issue.**
 
@@ -1533,8 +1556,21 @@ function createTools(
   // Track active background job IDs for this session
   const activeJobIds = new Set<string>();
   const consecutiveSearches = searchCounter || { value: 0 };
+  let consecutiveCheckRemote = 0;
   // Experiment counter for sequential naming (shared with caller via ref object)
   const experimentCount = expCounter || { value: 0 };
+
+  const BLOCKED_COMMAND_PATTERNS = /\b(pip3?\s+install|pip3?\s+uninstall|conda\s+(install|create|env)|apt(-get)?\s+install|sudo\s)/i;
+
+  function isBlockedInfraCommand(cmd: string): string | null {
+    if (BLOCKED_COMMAND_PATTERNS.test(cmd)) {
+      return "Package management commands are not allowed. To add dependencies:\n" +
+        "1. Add them to requirements.txt using write_file\n" +
+        "2. The system installs them automatically when you run execute_remote\n" +
+        "3. If a package fails to install, ask the user for help — don't try to pip install manually.";
+    }
+    return null;
+  }
 
   return {
     search_papers: tool({
@@ -1544,6 +1580,7 @@ function createTools(
         max_results: z.number().min(1).max(8).default(5).optional(),
       }),
       execute: async ({ query, max_results }: { query: string; max_results?: number }) => {
+        consecutiveCheckRemote = 0;
         // Hard rate-limit: max 2 consecutive search_papers calls before requiring a different tool
         consecutiveSearches.value++;
         if (consecutiveSearches.value > 2) {
@@ -1718,6 +1755,7 @@ function createTools(
         title: z.string().describe("Title (or partial title) of the paper to read"),
       }),
       execute: async ({ title }: { title: string }) => {
+        consecutiveCheckRemote = 0;
         // Check if trying to read a banned paper (benchmarks)
         if (bannedPapers && bannedPapers.length > 0) {
           for (const b of bannedPapers) {
@@ -1881,6 +1919,7 @@ function createTools(
         content: z.string().describe("Full file content"),
       }),
       execute: async ({ filename, content }: { filename: string; content: string }) => {
+        consecutiveCheckRemote = 0;
         // Prevent path traversal
         let safeName = path.basename(filename);
 
@@ -1967,6 +2006,9 @@ function createTools(
         timeout_seconds: z.number().default(300).optional().describe("Max execution time in seconds (default 300)"),
       }),
       execute: async ({ command, timeout_seconds }: { command: string; timeout_seconds?: number }) => {
+        const blocked = isBlockedInfraCommand(command);
+        if (blocked) return blocked;
+
         emit({ type: "tool_progress", toolName: "execute_command", content: `$ ${command.slice(0, 100)}${command.length > 100 ? "..." : ""}` });
         const timeoutSec = timeout_seconds || 300;
         const isPythonRun = /python\s/.test(command);
@@ -2065,6 +2107,15 @@ function createTools(
         host_alias: z.string().optional().describe("Remote host alias. Omit for default."),
       }),
       execute: async ({ command, host_alias }: { command: string; host_alias?: string }) => {
+        consecutiveCheckRemote++;
+        if (consecutiveCheckRemote > 3) {
+          consecutiveCheckRemote = 0;
+          return "You've checked the remote 3 times in a row. Use check_job for running experiments, read_file for local files, or get back to research. If you need the workspace state, describe what you're looking for and use a single targeted command.";
+        }
+
+        const blocked = isBlockedInfraCommand(command);
+        if (blocked) return blocked;
+
         const hostWhere = host_alias ? { alias: host_alias } : { isDefault: true };
         let host = await prisma.remoteHost.findFirst({ where: hostWhere });
         if (!host) host = await prisma.remoteHost.findFirst();
@@ -2109,6 +2160,7 @@ function createTools(
         host_alias: z.string().optional().describe("Remote host alias. Omit to use the default host."),
       }),
       execute: async ({ command, host_alias }: { command: string; host_alias?: string }) => {
+        consecutiveCheckRemote = 0;
         // Find host
         const hostWhere = host_alias
           ? { alias: host_alias }
@@ -2610,6 +2662,7 @@ function createTools(
         })).min(2).max(3).describe("2-3 different search facets to explore in parallel"),
       }),
       execute: async ({ facets }: { facets: { angle: string; keywords: string[] }[] }) => {
+        consecutiveCheckRemote = 0;
         if (!(prisma as unknown as Record<string, unknown>).agentTask) {
           return "Sub-agent tasks not available. Restart the dev server to pick up schema changes.";
         }
@@ -2652,6 +2705,7 @@ function createTools(
           .describe("What aspect to focus the review on"),
       }),
       execute: async ({ content, focus }: { content: string; focus?: string }) => {
+        consecutiveCheckRemote = 0;
         if (!(prisma as unknown as Record<string, unknown>).agentTask) {
           return "Sub-agent tasks not available. Restart the dev server to pick up schema changes.";
         }
@@ -2691,6 +2745,7 @@ function createTools(
         focus: z.string().describe("What to focus the synthesis on (e.g., 'attention mechanism efficiency techniques across these papers')"),
       }),
       execute: async ({ papers, focus }: { papers?: string[]; focus: string }) => {
+        consecutiveCheckRemote = 0;
         if (!(prisma as unknown as Record<string, unknown>).agentTask) {
           return "Sub-agent tasks not available. Restart the dev server to pick up schema changes.";
         }
@@ -2736,6 +2791,7 @@ function createTools(
       execute: async ({ goal, synthesis, diagnostics, current_approach }: {
         goal: string; synthesis: string; diagnostics?: string; current_approach?: string;
       }) => {
+        consecutiveCheckRemote = 0;
         if (!(prisma as unknown as Record<string, unknown>).agentTask) {
           return "Sub-agent tasks not available. Restart the dev server to pick up schema changes.";
         }
@@ -2772,6 +2828,7 @@ function createTools(
         stuck_on: z.string().optional().describe("What specific problem you're stuck on, if any"),
       }),
       execute: async ({ goal, trajectory, stuck_on }: { goal: string; trajectory: string; stuck_on?: string }) => {
+        consecutiveCheckRemote = 0;
         if (!(prisma as unknown as Record<string, unknown>).agentTask) {
           return "Sub-agent tasks not available. Restart the dev server to pick up schema changes.";
         }
@@ -3079,6 +3136,7 @@ Be harsh but fair. Vague praise is useless. Specific criticism saves months of w
         related_paper_title: z.string().optional().describe("Title (or fragment) of a paper this finding relates to. If provided, the insight will be linked to that paper in the Mind Palace."),
       }),
       execute: async ({ type, content, related_paper_title }: { type: string; content: string; related_paper_title?: string }) => {
+        consecutiveCheckRemote = 0;
         const logType = type === "finding" ? "observation"
           : type === "hypothesis" ? "agent_suggestion"
           : type === "breakthrough" ? "breakthrough"
