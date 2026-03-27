@@ -199,7 +199,10 @@ def setup_venv(workdir, log_callback=None):
     arcana_dir = os.path.join(workdir, ARCANA_DIR)
     os.makedirs(arcana_dir, exist_ok=True)
 
-    current_hash = file_hash(reqs_path)
+    # Hash includes both project requirements and base requirements (if present)
+    base_reqs_check_path = os.path.join(workdir, ARCANA_DIR, "base_requirements.txt")
+    base_hash = file_hash(base_reqs_check_path) or ""
+    current_hash = file_hash(reqs_path) + ":" + base_hash
     hash_path = os.path.join(arcana_dir, REQS_HASH_FILE)
 
     # Check if already installed with same hash
@@ -250,13 +253,47 @@ def setup_venv(workdir, log_callback=None):
     except Exception:
         pass
 
+    # Merge base requirements (from host config) with project requirements
+    base_reqs_path = os.path.join(workdir, ARCANA_DIR, "base_requirements.txt")
+    install_reqs_path = reqs_path  # default: use project requirements directly
+
+    if os.path.exists(base_reqs_path):
+        merged_reqs_path = os.path.join(workdir, ARCANA_DIR, "merged_requirements.txt")
+        merged_lines = []
+        base_packages = set()
+
+        with open(base_reqs_path) as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith('#'):
+                    merged_lines.append(line)
+                    pkg_name = line.split('==')[0].split('>=')[0].split('<=')[0].split('<')[0].split('>')[0].split('[')[0].strip().lower()
+                    base_packages.add(pkg_name)
+
+        with open(reqs_path) as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith('#'):
+                    pkg_name = line.split('==')[0].split('>=')[0].split('<=')[0].split('<')[0].split('>')[0].split('[')[0].strip().lower()
+                    if pkg_name not in base_packages:
+                        merged_lines.append(line)
+                    elif log_callback:
+                        log_callback(f"[env-setup] Skipping {line} — already in base requirements")
+
+        with open(merged_reqs_path, 'w') as f:
+            f.write('\n'.join(merged_lines) + '\n')
+
+        install_reqs_path = merged_reqs_path
+        if log_callback:
+            log_callback(f"[env-setup] Merged {len(base_packages)} base + {len(merged_lines) - len(base_packages)} project packages")
+
     # Install requirements
     if log_callback:
         log_callback("[env-setup] Installing requirements...")
     pip_log_path = os.path.join(arcana_dir, PIP_LOG_FILE)
     try:
         result = subprocess.run(
-            [pip_path, "install", "-r", reqs_path],
+            [pip_path, "install", "-r", install_reqs_path],
             capture_output=True, text=True, timeout=1800,
         )
         # Save full log

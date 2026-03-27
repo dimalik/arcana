@@ -402,6 +402,17 @@ export async function submitRemoteJob(params: {
     throw new Error(`File sync to ${host.alias} failed: ${message}`);
   }
 
+  // Write base requirements to remote if configured
+  if (host.baseRequirements) {
+    try {
+      await sshExec(config,
+        `mkdir -p ${remoteDir}/.arcana && cat > ${remoteDir}/.arcana/base_requirements.txt << 'ARCANA_EOF'\n${host.baseRequirements}\nARCANA_EOF`
+      );
+    } catch (err) {
+      console.warn(`[remote-executor] Failed to write base requirements:`, (err as Error).message);
+    }
+  }
+
   // Start the experiment + poll in the background
   runAndPoll(job.id, config, backend, remoteDir, params.command, params.localDir).catch((err) => {
     console.error(`[remote-executor] Job ${job.id} background error:`, err);

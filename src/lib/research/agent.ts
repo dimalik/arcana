@@ -827,7 +827,7 @@ function buildSystemPrompt(
   project: { title: string; brief: string; methodology: string | null },
   papers: { id: string; title: string; abstract: string | null; summary: string | null }[],
   workDir: string,
-  remoteHosts: { alias: string; gpuType: string | null }[],
+  remoteHosts: { alias: string; gpuType: string | null; envNotes?: string | null }[],
   resourceSetting: "all" | "local" | string[],
   capabilities?: { name: string; description: string; instructions: string }[],
   gpuInfo?: import("./remote-executor").HostProfile[],
@@ -955,7 +955,7 @@ Follow confirmed preferences (3+ uses) automatically. The user can still overrid
   const remoteSection = remoteHosts.length > 0
     ? `\n## Remote GPU Servers (IMPORTANT)${resourceNote}
 You have ${remoteHosts.length} remote server(s) configured:
-${remoteHosts.map((h) => `- "${h.alias}"${h.gpuType ? ` (${h.gpuType})` : ""}`).join("\n")}
+${remoteHosts.map((h) => `- "${h.alias}"${h.gpuType ? ` (${h.gpuType})` : ""}${h.envNotes ? `\n  User notes: ${h.envNotes}` : ""}`).join("\n")}
 ${gpuSection}
 ${prefSection}
 **Tool selection guide:**
