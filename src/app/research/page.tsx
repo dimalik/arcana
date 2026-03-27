@@ -19,6 +19,7 @@ import {
   Compass,
   Server,
   SlidersHorizontal,
+  Target,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -232,6 +233,10 @@ export default function ResearchPage() {
   const [remoteHosts, setRemoteHosts] = useState<{ id: string; alias: string; gpuType: string | null }[]>([]);
   const [hostsLoading, setHostsLoading] = useState(true);
   const [selectedResources, setSelectedResources] = useState<"all" | "local" | Set<string>>("all");
+  const [benchmarkOpen, setBenchmarkOpen] = useState(false);
+  const [benchmarkPapers, setBenchmarkPapers] = useState<{ id: string; title: string; year: number | null }[]>([]);
+  const [benchmarkSelectedPaper, setBenchmarkSelectedPaper] = useState("");
+  const [benchmarkCreating, setBenchmarkCreating] = useState(false);
 
   // Infer methodology from topic (when user hasn't manually picked)
   const inferredMethodology = useMemo(() => inferMethodology(topic), [topic]);
@@ -382,6 +387,38 @@ export default function ResearchPage() {
     }
   };
 
+  const handleOpenBenchmark = async () => {
+    setBenchmarkOpen(true);
+    if (benchmarkPapers.length === 0) {
+      try {
+        const res = await fetch("/api/papers?limit=50&sort=newest");
+        const data = await res.json();
+        setBenchmarkPapers((data.papers || []).filter((p: { fullText?: string; abstract?: string }) => p.fullText || p.abstract).map((p: { id: string; title: string; year: number | null }) => ({ id: p.id, title: p.title, year: p.year })));
+      } catch { /* ignore */ }
+    }
+  };
+
+  const handleCreateBenchmark = async () => {
+    if (!benchmarkSelectedPaper) return;
+    setBenchmarkCreating(true);
+    try {
+      const res = await fetch("/api/research/benchmark", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ paperId: benchmarkSelectedPaper }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      setBenchmarkOpen(false);
+      setBenchmarkSelectedPaper("");
+      toast.success(`Benchmark created: ${data.title}`);
+      router.push(`/research/${data.projectId}`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to create benchmark");
+    }
+    setBenchmarkCreating(false);
+  };
+
   const handleProjectStatusChange = async (id: string, status: string) => {
     const res = await fetch(`/api/research/${id}`, {
       method: "PATCH",
@@ -478,6 +515,14 @@ export default function ResearchPage() {
           >
             {importing ? <Loader2 className="h-3 w-3 animate-spin" /> : <Upload className="h-3 w-3" />}
             Import
+          </button>
+          <button
+            onClick={handleOpenBenchmark}
+            className="inline-flex items-center gap-1 rounded-md text-[11px] text-muted-foreground/60 hover:text-foreground px-2 py-1 hover:bg-accent transition-colors"
+            title="Create a rediscovery benchmark from a paper"
+          >
+            <Target className="h-3 w-3" />
+            Benchmark
           </button>
         </div>
       </div>
@@ -787,6 +832,49 @@ export default function ResearchPage() {
               className="rounded-md bg-destructive px-3 py-1.5 text-xs text-destructive-foreground hover:bg-destructive/90 transition-colors"
             >
               Delete
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Benchmark creation dialog */}
+      <Dialog open={benchmarkOpen} onOpenChange={setBenchmarkOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogTitle className="text-sm flex items-center gap-2">
+            <Target className="h-4 w-4 text-purple-500" />
+            Rediscovery Benchmark
+          </DialogTitle>
+          <DialogDescription className="text-xs text-muted-foreground">
+            Select a paper from your library. The system will extract a blinded research question, use the paper's references as seeds, and test if the agent can independently rediscover the method.
+          </DialogDescription>
+          <div className="space-y-3 py-2">
+            <select
+              value={benchmarkSelectedPaper}
+              onChange={(e) => setBenchmarkSelectedPaper(e.target.value)}
+              className="w-full rounded-md border border-border/60 bg-muted/20 px-3 py-2 text-xs focus:outline-none focus:border-foreground/20"
+            >
+              <option value="">Select a paper...</option>
+              {benchmarkPapers.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.title.slice(0, 80)}{p.title.length > 80 ? "..." : ""} ({p.year || "?"})
+                </option>
+              ))}
+            </select>
+          </div>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <button
+              onClick={() => setBenchmarkOpen(false)}
+              className="rounded-md px-3 py-1.5 text-xs text-muted-foreground hover:bg-accent transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleCreateBenchmark}
+              disabled={!benchmarkSelectedPaper || benchmarkCreating}
+              className="rounded-md bg-foreground px-3 py-1.5 text-xs text-background hover:bg-foreground/90 transition-colors disabled:opacity-30"
+            >
+              {benchmarkCreating ? <Loader2 className="h-3.5 w-3.5 animate-spin inline mr-1" /> : null}
+              Create Benchmark
             </button>
           </DialogFooter>
         </DialogContent>
