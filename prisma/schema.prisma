@@ -621,6 +621,8 @@ model RemoteHost {
   gpuType     String?                       // "A100", "H100", "4090", etc.
   conda       String?                       // conda env to activate
   setupCmd    String?                       // extra setup commands (e.g. "module load cuda/12.1")
+  baseRequirements String?                 // base requirements.txt content (tested, known-good packages)
+  envNotes         String?                 // user notes about this host's quirks (shown to agent)
   isDefault   Boolean  @default(false)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
