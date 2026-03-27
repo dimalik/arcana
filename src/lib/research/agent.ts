@@ -682,6 +682,15 @@ async function runAgent(
   let iterationNudged = false;
   const iterationStepsAtStart = stepSortOrder; // total steps already in this iteration
 
+  // Step budget tracking
+  const stepBudget = {
+    literature: 0,
+    design: 0,
+    experiment: 0,
+    analysis: 0,
+    infraDebug: 0,
+  };
+
   emit({ type: "thinking", content: "Analyzing project state and planning next steps..." });
 
   const result = streamText({
@@ -757,6 +766,27 @@ async function runAgent(
       if (!iterationNudged && totalIterationSteps >= 50 && stepCount >= 10) {
         iterationNudged = true;
         console.log(`[agent] Nudge: iteration #${iteration.number} has ${totalIterationSteps} steps, consider advancing`);
+      }
+
+      // Classify step into budget categories
+      for (const tc of toolCalls || []) {
+        if (["search_papers", "read_paper", "dispatch_scouts", "collect_results", "search_library", "query_insights", "dispatch_synthesizer"].includes(tc.toolName)) {
+          stepBudget.literature++;
+        } else if (["write_file", "log_finding", "update_hypothesis"].includes(tc.toolName)) {
+          stepBudget.design++;
+        } else if (["execute_remote", "validate_environment"].includes(tc.toolName)) {
+          stepBudget.experiment++;
+        } else if (["check_job", "monitor_experiment", "read_file"].includes(tc.toolName)) {
+          stepBudget.analysis++;
+        } else if (["check_remote", "execute_command"].includes(tc.toolName)) {
+          stepBudget.infraDebug++;
+        }
+      }
+
+      // Warn if infrastructure debugging exceeds budget
+      const totalBudgetSteps = Object.values(stepBudget).reduce((s, v) => s + v, 0);
+      if (totalBudgetSteps > 10 && stepBudget.infraDebug / totalBudgetSteps > 0.1) {
+        emit({ type: "text", content: `\n\n[System: Infrastructure debugging is ${Math.round(stepBudget.infraDebug / totalBudgetSteps * 100)}% of your steps (target: <5%). Focus on research, not environment issues. Use get_workspace instead of check_remote.]\n\n` });
       }
 
       // Emit thinking indicator
@@ -1188,6 +1218,8 @@ Your mechanism design document should include:
 **Only proceed to Phase 2 after the mechanism design is written and logged.**
 
 ### Phase 2: Experiment
+
+**DO NOT run ls, find, cat, or nvidia-smi via check_remote to understand the workspace.** Use \`get_workspace\` instead — it returns everything in one call. check_remote is for rare cases like reading a specific line range from a log file.
 
 **╔══════════════════════════════════════════════════════════════════╗**
 **║  PROOF-OF-CONCEPT FIRST — ALWAYS                               ║**
