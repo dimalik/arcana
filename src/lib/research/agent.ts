@@ -429,6 +429,18 @@ async function runAgent(
   });
   if (!project) throw new Error("Project not found");
 
+  // Load oracle hints separately (they may not be in the last 30 log entries)
+  const oracleHintEntries = await prisma.researchLogEntry.findMany({
+    where: { projectId, metadata: { contains: "oracleHint" } },
+    select: { type: true, content: true, metadata: true },
+  });
+  // Inject into project.log so buildMessages can find them
+  for (const hint of oracleHintEntries) {
+    if (!project.log.some((l) => l.content === hint.content)) {
+      project.log.push(hint);
+    }
+  }
+
   // 2. Set up working directory (slug + short project ID to avoid collisions)
   const slug = project.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 40);
   const shortId = projectId.slice(0, 8);
@@ -1462,13 +1474,25 @@ function buildMessages(
     context += `\n\nCurrent hypotheses:\n${project.hypotheses.map((h) => `- [${h.status}] ${h.statement}`).join("\n")}`;
   }
 
+  // Surface oracle hints PROMINENTLY — they must never be missed
+  const oracleHints = project.log.filter((l) => {
+    if (!l.metadata) return false;
+    try { return JSON.parse(l.metadata).oracleHint === true; } catch { return false; }
+  });
+  if (oracleHints.length > 0) {
+    context += `\n\n## ⚡ ORACLE HINTS (from an expert — ALWAYS follow these)\n${oracleHints.map((l) => l.content).join("\n")}`;
+  }
+
   // Include recent DB log entries not already in the file
   const recentLog = project.log
     .filter((l) => l.type !== "agent_suggestion")
     .filter((l) => {
       // Exclude ground truth entries (benchmarks) from agent context
       if (!l.metadata) return true;
-      try { return !JSON.parse(l.metadata).groundTruth; } catch { return true; }
+      try {
+        const meta = JSON.parse(l.metadata);
+        return !meta.groundTruth && !meta.oracleHint; // hints shown separately above
+      } catch { return true; }
     })
     .slice(0, 10);
   if (recentLog.length > 0) {
