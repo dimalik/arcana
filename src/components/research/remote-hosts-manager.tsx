@@ -64,6 +64,7 @@ export function RemoteHostsManager() {
   const [envTestResults, setEnvTestResults] = useState<Record<string, { ok: boolean; output?: string; error?: string }>>({});
   const [saving, setSaving] = useState<string | null>(null);
   const [pendingEdits, setPendingEdits] = useState<Record<string, Record<string, string>>>({});
+  const [probing, setProbing] = useState<string | null>(null);
   const [sshHosts, setSSHHosts] = useState<SSHConfigEntry[]>([]);
   const [expandedHost, setExpandedHost] = useState<string | null>(null);
 
@@ -257,6 +258,27 @@ export function RemoteHostsManager() {
       toast.error("Environment test failed");
     } finally {
       setTestingEnv(null);
+    }
+  };
+
+  const handleProbeEnvNotes = async (id: string) => {
+    setProbing(id);
+    try {
+      const res = await fetch(`/api/research/remote-hosts/${id}/probe-env`);
+      const data = await res.json();
+      if (data.ok && data.notes) {
+        setPendingEdit(id, "envNotes", data.notes);
+        // Also update the textarea visually
+        const textarea = document.querySelector(`textarea[data-env-notes="${id}"]`) as HTMLTextAreaElement;
+        if (textarea) textarea.value = data.notes;
+        toast.success("Environment notes generated");
+      } else {
+        toast.error(data.error || "Failed to probe environment");
+      }
+    } catch {
+      toast.error("Failed to probe environment");
+    } finally {
+      setProbing(null);
     }
   };
 
@@ -538,8 +560,18 @@ export function RemoteHostsManager() {
                       </p>
                     </div>
                     <div className="space-y-1">
-                      <label className="text-[9px] text-muted-foreground uppercase tracking-wide">Environment Notes</label>
+                      <div className="flex items-center justify-between">
+                        <label className="text-[9px] text-muted-foreground uppercase tracking-wide">Environment Notes</label>
+                        <button
+                          onClick={() => handleProbeEnvNotes(h.id)}
+                          disabled={probing === h.id}
+                          className="text-[9px] text-muted-foreground/50 hover:text-foreground transition-colors disabled:opacity-50"
+                        >
+                          {probing === h.id ? "Detecting..." : "Auto-detect"}
+                        </button>
+                      </div>
                       <textarea
+                        data-env-notes={h.id}
                         defaultValue={h.envNotes || ""}
                         onChange={(e) => setPendingEdit(h.id, "envNotes", e.target.value)}
                         placeholder="e.g., flash-attn works with CUDA 12.1, use fp16 not bf16, conda activate myenv first"
