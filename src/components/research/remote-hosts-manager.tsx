@@ -29,6 +29,8 @@ interface RemoteHost {
   gpuType: string | null;
   conda: string | null;
   setupCmd: string | null;
+  baseRequirements: string | null;
+  envNotes: string | null;
   isDefault: boolean;
   _count: { jobs: number };
 }
@@ -456,6 +458,32 @@ export function RemoteHostsManager() {
                         placeholder="e.g. module load cuda/12.1"
                         className="w-full rounded border border-input bg-background px-2 py-1 text-[11px] focus:outline-none focus:ring-1 focus:ring-ring"
                       />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[9px] text-muted-foreground uppercase tracking-wide">Base Requirements</label>
+                      <textarea
+                        defaultValue={h.baseRequirements || ""}
+                        onBlur={(e) => handleUpdateField(h.id, "baseRequirements", e.target.value)}
+                        placeholder={"# Tested base packages (one per line)\ntorch==2.3.1\ntransformers>=4.40\naccelerate\ndatasets"}
+                        className="w-full rounded border border-input bg-background px-2 py-1 text-[11px] font-mono placeholder:text-muted-foreground/25 focus:outline-none focus:ring-1 focus:ring-ring resize-y min-h-[100px]"
+                        rows={6}
+                      />
+                      <p className="text-[10px] text-muted-foreground/50">
+                        Packages here are auto-merged into every project&apos;s requirements.txt. Test them manually first.
+                      </p>
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[9px] text-muted-foreground uppercase tracking-wide">Environment Notes</label>
+                      <textarea
+                        defaultValue={h.envNotes || ""}
+                        onBlur={(e) => handleUpdateField(h.id, "envNotes", e.target.value)}
+                        placeholder="e.g., flash-attn works with CUDA 12.1, use fp16 not bf16, conda activate myenv first"
+                        className="w-full rounded border border-input bg-background px-2 py-1 text-[11px] placeholder:text-muted-foreground/25 focus:outline-none focus:ring-1 focus:ring-ring resize-y"
+                        rows={3}
+                      />
+                      <p className="text-[10px] text-muted-foreground/50">
+                        Free-text notes shown to the research agent. Include any quirks or gotchas.
+                      </p>
                     </div>
                     {h._count.jobs > 0 && (
                       <p className="text-[10px] text-muted-foreground">{h._count.jobs} job{h._count.jobs !== 1 ? "s" : ""} run on this host</p>
