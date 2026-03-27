@@ -1706,6 +1706,7 @@ function createTools(
   const experimentCount = expCounter || { value: 0 };
 
   const BLOCKED_COMMAND_PATTERNS = /\b(pip3?\s+install|pip3?\s+uninstall|conda\s+(install|create|env)|apt(-get)?\s+install|sudo\s)/i;
+  const REDIRECT_COMMAND_PATTERNS = /\b(sed\s+-[nie]|grep\s+-[nrc]|wc\s+-l|head\s+-|tail\s+-|cat\s+\S+\.py)\b/;
 
   function isBlockedInfraCommand(cmd: string): string | null {
     if (BLOCKED_COMMAND_PATTERNS.test(cmd)) {
@@ -1713,6 +1714,9 @@ function createTools(
         "1. Add them to requirements.txt using write_file\n" +
         "2. The system installs them automatically when you run execute_remote\n" +
         "3. If a package fails to install, ask the user for help — don't try to pip install manually.";
+    }
+    if (REDIRECT_COMMAND_PATTERNS.test(cmd)) {
+      return "Use read_file instead of sed/grep/cat/head/tail to read files. Use list_files to see what's in the directory.";
     }
     return null;
   }
@@ -2114,7 +2118,8 @@ function createTools(
         let safeName = path.basename(filename);
 
         // Auto-number experiment scripts that don't follow the convention
-        if (safeName.endsWith(".py") && !safeName.startsWith("exp_") && !isUtilityScript(safeName)) {
+        // Skip: poc_ (proof-of-concept), exp_ (already numbered), utility scripts
+        if (safeName.endsWith(".py") && !safeName.startsWith("exp_") && !safeName.startsWith("poc_") && !safeName.startsWith("run_") && !safeName.startsWith("debug_") && !isUtilityScript(safeName)) {
           experimentCount.value++;
           const num = String(experimentCount.value).padStart(3, "0");
           const stem = safeName.replace(/\.py$/, "").replace(/[^a-z0-9_]/gi, "_").toLowerCase();
@@ -2326,6 +2331,11 @@ function createTools(
 
         const blocked = isBlockedInfraCommand(command);
         if (blocked) return blocked;
+
+        // Block environment probing — this info is in the host profile and get_workspace
+        if (/pip\s+list|pip\s+show|pip\s+freeze|python3?\s+-c\s+.*import|python3?\s+--version|nvidia-smi(?!\s+--query)/.test(command)) {
+          return "Environment info is already in the host profile (shown in system prompt) and get_workspace. Don't probe manually.";
+        }
 
         const hostWhere = host_alias ? { alias: host_alias } : { isDefault: true };
         let host = await prisma.remoteHost.findFirst({ where: hostWhere });
