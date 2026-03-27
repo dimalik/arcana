@@ -2,7 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireUserId } from "@/lib/paper-auth";
 import { getModelForTier } from "@/lib/llm/auto-process";
-import { generateLLMResponse, setLlmContext } from "@/lib/llm/provider";
+import { getModel, setLlmContext } from "@/lib/llm/provider";
+import { generateObject } from "ai";
+import { z } from "zod";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
@@ -89,34 +91,38 @@ export async function POST(request: NextRequest) {
 
     const papers = project.collection?.papers.map((cp) => cp.paper.title).join(", ") || "none";
 
-    // LLM evaluation
+    // LLM evaluation with structured output
     const { provider, modelId, proxyConfig } = await getModelForTier("reasoning");
     setLlmContext("benchmark-evaluate", userId, { projectId });
+    const model = await getModel(provider, modelId, proxyConfig);
 
-    const evaluation = await generateLLMResponse({
-      provider, modelId, proxyConfig,
-      system: `You are evaluating a research agent's ability to independently rediscover a paper's method. You are given:
-1. The GROUND TRUTH: what the actual paper proposed
-2. The AGENT'S WORK: hypotheses, experiments, and findings
+    const evaluationSchema = z.object({
+      scores: z.object({
+        problemId: z.number().min(1).max(5),
+        methodProximity: z.number().min(1).max(5),
+        insightDiscovery: z.number().min(1).max(5),
+        experimentalDesign: z.number().min(1).max(5),
+        novelContributions: z.number().min(1).max(5),
+      }),
+      overallScore: z.number().min(1).max(5),
+      summary: z.string(),
+      whatMatched: z.array(z.string()),
+      whatMissed: z.array(z.string()),
+      surprises: z.array(z.string()),
+      recommendations: z.array(z.string()),
+    });
 
-Score the agent on these dimensions (1-5 each):
+    const { object: result } = await generateObject({
+      model,
+      schema: evaluationSchema,
+      system: `You are evaluating a research agent's ability to independently rediscover a paper's method. You are given the ground truth (what the paper proposed) and the agent's work (hypotheses, experiments, findings).
 
-- **Problem Identification** (1-5): Did the agent correctly identify the core problem/gap?
-- **Method Proximity** (1-5): How close did the agent's proposed approach get to the actual method? 5 = essentially the same technique; 1 = completely different direction.
-- **Key Insight Discovery** (1-5): Did the agent discover the paper's key insight(s)?
-- **Experimental Design** (1-5): Were the agent's experiments well-designed to test the right things?
-- **Novel Contributions** (1-5): Did the agent propose anything the paper DIDN'T do (potentially valuable additions)?
-
-Return JSON:
-{
-  "scores": { "problemId": N, "methodProximity": N, "insightDiscovery": N, "experimentalDesign": N, "novelContributions": N },
-  "overallScore": N,  // 1-5 average
-  "summary": "2-3 sentence overall assessment",
-  "whatMatched": ["list of things the agent got right"],
-  "whatMissed": ["list of things the agent missed"],
-  "surprises": ["anything interesting the agent found that the paper didn't"],
-  "recommendations": ["how to improve the agent based on this benchmark"]
-}`,
+Score on 5 dimensions (1-5 each):
+- problemId: Did the agent correctly identify the core problem/gap?
+- methodProximity: How close did the agent get to the actual method? 5 = same technique, 1 = completely different
+- insightDiscovery: Did the agent discover the paper's key insight(s)?
+- experimentalDesign: Were experiments well-designed to test the right things?
+- novelContributions: Did the agent propose anything the paper didn't (potentially valuable)?`,
       prompt: `## Ground Truth (actual paper method)
 ${groundTruth}
 
@@ -133,16 +139,7 @@ ${findings || "None recorded yet"}
 ${papers}
 
 Evaluate how well the agent rediscovered the paper's method.`,
-      maxTokens: 3000,
     });
-
-    let result;
-    try {
-      const cleaned = evaluation.replace(/```json\s*/g, "").replace(/```\s*/g, "").trim();
-      result = JSON.parse(cleaned);
-    } catch {
-      result = { raw: evaluation, error: "Failed to parse evaluation" };
-    }
 
     return NextResponse.json({
       projectId,

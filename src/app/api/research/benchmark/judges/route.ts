@@ -2,7 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireUserId } from "@/lib/paper-auth";
 import { getModelForTier } from "@/lib/llm/auto-process";
-import { generateLLMResponse, setLlmContext } from "@/lib/llm/provider";
+import { getModel, setLlmContext } from "@/lib/llm/provider";
+import { generateObject } from "ai";
+import { z } from "zod";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -213,33 +215,35 @@ Return JSON: { "verdicts": [{"move": 1, "score": N, "label": "hot|warm|neutral|c
       },
     ];
 
+    // Structured output schema — guarantees valid JSON
+    const verdictSchema = z.object({
+      verdicts: z.array(z.object({
+        move: z.number(),
+        score: z.number().min(-2).max(2),
+        label: z.enum(["hot", "warm", "neutral", "cool", "cold"]),
+        comment: z.string(),
+      })),
+      summary: z.string(),
+      overallScore: z.number().min(1).max(5),
+    });
+
+    const model = await getModel(provider, modelId, proxyConfig);
+
     const judgeResults = await Promise.all(
       judgePrompts.map(async (judge) => {
         try {
-          const result = await generateLLMResponse({
-            provider, modelId, proxyConfig,
-            system: judge.system + `\n\nCRITICAL: You MUST respond with ONLY valid JSON. No preamble, no explanation, no markdown fences. Start your response with { and end with }. Do NOT write anything before or after the JSON object.`,
-            prompt: `## Ground Truth (the actual paper's method — HIDDEN from the agent)\n${groundTruth}\n\n## Agent's Moves (in chronological order)\n${moveSummary}\n\nRespond with JSON only:`,
-            maxTokens: 4000,
+          const { object } = await generateObject({
+            model,
+            schema: verdictSchema,
+            system: judge.system,
+            prompt: `## Ground Truth (the actual paper's method — HIDDEN from the agent)\n${groundTruth}\n\n## Agent's Moves (in chronological order)\n${moveSummary}`,
           });
-
-          // Extract JSON from response — handle markdown fences, preamble text, etc.
-          let jsonStr = result;
-          // Strip markdown fences
-          jsonStr = jsonStr.replace(/```json\s*/g, "").replace(/```\s*/g, "");
-          // Find the first { and last } to extract JSON even if there's preamble
-          const firstBrace = jsonStr.indexOf("{");
-          const lastBrace = jsonStr.lastIndexOf("}");
-          if (firstBrace >= 0 && lastBrace > firstBrace) {
-            jsonStr = jsonStr.slice(firstBrace, lastBrace + 1);
-          }
-          const parsed = JSON.parse(jsonStr);
 
           // Merge with previous verdicts if incremental
           const priorVerdicts = previousVerdicts?.[judge.name] || [];
-          const mergedVerdicts = [...priorVerdicts, ...(parsed.verdicts || [])];
+          const mergedVerdicts = [...priorVerdicts, ...object.verdicts];
 
-          return { judge: judge.name, verdicts: mergedVerdicts, summary: parsed.summary, overallScore: parsed.overallScore } as JudgeReport;
+          return { judge: judge.name, verdicts: mergedVerdicts, summary: object.summary, overallScore: object.overallScore } as JudgeReport;
         } catch (err) {
           return { judge: judge.name, verdicts: [], summary: `Judge failed: ${(err as Error).message}`, overallScore: 0 } as JudgeReport;
         }
