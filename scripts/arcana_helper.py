@@ -31,7 +31,7 @@ import time
 import hashlib
 from pathlib import Path
 
-HELPER_VERSION = "3"
+HELPER_VERSION = "4"
 ARCANA_DIR = ".arcana"
 STATUS_FILE = "status.json"
 REQS_HASH_FILE = "reqs_hash"
@@ -345,35 +345,49 @@ def cmd_run(workdir, command):
         if pid and is_pid_alive(pid):
             json_err(f"Experiment already running (PID {pid}). Use 'kill' first.")
 
-    # Setup venv
+    # Check for pre-existing environment (user-configured venv/conda)
+    conda_env = os.environ.get("ARCANA_CONDA", "")
+    has_existing_env = bool(conda_env.strip())
+
     write_status(workdir, {
         "status": "setup",
         "started_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
     })
 
-    success, msg = setup_venv(workdir)
-    if not success:
-        write_status(workdir, {
-            "status": "failed",
-            "error": msg,
-            "started_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
-            "completed_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
-        })
-        json_err(f"Environment setup failed: {msg}")
+    # Only create/install venv if NO pre-existing environment is configured
+    msg = "Using pre-configured environment" if has_existing_env else ""
+    if not has_existing_env:
+        success, msg = setup_venv(workdir)
+        if not success:
+            write_status(workdir, {
+                "status": "failed",
+                "error": msg,
+                "started_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                "completed_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+            })
+            json_err(f"Environment setup failed: {msg}")
 
     # Build the actual command to run
-    # Activate venv if it exists, apply conda/setup, then run the command
-    venv_activate = os.path.join(workdir, ".venv", "bin", "activate")
     shell_parts = [f"cd {workdir}"]
-    if os.path.exists(venv_activate):
-        shell_parts.append(f"source {venv_activate}")
 
-    # Conda activation from env var
-    conda_env = os.environ.get("ARCANA_CONDA")
-    if conda_env:
-        shell_parts.append(
-            f"conda activate {conda_env} 2>/dev/null || source activate {conda_env} 2>/dev/null || true"
-        )
+    # Pre-existing env takes priority
+    if has_existing_env:
+        # Support: /path/to/bin/activate, /path/to/bin/python, conda env name
+        if conda_env.endswith("/activate"):
+            shell_parts.append(f"source {conda_env}")
+        elif conda_env.endswith("/python") or conda_env.endswith("/python3"):
+            bin_dir = os.path.dirname(conda_env)
+            activate = os.path.join(bin_dir, "activate")
+            shell_parts.append(f"source {activate} 2>/dev/null || export PATH={bin_dir}:$PATH")
+        else:
+            shell_parts.append(
+                f"conda activate {conda_env} 2>/dev/null || source activate {conda_env} 2>/dev/null || source {conda_env} 2>/dev/null || true"
+            )
+    else:
+        # No pre-existing env — use .venv if it was created by setup_venv
+        venv_activate = os.path.join(workdir, ".venv", "bin", "activate")
+        if os.path.exists(venv_activate):
+            shell_parts.append(f"source {venv_activate}")
 
     # Custom setup command from env var
     setup_cmd = os.environ.get("ARCANA_SETUP")
