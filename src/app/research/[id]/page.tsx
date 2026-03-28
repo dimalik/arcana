@@ -27,6 +27,7 @@ import { AgentActivityBar, AgentActivityHandle } from "@/components/research/age
 import { ResearchChat } from "@/components/research/research-chat";
 import { BenchmarkPanel } from "@/components/research/benchmark-panel";
 import { AttentionQueue } from "@/components/research/attention-queue";
+import { FiguresPanel } from "@/components/research/figures-panel";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
 
@@ -417,8 +418,8 @@ export default function ResearchWorkspacePage({ params }: { params: { id: string
           )}
         </div>
 
-        {/* Right: Context sidebar */}
-        <div className="w-56 shrink-0 overflow-hidden">
+        {/* Right: Context sidebar + Figures */}
+        <div className="w-56 shrink-0 overflow-hidden space-y-3">
           <ContextSidebar
             project={project}
             papers={papers.map((p) => ({ id: p.id, title: p.title }))}
@@ -429,6 +430,7 @@ export default function ResearchWorkspacePage({ params }: { params: { id: string
               steps: activeIteration.steps.map((s) => ({ status: s.status })),
             } : null}
           />
+          <FiguresPanel projectId={project.id} />
         </div>
       </div>
 
