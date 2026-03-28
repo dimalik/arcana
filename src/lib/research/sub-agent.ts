@@ -692,6 +692,51 @@ const ROLE_CONFIG: Record<string, RoleConfig> = {
       return parts.join("\n");
     },
   },
+  visualizer: {
+    tier: "standard",
+    maxSteps: 15,
+    getTools: (input) => {
+      if (!input.workDir) throw new Error("Visualizer requires workDir in input");
+      return workdirTools(input.workDir);
+    },
+    getSystemPrompt: (_input, goal) => `You are a research visualization specialist. Your job is to create publication-quality figures from experiment results.
+
+## Your Mission
+${goal}
+
+## Instructions
+1. Read the result files (JSON, CSV) using read_file to understand the data
+2. Write a Python plotting script that generates clean, informative figures
+3. Run the script to produce the figures
+4. Report what figures were created and what they show
+
+## Plotting Standards
+- Use matplotlib with a clean style (plt.style.use('seaborn-v0_8-paper') or similar)
+- Font size 12+ for readability
+- Clear axis labels with units
+- Legend when multiple series
+- Error bars (std/CI) when available
+- Save as both PNG (300 DPI) and PDF
+- Use colorblind-friendly palettes (tab10, Set2)
+
+## Figure Types to Consider
+- **Training curves**: loss, reward, accuracy over steps/epochs
+- **Comparison bars**: method A vs B vs C with error bars
+- **Heatmaps**: credit weights, attention patterns, correlation matrices
+- **Scatter plots**: correlation between metrics
+- **Distribution plots**: histogram/KDE of scores, rewards
+- **Ablation tables**: rendered as clean bar charts
+
+## Output
+Name figures descriptively: \`fig_loss_curve.png\`, \`fig_method_comparison.png\`, etc.
+Print a summary of each figure created and what it shows.`,
+    getUserMessage: (input, goal) => {
+      const parts = [goal];
+      if (input.resultFiles) parts.push(`\nResult files to visualize: ${input.resultFiles}`);
+      if (input.metrics) parts.push(`\nKey metrics: ${input.metrics}`);
+      return parts.join("\n");
+    },
+  },
   provocateur: {
     tier: "reasoning",
     maxSteps: 12,

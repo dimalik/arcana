@@ -1081,6 +1081,16 @@ Call it when you're stuck in a rut, when results plateau, or after 2+ experiment
 **Training monitor — use \`monitor_experiment\` DURING long-running experiments:**
 While an experiment runs on a remote server, call \`monitor_experiment\` periodically (every few steps) to check for NaN, loss divergence, gradient explosion, plateaus, and other anomalies. Don't wait until the experiment finishes to discover it diverged at step 100. Monitor early, catch problems early.
 
+**Visualizer — use \`dispatch_visualizer\` AFTER experiments produce results:**
+After 2+ experiments complete, dispatch the visualizer to create publication-quality figures: training curves, method comparisons, ablation charts. The visualizer reads result JSON/CSV files and creates matplotlib plots. **Do NOT write plotting scripts yourself** — delegate to the visualizer.
+
+**NEVER write monitoring, status-checking, cleanup, or GPU-checking scripts.** Use the built-in tools:
+- \`check_job\`: experiment status and logs
+- \`get_workspace\`: file listings and result contents
+- \`check_remote\`: specific SSH commands
+- \`monitor_experiment\`: live training metrics
+Writing a Python script to do \`nvidia-smi\` or \`ps aux\` or \`cat logs\` is NEVER the right approach.
+
 **The full research pipeline:**
 1. \`dispatch_scouts\` (3 angles) → read existing papers while scouts work
 2. \`collect_results\` → import best papers → \`dispatch_synthesizer\`
@@ -2116,6 +2126,28 @@ function createTools(
         consecutiveCheckRemote = 0;
         // Prevent path traversal
         let safeName = path.basename(filename);
+
+        // Block monitoring/cleanup/status scripts — use check_job, get_workspace, check_remote instead
+        if (safeName.endsWith(".py")) {
+          const lowerName = safeName.toLowerCase();
+          if (/monitor|check_status|check_progress|check_log|tail_log|cleanup|kill_|read_result|read_log|gpu_mem|gpu_activity|check_running|deep_check/.test(lowerName)) {
+            return `BLOCKED — Do not write monitoring/cleanup scripts. Use these tools instead:\n` +
+              `- check_job: check experiment status\n- get_workspace: see all files and results\n` +
+              `- check_remote: run a specific command\n- monitor_experiment: check training metrics\n` +
+              `Writing a Python script to do ps/nvidia-smi/cat-logs is never the right approach.`;
+          }
+        }
+
+        // Cap total scripts per project to prevent bloat
+        try {
+          const existingFiles = await readdir(workDir);
+          const pyFiles = existingFiles.filter((f) => f.endsWith(".py"));
+          if (pyFiles.length > 30 && safeName.endsWith(".py")) {
+            return `BLOCKED — ${pyFiles.length} Python scripts already exist. You're creating too many scripts.\n` +
+              `Reuse existing scripts with command-line arguments instead of writing new ones.\n` +
+              `Use list_files to see what you have, then modify an existing script with write_file.`;
+          }
+        } catch { /* dir may not exist yet */ }
 
         // Auto-number experiment scripts that don't follow the convention
         // Skip: poc_ (proof-of-concept), exp_ (already numbered), utility scripts
@@ -3197,6 +3229,39 @@ else: print('OK')
         await recordStep("synthesize", `Dispatched architect: ${goal.slice(0, 80)}`, "COMPLETED", { taskId: task.id, goal, hasDiagnostics: !!diagnostics }, "literature");
 
         return `Launched architect (ID: ${task.id.slice(0, 8)}): "${goal}"\n\nThe architect runs on Opus with library access and will propose 2-3 novel approaches with risk ratings. **Continue with other work** and use \`collect_results\` with ["${task.id}"] when ready.\n\n**Important:** Review proposals critically. Start with the cheapest validation experiment before committing to larger changes.`;
+      },
+    }),
+
+    dispatch_visualizer: tool({
+      description: "Launch a background visualizer to create publication-quality figures from experiment results. The visualizer reads result JSON/CSV files, creates matplotlib plots (training curves, method comparisons, ablation charts, heatmaps), and saves them as PNG+PDF. Use after experiments complete to visualize and compare results.",
+      inputSchema: z.object({
+        goal: z.string().describe("What to visualize (e.g., 'Compare training loss across all methods', 'Plot credit weight distributions')"),
+        resultFiles: z.string().optional().describe("Comma-separated list of result files to read"),
+        metrics: z.string().optional().describe("Key metrics to focus on (e.g., 'loss, accuracy, gradient_norm')"),
+      }),
+      execute: async ({ goal, resultFiles, metrics }: { goal: string; resultFiles?: string; metrics?: string }) => {
+        if (!(prisma as unknown as Record<string, unknown>).agentTask) {
+          return "Sub-agent tasks not available.";
+        }
+        emit({ type: "tool_progress", toolName: "dispatch_visualizer", content: `Launching visualizer...` });
+
+        const task = await prisma.agentTask.create({
+          data: {
+            projectId,
+            role: "visualizer",
+            goal,
+            status: "PENDING",
+            input: JSON.stringify({ workDir, userId, resultFiles, metrics }),
+          },
+        });
+
+        import("./sub-agent").then(({ runSubAgent }) => {
+          runSubAgent(task.id).catch((err) => {
+            console.error(`[dispatch_visualizer] Visualizer ${task.id} failed:`, err);
+          });
+        });
+
+        return `Launched visualizer (ID: ${task.id.slice(0, 8)}): "${goal}"\n\nThe visualizer will read result files and create figures in the experiment directory. Collect results with \`collect_results\` when ready.`;
       },
     }),
 
