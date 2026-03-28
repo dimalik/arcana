@@ -804,6 +804,10 @@ async function runAgent(
       if (experimentsSinceLastLitReview >= 4) {
         emit({ type: "text", content: "\n\n[System: 4 experiments without consulting literature. Use dispatch_scouts or search_library to check if someone has already solved your current problem.]\n\n" });
       }
+      // Remind about visualization after successful experiments
+      if (totalExperimentsRun >= 3 && totalExperimentsRun % 3 === 0) {
+        emit({ type: "text", content: "\n\n[System: You've completed 3+ experiments. Use dispatch_visualizer to create figures comparing your results.]\n\n" });
+      }
 
       // Iteration advancement nudge — internal only
       const totalIterationSteps = iterationStepsAtStart + stepCount;
@@ -1712,6 +1716,7 @@ function createTools(
   const consecutiveSearches = searchCounter || { value: 0 };
   let consecutiveCheckRemote = 0;
   const scriptFailureCounts = new Map<string, number>(); // Track per-script failures
+  let totalProjectFailures = 0; // Track total failures across all scripts
   // Experiment counter for sequential naming (shared with caller via ref object)
   const experimentCount = expCounter || { value: 0 };
 
@@ -2581,12 +2586,23 @@ else: print('OK')
             return `BLOCKED — Script "${scriptName}" does not exist in the experiment directory. Write it first with write_file.`;
           }
 
-          // ── Check for excessive retries of the same script ──
+          // ── Check for excessive retries of the same approach ──
           const failCount = scriptFailureCounts.get(scriptName) || 0;
+          // Also check base approach (poc_004, poc_004b, poc_004c all count together)
+          const baseApproach = scriptName.replace(/[bcdefg]\.py$/, ".py").replace(/_v\d+\.py$/, ".py");
+          const baseFailCount = scriptFailureCounts.get(baseApproach) || 0;
+
           if (failCount >= 2) {
             return `BLOCKED — "${scriptName}" has failed ${failCount} times. Do NOT retry the same script. ` +
-              `Rewrite it from scratch or try a completely different approach. ` +
-              `Read the previous errors, understand the root cause, and create a NEW script with a different name.`;
+              `Rewrite it from scratch or try a completely different approach.`;
+          }
+          if (baseFailCount >= 4) {
+            return `BLOCKED — The "${baseApproach}" approach has failed ${baseFailCount} times across variants (${scriptName}, etc.). ` +
+              `This approach is fundamentally broken. STOP making small modifications. ` +
+              `Use dispatch_provocateur for a completely different direction, or consult literature for how others solved this.`;
+          }
+          if (totalProjectFailures >= 8) {
+            emit({ type: "text", content: `\n\n[System: WARNING — ${totalProjectFailures} experiment failures so far. Step back and REPLAN. Use adversarial_review or dispatch_reviewer to critique your approach before running more experiments.]\n\n` });
           }
 
           // ── PoC gate: require a successful PoC before full-scale experiments ──
@@ -2799,6 +2815,10 @@ else: print('OK')
           const failedScript = job.command?.match(/python3?\s+(\S+\.py)/)?.[1];
           if (failedScript) {
             scriptFailureCounts.set(failedScript, (scriptFailureCounts.get(failedScript) || 0) + 1);
+            // Also track the base approach (poc_004, poc_004b, poc_004c all share "poc_004")
+            const baseApproach = failedScript.replace(/[a-z]_/g, "_").replace(/[bcdefg]\.py$/, ".py").replace(/_v\d+\.py$/, ".py");
+            scriptFailureCounts.set(baseApproach, (scriptFailureCounts.get(baseApproach) || 0) + 1);
+            totalProjectFailures++;
           }
 
           return `EXPERIMENT FAILED (exit ${job.exitCode ?? "?"}) on ${job.host.alias}${elapsedStr}. Fix the code and re-run.\n\nstdout:\n${(job.stdout || "").slice(-3000)}\n\nstderr:\n${(job.stderr || "").slice(-2000)}${partialResults}${oomGuidance}`;
