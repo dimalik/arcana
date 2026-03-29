@@ -1,8 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { Loader2, Sparkles, Server, FileCode, Check, AlertCircle, ChevronDown, Play, X, RotateCcw, Monitor } from "lucide-react";
+import { useEffect, useState, useCallback } from "react";
+import { Loader2, Sparkles, Server, FileCode, Check, AlertCircle, ChevronDown, Play, X, RotateCcw, Monitor, FlaskConical } from "lucide-react";
 import { useStepActions } from "./use-step-actions";
+import { ExperimentCard } from "./experiment-card";
+import { FiguresGallery } from "./figures-gallery";
 import { toast } from "sonner";
 
 interface Step {
@@ -36,11 +38,48 @@ interface RemoteJob {
   completedAt: string | null;
 }
 
+interface ExperimentResultData {
+  id: string;
+  scriptName: string;
+  metrics: string | null;
+  comparison: string | null;
+  verdict: string | null;
+  reflection: string | null;
+  hypothesisId: string | null;
+  branchId: string | null;
+  jobId: string | null;
+  createdAt: string;
+  branch: { name: string; status: string } | null;
+}
+
+interface ExperimentJobData {
+  id: string;
+  status: string;
+  exitCode: number | null;
+  command: string;
+  startedAt: string | null;
+  completedAt: string | null;
+  stderr: string | null;
+  host: { alias: string; gpuType: string | null };
+}
+
+interface FileEntry {
+  name: string;
+  path: string;
+  size: number;
+  isDir: boolean;
+  modified: string;
+  children?: FileEntry[];
+}
+
 interface ExperimentPhaseProps {
   projectId: string;
   steps: Step[];
   hypotheses: { id: string; statement: string; status: string }[];
   onRefresh: () => void;
+  experimentResults?: ExperimentResultData[];
+  experimentJobs?: ExperimentJobData[];
+  hypothesesById?: Record<string, string>;
 }
 
 function parseOutput(output: string | null) {
@@ -124,7 +163,10 @@ function PendingStepRow({
   );
 }
 
-export function ExperimentPhase({ projectId, steps, onRefresh }: ExperimentPhaseProps) {
+export function ExperimentPhase({
+  projectId, steps, onRefresh,
+  experimentResults, experimentJobs, hypothesesById,
+}: ExperimentPhaseProps) {
   const {
     loadingStep, autoRunning, handleAutoRun, handleSkip,
     handleRestore, handleExecute, handleContinueNext,
@@ -133,6 +175,7 @@ export function ExperimentPhase({ projectId, steps, onRefresh }: ExperimentPhase
   const [remoteJobs, setRemoteJobs] = useState<RemoteJob[]>([]);
   const [deploying, setDeploying] = useState(false);
   const [expandedJobs, setExpandedJobs] = useState<Set<string>>(new Set());
+  const [projectFiles, setProjectFiles] = useState<FileEntry[]>([]);
 
   useEffect(() => {
     fetch("/api/research/remote-hosts")
@@ -168,6 +211,64 @@ export function ExperimentPhase({ projectId, steps, onRefresh }: ExperimentPhase
     }, 5000);
     return () => clearInterval(interval);
   }, [projectId, remoteJobs, onRefresh]);
+
+  // Fetch project files for artifact matching
+  const fetchFiles = useCallback(() => {
+    fetch(`/api/research/${projectId}/files`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.files) setProjectFiles(data.files);
+      })
+      .catch(() => {});
+  }, [projectId]);
+
+  useEffect(() => {
+    fetchFiles();
+    const interval = setInterval(fetchFiles, 30_000);
+    return () => clearInterval(interval);
+  }, [fetchFiles]);
+
+  // Flatten project files for artifact matching
+  const flatFiles: { name: string; path: string }[] = [];
+  const walkFiles = (entries: FileEntry[]) => {
+    for (const f of entries) {
+      if (f.isDir && f.children) {
+        walkFiles(f.children);
+      } else if (!f.path.includes(".venv") && !f.path.includes("__pycache__")) {
+        flatFiles.push({ name: f.name, path: f.path });
+      }
+    }
+  };
+  walkFiles(projectFiles);
+
+  // Match artifacts to an experiment result by script name pattern
+  const getArtifactsForResult = (result: ExperimentResultData) => {
+    const stem = result.scriptName.replace(/\.py$/, "");
+    // Extract number patterns from script name (e.g., poc_003 → "003", experiment_1 → "1")
+    const numMatch = stem.match(/(\d+)/);
+    const expNum = numMatch ? numMatch[1] : null;
+    const artifactExts = /\.(png|jpg|jpeg|gif|svg|json|csv|tsv|pdf|txt|log)$/i;
+
+    return flatFiles.filter((f) => {
+      if (!artifactExts.test(f.name)) return false;
+      // Match by: filename contains the script stem, or contains exp_NNN / NNN pattern
+      const nameLower = f.name.toLowerCase();
+      const stemLower = stem.toLowerCase();
+      if (nameLower.includes(stemLower)) return true;
+      if (expNum && (nameLower.includes(`exp_${expNum}`) || nameLower.includes(`_${expNum}`))) return true;
+      return false;
+    });
+  };
+
+  // Build job lookup by ID
+  const jobsById: Record<string, ExperimentJobData> = {};
+  if (experimentJobs) {
+    for (const j of experimentJobs) {
+      jobsById[j.id] = j;
+    }
+  }
+
+  const completedResults = experimentResults || [];
 
   const handleCancelJob = async (jobId: string) => {
     try {
@@ -416,27 +517,19 @@ export function ExperimentPhase({ projectId, steps, onRefresh }: ExperimentPhase
     return 0;
   });
 
-  const hasContent = groups.length > 0 || pendingSteps.length > 0 || runningSteps.length > 0;
+  const hasContent = groups.length > 0 || pendingSteps.length > 0 || runningSteps.length > 0 || completedResults.length > 0;
 
   return (
     <div className="space-y-4 pr-2">
-      {/* Action bar */}
-      <div className="flex items-center gap-3">
-        <button
-          onClick={handleAutoRun}
-          disabled={autoRunning || runningSteps.length > 0}
-          className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
-        >
-          {autoRunning ? <Loader2 className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3" />}
-          {runningSteps.length > 0 ? "Generating code..." : "Generate experiment"}
-        </button>
-        {hosts.length > 0 && (
+      {/* Host info */}
+      {hosts.length > 0 && (
+        <div className="flex items-center gap-3">
           <span className="text-[10px] text-muted-foreground">
             <Server className="h-3 w-3 inline mr-0.5" />
             {hosts.length} remote host{hosts.length !== 1 ? "s" : ""}
           </span>
-        )}
-      </div>
+        </div>
+      )}
 
       {/* Pending / Running agent steps */}
       {runningSteps.map((step) => (
@@ -469,6 +562,35 @@ export function ExperimentPhase({ projectId, steps, onRefresh }: ExperimentPhase
         />
       ))}
 
+      {/* Completed experiment results */}
+      {completedResults.length > 0 && (
+        <div className="space-y-2">
+          <div className="flex items-center gap-1.5">
+            <FlaskConical className="h-3.5 w-3.5 text-muted-foreground/40" />
+            <span className="text-xs font-medium">
+              Completed Experiments ({completedResults.length})
+            </span>
+          </div>
+          {completedResults.map((result) => (
+            <ExperimentCard
+              key={result.id}
+              result={result}
+              job={result.jobId ? jobsById[result.jobId] : undefined}
+              hypothesisStatement={result.hypothesisId ? hypothesesById?.[result.hypothesisId] : undefined}
+              projectId={projectId}
+              artifacts={getArtifactsForResult(result)}
+            />
+          ))}
+        </div>
+      )}
+
+      {/* In-progress experiment groups */}
+      {groups.length > 0 && completedResults.length > 0 && (
+        <div className="flex items-center gap-1.5 pt-1">
+          <span className="text-xs font-medium text-muted-foreground/60">In Progress</span>
+        </div>
+      )}
+
       {/* Experiment groups */}
       {groups.map((group) => (
         <ExperimentGroupCard
@@ -494,6 +616,9 @@ export function ExperimentPhase({ projectId, steps, onRefresh }: ExperimentPhase
           </p>
         </div>
       )}
+
+      {/* Collapsible figures gallery */}
+      <FiguresGallery projectId={projectId} collapsible />
     </div>
   );
 }

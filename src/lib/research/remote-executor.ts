@@ -15,7 +15,7 @@ const execAsync = promisify(exec);
 
 // ── Helper management ────────────────────────────────────────────
 
-const HELPER_VERSION = "4";
+const HELPER_VERSION = "5";
 const helperInstalledHosts = new Map<string, boolean>();
 
 /**
@@ -74,6 +74,14 @@ async function invokeHelper(host: HostConfig, args: string): Promise<string> {
   const envParts: string[] = [];
   if (host.conda) envParts.push(`ARCANA_CONDA='${host.conda}'`);
   if (host.setupCmd) envParts.push(`ARCANA_SETUP='${host.setupCmd}'`);
+  // Pass user-configured environment variables (HF_TOKEN, WANDB_API_KEY, etc.)
+  if (host.envVars) {
+    for (const [key, val] of Object.entries(host.envVars)) {
+      if (key && val && /^[A-Z_][A-Z0-9_]*$/i.test(key)) {
+        envParts.push(`${key}='${val.replace(/'/g, "'\\''")}'`);
+      }
+    }
+  }
   const envPrefix = envParts.length > 0 ? envParts.join(" ") + " " : "";
   return sshExec(host, `${envPrefix}python3 ~/.arcana/helper.py ${args}`);
 }
@@ -137,6 +145,17 @@ export interface HostConfig {
   workDir: string;
   conda: string | null;
   setupCmd: string | null;
+  envVars?: Record<string, string> | null;
+}
+
+/** Build HostConfig from a Prisma RemoteHost record */
+function hostToConfig(host: { host: string; port: number; user: string; keyPath: string | null; workDir: string; conda: string | null; setupCmd: string | null; envVars: string | null }): HostConfig {
+  let envVars: Record<string, string> | null = null;
+  if (host.envVars) { try { envVars = JSON.parse(host.envVars); } catch { /* ignore */ } }
+  return {
+    host: host.host, port: host.port, user: host.user, keyPath: host.keyPath,
+    workDir: host.workDir, conda: host.conda, setupCmd: host.setupCmd, envVars,
+  };
 }
 
 // ── SSH executor ──────────────────────────────────────────────────
@@ -356,19 +375,13 @@ export async function submitRemoteJob(params: {
   command: string;
   stepId?: string;
   projectId?: string;
+  scriptHash?: string;
+  hypothesisId?: string;
 }): Promise<{ jobId: string }> {
   const host = await prisma.remoteHost.findUnique({ where: { id: params.hostId } });
   if (!host) throw new Error("Remote host not found");
 
-  const config: HostConfig = {
-    host: host.host,
-    port: host.port,
-    user: host.user,
-    keyPath: host.keyPath,
-    workDir: host.workDir,
-    conda: host.conda,
-    setupCmd: host.setupCmd,
-  };
+  const config = hostToConfig(host);
 
   const backend = getBackend(host.backend);
 
@@ -381,6 +394,8 @@ export async function submitRemoteJob(params: {
       localDir: params.localDir,
       remoteDir: "", // will be set after sync
       command: params.command,
+      scriptHash: params.scriptHash || null,
+      hypothesisId: params.hypothesisId || null,
       status: "SYNCING",
     },
   });
@@ -628,6 +643,46 @@ async function runAndPoll(
       import("./workspace").then(({ invalidateWorkspace }) => {
         if (job.projectId) invalidateWorkspace(job.projectId);
       }).catch(() => {});
+
+      // ── Auto-visualization: dispatch visualizer after successful experiments ──
+      if (!failed && !indeterminate && job.projectId) {
+        try {
+          const completedCount = await prisma.remoteJob.count({
+            where: { projectId: job.projectId, status: "COMPLETED" },
+          });
+          const vizCount = await prisma.agentTask.count({
+            where: { projectId: job.projectId, role: "visualizer" },
+          });
+          // Auto-dispatch every ~2 new successful experiments
+          if (completedCount >= 2 && completedCount > vizCount * 2) {
+            const vizTask = await prisma.agentTask.create({
+              data: {
+                projectId: job.projectId,
+                role: "visualizer",
+                goal: "Auto-visualization: create publication-quality figures comparing all completed experiment results",
+                status: "PENDING",
+                input: JSON.stringify({ workDir: localDir }),
+              },
+            });
+            // Dynamic import to avoid circular dependency
+            import("./sub-agent").then(({ runSubAgent }) => {
+              runSubAgent(vizTask.id).catch((e) =>
+                console.error("[auto-viz] Visualizer sub-agent failed:", e)
+              );
+            }).catch(() => {});
+
+            await prisma.researchLogEntry.create({
+              data: {
+                projectId: job.projectId,
+                type: "observation",
+                content: `Auto-dispatched visualizer after ${completedCount} completed experiments`,
+              },
+            });
+          }
+        } catch (vizErr) {
+          console.warn("[auto-viz] Failed to dispatch visualizer:", vizErr);
+        }
+      }
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : "Remote execution failed";
@@ -706,11 +761,7 @@ export async function cleanupStaleJobs(projectId?: string): Promise<number> {
     if (elapsed < MIN_AGE_MS) continue; // Too fresh, skip
 
     // Build SSH config if host is available
-    const config: HostConfig | null = job.host ? {
-      host: job.host.host, port: job.host.port, user: job.host.user,
-      keyPath: job.host.keyPath, workDir: job.host.workDir,
-      conda: job.host.conda, setupCmd: job.host.setupCmd,
-    } : null;
+    const config: HostConfig | null = job.host ? hostToConfig(job.host) : null;
 
     // Primary check: use helper status (single SSH call for everything)
     let helperResult: HelperStatus | null = null;
@@ -815,15 +866,7 @@ export async function cancelRemoteJob(jobId: string): Promise<void> {
   });
   if (!job) return;
 
-  const config: HostConfig = {
-    host: job.host.host,
-    port: job.host.port,
-    user: job.host.user,
-    keyPath: job.host.keyPath,
-    workDir: job.host.workDir,
-    conda: job.host.conda,
-    setupCmd: job.host.setupCmd,
-  };
+  const config = hostToConfig(job.host);
 
   // Use helper for clean process group kill; fall back to raw kill
   if (job.remoteDir) {

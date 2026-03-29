@@ -142,17 +142,6 @@ export function ReflectionPhase({ projectId, steps, currentIteration, previousIt
 
   return (
     <div className="space-y-4 pr-2">
-      <div className="flex items-center gap-2">
-        <button
-          onClick={handleAutoRun}
-          disabled={autoRunning || runningSteps.length > 0}
-          className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
-        >
-          {autoRunning ? <Loader2 className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3" />}
-          {runningSteps.length > 0 ? "Reflecting..." : "What should I do next?"}
-        </button>
-      </div>
-
       {/* Running indicator */}
       {runningSteps.length > 0 && (
         <div className="rounded-md border border-blue-500/30 bg-blue-500/5 p-3 flex items-center gap-2">

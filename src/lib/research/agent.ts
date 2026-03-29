@@ -6,7 +6,7 @@
  * results, and iterates.
  */
 
-import { streamText, generateText, stepCountIs, tool } from "ai";
+import { streamText, generateText, generateObject, stepCountIs, tool } from "ai";
 import { z } from "zod";
 import { getModel } from "@/lib/llm/provider";
 import { getDefaultModel, getModelForTier } from "@/lib/llm/auto-process";
@@ -90,6 +90,85 @@ async function drainPdfDownloadQueue() {
   }
 
   pdfDownloadRunning = false;
+}
+
+// ── Phase gate infrastructure ────────────────────────────────────
+
+/** Tools only available in specific phases. Benchmark projects bypass all gates. */
+const PHASE_RESTRICTED_TOOLS: Record<string, string[]> = {
+  execute_remote: ["experiment"],
+  run_experiment_sweep: ["experiment"],
+  validate_environment: ["experiment"],
+  complete_iteration: ["reflection"],
+};
+
+async function checkPhaseGate(
+  projectId: string,
+  targetPhase: string,
+  currentPhase: string,
+): Promise<{ ok: boolean; reason?: string }> {
+  const PHASE_ORDER = ["literature", "hypothesis", "experiment", "analysis", "reflection"];
+  const currentIdx = PHASE_ORDER.indexOf(currentPhase);
+  const targetIdx = PHASE_ORDER.indexOf(targetPhase);
+  if (targetIdx < 0 || currentIdx < 0) return { ok: false, reason: `Unknown phase: ${targetPhase}` };
+  // Going backwards: always ok
+  if (targetIdx < currentIdx) return { ok: true };
+  // Must be adjacent forward
+  if (targetIdx > currentIdx + 1) return { ok: false, reason: `Cannot skip from ${currentPhase} to ${targetPhase}. Advance one phase at a time.` };
+  // Check gates
+  switch (`${currentPhase}->${targetPhase}`) {
+    case "literature->hypothesis": {
+      const paperCount = await prisma.paper.count({
+        where: { collections: { some: { collection: { researchProject: { id: projectId } } } } },
+      });
+      const scoutCount = await prisma.agentTask.count({ where: { projectId, role: "scout" } });
+      if (paperCount < 3 && scoutCount === 0) return { ok: false, reason: `Gate: need 3+ papers or 1+ scout dispatched. Currently: ${paperCount} papers, ${scoutCount} scouts.` };
+      // Check that papers are actually processed (not just imported)
+      const unprocessedCount = await prisma.paper.count({
+        where: {
+          collections: { some: { collection: { researchProject: { id: projectId } } } },
+          processingStatus: { notIn: ["COMPLETED", "FAILED", "NEEDS_DEFERRED", "NO_PDF"] },
+        },
+      });
+      if (unprocessedCount > 0) return { ok: false, reason: `Gate: ${unprocessedCount} paper(s) still processing. Wait for them to complete — you need full summaries and key findings before forming hypotheses.` };
+      // Require synthesizer to find cross-paper patterns before hypothesizing
+      const synthCount = await prisma.agentTask.count({ where: { projectId, role: "synthesizer", status: "COMPLETED" } });
+      if (synthCount === 0) return { ok: false, reason: "Gate: need at least 1 completed synthesis. Use dispatch_synthesizer to find contradictions, complementary techniques, and unexplored combinations across papers before forming hypotheses." };
+      break;
+    }
+    case "hypothesis->experiment": {
+      const hypCount = await prisma.researchHypothesis.count({ where: { projectId } });
+      if (hypCount === 0) return { ok: false, reason: "Gate: need at least 1 hypothesis. Use log_finding(type='hypothesis') first." };
+      // Require architect proposals before experimenting (ensures principled approach design)
+      const architectCount = await prisma.agentTask.count({ where: { projectId, role: "architect", status: "COMPLETED" } });
+      if (architectCount === 0) return { ok: false, reason: "Gate: need at least 1 completed architect proposal. Use dispatch_architect to get novel approach designs before experimenting." };
+      // Require mechanism design document (logged as a decision or written to RESEARCH_LOG.md)
+      const mechDesignCount = await prisma.researchLogEntry.count({
+        where: { projectId, type: "decision", content: { contains: "echanism" } }, // matches "Mechanism" or "mechanism"
+      });
+      if (mechDesignCount === 0) return { ok: false, reason: "Gate: need a mechanism design document. Before coding, log your approach design with log_finding(type='decision') describing: problem formulation, pseudocode, key design choices with paper references, expected behavior, and failure modes." };
+      break;
+    }
+    case "experiment->analysis": {
+      const completed = await prisma.remoteJob.count({ where: { projectId, status: "COMPLETED" } });
+      if (completed === 0) return { ok: false, reason: "Gate: need at least 1 completed experiment." };
+      // Require adversarial review of experimental results
+      const reviewCount = await prisma.agentTask.count({ where: { projectId, role: "reviewer", status: "COMPLETED" } });
+      const inlineReviewCount = await prisma.researchStep.count({
+        where: { iteration: { projectId }, type: "critique", status: "COMPLETED" },
+      });
+      if (reviewCount === 0 && inlineReviewCount === 0) return { ok: false, reason: "Gate: need at least 1 adversarial review. Use dispatch_reviewer or adversarial_review to critique your experimental methodology and results before advancing to analysis." };
+      break;
+    }
+    case "analysis->reflection": {
+      const updatedHyps = await prisma.researchHypothesis.count({
+        where: { projectId, evidence: { not: null } },
+      });
+      if (updatedHyps === 0) return { ok: false, reason: "Gate: need at least 1 hypothesis updated with evidence. Use update_hypothesis first." };
+      break;
+    }
+  }
+  return { ok: true };
 }
 
 // ── Helpers ──────────────────────────────────────────────────────
@@ -627,7 +706,15 @@ async function runAgent(
   // 6. Build context
   const papers = project.collection?.papers.map((cp) => cp.paper) || [];
   const systemPrompt = buildSystemPrompt(project, papers, workDir, remoteHosts, resourceSetting, capabilities, gpuInfo, processMemories, resourcePreferences, sharedUtilities, sharedDir);
-  const messages = buildMessages(project, papers, userMessage, researchLog);
+
+  // Generate structured research state for context injection
+  let researchState = "";
+  try {
+    const { getResearchStateForContext } = await import("./research-state");
+    researchState = await getResearchStateForContext(projectId, workDir);
+  } catch {}
+
+  const messages = buildMessages(project, papers, userMessage, researchLog, researchState);
 
   // 6. Get model — Opus for the main research agent (critical reasoning)
   const { provider, modelId, proxyConfig } = await getModelForTier("reasoning");
@@ -642,17 +729,34 @@ async function runAgent(
     output: unknown,
     phase?: string,
   ) => {
-    await prisma.researchStep.create({
-      data: {
-        iterationId,
-        type,
-        title,
-        status,
-        output: typeof output === "string" ? output : JSON.stringify(output),
-        sortOrder: stepSortOrder++,
-        completedAt: new Date(),
-      },
+    // Deduplicate: if an identical step (same type + title) was recorded in this iteration,
+    // update it instead of creating a duplicate
+    const existing = await prisma.researchStep.findFirst({
+      where: { iterationId, type, title },
+      orderBy: { sortOrder: "desc" },
     });
+    if (existing) {
+      await prisma.researchStep.update({
+        where: { id: existing.id },
+        data: {
+          status,
+          output: typeof output === "string" ? output : JSON.stringify(output),
+          completedAt: new Date(),
+        },
+      });
+    } else {
+      await prisma.researchStep.create({
+        data: {
+          iterationId,
+          type,
+          title,
+          status,
+          output: typeof output === "string" ? output : JSON.stringify(output),
+          sortOrder: stepSortOrder++,
+          completedAt: new Date(),
+        },
+      });
+    }
     if (phase) {
       await prisma.researchProject.update({
         where: { id: projectId },
@@ -672,7 +776,8 @@ async function runAgent(
   const rawTools = createTools(projectId, userId, workDir, emit, remoteHosts, recordStep, { id: iterationId, number: iteration.number }, sharedDir, onIterationAdvance, model, expCounter, searchCounter, gpuInfo?.map((g) => ({ alias: g.alias, gpuCount: g.gpuCount })), bannedPapers, isBenchmarkProject);
 
   // Wrap every tool's execute to sanitize return values — prevents invalid Unicode
-  // surrogates from entering the LLM message history and causing API errors
+  // surrogates from entering the LLM message history and causing API errors.
+  // Also enforces phase gates for restricted tools (benchmark projects bypass all gates).
   const tools = Object.fromEntries(
     Object.entries(rawTools).map(([name, t]) => {
       const orig = t as { execute?: (...args: unknown[]) => Promise<unknown> };
@@ -680,6 +785,16 @@ async function runAgent(
       return [name, {
         ...t,
         execute: async (...args: unknown[]) => {
+          // Phase gate: block tools that are restricted to specific phases
+          if (!isBenchmarkProject && PHASE_RESTRICTED_TOOLS[name]) {
+            const proj = await prisma.researchProject.findUnique({
+              where: { id: projectId }, select: { currentPhase: true },
+            });
+            if (proj && !PHASE_RESTRICTED_TOOLS[name].includes(proj.currentPhase)) {
+              const allowed = PHASE_RESTRICTED_TOOLS[name].join(" or ");
+              return `BLOCKED — ${name} is only available in the ${allowed} phase. Current phase: ${proj.currentPhase}. Use advance_phase to transition.`;
+            }
+          }
           const result = await orig.execute!(...args);
           if (typeof result === "string") return sanitizeForJson(result);
           return result;
@@ -694,7 +809,6 @@ async function runAgent(
   const emittedHints = new Set<string>();
 
   // Track tool usage for nudges
-  let experimentsSinceLastLitReview = 0;
   let totalExperimentsRun = 0;
   let totalPaperConsultations = 0;
   const LIT_TOOLS = new Set(["search_papers", "read_paper", "search_library", "query_insights"]);
@@ -726,11 +840,9 @@ async function runAgent(
       let hasNonSearch = false;
       for (const tc of toolCalls || []) {
         if (LIT_TOOLS.has(tc.toolName)) {
-          experimentsSinceLastLitReview = 0;
           totalPaperConsultations++;
         }
         if (EXPERIMENT_TOOLS.has(tc.toolName)) {
-          experimentsSinceLastLitReview++;
           totalExperimentsRun++;
         }
         if (tc.toolName !== "search_papers") hasNonSearch = true;
@@ -773,9 +885,6 @@ async function runAgent(
         // Budget reminders — only log, agent already knows from system prompt
         console.log(`[agent] Step budget: ${remaining} steps remaining (step ${stepCount}/${MAX_STEPS})`);
       }
-      if (experimentsSinceLastLitReview >= 3) {
-        console.log(`[agent] Nudge: ${experimentsSinceLastLitReview} experiments without lit review`);
-      }
       // Replan nudge every 20 steps
       if (stepCount % 20 === 0 && stepCount > 0) {
         emit({ type: "text", content: "\n\n[System: You've completed 20 steps since your last plan. Write an updated plan to RESEARCH_LOG.md before continuing.]\n\n" });
@@ -801,13 +910,7 @@ async function runAgent(
       if (totalExperimentsRun > 0 && totalExperimentsRun % 2 === 0 && stepCount > 5) {
         emit({ type: "text", content: "\n\n[System: You've completed 2+ experiments without an adversarial review. Use adversarial_review or dispatch_reviewer before your next experiment.]\n\n" });
       }
-      if (experimentsSinceLastLitReview >= 4) {
-        emit({ type: "text", content: "\n\n[System: 4 experiments without consulting literature. Use dispatch_scouts or search_library to check if someone has already solved your current problem.]\n\n" });
-      }
-      // Remind about visualization after successful experiments
-      if (totalExperimentsRun >= 3 && totalExperimentsRun % 3 === 0) {
-        emit({ type: "text", content: "\n\n[System: You've completed 3+ experiments. Use dispatch_visualizer to create figures comparing your results.]\n\n" });
-      }
+      // Lit review and visualization nudges removed — enforced by synthesis gate and auto-viz hook
 
       // Iteration advancement nudge — internal only
       const totalIterationSteps = iterationStepsAtStart + stepCount;
@@ -824,28 +927,14 @@ async function runAgent(
           stepBudget.design++;
         } else if (["execute_remote", "validate_environment"].includes(tc.toolName)) {
           stepBudget.experiment++;
-        } else if (["check_job", "monitor_experiment", "read_file", "get_workspace"].includes(tc.toolName)) {
+        } else if (["check_job", "monitor_experiment", "read_file", "get_workspace", "read_remote_file"].includes(tc.toolName)) {
           stepBudget.analysis++;
-        } else if (tc.toolName === "check_remote") {
-          // Classify check_remote by content: reading results/logs = analysis, ls/find/pip = infra
-          const args = tc.input as { command?: string } | undefined;
-          const cmd = args?.command || "";
-          const isResultRead = /cat.*result|cat.*stdout|cat.*stderr|cat.*\.json|cat.*\.csv|tail.*log|head.*log/.test(cmd);
-          if (isResultRead) {
-            stepBudget.analysis++;
-          } else {
-            stepBudget.infraDebug++;
-          }
         } else if (tc.toolName === "execute_command") {
           stepBudget.infraDebug++;
         }
       }
 
-      // Warn if infrastructure debugging exceeds budget
-      const totalBudgetSteps = Object.values(stepBudget).reduce((s, v) => s + v, 0);
-      if (totalBudgetSteps > 10 && stepBudget.infraDebug / totalBudgetSteps > 0.1) {
-        emit({ type: "text", content: `\n\n[System: Infrastructure debugging is ${Math.round(stepBudget.infraDebug / totalBudgetSteps * 100)}% of your steps (target: <5%). Focus on research, not environment issues. Use get_workspace instead of check_remote.]\n\n` });
-      }
+      // Infra debugging warning removed — check_remote is gone, only execute_command remains
 
       // Emit thinking indicator
       emit({ type: "thinking", content: thinkingHint(toolCalls) });
@@ -1051,7 +1140,7 @@ ${prefSection}
 - \`check_job\` → check status of a background job (quick, non-blocking). Call periodically to monitor progress.
 - \`wait_for_jobs\` → block until specific jobs complete (use when you need results before proceeding, e.g., to compare outputs).
 - \`get_workspace\` → PREFERRED: structured view of all files, results, packages, job status (cached, fast)
-- \`check_remote\` → LAST RESORT: run a specific command only when get_workspace doesn't have what you need (e.g., reading a specific log file line range). Limited to 3 consecutive calls.
+- \`read_remote_file\` → read a specific file from the remote experiment directory (e.g., results.json, stderr.log, output/metrics.csv) when get_workspace doesn't show its full contents
 - \`execute_command\` → local tasks (editing files, data prep, lightweight compute)
 
 ### Parallel Workflow (YOU MUST DO THIS — NOT OPTIONAL)
@@ -1091,7 +1180,7 @@ After 2+ experiments complete, dispatch the visualizer to create publication-qua
 **NEVER write monitoring, status-checking, cleanup, or GPU-checking scripts.** Use the built-in tools:
 - \`check_job\`: experiment status and logs
 - \`get_workspace\`: file listings and result contents
-- \`check_remote\`: specific SSH commands
+- \`read_remote_file\`: read specific files from remote
 - \`monitor_experiment\`: live training metrics
 Writing a Python script to do \`nvidia-smi\` or \`ps aux\` or \`cat logs\` is NEVER the right approach.
 
@@ -1254,14 +1343,43 @@ This is not optional. A plan that is never revised is a bad plan. The act of rep
 
 **Key principle from Plan-and-Act (ICML 2025):** Agents that separate planning from execution outperform those that interleave them. Plan your strategy, THEN execute it. When results come back, replan, THEN execute again. Never freestyle.
 
-## The Research Cycle (repeat this loop — NEVER stop after one experiment)
+## Phase-Gated Workflow
 
-**Phase stability:** Do NOT switch phases unless you've spent at least:
-- Literature: 5 steps before moving to Hypothesis
-- Hypothesis: 3 steps before moving to Experiment
-- Experiment: 10 steps before moving to Analysis
-- Analysis: 3 steps before moving to the next cycle
-Constant phase-switching (13 changes in one project) wastes context and prevents deep work.
+Your research operates in a structured phase system. Some tools are ONLY available in certain phases:
+- **EXPERIMENT phase only:** execute_remote, run_experiment_sweep, validate_environment, write Python scripts
+- **REFLECTION phase only:** complete_iteration
+
+Use \`advance_phase\` to transition between phases. Each transition has gates:
+- **literature → hypothesis:** 3+ papers collected OR scout dispatched
+- **hypothesis → experiment:** 1+ hypothesis formulated
+- **experiment → analysis:** 1+ completed experiment
+- **analysis → reflection:** 1+ hypothesis updated with evidence
+
+You can always go backwards (e.g., experiment → hypothesis to reformulate). Forward requires meeting gates.
+
+**Current phase is shown in RESEARCH_STATE.md** — check it to know what tools are available.
+
+### Phase-Specific Use of \`query_insights\`
+\`query_insights\` is available in ALL phases, but use it differently depending on where you are:
+- **LITERATURE phase:** Use \`query_insights\` to find relevant methodology and techniques from your knowledge base. This helps you build on prior learnings rather than starting from scratch.
+- **EXPERIMENT phase:** Use \`query_insights\` to find debugging patterns, code solutions, and practical tricks that solved similar problems in past research.
+- **ANALYSIS phase:** Use \`query_insights\` to find related findings for comparison — understanding how your results relate to distilled knowledge from previous papers strengthens your analysis.
+
+## Structured Research Tracking
+
+### Approaches
+Use \`register_approach\` to create branches in your approach tree. Every distinct research direction should be a registered approach. Sub-approaches (refinements) link to parents.
+Use \`view_approach_tree\` to see all approaches and their status.
+
+### Results
+After EVERY completed experiment, call \`record_result\` with structured metrics and a verdict (better/worse/inconclusive).
+After EVERY failed experiment, call \`reflect_on_failure\` with root cause analysis before submitting another experiment.
+Use \`query_results\` to see a formatted comparison table.
+
+### Research State
+RESEARCH_STATE.md is auto-generated and shows your current structured state: hypotheses, approach tree, results table, pending jobs. Use this as your primary reference rather than scrolling through logs.
+
+## The Research Cycle (repeat this loop — NEVER stop after one experiment)
 
 ### Phase 1: Literature, Synthesis & Hypotheses
 **IMPORTANT: Use \`dispatch_scouts\` for all bulk literature search — do NOT call \`search_papers\` more than twice in a row.** Scouts run in parallel and are much faster. Use \`search_papers\` only for targeted follow-up queries on a specific sub-question.
@@ -1294,7 +1412,7 @@ Your mechanism design document should include:
 
 ### Phase 2: Experiment
 
-**DO NOT run ls, find, cat, or nvidia-smi via check_remote to understand the workspace.** Use \`get_workspace\` instead — it returns everything in one call. check_remote is for rare cases like reading a specific line range from a log file.
+**DO NOT run ls, find, cat, or nvidia-smi to understand the workspace.** Use \`get_workspace\` instead — it returns everything in one call. Use \`read_remote_file\` when you need the full contents of a specific file (e.g., a result JSON or log).
 
 **╔══════════════════════════════════════════════════════════════════╗**
 **║  PROOF-OF-CONCEPT FIRST — ALWAYS                               ║**
@@ -1357,7 +1475,14 @@ Your mechanism design document should include:
 - Before writing a new \`exp_NNN\` or \`poc_NNN\` script, check if an existing script already does 80% of what you need. If so, add a flag to it.
 - Exception: fundamentally different experiments (e.g., diagnostic vs training) CAN be separate scripts.
 
-**Experiment naming:** Use \`poc_NNN_name.py\` for proof-of-concept and \`exp_NNN_name.py\` for full experiments. But prefer FEWER scripts with MORE arguments over MANY scripts with slight variations.
+**Script naming taxonomy (ENFORCED — non-conforming names are rejected):**
+- \`poc_NNN_name.py\` — Proof of concept: quick validation (<5 min, small data). No hypothesis required.
+- \`exp_NNN_name.py\` — Full experiment: tests a specific hypothesis. Requires hypothesis_id.
+- \`analysis_NNN_name.py\` — Post-experiment analysis, visualization, comparison of results.
+- \`sweep_NNN_name.py\` — Parameter sweep across a range of values.
+- Utility modules: \`utils.py\`, \`config.py\`, \`eval_utils.py\`, \`data_loader.py\`, etc.
+- **Any other name (run_*, analyze_*, test_*, etc.) will be BLOCKED.** Use the taxonomy above.
+- Prefer FEWER scripts with MORE arguments over MANY scripts with slight variations.
 
 - **Before EVERY experiment, check the literature.** Use \`search_library\` to find relevant techniques in papers you already have. Use \`search_papers\` when you need new papers on a specific sub-problem. Use \`read_paper\` to extract exact methods, hyperparameters, and baselines from the most relevant papers. The experiment you design should cite at least one paper's approach. Never design an experiment from scratch when a paper has already solved part of the problem — build on their work.
 - **Before writing code, search the web for existing tools.** Use \`web_search\` to find libraries that already do what you need (e.g., \`trl\` for RLHF, \`peft\` for parameter-efficient fine-tuning, \`accelerate\` for distributed training). Read their documentation with \`fetch_webpage\`. Don't rewrite from scratch what a mature library already provides — use pip packages.
@@ -1487,7 +1612,7 @@ Think of iterations like chapters — each should have a coherent narrative. Sta
 - **NEVER generate synthetic toy data when a real dataset exists.** If a paper evaluates on GLUE, use GLUE. If on SQuAD, use SQuAD. Generating 50 random samples to "simulate" a dataset invalidates the entire experiment. Use \`datasets\` library, \`torchvision.datasets\`, or direct download URLs from the papers.
 - **NEVER manage the Python environment manually when using execute_remote.** The remote wrapper handles venv creation, package installation, and activation automatically. Just write a \`requirements.txt\` and run \`python3 script.py\`. For local runs with execute_command, create a venv once: \`python3 -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt && python3 script.py\`, then reuse on subsequent runs.
 - **execute_remote handles EVERYTHING automatically and returns immediately.** The remote wrapper: (1) cds into the experiment directory, (2) creates .venv if needed, (3) installs requirements.txt if changed, (4) activates .venv, (5) runs your command, (6) captures exit code. So your command should be JUST the experiment, e.g. \`python3 experiment.py\`. NEVER include: \`cd\`, \`source .venv/bin/activate\`, \`python3 -m venv\`, \`pip install\`, \`bash -c\`, \`timeout\`, \`nohup\`, absolute paths to python or .venv/bin/python3. These WILL break the command. After submitting, **keep working** — don't just call check_job in a loop. Do something useful (read papers, write code) and check back later.
-- **NEVER use execute_remote for checking files, reading logs, or listing results.** Use check_remote for that — it's a direct SSH command with no sync overhead. execute_remote does a full rsync which is slow and can fail.
+- **NEVER use execute_remote for checking files, reading logs, or listing results.** Use read_remote_file or get_workspace for that. execute_remote does a full rsync which is slow and can fail.
 - **ALWAYS use flush=True in print() and save results incrementally.** Remote jobs buffer stdout — without flushing you won't see progress. Without incremental saves, a crash after training means zero results.
 - **Save lessons with save_lesson whenever you fix a non-obvious bug or discover a practical trick.** Future you (and other projects) will benefit. Don't save obvious things — save things that cost you time to figure out.
 - Use log_finding liberally: record hypotheses, findings, decisions, and breakthroughs. This is your lab notebook.
@@ -1507,17 +1632,23 @@ function buildMessages(
   papers: { title: string }[],
   userMessage: string | null,
   researchLog?: string,
+  researchState?: string,
 ): { role: "user" | "assistant"; content: string }[] {
   const messages: { role: "user" | "assistant"; content: string }[] = [];
 
   // Build the initial user message with context
   let context = "";
 
+  // Inject structured research state (primary reference for the agent)
+  if (researchState && researchState.trim().length > 50) {
+    context += `\n\n## RESEARCH STATE (structured — use as primary reference)\n${researchState}\n`;
+  }
+
   // Inject the persistent research log (user-editable)
   if (researchLog && researchLog.trim().length > 50) {
-    // Truncate if very long to preserve context budget
-    const logContent = researchLog.length > 8000
-      ? researchLog.slice(0, 6000) + "\n\n[...truncated — read RESEARCH_LOG.md for the full log...]\n\n" + researchLog.slice(-2000)
+    // Truncate more aggressively since research state captures the essentials
+    const logContent = researchLog.length > 3000
+      ? researchLog.slice(0, 2000) + "\n\n[...truncated — read RESEARCH_LOG.md for the full log...]\n\n" + researchLog.slice(-1000)
       : researchLog;
     context += `\n\n## RESEARCH_LOG.md (your persistent lab notebook — READ THIS CAREFULLY)\n${logContent}`;
   }
@@ -1625,8 +1756,8 @@ function thinkingHint(toolCalls?: { toolName: string; input: unknown }[]): strin
       return "Reviewing written code and planning next action...";
     case "execute_command":
       return "Analyzing command output...";
-    case "check_remote":
-      return "Checking remote files...";
+    case "read_remote_file":
+      return "Reading remote file...";
     case "execute_remote":
       return "Job submitted — continuing with other work...";
     case "check_job":
@@ -1714,9 +1845,7 @@ function createTools(
   // Track active background job IDs for this session
   const activeJobIds = new Set<string>();
   const consecutiveSearches = searchCounter || { value: 0 };
-  let consecutiveCheckRemote = 0;
-  const scriptFailureCounts = new Map<string, number>(); // Track per-script failures
-  let totalProjectFailures = 0; // Track total failures across all scripts
+  // Failure tracking is DB-backed (survives restarts) — see execute_remote gate
   // Experiment counter for sequential naming (shared with caller via ref object)
   const experimentCount = expCounter || { value: 0 };
 
@@ -1747,10 +1876,20 @@ function createTools(
       }),
       execute: async ({ approach, rationale }: { approach: string; rationale: string }) => {
         committedApproachInner = approach;
+        // Also create an ApproachBranch record for structured tracking
+        let branchId = "";
+        try {
+          const branch = await prisma.approachBranch.create({
+            data: { projectId, name: approach, description: rationale, status: "ACTIVE" },
+          });
+          branchId = branch.id.slice(0, 8);
+        } catch {
+          // Non-fatal — approach tracking is optional
+        }
         await prisma.researchLogEntry.create({
           data: { projectId, type: "decision", content: `COMMITTED TO APPROACH: ${approach}\nRationale: ${rationale}` },
         });
-        return `Committed to "${approach}". You are now locked into iterating on this approach. To change direction, you must call abandon_approach with evidence that this approach is fundamentally flawed.`;
+        return `Committed to "${approach}"${branchId ? ` (approach ID: ${branchId})` : ""}. You are now locked into iterating on this approach. To change direction, you must call abandon_approach with evidence that this approach is fundamentally flawed.`;
       },
     }),
 
@@ -1766,10 +1905,329 @@ function createTools(
         }
         const prev = committedApproachInner;
         committedApproachInner = null;
+        // Update the most recent ACTIVE approach branch to ABANDONED
+        try {
+          const activeBranch = await prisma.approachBranch.findFirst({
+            where: { projectId, status: "ACTIVE" },
+            orderBy: { createdAt: "desc" },
+          });
+          if (activeBranch) {
+            await prisma.approachBranch.update({
+              where: { id: activeBranch.id },
+              data: { status: "ABANDONED" },
+            });
+          }
+        } catch {
+          // Non-fatal — approach tracking is optional
+        }
         await prisma.researchLogEntry.create({
           data: { projectId, type: "decision", content: `ABANDONED APPROACH: ${prev}\nEvidence: ${evidence}\nExperiments tried: ${experiments_tried}` },
         });
         return `Abandoned "${prev}". You must now commit_to_approach with a new direction before running more experiments.`;
+      },
+    }),
+
+    // ── Phase-gated research tools ─────────────────────────────────
+
+    advance_phase: tool({
+      description: "Explicitly transition to a new research phase. Each transition has gate conditions that must be met. Phases: literature → hypothesis → experiment → analysis → reflection. You can go backwards freely but must meet gates to advance forward.",
+      inputSchema: z.object({
+        target_phase: z.enum(["literature", "hypothesis", "experiment", "analysis", "reflection"]),
+        justification: z.string().describe("Why you're ready for this phase"),
+      }),
+      execute: async ({ target_phase, justification }: { target_phase: string; justification: string }) => {
+        const project = await prisma.researchProject.findUnique({
+          where: { id: projectId }, select: { currentPhase: true },
+        });
+        if (!project) return "Project not found";
+        if (project.currentPhase === target_phase) return `Already in ${target_phase} phase.`;
+        const gate = await checkPhaseGate(projectId, target_phase, project.currentPhase);
+        if (!gate.ok) return `BLOCKED — ${gate.reason}`;
+        await prisma.researchProject.update({
+          where: { id: projectId }, data: { currentPhase: target_phase },
+        });
+        await prisma.researchLogEntry.create({
+          data: { projectId, type: "decision", content: `Phase: ${project.currentPhase} → ${target_phase}. ${justification}` },
+        });
+        // Regenerate research state
+        try {
+          const { generateResearchState } = await import("./research-state");
+          await generateResearchState(projectId, workDir);
+        } catch {}
+        emit({ type: "tool_output", toolName: "advance_phase", content: `Phase: ${project.currentPhase} → ${target_phase}` });
+        return `Phase advanced to ${target_phase}. ${justification}`;
+      },
+    }),
+
+    register_approach: tool({
+      description: "Register a research approach in the approach tree. Use this to track different directions you're exploring. Returns an ID for linking experiments via record_result.",
+      inputSchema: z.object({
+        name: z.string().describe("Short name, e.g. 'LoRA fine-tuning with r=16'"),
+        description: z.string().optional().describe("Detailed description of the approach"),
+        parent_id: z.string().optional().describe("Parent approach ID if this is a sub-approach/refinement"),
+      }),
+      execute: async ({ name, description, parent_id }: { name: string; description?: string; parent_id?: string }) => {
+        if (parent_id) {
+          const parent = await prisma.approachBranch.findFirst({ where: { id: parent_id, projectId } });
+          if (!parent) return `Parent approach "${parent_id}" not found.`;
+        }
+        const branch = await prisma.approachBranch.create({
+          data: { projectId, name, description, parentId: parent_id },
+        });
+        await prisma.researchLogEntry.create({
+          data: { projectId, type: "decision", content: `Registered approach: ${name}` },
+        });
+        return `Approach "${name}" registered (ID: ${branch.id.slice(0, 8)}). Use this ID in record_result to link experiments.`;
+      },
+    }),
+
+    record_result: tool({
+      description: "Record structured experiment results. Call this after EVERY completed experiment. Builds the results database for tracking progress and comparisons.",
+      inputSchema: z.object({
+        job_id: z.string().describe("Job ID from execute_remote or check_job"),
+        approach_id: z.string().optional().describe("ApproachBranch ID from register_approach"),
+        hypothesis_id: z.string().optional().describe("Hypothesis ID being tested"),
+        baseline_id: z.string().optional().describe("ExperimentResult ID to compare against"),
+        metrics: z.record(z.string(), z.number()).describe("Key metrics: { accuracy: 0.85, loss: 0.23, f1: 0.81 }"),
+        verdict: z.enum(["better", "worse", "inconclusive", "error"]).describe("How this compares to baseline or expectations"),
+        summary: z.string().describe("One sentence: what this experiment demonstrated"),
+      }),
+      execute: async ({ job_id, approach_id, hypothesis_id, baseline_id, metrics, verdict, summary }: {
+        job_id: string; approach_id?: string; hypothesis_id?: string; baseline_id?: string;
+        metrics: Record<string, number>; verdict: string; summary: string;
+      }) => {
+        // Check for duplicate
+        const existing = await prisma.experimentResult.findUnique({ where: { jobId: job_id } });
+        if (existing) return `Result already recorded for job ${job_id.slice(0, 8)}.`;
+
+        const job = await prisma.remoteJob.findUnique({ where: { id: job_id } });
+        const scriptName = job?.command?.match(/python3?\s+(\S+\.py)/)?.[1] || "unknown";
+
+        // Compute comparison delta if baseline provided
+        let comparison: Record<string, number> | null = null;
+        if (baseline_id) {
+          const baseline = await prisma.experimentResult.findUnique({ where: { id: baseline_id } });
+          if (baseline?.metrics) {
+            try {
+              const baseMetrics = JSON.parse(baseline.metrics) as Record<string, number>;
+              comparison = {};
+              for (const [k, v] of Object.entries(metrics)) {
+                if (typeof baseMetrics[k] === "number") comparison[k] = Number((v - baseMetrics[k]).toFixed(6));
+              }
+            } catch {}
+          }
+        }
+
+        const result = await prisma.experimentResult.create({
+          data: {
+            projectId, jobId: job_id, hypothesisId: hypothesis_id, branchId: approach_id,
+            baselineId: baseline_id, scriptName,
+            parameters: job?.command ? JSON.stringify({ command: job.command }) : null,
+            metrics: JSON.stringify(metrics),
+            comparison: comparison ? JSON.stringify(comparison) : null,
+            verdict, reflection: summary,
+          },
+        });
+
+        // Update approach status if many errors
+        if (approach_id && verdict === "error") {
+          const errorCount = await prisma.experimentResult.count({
+            where: { branchId: approach_id, verdict: "error" },
+          });
+          if (errorCount >= 3) {
+            await prisma.approachBranch.update({
+              where: { id: approach_id }, data: { status: "EXHAUSTED" },
+            });
+          }
+        }
+        if (approach_id && verdict === "better") {
+          await prisma.approachBranch.update({
+            where: { id: approach_id }, data: { status: "PROMISING" },
+          }).catch(() => {});
+        }
+
+        await recordStep("analyze_results", `Result: ${scriptName} → ${verdict}`, "COMPLETED",
+          { resultId: result.id, metrics, verdict });
+
+        // Regenerate research state
+        try {
+          const { generateResearchState } = await import("./research-state");
+          await generateResearchState(projectId, workDir);
+        } catch {}
+
+        const compStr = comparison ? Object.entries(comparison).map(([k, v]) => `${k}: ${v > 0 ? "+" : ""}${v}`).join(", ") : "";
+        return `Result recorded (${result.id.slice(0, 8)}). ${verdict.toUpperCase()}: ${summary}${compStr ? `\nΔ vs baseline: ${compStr}` : ""}`;
+      },
+    }),
+
+    reflect_on_failure: tool({
+      description: "Mandatory reflection after a failed experiment. You MUST call this before submitting another experiment. Analyzing failures prevents repeating mistakes.",
+      inputSchema: z.object({
+        job_id: z.string().describe("Job ID of the failed experiment"),
+        root_cause: z.string().describe("What specifically caused the failure (be precise)"),
+        what_this_teaches: z.string().describe("What you learned from this failure"),
+        next_approach_should: z.string().describe("How the next attempt should differ fundamentally"),
+      }),
+      execute: async ({ job_id, root_cause, what_this_teaches, next_approach_should }: {
+        job_id: string; root_cause: string; what_this_teaches: string; next_approach_should: string;
+      }) => {
+        const job = await prisma.remoteJob.findUnique({ where: { id: job_id } });
+        if (!job) return `Job "${job_id}" not found.`;
+        const scriptName = job.command?.match(/python3?\s+(\S+\.py)/)?.[1] || "unknown";
+
+        // Check for duplicate
+        const existing = await prisma.experimentResult.findUnique({ where: { jobId: job_id } });
+        if (existing) return `Reflection already recorded for job ${job_id.slice(0, 8)}.`;
+
+        const reflection = `ROOT CAUSE: ${root_cause}\nLESSON: ${what_this_teaches}\nNEXT: ${next_approach_should}`;
+
+        await prisma.experimentResult.create({
+          data: {
+            projectId, jobId: job_id, scriptName, verdict: "error", reflection,
+            branchId: null, hypothesisId: job.hypothesisId,
+          },
+        });
+
+        await prisma.researchLogEntry.create({
+          data: {
+            projectId, type: "dead_end",
+            content: `Failure reflection (${scriptName}): ${root_cause}. Lesson: ${what_this_teaches}`,
+          },
+        });
+
+        // Append to RESEARCH_LOG.md
+        const timestamp = new Date().toISOString().slice(0, 16).replace("T", " ");
+        const entry = `\n### Failure Reflection (${timestamp})\n**Script:** ${scriptName}\n**Root cause:** ${root_cause}\n**Lesson:** ${what_this_teaches}\n**Next approach:** ${next_approach_should}\n`;
+        await appendFile(path.join(workDir, "RESEARCH_LOG.md"), entry).catch(() => {});
+
+        await recordStep("analyze_results", `Failure reflection: ${scriptName}`, "COMPLETED",
+          { jobId: job_id, rootCause: root_cause });
+
+        try {
+          const { generateResearchState } = await import("./research-state");
+          await generateResearchState(projectId, workDir);
+        } catch {}
+
+        return `Reflection recorded for ${scriptName}. You may now submit a new experiment.\nKey lesson: ${what_this_teaches}`;
+      },
+    }),
+
+    extract_results: tool({
+      description: "Auto-extract structured metrics from experiment output using AI. Pass a job ID and the system will parse stdout/stderr to extract numeric metrics, determine success/failure, and return structured data ready for record_result. Use this instead of manually parsing experiment output.",
+      inputSchema: z.object({
+        job_id: z.string().describe("Job ID of a completed experiment"),
+      }),
+      execute: async ({ job_id }: { job_id: string }) => {
+        const job = await prisma.remoteJob.findUnique({ where: { id: job_id } });
+        if (!job) return `Job "${job_id}" not found.`;
+        if (job.status !== "COMPLETED" && job.status !== "FAILED") {
+          return `Job is still ${job.status}. Wait for completion first.`;
+        }
+
+        const output = [
+          job.stdout ? `STDOUT:\n${job.stdout.slice(-3000)}` : "",
+          job.stderr ? `STDERR:\n${job.stderr.slice(-1000)}` : "",
+        ].filter(Boolean).join("\n\n");
+
+        if (!output.trim()) return "No output to extract from.";
+
+        try {
+          const { getModelForTier } = await import("@/lib/llm/auto-process");
+          const { getModel, setLlmContext } = await import("@/lib/llm/provider");
+          const { provider, modelId, proxyConfig } = await getModelForTier("standard");
+          setLlmContext("extract-results", userId, { projectId });
+          const model = await getModel(provider, modelId, proxyConfig);
+
+          const metricsSchema = z.object({
+            metrics: z.record(z.string(), z.number()).describe("All numeric metrics found (e.g., accuracy, loss, f1, perplexity, BLEU, rouge)"),
+            verdict: z.enum(["better", "worse", "inconclusive", "error"]).describe("Overall outcome based on the output"),
+            summary: z.string().describe("One-sentence summary of what the experiment showed"),
+            error_type: z.string().optional().describe("If failed: OOM, import error, CUDA error, etc."),
+          });
+
+          const { object } = await generateObject({
+            model,
+            schema: metricsSchema,
+            system: "Extract structured metrics from experiment output. Find ALL numeric values that look like evaluation metrics (accuracy, loss, F1, BLEU, perplexity, etc.). If the experiment failed, set verdict='error' and describe the error type.",
+            prompt: output.slice(0, 4000),
+          });
+
+          const metricsStr = Object.entries(object.metrics).map(([k, v]) => `${k}: ${v}`).join(", ");
+          return `Extracted metrics: ${metricsStr}\nVerdict: ${object.verdict}\nSummary: ${object.summary}${object.error_type ? `\nError: ${object.error_type}` : ""}\n\nUse these values with record_result to save structured results.`;
+        } catch (err) {
+          return `Auto-extraction failed: ${err instanceof Error ? err.message : "unknown error"}. Parse the output manually and use record_result.`;
+        }
+      },
+    }),
+
+    query_results: tool({
+      description: "Get a formatted table of all experiment results. Use this to see what you've tried, what worked, and compare approaches.",
+      inputSchema: z.object({
+        approach_id: z.string().optional().describe("Filter by approach branch ID"),
+        hypothesis_id: z.string().optional().describe("Filter by hypothesis ID"),
+      }),
+      execute: async ({ approach_id, hypothesis_id }: { approach_id?: string; hypothesis_id?: string }) => {
+        const where: Record<string, unknown> = { projectId };
+        if (approach_id) where.branchId = approach_id;
+        if (hypothesis_id) where.hypothesisId = hypothesis_id;
+
+        const results = await prisma.experimentResult.findMany({
+          where: where as any,
+          include: { branch: { select: { name: true } } },
+          orderBy: { createdAt: "asc" },
+        });
+
+        if (results.length === 0) return "No experiment results recorded yet. Use record_result after experiments complete.";
+
+        let table = "| # | Script | Approach | Key Metrics | vs Baseline | Verdict |\n|---|--------|----------|-------------|-------------|--------|\n";
+        for (let i = 0; i < results.length; i++) {
+          const r = results[i];
+          const metrics = r.metrics ? JSON.parse(r.metrics) : {};
+          const metricsStr = Object.entries(metrics).map(([k, v]) => `${k}=${v}`).join(", ").slice(0, 50);
+          const comp = r.comparison ? JSON.parse(r.comparison) : null;
+          const compStr = comp ? Object.entries(comp).map(([k, v]) => `${k}:${(v as number) > 0 ? "+" : ""}${v}`).join(", ") : "-";
+          table += `| ${i + 1} | ${r.scriptName} | ${r.branch?.name || "-"} | ${metricsStr || "-"} | ${compStr} | ${r.verdict || "-"} |\n`;
+        }
+        return table;
+      },
+    }),
+
+    view_approach_tree: tool({
+      description: "Display the approach tree — all research directions, their status, and experiment counts. Use this to decide what to try next.",
+      inputSchema: z.object({}),
+      execute: async () => {
+        const branches = await prisma.approachBranch.findMany({
+          where: { projectId },
+          include: { results: { select: { verdict: true, metrics: true } } },
+          orderBy: { createdAt: "asc" },
+        });
+
+        if (branches.length === 0) return "No approaches registered. Use register_approach to start tracking research directions.";
+
+        const roots = branches.filter(b => !b.parentId);
+        let tree = "";
+        const statusIcon: Record<string, string> = { ACTIVE: "●", PROMISING: "★", ABANDONED: "✗", EXHAUSTED: "◌" };
+
+        for (const root of roots) {
+          const icon = statusIcon[root.status] || "?";
+          const expCount = root.results.length;
+          const bestMetric = root.results.filter(r => r.metrics && r.verdict !== "error")
+            .map(r => { try { return JSON.parse(r.metrics!); } catch { return {}; } })
+            .reduce((best: { key: string; val: number }, m: Record<string, number>) => {
+              const key = Object.keys(m)[0];
+              if (key && (!best.key || m[key] > best.val)) return { key, val: m[key] };
+              return best;
+            }, { key: "", val: 0 });
+
+          tree += `${icon} ${root.name} [${root.status}] (${expCount} exp${bestMetric.key ? `, best: ${bestMetric.key}=${bestMetric.val}` : ""})\n`;
+
+          const children = branches.filter(b => b.parentId === root.id);
+          for (const child of children) {
+            const cIcon = statusIcon[child.status] || "?";
+            tree += `  ${cIcon} ${child.name} [${child.status}] (${child.results.length} exp)\n`;
+          }
+        }
+        return tree;
       },
     }),
 
@@ -1780,7 +2238,6 @@ function createTools(
         max_results: z.number().min(1).max(8).default(5).optional(),
       }),
       execute: async ({ query, max_results }: { query: string; max_results?: number }) => {
-        consecutiveCheckRemote = 0;
         // Hard rate-limit: max 2 consecutive search_papers calls before requiring a different tool
         consecutiveSearches.value++;
         if (consecutiveSearches.value > 2) {
@@ -1955,7 +2412,6 @@ function createTools(
         title: z.string().describe("Title (or partial title) of the paper to read"),
       }),
       execute: async ({ title }: { title: string }) => {
-        consecutiveCheckRemote = 0;
         // Check if trying to read a banned paper (benchmarks)
         if (bannedPapers && bannedPapers.length > 0) {
           for (const b of bannedPapers) {
@@ -2013,8 +2469,10 @@ function createTools(
           },
         });
         if (!paper) return `Paper "${title}" not found in library. Try searching first.`;
-        if (paper.processingStatus && !["COMPLETED", "FAILED", "NEEDS_DEFERRED"].includes(paper.processingStatus)) {
-          emit({ type: "tool_progress", toolName: "read_paper", content: `Paper is still being processed (${paper.processingStatus}). Reading what's available...` });
+        if (paper.processingStatus && !["COMPLETED", "FAILED", "NEEDS_DEFERRED", "NO_PDF"].includes(paper.processingStatus)) {
+          return `Paper "${paper.title}" is still being processed (status: ${paper.processingStatus}). ` +
+            `Wait for processing to complete before reading — you'll get abstracts, summaries, key findings, and full text. ` +
+            `Do other work first (search for more papers, read already-processed papers) and come back to this one later.`;
         }
 
         const parts: string[] = [];
@@ -2122,23 +2580,32 @@ function createTools(
     }),
 
     write_file: tool({
-      description: "Write a file to the experiment directory. Use for Python scripts, requirements.txt, configs, etc. Overwrites if exists. Experiment scripts MUST follow naming: exp_NNN_name.py (e.g. exp_001_baseline.py). Helper/utility scripts can use any name.",
+      description: "Write a file to the experiment directory. Python scripts MUST follow the naming taxonomy:\n- poc_NNN_name.py — proof of concept (quick validation, <5 min)\n- exp_NNN_name.py — full experiment (tests a hypothesis)\n- analysis_NNN_name.py — post-experiment analysis/visualization\n- sweep_NNN_name.py — parameter sweep\nUtility modules (utils.py, config.py, etc.) and non-Python files use any name.",
       inputSchema: z.object({
-        filename: z.string().describe("Filename. For experiments: exp_NNN_name.py (e.g. exp_001_baseline.py, exp_002_finetune.py). For utilities/helpers: any name."),
+        filename: z.string().describe("Filename following taxonomy: poc_NNN_name.py, exp_NNN_name.py, analysis_NNN_name.py, sweep_NNN_name.py. Utilities: utils.py, helpers.py, etc."),
         content: z.string().describe("Full file content"),
       }),
       execute: async ({ filename, content }: { filename: string; content: string }) => {
-        consecutiveCheckRemote = 0;
+        // Phase gate: writing Python scripts requires hypothesis or experiment phase
+        if (filename.endsWith(".py") && !isBenchmarkProject) {
+          const proj = await prisma.researchProject.findUnique({
+            where: { id: projectId }, select: { currentPhase: true },
+          });
+          if (proj && !["experiment", "hypothesis"].includes(proj.currentPhase)) {
+            return `BLOCKED — Writing Python scripts requires the hypothesis or experiment phase. Current phase: ${proj.currentPhase}. Use advance_phase to transition.`;
+          }
+        }
+
         // Prevent path traversal
         let safeName = path.basename(filename);
 
-        // Block monitoring/cleanup/status scripts — use check_job, get_workspace, check_remote instead
+        // Block monitoring/cleanup/status scripts — use check_job, get_workspace, read_remote_file instead
         if (safeName.endsWith(".py")) {
           const lowerName = safeName.toLowerCase();
           if (/monitor|check_status|check_progress|check_log|tail_log|cleanup|kill_|read_result|read_log|gpu_mem|gpu_activity|check_running|deep_check/.test(lowerName)) {
             return `BLOCKED — Do not write monitoring/cleanup scripts. Use these tools instead:\n` +
               `- check_job: check experiment status\n- get_workspace: see all files and results\n` +
-              `- check_remote: run a specific command\n- monitor_experiment: check training metrics\n` +
+              `- read_remote_file: read a specific file\n- monitor_experiment: check training metrics\n` +
               `Writing a Python script to do ps/nvidia-smi/cat-logs is never the right approach.`;
           }
         }
@@ -2154,13 +2621,31 @@ function createTools(
           }
         } catch { /* dir may not exist yet */ }
 
-        // Auto-number experiment scripts that don't follow the convention
-        // Skip: poc_ (proof-of-concept), exp_ (already numbered), utility scripts
-        if (safeName.endsWith(".py") && !safeName.startsWith("exp_") && !safeName.startsWith("poc_") && !safeName.startsWith("run_") && !safeName.startsWith("debug_") && !isUtilityScript(safeName)) {
-          experimentCount.value++;
-          const num = String(experimentCount.value).padStart(3, "0");
-          const stem = safeName.replace(/\.py$/, "").replace(/[^a-z0-9_]/gi, "_").toLowerCase();
-          safeName = `exp_${num}_${stem}.py`;
+        // ── Enforce naming taxonomy for Python scripts ──
+        // Valid prefixes: poc_, exp_, analysis_, sweep_, or recognized utility names
+        if (safeName.endsWith(".py") && !isUtilityScript(safeName)) {
+          const validPrefix = /^(poc|exp|analysis|sweep)_\d{3}_/.test(safeName);
+          if (!validPrefix) {
+            // Check if it has a valid prefix but wrong numbering
+            const hasPrefix = /^(poc|exp|analysis|sweep)_/.test(safeName);
+            if (hasPrefix) {
+              // Auto-fix numbering: poc_test.py → poc_NNN_test.py
+              experimentCount.value++;
+              const num = String(experimentCount.value).padStart(3, "0");
+              const rest = safeName.replace(/^(poc|exp|analysis|sweep)_/, "");
+              const prefix = safeName.match(/^(poc|exp|analysis|sweep)_/)![1];
+              safeName = `${prefix}_${num}_${rest}`;
+            } else {
+              // Unknown prefix — block with taxonomy guidance
+              return `BLOCKED — Python scripts must follow the naming taxonomy:\n` +
+                `- \`poc_NNN_name.py\` — proof of concept (quick validation)\n` +
+                `- \`exp_NNN_name.py\` — full experiment (tests hypothesis)\n` +
+                `- \`analysis_NNN_name.py\` — post-experiment analysis\n` +
+                `- \`sweep_NNN_name.py\` — parameter sweep\n\n` +
+                `For utility modules, use: utils.py, helpers.py, config.py, eval_utils.py, data_loader.py, etc.\n` +
+                `Got: "${safeName}". Rename it to follow the taxonomy.`;
+            }
+          }
         }
 
         const filePath = path.join(workDir, safeName);
@@ -2333,12 +2818,11 @@ function createTools(
     }),
 
     get_workspace: tool({
-      description: "Get a complete, structured view of the remote experiment workspace: all files with sizes and timestamps, result file contents, installed packages, and job status. This is MUCH faster than running multiple check_remote ls/cat commands. Use this FIRST when you need to understand the current state of the workspace.",
+      description: "Get a complete, structured view of the remote experiment workspace: all files with sizes and timestamps, result file contents, installed packages, and job status. This is MUCH faster than reading files individually. Use this FIRST when you need to understand the current state of the workspace.",
       inputSchema: z.object({
         refresh: z.boolean().default(false).optional().describe("Force refresh from remote (default: use 30s cache)"),
       }),
       execute: async ({ refresh }: { refresh?: boolean }) => {
-        consecutiveCheckRemote = 0;
         const hostWhere = { isDefault: true as const };
         let host = await prisma.remoteHost.findFirst({ where: hostWhere });
         if (!host) host = await prisma.remoteHost.findFirst();
@@ -2353,80 +2837,96 @@ function createTools(
       },
     }),
 
-    check_remote: tool({
-      description: "Run a quick command on the remote server via SSH — NO file sync, NO job record. Use this for lightweight operations: reading log files, checking results, listing files, checking disk space, etc. Much faster than execute_remote since it skips rsync. Do NOT use this for running experiments — use execute_remote for that.",
+    read_remote_file: tool({
+      description: "Read a specific file from the remote experiment directory. Use after get_workspace shows files you need to inspect (e.g., results.json, stderr.log, stdout.log). Cannot run commands — only reads file content.",
       inputSchema: z.object({
-        command: z.string().describe("Shell command to run on the remote host (e.g., 'cat results.json', 'ls -la *.json', 'tail -50 stdout.log')"),
+        filepath: z.string().describe("Path relative to experiment directory (e.g., 'results.json', 'stderr.log', 'output/metrics.csv')"),
+        tail_lines: z.number().optional().describe("Only return the last N lines (useful for long logs). Default: entire file."),
         host_alias: z.string().optional().describe("Remote host alias. Omit for default."),
       }),
-      execute: async ({ command, host_alias }: { command: string; host_alias?: string }) => {
-        consecutiveCheckRemote++;
-        if (consecutiveCheckRemote > 3) {
-          consecutiveCheckRemote = 0;
-          return "You've checked the remote 3 times in a row. Use check_job for running experiments, read_file for local files, or get back to research. If you need the workspace state, describe what you're looking for and use a single targeted command.";
-        }
-
-        const blocked = isBlockedInfraCommand(command);
-        if (blocked) return blocked;
-
-        // Block environment probing — this info is in the host profile and get_workspace
-        if (/pip\s+list|pip\s+show|pip\s+freeze|python3?\s+-c\s+.*import|python3?\s+--version|nvidia-smi(?!\s+--query)/.test(command)) {
-          return "Environment info is already in the host profile (shown in system prompt) and get_workspace. Don't probe manually.";
-        }
+      execute: async ({ filepath, tail_lines, host_alias }: { filepath: string; tail_lines?: number; host_alias?: string }) => {
+        // Prevent path traversal
+        const safePath = filepath.replace(/\.\.\//g, "").replace(/^\//, "");
+        if (!safePath || safePath.includes("..")) return "Invalid path.";
 
         const hostWhere = host_alias ? { alias: host_alias } : { isDefault: true };
         let host = await prisma.remoteHost.findFirst({ where: hostWhere });
         if (!host) host = await prisma.remoteHost.findFirst();
         if (!host) return "No remote hosts configured.";
 
-        // Strip unnecessary timeout wrapper — check_remote has its own SSH timeout
-        const cleanCmd = command.replace(/^timeout\s+\d+\s+/, "");
-
-        // Isolate: block access to other projects' remote directories
-        const projectSlug = path.basename(workDir);
-        const refsExperimentsDir = /~\/experiments\/|\/home\/.*\/experiments\//.test(cleanCmd);
-        const refsOurProject = cleanCmd.includes(projectSlug);
-        if (refsExperimentsDir && !refsOurProject) {
-          return "You can only access this project's remote directory. Other projects' files are off-limits.";
-        }
-
-        emit({ type: "tool_progress", toolName: "check_remote", content: `$ [${host.alias}] ${cleanCmd.slice(0, 80)}` });
-
-        // Build the full path to the experiment directory on the remote
         const slug = workDir.split("/").filter(Boolean).pop() || "experiment";
         const remoteDir = `${host.workDir}/${slug}`;
+        const fullPath = `${remoteDir}/${safePath}`;
 
-        // Wrap with cd to experiment dir + venv activation
-        const fullCmd = `cd ${remoteDir} 2>/dev/null && [ -f .venv/bin/activate ] && source .venv/bin/activate 2>/dev/null; ${cleanCmd}`;
+        const cmd = tail_lines
+          ? `tail -${Math.min(tail_lines, 500)} ${fullPath} 2>/dev/null`
+          : `head -2000 ${fullPath} 2>/dev/null`;
 
-        const result = await quickRemoteCommand(host.id, fullCmd);
+        const result = await quickRemoteCommand(host.id, cmd);
+        if (!result.ok) return `File not found or unreadable: ${safePath}`;
 
-        if (!result.ok) {
-          emit({ type: "tool_output", toolName: "check_remote", content: `ERROR: ${result.error}` });
-          return `Command failed on ${host.alias}: ${result.error}`;
-        }
-
-        // Stream output lines
+        emit({ type: "tool_output", toolName: "read_remote_file", content: `── ${safePath} ──` });
         const lines = result.output.split("\n");
-        for (const line of lines.slice(0, 100)) {
-          emit({ type: "tool_output", toolName: "check_remote", content: line });
+        for (const line of lines.slice(0, 200)) {
+          emit({ type: "tool_output", toolName: "read_remote_file", content: line });
         }
-        if (lines.length > 100) {
-          emit({ type: "tool_output", toolName: "check_remote", content: `... (${lines.length - 100} more lines)` });
+        if (lines.length > 200) {
+          emit({ type: "tool_output", toolName: "read_remote_file", content: `... (${lines.length - 200} more lines, use tail_lines to see end)` });
         }
 
-        return result.output.slice(-5000) || "Command completed with no output.";
+        return result.output.slice(-5000) || "File is empty.";
       },
     }),
 
     execute_remote: tool({
-      description: "Submit an experiment to a remote GPU server. Syncs files and starts the job, then returns IMMEDIATELY — the job runs in the background. Use check_job to monitor progress, or wait_for_jobs if you need results before continuing. This lets you submit multiple experiments and do other work (read papers, write code) while they run. ONLY use for running experiments (python scripts). For checking files/logs, use check_remote instead.",
+      description: "Submit an experiment to a remote GPU server. Syncs files and starts the job, then returns IMMEDIATELY — the job runs in the background. Use check_job to monitor progress, or wait_for_jobs if you need results before continuing. This lets you submit multiple experiments and do other work (read papers, write code) while they run. ONLY use for running experiments (python scripts). For checking files/logs, use read_remote_file or get_workspace instead.",
       inputSchema: z.object({
         command: z.string().describe("The experiment command ONLY — e.g. 'python3 experiment.py'. Do NOT include: cd, source .venv/bin/activate, bash -c wrappers, timeout, absolute paths, or nohup. The system handles all of that automatically."),
         host_alias: z.string().optional().describe("Remote host alias. Omit to use the default host."),
+        hypothesis_id: z.string().optional().describe("ID of the hypothesis this experiment tests. REQUIRED for exp_ scripts. Use log_finding(type='hypothesis') to create one first, then reference its ID here."),
       }),
-      execute: async ({ command, host_alias }: { command: string; host_alias?: string }) => {
-        consecutiveCheckRemote = 0;
+      execute: async ({ command, host_alias, hypothesis_id }: { command: string; host_alias?: string; hypothesis_id?: string }) => {
+        // ── Failure reflection gate: require reflect_on_failure after failures ──
+        if (!isBenchmarkProject) {
+          const failedJobIds = await prisma.remoteJob.findMany({
+            where: { projectId, status: "FAILED" },
+            select: { id: true },
+          });
+          if (failedJobIds.length > 0) {
+            const reflectedJobIds = await prisma.experimentResult.findMany({
+              where: { projectId, verdict: "error", jobId: { not: null } },
+              select: { jobId: true },
+            });
+            const reflectedSet = new Set(reflectedJobIds.map(r => r.jobId));
+            const unreflected = failedJobIds.filter(j => !reflectedSet.has(j.id));
+            if (unreflected.length > 0) {
+              return `BLOCKED — ${unreflected.length} failed experiment(s) need reflection before you can submit more. Call reflect_on_failure for job "${unreflected[0].id}" first.\n\nThis forces you to analyze what went wrong before trying again.`;
+            }
+          }
+        }
+
+        // ── Synthesis gate: require analysis after every 3 completed experiments ──
+        const completedExperiments = await prisma.remoteJob.count({
+          where: { projectId, status: "COMPLETED" },
+        });
+        if (completedExperiments >= 3) {
+          const analysisSteps = await prisma.researchStep.count({
+            where: {
+              iteration: { projectId },
+              type: "analyze_results",
+              status: "COMPLETED",
+            },
+          });
+          const requiredAnalyses = Math.floor(completedExperiments / 3);
+          if (analysisSteps < requiredAnalyses) {
+            return `BLOCKED — ${completedExperiments} experiments completed but only ${analysisSteps} analysis steps recorded. ` +
+              `Before running more experiments:\n` +
+              `1. Use update_hypothesis to mark hypotheses SUPPORTED/REFUTED with evidence\n` +
+              `2. Use log_finding(type="finding") to record what you learned\n` +
+              `This prevents experiment spam and ensures you build on evidence.`;
+          }
+        }
+
         // Find host
         const hostWhere = host_alias
           ? { alias: host_alias }
@@ -2477,8 +2977,55 @@ function createTools(
         // Clean up whitespace
         sanitized = sanitized.replace(/\s+/g, " ").trim();
 
-        // No timeout wrapper — ML training can run for hours/days.
-        // The stale job cleanup handles genuinely stuck jobs.
+        // ── GATE: execute_remote is ONLY for running Python experiment scripts ──
+        // Block arbitrary shell commands, oneliners, kill, echo, cat, ls, etc.
+        // The agent must use read_remote_file/get_workspace for inspection and write_file for scripts.
+        const validExperimentCmd = /^python3?\s+[\w][\w\-]*\.py(?:\s+.*)?$/.test(sanitized);
+        if (!validExperimentCmd) {
+          // Check specific bad patterns and give targeted feedback
+          if (/^(kill|pkill|killall)\b/.test(sanitized)) {
+            return "BLOCKED — execute_remote is only for running Python experiment scripts (e.g. 'python3 experiment.py'). Process management is handled automatically.";
+          }
+          if (/^(echo|cat|ls|find|grep|head|tail|wc|du|df|ps|nvidia-smi|stat|file|which|whoami|pwd|env|printenv)\b/.test(sanitized)) {
+            return "BLOCKED — execute_remote is only for running Python experiment scripts. Use read_remote_file or get_workspace for inspecting the remote filesystem.";
+          }
+          if (/^python3?\s+-c\s/.test(sanitized)) {
+            return "BLOCKED — execute_remote does not accept inline Python (-c). Write your code to a .py file with write_file first, then run it with 'python3 <filename>.py'.";
+          }
+          if (/^(pip3?|conda|apt|brew|npm|curl|wget)\b/.test(sanitized)) {
+            return "BLOCKED — execute_remote is only for running experiments. Package management is handled automatically via requirements.txt.";
+          }
+          if (/^(bash|sh|zsh)\b/.test(sanitized)) {
+            return "BLOCKED — execute_remote is only for running Python experiment scripts. Do not wrap commands in bash/sh.";
+          }
+          return `BLOCKED — execute_remote only accepts commands in the form 'python3 <script>.py [args]'. Got: "${sanitized.slice(0, 60)}". Write a Python script with write_file first.`;
+        }
+
+        // ── Mandatory hypothesis link for full experiments ──
+        const isFullExperiment = /python3?\s+exp_\d+/.test(sanitized);
+        let resolvedHypothesisId = hypothesis_id;
+        if (isFullExperiment) {
+          if (!hypothesis_id) {
+            const hypotheses = await prisma.researchHypothesis.findMany({
+              where: { projectId },
+              select: { id: true, statement: true, status: true },
+            });
+            if (hypotheses.length === 0) {
+              return "BLOCKED — No hypotheses exist for this project. Before running a full experiment (exp_*), use log_finding(type='hypothesis') to state what you expect to learn.";
+            }
+            return `BLOCKED — Full experiments (exp_*) must reference a hypothesis via the hypothesis_id parameter. Available hypotheses:\n${hypotheses.map(h => `- ${h.id}: [${h.status}] ${h.statement.slice(0, 100)}`).join("\n")}`;
+          }
+          // Support both full UUIDs and prefix matching (agent may use truncated IDs)
+          const allHyps = await prisma.researchHypothesis.findMany({ where: { projectId } });
+          const hyp = allHyps.find(h => h.id === hypothesis_id || h.id.startsWith(hypothesis_id));
+          if (!hyp) {
+            return `BLOCKED — Hypothesis "${hypothesis_id}" not found. Available:\n${allHyps.map(h => `- ${h.id}: [${h.status}] ${h.statement.slice(0, 80)}`).join("\n")}`;
+          }
+          resolvedHypothesisId = hyp.id; // Use full UUID for DB storage
+          if (hyp.status === "PROPOSED") {
+            await prisma.researchHypothesis.update({ where: { id: hyp.id }, data: { status: "TESTING" } });
+          }
+        }
 
         // ── Pre-flight validation: catch antipatterns before burning GPU time ──
         // Skip preflight for proof-of-concept scripts (poc_NNN_*.py) — they're intentionally small
@@ -2541,23 +3088,40 @@ else: print('OK')
                   const missing = output.replace("MISSING:", "").split(",").map(s => s.trim());
                   emit({ type: "tool_output", toolName: "execute_remote", content: `⚠ Missing packages: ${missing.join(", ")}` });
 
-                  // Auto-create help request for user
-                  await prisma.researchLogEntry.create({
-                    data: {
+                  // Check if there's already an unresolved help request for packages on this host
+                  const existingRequest = await prisma.researchLogEntry.findFirst({
+                    where: {
                       projectId,
                       type: "help_request",
-                      content: `Packages not found in host environment: ${missing.join(", ")}`,
-                      metadata: JSON.stringify({
-                        category: "package",
-                        title: `Install ${missing.slice(0, 3).join(", ")}${missing.length > 3 ? ` +${missing.length - 3} more` : ""} on ${host.alias}`,
-                        suggestion: `Run on the host: pip install ${missing.join(" ")}`,
-                        resolved: false,
-                      }),
+                      metadata: { contains: '"category":"package"' },
+                      // Check it's not already resolved
                     },
-                  }).catch(() => {});
+                    orderBy: { createdAt: "desc" },
+                  });
+                  const alreadyResolved = existingRequest?.metadata
+                    ? (() => { try { return JSON.parse(existingRequest.metadata).resolved === true; } catch { return false; } })()
+                    : false;
 
-                  return `Missing packages: ${missing.join(", ")}. A help request has been sent to the user. ` +
-                    `Remove these from requirements.txt if the host already has equivalents, or continue with other work while the user installs them.`;
+                  if (!existingRequest || alreadyResolved) {
+                    // Only create a NEW help request if none exists or the last one was resolved
+                    await prisma.researchLogEntry.create({
+                      data: {
+                        projectId,
+                        type: "help_request",
+                        content: `Packages not found in host environment: ${missing.join(", ")}`,
+                        metadata: JSON.stringify({
+                          category: "package",
+                          title: `Install ${missing.slice(0, 3).join(", ")}${missing.length > 3 ? ` +${missing.length - 3} more` : ""} on ${host.alias}`,
+                          suggestion: `Run on the host: pip install ${missing.join(" ")}`,
+                          resolved: false,
+                        }),
+                      },
+                    }).catch(() => {});
+                  }
+
+                  // Don't block submission — warn but let the job attempt to run
+                  // The helper's venv setup may resolve it, or the script may not actually need these packages
+                  emit({ type: "tool_output", toolName: "execute_remote", content: `⚠ Packages may be missing: ${missing.join(", ")}. Proceeding anyway — the job may still work.` });
                 }
               }
             }
@@ -2567,16 +3131,12 @@ else: print('OK')
           }
         }
 
-        // ── Auto-kill stale processes before submission ──
-        // Prevents "already running" failures without the agent needing to manually pkill
-        try {
-          await quickRemoteCommand(host.id,
-            `python3 ~/.arcana/helper.py kill ${host.workDir}/*${projectId.slice(0, 8)}* 2>/dev/null || true`
-          );
-        } catch { /* ignore — may not have anything running */ }
+        // Auto-kill is handled by the helper itself (kills stale process before starting new one)
+        // No pre-kill needed here — the helper's cmd_run auto-kills if something is running
 
         // ── Verify the script exists locally before syncing ──
         const scriptMatch = sanitized.match(/python3?\s+(\S+\.py)/);
+        let scriptHash: string | undefined;
         if (scriptMatch) {
           const scriptName = scriptMatch[1];
           const scriptPath = path.join(workDir, scriptName);
@@ -2586,23 +3146,33 @@ else: print('OK')
             return `BLOCKED — Script "${scriptName}" does not exist in the experiment directory. Write it first with write_file.`;
           }
 
-          // ── Check for excessive retries of the same approach ──
-          const failCount = scriptFailureCounts.get(scriptName) || 0;
-          // Also check base approach (poc_004, poc_004b, poc_004c all count together)
-          const baseApproach = scriptName.replace(/[bcdefg]\.py$/, ".py").replace(/_v\d+\.py$/, ".py");
-          const baseFailCount = scriptFailureCounts.get(baseApproach) || 0;
+          // ── DB-backed failure tracking (survives restarts) ──
+          const scriptContent = await readFile(scriptPath, "utf-8");
+          const { createHash } = await import("crypto");
+          scriptHash = createHash("sha256").update(scriptContent).digest("hex").slice(0, 16);
 
-          if (failCount >= 2) {
-            return `BLOCKED — "${scriptName}" has failed ${failCount} times. Do NOT retry the same script. ` +
-              `Rewrite it from scratch or try a completely different approach.`;
+          // Exact script name failures
+          const exactFailCount = await prisma.remoteJob.count({
+            where: { projectId, status: "FAILED", command: { contains: scriptName } },
+          });
+          if (exactFailCount >= 2) {
+            return `BLOCKED — "${scriptName}" has failed ${exactFailCount} times. Rewrite from scratch or try a completely different approach.`;
           }
-          if (baseFailCount >= 4) {
-            return `BLOCKED — The "${baseApproach}" approach has failed ${baseFailCount} times across variants (${scriptName}, etc.). ` +
-              `This approach is fundamentally broken. STOP making small modifications. ` +
-              `Use dispatch_provocateur for a completely different direction, or consult literature for how others solved this.`;
+
+          // Content-identical failures (same code under different filenames)
+          const hashFailCount = await prisma.remoteJob.count({
+            where: { projectId, status: "FAILED", scriptHash },
+          });
+          if (hashFailCount >= 3) {
+            return `BLOCKED — This exact code has failed ${hashFailCount} times (under different filenames). The approach itself is broken. Try something fundamentally different.`;
           }
-          if (totalProjectFailures >= 8) {
-            emit({ type: "text", content: `\n\n[System: WARNING — ${totalProjectFailures} experiment failures so far. Step back and REPLAN. Use adversarial_review or dispatch_reviewer to critique your approach before running more experiments.]\n\n` });
+
+          // Total project failures warning
+          const totalFails = await prisma.remoteJob.count({
+            where: { projectId, status: "FAILED" },
+          });
+          if (totalFails >= 8) {
+            emit({ type: "text", content: `\n\n[System: WARNING — ${totalFails} total experiment failures. Step back and REPLAN before running more experiments.]\n\n` });
           }
 
           // ── PoC gate: require a successful PoC before full-scale experiments ──
@@ -2628,6 +3198,8 @@ else: print('OK')
             localDir: workDir,
             command: sanitized,
             projectId,
+            scriptHash,
+            hypothesisId: resolvedHypothesisId,
           });
           jobId = result.jobId;
         } catch (submitErr) {
@@ -2811,15 +3383,7 @@ else: print('OK')
             ? "\n\n⚠ OOM KILL DETECTED — the process ran out of memory. To fix:\n1. Reduce per_device_train_batch_size (try halving it)\n2. Enable gradient_checkpointing=True\n3. Use DeepSpeed ZeRO stage 2 or 3 (add deepspeed config)\n4. Use accelerate with device_map='auto' for model sharding\n5. Use mixed precision (fp16=True or bf16=True)\nDo NOT reduce the dataset or simplify the model — fix memory usage instead."
             : "";
 
-          // Track script failure count for retry prevention
-          const failedScript = job.command?.match(/python3?\s+(\S+\.py)/)?.[1];
-          if (failedScript) {
-            scriptFailureCounts.set(failedScript, (scriptFailureCounts.get(failedScript) || 0) + 1);
-            // Also track the base approach (poc_004, poc_004b, poc_004c all share "poc_004")
-            const baseApproach = failedScript.replace(/[a-z]_/g, "_").replace(/[bcdefg]\.py$/, ".py").replace(/_v\d+\.py$/, ".py");
-            scriptFailureCounts.set(baseApproach, (scriptFailureCounts.get(baseApproach) || 0) + 1);
-            totalProjectFailures++;
-          }
+          // Failure tracking is DB-backed — no session-local state needed
 
           return `EXPERIMENT FAILED (exit ${job.exitCode ?? "?"}) on ${job.host.alias}${elapsedStr}. Fix the code and re-run.\n\nstdout:\n${(job.stdout || "").slice(-3000)}\n\nstderr:\n${(job.stderr || "").slice(-2000)}${partialResults}${oomGuidance}`;
         }
@@ -3094,7 +3658,6 @@ else: print('OK')
         })).min(2).max(3).describe("2-3 different search facets to explore in parallel"),
       }),
       execute: async ({ facets }: { facets: { angle: string; keywords: string[] }[] }) => {
-        consecutiveCheckRemote = 0;
         if (!(prisma as unknown as Record<string, unknown>).agentTask) {
           return "Sub-agent tasks not available. Restart the dev server to pick up schema changes.";
         }
@@ -3137,7 +3700,6 @@ else: print('OK')
           .describe("What aspect to focus the review on"),
       }),
       execute: async ({ content, focus }: { content: string; focus?: string }) => {
-        consecutiveCheckRemote = 0;
         if (!(prisma as unknown as Record<string, unknown>).agentTask) {
           return "Sub-agent tasks not available. Restart the dev server to pick up schema changes.";
         }
@@ -3177,7 +3739,6 @@ else: print('OK')
         focus: z.string().describe("What to focus the synthesis on (e.g., 'attention mechanism efficiency techniques across these papers')"),
       }),
       execute: async ({ papers, focus }: { papers?: string[]; focus: string }) => {
-        consecutiveCheckRemote = 0;
         if (!(prisma as unknown as Record<string, unknown>).agentTask) {
           return "Sub-agent tasks not available. Restart the dev server to pick up schema changes.";
         }
@@ -3223,7 +3784,6 @@ else: print('OK')
       execute: async ({ goal, synthesis, diagnostics, current_approach }: {
         goal: string; synthesis: string; diagnostics?: string; current_approach?: string;
       }) => {
-        consecutiveCheckRemote = 0;
         if (!(prisma as unknown as Record<string, unknown>).agentTask) {
           return "Sub-agent tasks not available. Restart the dev server to pick up schema changes.";
         }
@@ -3293,7 +3853,6 @@ else: print('OK')
         stuck_on: z.string().optional().describe("What specific problem you're stuck on, if any"),
       }),
       execute: async ({ goal, trajectory, stuck_on }: { goal: string; trajectory: string; stuck_on?: string }) => {
-        consecutiveCheckRemote = 0;
         if (!(prisma as unknown as Record<string, unknown>).agentTask) {
           return "Sub-agent tasks not available. Restart the dev server to pick up schema changes.";
         }
@@ -3601,7 +4160,6 @@ Be harsh but fair. Vague praise is useless. Specific criticism saves months of w
         related_paper_title: z.string().optional().describe("Title (or fragment) of a paper this finding relates to. If provided, the insight will be linked to that paper in the Mind Palace."),
       }),
       execute: async ({ type, content, related_paper_title }: { type: string; content: string; related_paper_title?: string }) => {
-        consecutiveCheckRemote = 0;
         const logType = type === "finding" ? "observation"
           : type === "hypothesis" ? "agent_suggestion"
           : type === "breakthrough" ? "breakthrough"
@@ -3748,8 +4306,9 @@ Be harsh but fair. Vague praise is useless. Specific criticism saves months of w
           .describe("Category: package (dependency issues), environment (setup/config), code_pattern (what works), debugging (error fixes), dataset (data quirks), performance (speed/memory), general"),
         lesson: z.string().describe("The lesson — concise, actionable, specific. E.g., 'Always use transformers>=4.35 for Mistral models' or 'Use torch.cuda.empty_cache() between model loads to avoid OOM'"),
         context: z.string().optional().describe("Brief context: what error or situation led to this lesson"),
+        approach_id: z.string().optional().describe("ID of the current approach/branch this lesson was learned in. Links the lesson to a specific research approach for traceability."),
       }),
-      execute: async ({ category, lesson, context }: { category: string; lesson: string; context?: string }) => {
+      execute: async ({ category, lesson, context, approach_id }: { category: string; lesson: string; context?: string; approach_id?: string }) => {
         // Benchmarks don't save lessons — prevents contaminating future benchmark runs
         if (isBenchmarkProject) return "Lesson noted (not saved — benchmark mode).";
 
@@ -3779,12 +4338,17 @@ Be harsh but fair. Vague praise is useless. Specific criticism saves months of w
           return `Updated existing lesson: "${lesson.slice(0, 100)}"`;
         }
 
+        // Include approach info in context for traceability
+        const contextWithApproach = approach_id
+          ? `${context ? context + " " : ""}[approach:${approach_id}]`
+          : context || null;
+
         await prisma.agentMemory.create({
           data: {
             userId,
             category,
             lesson: lesson.slice(0, 1000),
-            context: context?.slice(0, 500) || null,
+            context: contextWithApproach?.slice(0, 500) || null,
             projectId,
           },
         });
@@ -4291,6 +4855,12 @@ Be harsh but fair. Vague praise is useless. Specific criticism saves months of w
         currentIteration.number = newIteration.number;
         onIterationAdvance?.(newIteration.id, newIteration.number);
 
+        // Regenerate research state document
+        try {
+          const { generateResearchState } = await import("./research-state");
+          await generateResearchState(projectId, workDir);
+        } catch {}
+
         return `Iteration #${prevNumber} completed. Starting iteration #${newIteration.number}: "${next_goal}". Phase set to ${start_phase}.`;
       },
     }),
@@ -4360,6 +4930,12 @@ Be harsh but fair. Vague praise is useless. Specific criticism saves months of w
         const hTimestamp = new Date().toISOString().slice(0, 16).replace("T", " ");
         const hEntry = `\n### ${hEmoji} Hypothesis ${status} (${hTimestamp})\n**"${match.statement.slice(0, 200)}"**\nEvidence: ${evidence}\n`;
         await appendFile(path.join(workDir, "RESEARCH_LOG.md"), hEntry).catch(() => {});
+
+        // Regenerate research state document after hypothesis update
+        try {
+          const { generateResearchState } = await import("./research-state");
+          await generateResearchState(projectId, workDir);
+        } catch {}
 
         return `Updated hypothesis: "${match.statement.slice(0, 80)}..." → ${status}\nEvidence recorded: ${evidence.slice(0, 200)}`;
       },

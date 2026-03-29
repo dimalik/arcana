@@ -76,6 +76,9 @@ export async function validateExperiment(
   // ── Statistical rigor checks ────────────────────────────────────
   checkStatisticalRigor(lines, code, violations);
 
+  // ── Script substance quality gate ─────────────────────────────
+  checkScriptSubstance(lines, code, violations);
+
   const errors = violations.filter((v) => v.severity === "error");
   const warnings = violations.filter((v) => v.severity === "warning");
 
@@ -479,5 +482,155 @@ function checkStatisticalRigor(
         fix: "Run with multiple seeds (at least 3) and report mean ± std. Use bootstrap CIs for final metrics.",
       });
     }
+  }
+}
+
+/** Count lines that represent meaningful code (not empty, comments, imports, or placeholders). */
+function countMeaningfulLines(lines: string[]): number {
+  let count = 0;
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (trimmed === "") continue;
+    if (trimmed.startsWith("#")) continue;
+    if ((trimmed.startsWith("import ") || trimmed.startsWith("from ")) && !trimmed.includes("=")) continue;
+    if (trimmed === "pass" || trimmed === "...") continue;
+    count++;
+  }
+  return count;
+}
+
+/** Quality gate: reject trivial, diagnostic-only, or content-free scripts. */
+function checkScriptSubstance(
+  lines: string[],
+  _code: string,
+  violations: PreflightViolation[],
+) {
+  // ── Check A: Minimum substance (>= 15 meaningful lines) ──────
+  const meaningfulCount = countMeaningfulLines(lines);
+  if (meaningfulCount < 15) {
+    violations.push({
+      severity: "error",
+      code: "TRIVIAL_SCRIPT",
+      message: `Script has only ${meaningfulCount} meaningful lines of code (minimum 15 required). This is too simple to be a real experiment.`,
+      line: 1,
+      fix: "Write a substantive experiment script that loads data, runs a model or analysis, and saves results. A real experiment needs data loading, processing, model execution, evaluation, and result persistence.",
+    });
+  }
+
+  // ── Check B: Research content required (at least one pattern group) ──
+  const researchPatterns = {
+    training: [
+      /\.backward\(\)/,
+      /optimizer\.step/,
+      /Trainer\(/,
+      /\.train\(\)/,
+      /\.fit\(/,
+      /for\s+.*\b(epoch|batch)\b/,
+    ],
+    dataLoading: [
+      /load_dataset/,
+      /DataLoader/,
+      /read_csv/,
+      /from_pretrained/,
+      /\.load\(/,
+    ],
+    modelOps: [
+      /nn\.Module/,
+      /nn\.Linear/,
+      /model\(/,
+      /\.forward\(/,
+      /AutoModel/,
+      /\.generate\(/,
+      /\.eval\(\)/,
+    ],
+    statistics: [
+      /np\.mean/,
+      /scipy\.stats/,
+      /sklearn\./,
+      /accuracy_score/,
+      /f1_score/,
+      /torch\.mean/,
+      /bootstrap/,
+    ],
+  };
+
+  let hasAnyGroup = false;
+  for (const groupPatterns of Object.values(researchPatterns)) {
+    for (const line of lines) {
+      if (hasAnyGroup) break;
+      for (const pattern of groupPatterns) {
+        if (pattern.test(line)) {
+          hasAnyGroup = true;
+          break;
+        }
+      }
+    }
+    if (hasAnyGroup) break;
+  }
+
+  if (!hasAnyGroup) {
+    violations.push({
+      severity: "error",
+      code: "NO_RESEARCH_CONTENT",
+      message: "Script contains no recognizable research operations — no training loops, data loading, model operations, or statistical analysis.",
+      line: 1,
+      fix: "A research experiment script must include at least one of: training (optimizer.step, .backward(), Trainer), data loading (load_dataset, DataLoader, read_csv), model operations (nn.Module, AutoModel, .generate()), or statistical analysis (sklearn, scipy.stats, accuracy_score).",
+    });
+  }
+
+  // ── Check C: Must persist results ─────────────────────────────
+  const savePatterns = [
+    /json\.dump/,
+    /\.to_csv/,
+    /\.to_json/,
+    /torch\.save/,
+    /open\(.*['"]w/,
+    /save_pretrained/,
+    /pickle\.dump/,
+    /np\.save/,
+    /\.savefig/,
+  ];
+
+  let hasResultSave = false;
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (trimmed.startsWith("#")) continue;
+    for (const pattern of savePatterns) {
+      if (pattern.test(line)) {
+        hasResultSave = true;
+        break;
+      }
+    }
+    if (hasResultSave) break;
+  }
+
+  if (!hasResultSave) {
+    violations.push({
+      severity: "error",
+      code: "NO_RESULT_SAVE",
+      message: "Script never persists results to disk. Experiment outputs will be lost when the process exits.",
+      line: 1,
+      fix: "Save results using json.dump(), .to_csv(), torch.save(), np.save(), or write to a file with open(..., 'w'). Every experiment must persist its metrics, predictions, or model checkpoints.",
+    });
+  }
+
+  // ── Check D: Diagnostic-only (mostly print statements) ────────
+  let printCount = 0;
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (trimmed.startsWith("#")) continue;
+    if (trimmed.includes("print(")) {
+      printCount++;
+    }
+  }
+
+  if (meaningfulCount > 5 && printCount > meaningfulCount * 0.6) {
+    violations.push({
+      severity: "error",
+      code: "DIAGNOSTIC_ONLY",
+      message: `Script is ${Math.round((printCount / meaningfulCount) * 100)}% print statements (${printCount}/${meaningfulCount} meaningful lines). This looks like a diagnostic script, not an experiment.`,
+      line: 1,
+      fix: "Replace print-heavy debugging with a real experiment that processes data, runs a model, computes metrics, and saves structured results (JSON/CSV). Use logging instead of print for status messages.",
+    });
   }
 }

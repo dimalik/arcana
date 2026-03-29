@@ -125,11 +125,14 @@ function scoutTools(userId: string, _projectId: string, bannedPapers?: { title: 
           where: { userId, title: { contains: title } },
           select: {
             title: true, abstract: true, summary: true, keyFindings: true,
-            authors: true, year: true, venue: true,
+            authors: true, year: true, venue: true, processingStatus: true,
             insights: { select: { learning: true, significance: true } },
           },
         });
         if (!paper) return `Paper "${title}" not found.`;
+        if (paper.processingStatus && !["COMPLETED", "FAILED", "NEEDS_DEFERRED", "NO_PDF"].includes(paper.processingStatus)) {
+          return `Paper "${paper.title}" is still being processed (${paper.processingStatus}). Skip it for now and come back later.`;
+        }
 
         const parts = [`# ${paper.title}`];
         if (paper.authors) parts.push(`Authors: ${paper.authors}`);

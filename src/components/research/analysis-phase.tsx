@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import { MarkdownRenderer } from "@/components/ui/markdown-renderer";
 import { useStepActions } from "./use-step-actions";
+import { FiguresGallery } from "./figures-gallery";
 
 interface Step {
   id: string;
@@ -98,17 +99,8 @@ export function AnalysisPhase({ projectId, steps, hypotheses, onRefresh }: Analy
 
   return (
     <div className="space-y-4 pr-2">
-      {/* Action bar */}
-      <div className="flex items-center gap-2">
-        <button
-          onClick={handleAutoRun}
-          disabled={autoRunning || runningSteps.length > 0}
-          className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
-        >
-          {autoRunning ? <Loader2 className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3" />}
-          {runningSteps.length > 0 ? "Analyzing..." : "Analyze results"}
-        </button>
-      </div>
+      {/* Inline figures gallery */}
+      <FiguresGallery projectId={projectId} />
 
       {/* Running indicator */}
       {runningSteps.length > 0 && (

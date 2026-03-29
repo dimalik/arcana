@@ -31,7 +31,7 @@ import time
 import hashlib
 from pathlib import Path
 
-HELPER_VERSION = "4"
+HELPER_VERSION = "5"
 ARCANA_DIR = ".arcana"
 STATUS_FILE = "status.json"
 REQS_HASH_FILE = "reqs_hash"
@@ -338,12 +338,37 @@ def cmd_run(workdir, command):
     if not os.path.isdir(workdir):
         json_err(f"Workdir does not exist: {workdir}")
 
-    # Check if something is already running
+    # Auto-kill any running experiment in this workdir before starting a new one
+    # Process management is infrastructure — handled automatically, not by the agent
     status = read_status(workdir)
     if status and status.get("status") == "running":
-        pid = status.get("pid")
-        if pid and is_pid_alive(pid):
-            json_err(f"Experiment already running (PID {pid}). Use 'kill' first.")
+        old_pid = status.get("pid")
+        old_pgid = status.get("pgid")
+        if old_pid and is_pid_alive(old_pid):
+            try:
+                if old_pgid:
+                    os.killpg(old_pgid, signal.SIGTERM)
+                else:
+                    os.kill(old_pid, signal.SIGTERM)
+                # Give it a moment to die
+                for _ in range(10):
+                    if not is_pid_alive(old_pid):
+                        break
+                    time.sleep(0.5)
+                # Force kill if still alive
+                if is_pid_alive(old_pid):
+                    try:
+                        if old_pgid:
+                            os.killpg(old_pgid, signal.SIGKILL)
+                        else:
+                            os.kill(old_pid, signal.SIGKILL)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+            status["status"] = "cancelled"
+            status["completed_at"] = time.strftime("%Y-%m-%dT%H:%M:%S")
+            write_status(workdir, status)
 
     # Check for pre-existing environment (user-configured venv/conda)
     conda_env = os.environ.get("ARCANA_CONDA", "")

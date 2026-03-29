@@ -8,9 +8,37 @@ import {
   Image, FileCode, FileSpreadsheet, FileType,
   Plus, Pencil, Check as CheckIcon, Loader2,
   FlaskConical, BookOpen, Lightbulb, IterationCcw,
-  Users,
+  Users, GitBranch, BarChart3,
 } from "lucide-react";
 import { FilePreview } from "./file-preview";
+
+interface ApproachResult {
+  id: string;
+  verdict: string | null;
+  metrics: string | null;
+}
+
+interface ApproachData {
+  id: string;
+  name: string;
+  status: string;
+  description: string | null;
+  results: ApproachResult[];
+  children: {
+    id: string;
+    name: string;
+    status: string;
+    description: string | null;
+    results: ApproachResult[];
+  }[];
+}
+
+interface ExperimentResultData {
+  id: string;
+  verdict: string | null;
+  metrics: string | null;
+  branch: { name: string } | null;
+}
 
 interface ContextSidebarProps {
   project: {
@@ -22,6 +50,8 @@ interface ContextSidebarProps {
   papers: { id: string; title: string }[];
   hypotheses: { id: string; statement: string; status: string }[];
   iteration: { number: number; goal: string; steps: { status: string }[] } | null;
+  approaches?: ApproachData[];
+  experimentResults?: ExperimentResultData[];
 }
 
 const STATUS_DOT: Record<string, string> = {
@@ -79,7 +109,7 @@ function isPreviewable(name: string): boolean {
   return ["py", "txt", "log", "md", "json", "csv", "html", "sh", "yaml", "yml", "toml", "cfg", "ini", "r"].includes(ext || "");
 }
 
-export function ContextSidebar({ project, papers, hypotheses, iteration }: ContextSidebarProps) {
+export function ContextSidebar({ project, papers, hypotheses, iteration, approaches, experimentResults }: ContextSidebarProps) {
   const [briefExpanded, setBriefExpanded] = useState(false);
   const [papersExpanded, setPapersExpanded] = useState(false);
   const [memoriesExpanded, setMemoriesExpanded] = useState(false);
@@ -186,6 +216,8 @@ export function ContextSidebar({ project, papers, hypotheses, iteration }: Conte
   const totalFiles = countFiles(files);
 
   const [hypothesesExpanded, setHypothesesExpanded] = useState(hypotheses.length <= 4);
+  const [approachesExpanded, setApproachesExpanded] = useState(false);
+  const [resultsExpanded, setResultsExpanded] = useState(false);
 
   return (
     <div className="h-full flex flex-col">
@@ -271,6 +303,44 @@ export function ContextSidebar({ project, papers, hypotheses, iteration }: Conte
                   <p className="text-[10px] text-muted-foreground/50 pl-4">+{hypotheses.length - 8} more</p>
                 )}
               </div>
+            )}
+          </div>
+        )}
+
+        {/* Approaches */}
+        {approaches && approaches.length > 0 && (
+          <div>
+            <button
+              onClick={() => setApproachesExpanded(!approachesExpanded)}
+              className="flex items-center gap-1 text-[11px] font-medium text-muted-foreground hover:text-foreground w-full"
+            >
+              {approachesExpanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+              <GitBranch className="h-3 w-3" />
+              Approaches ({approaches.length})
+            </button>
+            {approachesExpanded && (
+              <div className="mt-1 space-y-0.5">
+                {approaches.filter((a) => !approaches.some((p) => p.children.some((c) => c.id === a.id))).map((a) => (
+                  <ApproachItem key={a.id} approach={a} />
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Results Summary */}
+        {experimentResults && experimentResults.length > 0 && (
+          <div>
+            <button
+              onClick={() => setResultsExpanded(!resultsExpanded)}
+              className="flex items-center gap-1 text-[11px] font-medium text-muted-foreground hover:text-foreground w-full"
+            >
+              {resultsExpanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+              <BarChart3 className="h-3 w-3" />
+              Results ({experimentResults.length})
+            </button>
+            {resultsExpanded && (
+              <ResultsSummary results={experimentResults} />
             )}
           </div>
         )}
@@ -773,6 +843,94 @@ function SubAgentSection({ projectId }: { projectId: string }) {
             {completed} completed{failed > 0 ? `, ${failed} failed` : ""}{running > 0 ? `, ${running} active` : ""}
           </p>
         </div>
+      )}
+    </div>
+  );
+}
+
+// ── Approach Tree Item ──────────────────────────────────
+
+const APPROACH_STATUS_DOT: Record<string, string> = {
+  ACTIVE: "bg-blue-500",
+  PROMISING: "bg-emerald-500",
+  ABANDONED: "bg-muted-foreground/40",
+  EXHAUSTED: "bg-red-500",
+};
+
+function ApproachItem({ approach }: { approach: ApproachData }) {
+  const resultCount = approach.results.length;
+  return (
+    <div>
+      <div className="flex items-start gap-1.5">
+        <div className={`h-1.5 w-1.5 rounded-full mt-1.5 shrink-0 ${APPROACH_STATUS_DOT[approach.status] || "bg-muted"}`} />
+        <div className="min-w-0 flex-1">
+          <p className="text-[10px] text-muted-foreground line-clamp-1">
+            {approach.name}
+            {resultCount > 0 && (
+              <span className="text-[8px] text-muted-foreground/50 ml-1">
+                {resultCount} exp
+              </span>
+            )}
+          </p>
+        </div>
+      </div>
+      {approach.children.length > 0 && (
+        <div className="ml-3 border-l border-border/50 pl-1.5 space-y-0.5">
+          {approach.children.map((child) => (
+            <div key={child.id} className="flex items-start gap-1.5">
+              <div className={`h-1.5 w-1.5 rounded-full mt-1.5 shrink-0 ${APPROACH_STATUS_DOT[child.status] || "bg-muted"}`} />
+              <p className="text-[10px] text-muted-foreground line-clamp-1">
+                {child.name}
+                {child.results.length > 0 && (
+                  <span className="text-[8px] text-muted-foreground/50 ml-1">
+                    {child.results.length} exp
+                  </span>
+                )}
+              </p>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Results Summary ──────────────────────────────────
+
+function ResultsSummary({ results }: { results: ExperimentResultData[] }) {
+  const completed = results.filter((r) => r.verdict && r.verdict !== "error").length;
+  const failed = results.filter((r) => r.verdict === "error").length;
+
+  // Find best result (verdict = "better" with highest metric value)
+  let bestResult: { branchName: string; metricSummary: string } | null = null;
+  for (const r of results) {
+    if (r.verdict === "better" && r.metrics && r.branch) {
+      try {
+        const m = JSON.parse(r.metrics);
+        const keys = Object.keys(m);
+        if (keys.length > 0) {
+          const topKey = keys[0];
+          const val = typeof m[topKey] === "number" ? m[topKey].toFixed(4) : String(m[topKey]);
+          bestResult = { branchName: r.branch.name, metricSummary: `${topKey}: ${val}` };
+        }
+      } catch {
+        // skip
+      }
+    }
+  }
+
+  return (
+    <div className="mt-1 space-y-0.5 text-[10px] text-muted-foreground">
+      <p>
+        {completed} completed{failed > 0 ? `, ${failed} failed` : ""}
+      </p>
+      {bestResult && (
+        <p className="text-emerald-500/80">
+          Best: {bestResult.branchName} ({bestResult.metricSummary})
+        </p>
+      )}
+      {!bestResult && completed > 0 && (
+        <p className="text-muted-foreground/50">No &quot;better&quot; verdict yet</p>
       )}
     </div>
   );

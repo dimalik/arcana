@@ -545,10 +545,12 @@ model ResearchProject {
 
   owner           User              @relation(fields: [userId], references: [id], onDelete: Cascade)
   collection      Collection?       @relation(fields: [collectionId], references: [id])
-  iterations      ResearchIteration[]
-  hypotheses      ResearchHypothesis[]
-  log             ResearchLogEntry[]
-  agentTasks      AgentTask[]
+  iterations        ResearchIteration[]
+  hypotheses        ResearchHypothesis[]
+  log               ResearchLogEntry[]
+  agentTasks        AgentTask[]
+  approaches        ApproachBranch[]
+  experimentResults ExperimentResult[]
 
   @@index([userId])
 }
@@ -623,6 +625,7 @@ model RemoteHost {
   setupCmd    String?                       // extra setup commands (e.g. "module load cuda/12.1")
   baseRequirements String?                 // base requirements.txt content (tested, known-good packages)
   envNotes         String?                 // user notes about this host's quirks (shown to agent)
+  envVars          String?                 // JSON: { "HF_TOKEN": "hf_...", "WANDB_API_KEY": "..." }
   isDefault   Boolean  @default(false)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -644,6 +647,8 @@ model RemoteJob {
   stdout        String?                     // last N lines of stdout
   stderr        String?                     // last N lines of stderr
   resultsSynced Boolean   @default(false)
+  scriptHash    String?                     // SHA-256 prefix of script content at submission
+  hypothesisId  String?                     // FK to ResearchHypothesis being tested
   createdAt     DateTime  @default(now())
   startedAt     DateTime?
   completedAt   DateTime?
@@ -653,6 +658,7 @@ model RemoteJob {
   @@index([hostId])
   @@index([stepId])
   @@index([status])
+  @@index([projectId, status])
 }
 
 model AgentTask {
@@ -686,6 +692,46 @@ model ResearchLogEntry {
 
   @@index([projectId])
   @@index([createdAt])
+}
+
+model ApproachBranch {
+  id          String    @id @default(uuid())
+  projectId   String
+  parentId    String?
+  name        String
+  description String?
+  status      String    @default("ACTIVE") // ACTIVE | EXHAUSTED | ABANDONED | PROMISING
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  project     ResearchProject  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  parent      ApproachBranch?  @relation("BranchTree", fields: [parentId], references: [id])
+  children    ApproachBranch[] @relation("BranchTree")
+  results     ExperimentResult[]
+
+  @@index([projectId])
+}
+
+model ExperimentResult {
+  id           String    @id @default(uuid())
+  projectId    String
+  jobId        String?   @unique    // links to RemoteJob.id
+  hypothesisId String?
+  branchId     String?
+  baselineId   String?              // links to another ExperimentResult for comparison
+  scriptName   String
+  parameters   String?              // JSON: hyperparameters
+  metrics      String?              // JSON: { accuracy: 0.85, loss: 0.23 }
+  comparison   String?              // JSON: delta vs baseline
+  verdict      String?              // better | worse | inconclusive | error
+  reflection   String?              // post-experiment analysis or failure reflection
+  createdAt    DateTime  @default(now())
+
+  project      ResearchProject  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  branch       ApproachBranch?  @relation(fields: [branchId], references: [id])
+
+  @@index([projectId])
+  @@index([branchId])
 }
 
 // ── Agent Capabilities (user-defined tools/resources the agent can use) ──

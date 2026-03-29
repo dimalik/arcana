@@ -15,6 +15,9 @@ import {
   ChevronRight,
   Save,
   FlaskConical,
+  Eye,
+  EyeOff,
+  X,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { toast } from "sonner";
@@ -33,6 +36,7 @@ interface RemoteHost {
   setupCmd: string | null;
   baseRequirements: string | null;
   envNotes: string | null;
+  envVars: string | null;
   isDefault: boolean;
   _count: { jobs: number };
 }
@@ -67,6 +71,48 @@ export function RemoteHostsManager() {
   const [probing, setProbing] = useState<string | null>(null);
   const [sshHosts, setSSHHosts] = useState<SSHConfigEntry[]>([]);
   const [expandedHost, setExpandedHost] = useState<string | null>(null);
+  const [visibleEnvKeys, setVisibleEnvKeys] = useState<Record<string, Set<number>>>({});
+
+  // Env vars helpers
+  const parseEnvVars = (jsonStr: string | null): Array<{ key: string; value: string }> => {
+    if (!jsonStr) return [];
+    try {
+      const obj = JSON.parse(jsonStr);
+      return Object.entries(obj).map(([key, value]) => ({ key, value: String(value) }));
+    } catch {
+      return [];
+    }
+  };
+
+  const getEnvVarsForHost = (host: RemoteHost): Array<{ key: string; value: string }> => {
+    // If there are pending edits for envVars, use those
+    const pending = pendingEdits[host.id]?.envVars;
+    if (pending !== undefined) return parseEnvVars(pending);
+    return parseEnvVars(host.envVars);
+  };
+
+  const setEnvVarsForHost = (hostId: string, vars: Array<{ key: string; value: string }>) => {
+    const obj: Record<string, string> = {};
+    for (const { key, value } of vars) {
+      if (key.trim()) obj[key.trim()] = value;
+    }
+    setPendingEdit(hostId, "envVars", JSON.stringify(obj));
+  };
+
+  const toggleEnvValueVisibility = (hostId: string, index: number) => {
+    setVisibleEnvKeys((prev) => {
+      const hostSet = new Set(prev[hostId] || []);
+      if (hostSet.has(index)) hostSet.delete(index);
+      else hostSet.add(index);
+      return { ...prev, [hostId]: hostSet };
+    });
+  };
+
+  const isEnvValueVisible = (hostId: string, index: number) => {
+    return visibleEnvKeys[hostId]?.has(index) ?? false;
+  };
+
+  const ENV_PRESETS = ["HF_TOKEN", "WANDB_API_KEY", "HUGGING_FACE_HUB_TOKEN"];
 
   // Add form
   const [hostInput, setHostInput] = useState("");
@@ -617,6 +663,88 @@ export function RemoteHostsManager() {
                       />
                       <p className="text-[10px] text-muted-foreground/50">
                         Shown to the research agent. Includes hardware, packages, and quirks.
+                      </p>
+                    </div>
+
+                    {/* Environment Variables — key-value editor */}
+                    <div className="space-y-1.5">
+                      <label className="text-[9px] text-muted-foreground uppercase tracking-wide">Environment Variables</label>
+                      {(() => {
+                        const vars = getEnvVarsForHost(h);
+                        return (
+                          <div className="space-y-1.5">
+                            {vars.map((v, i) => (
+                              <div key={i} className="flex items-center gap-1.5">
+                                <input
+                                  value={v.key}
+                                  onChange={(e) => {
+                                    const next = [...vars];
+                                    next[i] = { ...next[i], key: e.target.value };
+                                    setEnvVarsForHost(h.id, next);
+                                  }}
+                                  placeholder="KEY"
+                                  className="w-[140px] rounded border border-input bg-background px-2 py-1 text-[11px] font-mono focus:outline-none focus:ring-1 focus:ring-ring"
+                                />
+                                <div className="relative flex-1">
+                                  <input
+                                    type={isEnvValueVisible(h.id, i) ? "text" : "password"}
+                                    value={v.value}
+                                    onChange={(e) => {
+                                      const next = [...vars];
+                                      next[i] = { ...next[i], value: e.target.value };
+                                      setEnvVarsForHost(h.id, next);
+                                    }}
+                                    placeholder="value"
+                                    className="w-full rounded border border-input bg-background px-2 py-1 pr-7 text-[11px] font-mono focus:outline-none focus:ring-1 focus:ring-ring"
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => toggleEnvValueVisibility(h.id, i)}
+                                    className="absolute right-1 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground p-0.5"
+                                    title={isEnvValueVisible(h.id, i) ? "Hide value" : "Show value"}
+                                  >
+                                    {isEnvValueVisible(h.id, i) ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
+                                  </button>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const next = vars.filter((_, j) => j !== i);
+                                    setEnvVarsForHost(h.id, next);
+                                  }}
+                                  className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:text-destructive hover:bg-accent transition-colors shrink-0"
+                                  title="Remove variable"
+                                >
+                                  <X className="h-3 w-3" />
+                                </button>
+                              </div>
+                            ))}
+
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <button
+                                type="button"
+                                onClick={() => setEnvVarsForHost(h.id, [...vars, { key: "", value: "" }])}
+                                className="inline-flex items-center gap-1 rounded-md border border-dashed border-border/60 px-2 py-1 text-[10px] text-muted-foreground hover:text-foreground hover:border-border transition-colors"
+                              >
+                                <Plus className="h-3 w-3" />
+                                Add Variable
+                              </button>
+                              {ENV_PRESETS.filter((p) => !vars.some((v) => v.key === p)).map((preset) => (
+                                <button
+                                  key={preset}
+                                  type="button"
+                                  onClick={() => setEnvVarsForHost(h.id, [...vars, { key: preset, value: "" }])}
+                                  className="rounded-md bg-muted/50 px-1.5 py-0.5 text-[9px] font-mono text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                                >
+                                  + {preset}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        );
+                      })()}
+                      <p className="text-[10px] text-muted-foreground/50">
+                        Injected into every remote job. Values are stored locally and never sent to LLMs.
                       </p>
                     </div>
 

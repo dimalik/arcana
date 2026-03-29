@@ -2,7 +2,7 @@
  * Workspace state cache — provides a structured view of the remote
  * experiment directory without repeated SSH calls.
  *
- * Replaces the pattern of agents running 100+ check_remote ls/find/cat
+ * Replaces the pattern of agents running 100+ individual SSH
  * commands with a single cached manifest.
  */
 

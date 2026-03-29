@@ -34,6 +34,50 @@ export async function POST(request: NextRequest, { params }: Params) {
   }
 }
 
+// PATCH — Update a log entry's metadata (e.g. mark as resolved)
+export async function PATCH(request: NextRequest, { params }: Params) {
+  try {
+    const userId = await requireUserId();
+    const { id } = await params;
+    const body = await request.json();
+    const { entryId, metadata } = body;
+
+    if (!entryId || !metadata) {
+      return NextResponse.json({ error: "entryId and metadata required" }, { status: 400 });
+    }
+
+    const project = await prisma.researchProject.findFirst({
+      where: { id, userId },
+    });
+    if (!project) {
+      return NextResponse.json({ error: "Project not found" }, { status: 404 });
+    }
+
+    // Fetch existing entry to merge metadata
+    const existing = await prisma.researchLogEntry.findFirst({
+      where: { id: entryId, projectId: id },
+    });
+    if (!existing) {
+      return NextResponse.json({ error: "Log entry not found" }, { status: 404 });
+    }
+
+    let existingMeta: Record<string, unknown> = {};
+    try { existingMeta = JSON.parse(existing.metadata || "{}"); } catch { /* */ }
+
+    const merged = { ...existingMeta, ...metadata };
+
+    const updated = await prisma.researchLogEntry.update({
+      where: { id: entryId },
+      data: { metadata: JSON.stringify(merged) },
+    });
+
+    return NextResponse.json(updated);
+  } catch (err) {
+    console.error("[api/research/log] PATCH error:", err);
+    return NextResponse.json({ error: "Failed to update log entry" }, { status: 500 });
+  }
+}
+
 // GET — List log entries (paginated, filterable by type)
 export async function GET(request: NextRequest, { params }: Params) {
   try {

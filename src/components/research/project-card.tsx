@@ -75,7 +75,7 @@ export function ProjectCard({ project, onDelete, onStatusChange, onExport }: Pro
     search_papers: "Searching papers", read_paper: "Reading paper",
     write_file: "Writing file", read_file: "Reading file",
     execute_command: "Running command", execute_remote: "Running on remote",
-    check_remote: "Checking remote", log_finding: "Recording finding",
+    read_remote_file: "Reading remote file", log_finding: "Recording finding",
     web_search: "Searching the web", fetch_webpage: "Reading webpage",
   };
 

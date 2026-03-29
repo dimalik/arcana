@@ -76,7 +76,7 @@ function extractJobError(job: RemoteJobInfo): string | null {
   return null;
 }
 
-const EXECUTION_TOOLS = new Set(["execute_command", "execute_remote", "check_remote"]);
+const EXECUTION_TOOLS = new Set(["execute_command", "execute_remote"]);
 
 const TOOL_LABELS: Record<string, string> = {
   search_papers: "Searching papers",
@@ -85,7 +85,7 @@ const TOOL_LABELS: Record<string, string> = {
   read_file: "Reading file",
   list_files: "Listing files",
   execute_command: "Running command",
-  check_remote: "Checking remote",
+  read_remote_file: "Reading remote file",
   execute_remote: "Running on remote",
   log_finding: "Recording finding",
   update_hypothesis: "Updating hypothesis",
@@ -340,7 +340,7 @@ export const AgentActivityBar = forwardRef<AgentActivityHandle, AgentActivityBar
                   // For execution tools, extract and show the command
                   const argsObj = event.args as Record<string, unknown> | undefined;
                   const command = argsObj?.command as string | undefined;
-                  const isExecTool = EXECUTION_TOOLS.has(event.toolName || "") || event.toolName === "check_remote";
+                  const isExecTool = EXECUTION_TOOLS.has(event.toolName || "");
                   const displayLabel = isExecTool && command
                     ? `${label}: ${command.slice(0, 80)}${command.length > 80 ? "..." : ""}`
                     : label;

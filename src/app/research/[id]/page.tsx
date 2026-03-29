@@ -81,6 +81,57 @@ interface LogEntry {
   createdAt: string;
 }
 
+interface ApproachResult {
+  id: string;
+  verdict: string | null;
+  metrics: string | null;
+}
+
+interface Approach {
+  id: string;
+  name: string;
+  status: string;
+  description: string | null;
+  results: ApproachResult[];
+  children: {
+    id: string;
+    name: string;
+    status: string;
+    description: string | null;
+    results: ApproachResult[];
+  }[];
+}
+
+interface ExperimentResult {
+  id: string;
+  scriptName: string;
+  metrics: string | null;
+  comparison: string | null;
+  verdict: string | null;
+  reflection: string | null;
+  hypothesisId: string | null;
+  branchId: string | null;
+  jobId: string | null;
+  createdAt: string;
+  branch: { name: string; status: string } | null;
+}
+
+interface ExperimentJob {
+  id: string;
+  status: string;
+  exitCode: number | null;
+  command: string;
+  startedAt: string | null;
+  completedAt: string | null;
+  stderr: string | null;
+  host: { alias: string; gpuType: string | null };
+}
+
+interface GateStatus {
+  met: boolean;
+  progress: string;
+}
+
 interface Project {
   id: string;
   title: string;
@@ -95,6 +146,11 @@ interface Project {
   collection: {
     papers: { paper: Paper }[];
   } | null;
+  approaches?: Approach[];
+  experimentResults?: ExperimentResult[];
+  experimentJobs?: ExperimentJob[];
+  hypothesesById?: Record<string, string>;
+  gates?: Record<string, GateStatus>;
   benchmark?: {
     isBenchmark: boolean;
     sourcePaperId: string | null;
@@ -368,6 +424,7 @@ export default function ResearchWorkspacePage({ params }: { params: { id: string
             experiment: stepsForPhase("experiment").filter(s => s.status === "COMPLETED" || s.status === "FAILED").length,
             analysis: stepsForPhase("analysis").filter(s => s.status === "COMPLETED").length,
           }}
+          gates={project.gates}
         />
       </div>
 
@@ -397,6 +454,9 @@ export default function ResearchWorkspacePage({ params }: { params: { id: string
               steps={stepsForPhase("experiment")}
               hypotheses={project.hypotheses}
               onRefresh={fetchProject}
+              experimentResults={project.experimentResults}
+              experimentJobs={project.experimentJobs}
+              hypothesesById={project.hypothesesById}
             />
           )}
           {project.currentPhase === "analysis" && (
@@ -429,6 +489,8 @@ export default function ResearchWorkspacePage({ params }: { params: { id: string
               goal: activeIteration.goal,
               steps: activeIteration.steps.map((s) => ({ status: s.status })),
             } : null}
+            approaches={project.approaches}
+            experimentResults={project.experimentResults}
           />
           <FiguresPanel projectId={project.id} />
         </div>
