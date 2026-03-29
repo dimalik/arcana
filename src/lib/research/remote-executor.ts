@@ -548,6 +548,53 @@ async function runAndPoll(
     // If we couldn't determine exit code at all (SSH failures, no status file),
     // don't guess — mark as FAILED so the user knows to check manually.
     const indeterminate = exitCode === null && !finalStatus;
+
+    // ── Auto-fix layer: classify error and attempt fix for code bugs ──
+    // This runs BEFORE marking as FAILED — if the fix succeeds, a new job is submitted
+    // and this job is marked as FIXED (not FAILED), so it doesn't pollute failure counts.
+    if (failed && !indeterminate && localDir) {
+      try {
+        const { classifyAndFix } = await import("./auto-fix");
+        const fixResult = await classifyAndFix(
+          jobId, exitCode, finalStderr, finalStdout, localDir, command,
+        );
+
+        if (fixResult.fixed && fixResult.resubmitJobId) {
+          // Code error was auto-fixed and resubmitted — mark this job as FIXED, not FAILED
+          await prisma.remoteJob.update({
+            where: { id: jobId },
+            data: {
+              status: "CANCELLED", // Not FAILED — doesn't count in failure tracking
+              exitCode,
+              stdout: finalStdout,
+              stderr: `${finalStderr}\n\n[AUTO-FIXED] ${fixResult.reason}. Resubmitted as job ${fixResult.resubmitJobId.slice(0, 8)}.`,
+              resultsSynced: true,
+              completedAt: new Date(),
+            },
+          });
+
+          // Don't run the rest of the failure handling — the new job will handle it
+          if (localDir) {
+            import("./workspace").then(({ invalidateWorkspace }) => {
+              const job2 = prisma.remoteJob.findUnique({ where: { id: jobId }, select: { projectId: true } });
+              job2.then(j => { if (j?.projectId) invalidateWorkspace(j.projectId); });
+            }).catch(() => {});
+          }
+          return; // Exit runAndPoll — new job takes over
+        }
+
+        if (fixResult.errorClass === "RESOURCE_ERROR") {
+          // Resource error — mark as FAILED but with clear messaging
+          // Help request is created below in the existing logic
+          console.log(`[auto-fix] Resource error for job ${jobId.slice(0, 8)}: ${fixResult.reason}`);
+        }
+        // RESEARCH_FAILURE or unfixable CODE_ERROR — continue to normal failure handling
+      } catch (fixErr) {
+        console.warn("[auto-fix] Error in auto-fix layer:", fixErr);
+        // Don't block normal failure handling if auto-fix itself errors
+      }
+    }
+
     const finalJobStatus = failed || indeterminate ? "FAILED" : "COMPLETED";
 
     await prisma.remoteJob.update({

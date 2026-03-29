@@ -649,6 +649,7 @@ model RemoteJob {
   resultsSynced Boolean   @default(false)
   scriptHash    String?                     // SHA-256 prefix of script content at submission
   hypothesisId  String?                     // FK to ResearchHypothesis being tested
+  fixAttempts   Int       @default(0)       // Auto-fix attempts (code errors only, max 2)
   createdAt     DateTime  @default(now())
   startedAt     DateTime?
   completedAt   DateTime?

@@ -705,7 +705,46 @@ async function runAgent(
 
   // 6. Build context
   const papers = project.collection?.papers.map((cp) => cp.paper) || [];
-  const systemPrompt = buildSystemPrompt(project, papers, workDir, remoteHosts, resourceSetting, capabilities, gpuInfo, processMemories, resourcePreferences, sharedUtilities, sharedDir);
+  let systemPrompt = buildSystemPrompt(project, papers, workDir, remoteHosts, resourceSetting, capabilities, gpuInfo, processMemories, resourcePreferences, sharedUtilities, sharedDir);
+
+  // Non-Claude models: replace the massive system prompt with a condensed version
+  // The full prompt is ~18K tokens — too much for GPT models to process effectively
+  const { provider: modelProvider } = await getModelForTier("reasoning");
+  if (!modelProvider.includes("anthropic") && !systemPrompt.includes("[CONDENSED]")) {
+    const phase = project.currentPhase || "literature";
+    const hostInfo = remoteHosts.length > 0
+      ? `Remote hosts: ${remoteHosts.map(h => `${h.alias}${h.gpuType ? ` (${h.gpuType})` : ""}`).join(", ")}`
+      : "No remote hosts configured — use execute_command for local runs.";
+    systemPrompt = `[CONDENSED] You are an autonomous research agent investigating: "${project.title}".
+
+## How You Work
+You operate in a phase-gated system. Current phase: **${phase}**.
+Use \`advance_phase\` to move between phases. Each transition has requirements.
+
+**Phases:** literature → hypothesis → experiment → analysis → reflection
+- literature: Search papers (search_papers, dispatch_scouts), read them (read_paper), synthesize (dispatch_synthesizer)
+- hypothesis: Formulate hypotheses (log_finding type="hypothesis"), get architecture proposals (dispatch_architect), write mechanism design (log_finding type="decision")
+- experiment: Write scripts (write_file), run them (execute_remote), check results (check_job)
+- analysis: Record results (record_result), reflect on failures (reflect_on_failure), review (dispatch_reviewer, adversarial_review), update hypotheses (update_hypothesis)
+- reflection: Complete iteration (complete_iteration)
+
+## Rules
+1. ALWAYS call tools to make progress. Do NOT just describe what you'll do — DO it.
+2. After EVERY completed experiment: call record_result with metrics.
+3. After EVERY failed experiment: call reflect_on_failure before trying again.
+4. Use register_approach to track research directions.
+5. Script naming: poc_NNN_name.py, exp_NNN_name.py, analysis_NNN_name.py, sweep_NNN_name.py
+6. exp_ scripts require hypothesis_id parameter in execute_remote.
+
+## Environment
+Working directory: ${workDir}
+${hostInfo}
+
+## Research State
+Check RESEARCH_STATE.md (read_file) for current hypotheses, approach tree, and results.
+Check RESEARCH_LOG.md for the detailed research narrative.
+`;
+  }
 
   // Generate structured research state for context injection
   let researchState = "";
@@ -827,6 +866,42 @@ async function runAgent(
 
   emit({ type: "thinking", content: "Analyzing project state and planning next steps..." });
 
+  // Non-Claude models (GPT, etc.) emit text after each tool call, causing
+  // the SDK loop to stop after 1 step. We handle this with an outer retry loop.
+  const isNonClaude = !modelId.includes("claude");
+  // For non-Claude: track if the last step had tool calls (= more work to do)
+  let lastStepHadToolCalls = false;
+
+  // Non-Claude models struggle with 40+ tools. Reduce to essential set for the current phase.
+  if (isNonClaude) {
+    const ESSENTIAL_TOOLS = new Set([
+      // Phase management
+      "advance_phase", "register_approach", "record_result", "reflect_on_failure",
+      "query_results", "view_approach_tree",
+      // Literature
+      "search_papers", "read_paper", "search_library",
+      // Hypotheses & findings
+      "log_finding", "update_hypothesis", "adversarial_review",
+      // Experiment
+      "write_file", "execute_remote", "check_job", "wait_for_jobs",
+      // File management
+      "read_file", "list_files", "get_workspace", "read_remote_file",
+      // Sub-agents
+      "dispatch_scouts", "dispatch_synthesizer", "dispatch_architect",
+      "dispatch_reviewer", "collect_results",
+      // Iteration
+      "complete_iteration",
+      // Misc
+      "web_search", "request_help",
+    ]);
+    for (const key of Object.keys(tools)) {
+      if (!ESSENTIAL_TOOLS.has(key)) {
+        delete (tools as Record<string, unknown>)[key];
+      }
+    }
+    console.log(`[agent] Non-Claude model: reduced tools from 43 to ${Object.keys(tools).length}`);
+  }
+
   const result = streamText({
     model,
     system: systemPrompt,
@@ -834,6 +909,7 @@ async function runAgent(
     tools,
     stopWhen: stepCountIs(MAX_STEPS),
     onStepFinish: async ({ text, toolCalls }) => {
+      lastStepHadToolCalls = (toolCalls || []).length > 0;
       stepCount++;
 
       // Track tool usage patterns for nudges
@@ -987,6 +1063,126 @@ async function runAgent(
   } catch {
     // stopWhen termination — not an error
   }
+
+  // Non-Claude outer loop: GPT models stop after each tool round.
+  // We loop up to 15 times, each time giving a phase-specific directive.
+  if (isNonClaude && stepCount < MAX_STEPS - 5) {
+    const toolsUsedThisSession = new Set<string>();
+
+    for (let round = 0; round < 15 && stepCount < MAX_STEPS - 2; round++) {
+      // Detect what tools were used so far
+      const recentLogs = await prisma.researchLogEntry.findMany({
+        where: { projectId, type: "agent_suggestion", content: { startsWith: "[" } },
+        orderBy: { createdAt: "desc" },
+        take: 20,
+        select: { content: true },
+      });
+      for (const l of recentLogs) {
+        const m = l.content.match(/^\[(\w+)\]/);
+        if (m) toolsUsedThisSession.add(m[1]);
+      }
+
+      // Build a specific directive based on phase and what's already been done
+      const currentProject = await prisma.researchProject.findUnique({
+        where: { id: projectId }, select: { currentPhase: true },
+      });
+      const phase = currentProject?.currentPhase || "literature";
+
+      let directive = "";
+      if (phase === "literature") {
+        if (!toolsUsedThisSession.has("search_papers") && !toolsUsedThisSession.has("dispatch_scouts")) {
+          directive = "You are in the LITERATURE phase. Call search_papers with a query related to the research topic NOW. Do not read files — search for papers.";
+        } else if (!toolsUsedThisSession.has("dispatch_scouts")) {
+          directive = "Good, you've searched for papers. Now call dispatch_scouts with 2-3 search angles to broaden your literature coverage.";
+        } else if (!toolsUsedThisSession.has("dispatch_synthesizer")) {
+          directive = "Literature collected. Now call dispatch_synthesizer to find cross-paper patterns before forming hypotheses.";
+        } else {
+          directive = "Literature phase complete. Call advance_phase with target_phase='hypothesis' to move forward.";
+        }
+      } else if (phase === "hypothesis") {
+        if (!toolsUsedThisSession.has("log_finding")) {
+          directive = "You are in the HYPOTHESIS phase. Call log_finding with type='hypothesis' and a testable hypothesis statement NOW.";
+        } else if (!toolsUsedThisSession.has("dispatch_architect")) {
+          directive = "Hypothesis formulated. Call dispatch_architect to get novel approach proposals before experimenting.";
+        } else {
+          directive = "Call advance_phase with target_phase='experiment' to start experimenting.";
+        }
+      } else if (phase === "experiment") {
+        if (!toolsUsedThisSession.has("write_file")) {
+          directive = "You are in the EXPERIMENT phase. Call write_file to create a poc_ or exp_ Python script that tests your hypothesis.";
+        } else if (!toolsUsedThisSession.has("execute_remote")) {
+          directive = "Script written. Call execute_remote to run it on the remote server.";
+        } else {
+          directive = "Experiment submitted. Call check_job to monitor progress, or call advance_phase to move to analysis.";
+        }
+      } else if (phase === "analysis") {
+        directive = "You are in the ANALYSIS phase. Call record_result or update_hypothesis with experimental evidence.";
+      } else {
+        directive = "Call complete_iteration to finish this research cycle and start a new one.";
+      }
+
+      const continueMessages = [...messages];
+      if (finalText) {
+        continueMessages.push({ role: "assistant" as const, content: finalText });
+      }
+      continueMessages.push({ role: "user" as const, content: directive });
+
+      emit({ type: "text", content: `\n[${directive.split(".")[0]}...]\n` });
+
+      const innerResult = streamText({
+        model,
+        system: systemPrompt,
+        messages: continueMessages,
+        tools,
+        stopWhen: stepCountIs(MAX_STEPS - stepCount),
+        onStepFinish: async ({ text: innerText, toolCalls: innerToolCalls }) => {
+          stepCount++;
+          lastStepHadToolCalls = (innerToolCalls || []).length > 0;
+          for (const tc of innerToolCalls || []) {
+            toolsUsedThisSession.add(tc.toolName);
+            await prisma.researchLogEntry.create({
+              data: { projectId, type: "agent_suggestion", content: `[${tc.toolName}] ${JSON.stringify(tc.input).slice(0, 300)}`, metadata: JSON.stringify({ step: stepCount, tool: tc.toolName }) },
+            }).catch(() => {});
+          }
+          if (innerText && innerText.length > 10) {
+            await prisma.researchLogEntry.create({
+              data: { projectId, type: "agent_suggestion", content: innerText.slice(0, 500), metadata: JSON.stringify({ step: stepCount }) },
+            }).catch(() => {});
+          }
+          emit({ type: "step_done", stepNumber: stepCount });
+          emit({ type: "thinking", content: thinkingHint(innerToolCalls) });
+        },
+      });
+
+      try {
+        for await (const chunk of innerResult.fullStream) {
+          switch (chunk.type) {
+            case "text-delta":
+              emit({ type: "text", content: sanitizeForJson(chunk.text) });
+              break;
+            case "tool-call":
+              emit({ type: "tool_call", toolName: chunk.toolName, toolCallId: chunk.toolCallId, args: chunk.input });
+              break;
+            case "tool-result":
+              emit({
+                type: "tool_result", toolName: chunk.toolName, toolCallId: chunk.toolCallId,
+                result: sanitizeForJson(typeof chunk.output === "string" ? chunk.output.slice(0, 2000) : JSON.stringify(chunk.output).slice(0, 2000)),
+              });
+              break;
+          }
+        }
+      } catch (innerErr) {
+        const msg = innerErr instanceof Error ? innerErr.message : String(innerErr);
+        if (msg !== "terminated") console.warn("[agent] inner stream error:", msg);
+      }
+
+      try { finalText = await innerResult.text; } catch { /* terminated */ }
+
+      // If the model didn't use any tools this round, stop looping
+      if (!lastStepHadToolCalls) break;
+    }
+  }
+
   if (finalText) {
     await prisma.researchLogEntry.create({
       data: {
@@ -2599,14 +2795,23 @@ function createTools(
         // Prevent path traversal
         let safeName = path.basename(filename);
 
-        // Block monitoring/cleanup/status scripts — use check_job, get_workspace, read_remote_file instead
+        // Block infrastructure and monitoring scripts — these are not experiments
         if (safeName.endsWith(".py")) {
           const lowerName = safeName.toLowerCase();
+          // Monitoring/cleanup/status scripts — use built-in tools
           if (/monitor|check_status|check_progress|check_log|tail_log|cleanup|kill_|read_result|read_log|gpu_mem|gpu_activity|check_running|deep_check/.test(lowerName)) {
             return `BLOCKED — Do not write monitoring/cleanup scripts. Use these tools instead:\n` +
               `- check_job: check experiment status\n- get_workspace: see all files and results\n` +
-              `- read_remote_file: read a specific file\n- monitor_experiment: check training metrics\n` +
-              `Writing a Python script to do ps/nvidia-smi/cat-logs is never the right approach.`;
+              `- read_remote_file: read a specific file\n- monitor_experiment: check training metrics`;
+          }
+          // Setup/install/verify/clone scripts — environment is managed automatically
+          if (/setup|install|verify|clone|download|check_env|check_gpu|check_cuda|test_import|pip_|conda_|env_check|sanity/.test(lowerName)) {
+            return `BLOCKED — Do not write setup/verification scripts. Environment management is automatic:\n` +
+              `- Package installation: add to requirements.txt (helper installs automatically)\n` +
+              `- GPU/CUDA checks: shown in host profile and get_workspace\n` +
+              `- Import verification: handled by the auto-environment check before submission\n` +
+              `- Repository cloning: use execute_command for one-off setup, not a script\n\n` +
+              `Write actual experiments instead: poc_NNN_<what_you_test>.py`;
           }
         }
 

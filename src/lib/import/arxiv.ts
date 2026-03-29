@@ -28,10 +28,21 @@ export function parseArxivId(input: string): string | null {
 export async function fetchArxivMetadata(
   arxivId: string
 ): Promise<ArxivMetadata> {
-  const response = await fetch(
-    `https://export.arxiv.org/api/query?id_list=${arxivId}`
-  );
-  const xml = await response.text();
+  // Retry with backoff — arxiv rate-limits aggressively
+  let xml = "";
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (attempt > 0) await new Promise(r => setTimeout(r, 3000 * attempt));
+    const response = await fetch(
+      `https://export.arxiv.org/api/query?id_list=${arxivId}`,
+      { headers: { "User-Agent": "Arcana-Paper-Finder/1.0" } },
+    );
+    xml = await response.text();
+    if (!xml.includes("Rate exceeded")) break;
+  }
+
+  if (xml.includes("Rate exceeded")) {
+    throw new Error("arxiv API rate limit — try again in a few seconds");
+  }
 
   const parser = new XMLParser({
     ignoreAttributes: false,
@@ -41,7 +52,7 @@ export async function fetchArxivMetadata(
 
   const entry = result.feed?.entry;
   if (!entry) {
-    throw new Error("Paper not found on arxiv");
+    throw new Error(`Paper ${arxivId} not found on arxiv`);
   }
 
   const authors = Array.isArray(entry.author)

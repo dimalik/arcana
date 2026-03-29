@@ -77,9 +77,10 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
-    console.error("Arxiv import error:", error);
+    const message = error instanceof Error ? error.message : "Unknown error";
+    console.error("Arxiv import error:", message, error);
     return NextResponse.json(
-      { error: "Failed to import from arxiv" },
+      { error: `Failed to import from arxiv: ${message}` },
       { status: 500 }
     );
   }
