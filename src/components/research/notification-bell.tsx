@@ -237,7 +237,7 @@ export function NotificationBell({ projectId, onOpenInChat }: { projectId: strin
       {open && pending.length > 0 && (
         <div className="absolute right-0 top-full mt-2 w-[380px] max-h-[60vh] overflow-y-auto rounded-xl border border-border bg-background shadow-xl z-50 animate-in fade-in-0 slide-in-from-top-2 duration-150">
           <div className="px-4 py-3 border-b border-border/40 flex items-center justify-between">
-            <span className="text-sm font-medium">
+            <span className="text-xs font-medium text-muted-foreground">
               {pending.length} item{pending.length !== 1 ? "s" : ""} need
               {pending.length === 1 ? "s" : ""} attention
             </span>
@@ -322,8 +322,8 @@ function NotificationItem({
   const isAlternative = alternativeFor === item.id;
 
   // Shared button style
-  const btnPrimary = "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-foreground text-background hover:bg-foreground/90 transition-colors disabled:opacity-50";
-  const btnSecondary = "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs text-muted-foreground border border-border/50 hover:bg-muted/50 transition-colors disabled:opacity-50";
+  const btnPrimary = "inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-medium bg-primary/10 text-primary hover:bg-primary/20 transition-colors disabled:opacity-50";
+  const btnSecondary = "inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] text-muted-foreground border border-border/40 hover:bg-muted/40 transition-colors disabled:opacity-50";
 
   const renderActions = () => {
     switch (item.category) {
@@ -341,7 +341,7 @@ function NotificationItem({
                 <input type="text" value={alternativeText} onChange={(e) => onSetAlternativeText(e.target.value)}
                   onKeyDown={(e) => e.key === "Enter" && onSendAlternative(item)}
                   placeholder="Package name..." autoFocus
-                  className="flex-1 text-xs px-3 py-1.5 rounded-md border border-border/50 bg-background focus:outline-none focus:ring-1 focus:ring-ring" />
+                  className="flex-1 text-[11px] px-2.5 py-1 rounded-md border border-border/40 bg-background focus:outline-none focus:ring-1 focus:ring-ring" />
                 <button disabled={!alternativeText.trim() || isResolving} onClick={() => onSendAlternative(item)} className={btnPrimary}>
                   <Send className="h-3 w-3" />
                 </button>
@@ -422,7 +422,7 @@ function NotificationItem({
           }}
           placeholder="Your response will be visible to the research agent..."
           rows={prominent ? 3 : 2}
-          className="w-full text-xs px-3 py-2 rounded-md border border-border/50 bg-background focus:outline-none focus:ring-1 focus:ring-ring placeholder:text-muted-foreground/40 resize-y min-h-[48px]"
+          className="w-full text-[11px] px-2.5 py-1.5 rounded-md border border-border/40 bg-background focus:outline-none focus:ring-1 focus:ring-ring placeholder:text-muted-foreground/30 resize-y min-h-[40px]"
           autoFocus={!prominent}
         />
         <div className="flex justify-end">
@@ -439,10 +439,10 @@ function NotificationItem({
       {/* Title row */}
       <div className="flex items-start justify-between gap-3 mb-2">
         <div className="flex items-center gap-2 min-w-0">
-          <span className={`inline-flex h-5 w-5 items-center justify-center rounded-full shrink-0 ${meta.bgColor}`}>
-            <Icon className="h-3 w-3" />
+          <span className={`inline-flex h-4 w-4 items-center justify-center rounded-full shrink-0 ${meta.bgColor}`}>
+            <Icon className="h-2.5 w-2.5" />
           </span>
-          <span className="text-sm font-medium leading-tight truncate">{item.title}</span>
+          <span className="text-xs font-medium leading-tight truncate">{item.title}</span>
         </div>
         <div className="flex items-center gap-1.5 shrink-0">
           <span className="text-[11px] text-muted-foreground/40">{timeAgo(item.createdAt)}</span>
@@ -453,11 +453,11 @@ function NotificationItem({
       </div>
 
       {/* Detail */}
-      <p className="text-xs text-muted-foreground/70 leading-relaxed mb-3">{item.detail}</p>
+      <p className="text-[11px] text-muted-foreground/60 leading-relaxed mb-2.5">{item.detail}</p>
 
       {/* Suggestion */}
       {item.suggestion && (
-        <p className="text-xs text-muted-foreground/50 bg-muted/30 rounded-md px-3 py-2 mb-3 leading-relaxed">
+        <p className="text-[11px] text-muted-foreground/40 bg-muted/20 rounded-md px-2.5 py-1.5 mb-2.5 leading-relaxed">
           {item.suggestion}
         </p>
       )}
@@ -468,7 +468,7 @@ function NotificationItem({
         {onOpenInChat && (
           <button
             onClick={() => onOpenInChat(`The agent needs help with: ${item.title}\n\nDetails: ${item.detail}\n${item.suggestion ? `Suggestion: ${item.suggestion}` : ""}\n\nHow should I handle this?`)}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
+            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] text-muted-foreground/60 hover:text-foreground hover:bg-muted/30 transition-colors"
           >
             <MessageSquare className="h-3 w-3" />
             Chat
