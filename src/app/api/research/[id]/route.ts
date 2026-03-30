@@ -137,16 +137,29 @@ export async function GET(_request: NextRequest, { params }: Params) {
     }
 
     // Read research summary if it exists
-    let summary: string | null = null;
+    // Read research summary (JSON with short + full fields)
+    let summaryShort: string | null = null;
+    let summaryFull: string | null = null;
     if (project.outputFolder) {
       try {
-        const { readFile } = await import("fs/promises");
-        const path = await import("path");
-        summary = await readFile(path.join(project.outputFolder, "RESEARCH_SUMMARY.md"), "utf-8");
+        const { readFile: rf } = await import("fs/promises");
+        const pathMod = await import("path");
+        // Try JSON format first (new)
+        const raw = await rf(pathMod.join(project.outputFolder, "RESEARCH_SUMMARY.md"), "utf-8");
+        try {
+          const parsed = JSON.parse(raw);
+          summaryShort = parsed.short || null;
+          summaryFull = parsed.full || null;
+        } catch {
+          // Old format: plain markdown
+          summaryFull = raw;
+          const firstPara = raw.split(/\n\n/).find((p: string) => !p.startsWith("#") && p.trim().length > 20);
+          summaryShort = firstPara?.replace(/^>\s*/, "").trim() || null;
+        }
       } catch { /* file doesn't exist yet */ }
     }
 
-    return NextResponse.json({ ...project, benchmark, gates, experimentJobs, hypothesesById, summary });
+    return NextResponse.json({ ...project, benchmark, gates, experimentJobs, hypothesesById, summaryShort, summaryFull });
   } catch (err) {
     console.error("[api/research/[id]] GET error:", err);
     return NextResponse.json({ error: "Failed to fetch project" }, { status: 500 });

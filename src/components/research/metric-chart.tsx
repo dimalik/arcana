@@ -145,7 +145,7 @@ export function MetricChart({ results, compact = false, metricName }: MetricChar
       : Math.ceil(points.length / maxXLabels);
 
   return (
-    <div className={compact ? "" : "rounded-lg border border-border/60 p-4"}>
+    <div className={`relative ${compact ? "" : "rounded-lg border border-border/60 p-4"}`}>
       {!compact && (
         <div className="flex items-center justify-between mb-2">
           <h3 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
@@ -174,9 +174,9 @@ export function MetricChart({ results, compact = false, metricName }: MetricChar
       )}
 
       <svg
-        viewBox={`0 0 ${W} ${H}`}
+        viewBox={`0 ${compact ? -55 : 0} ${W} ${H + (compact ? 55 : 0)}`}
         className="w-full"
-        style={{ maxHeight: compact ? 80 : 160 }}
+        style={{ overflow: "visible", maxHeight: compact ? 80 : 160 }}
       >
         {/* Grid lines */}
         {!compact && yTicks.map((tick, i) => (
@@ -275,72 +275,47 @@ export function MetricChart({ results, compact = false, metricName }: MetricChar
             )
         )}
 
-        {/* Tooltip */}
-        {!compact && hoveredIdx !== null && (() => {
+        {/* Vertical guide line for hovered point */}
+        {hoveredIdx !== null && (() => {
           const p = points[hoveredIdx];
           const tx = scaleX(p.x);
-          const ty = scaleY(p.y);
-          const tooltipW = 150;
-          // Flip tooltip if too close to right edge
-          const tooltipX =
-            tx + tooltipW + 10 > W ? tx - tooltipW - 10 : tx + 10;
-          const tooltipY = Math.max(5, ty - 30);
-
           return (
-            <g className="pointer-events-none">
-              {/* Vertical guide */}
-              <line
-                x1={tx}
-                x2={tx}
-                y1={PAD.top}
-                y2={PAD.top + chartH}
-                stroke="currentColor"
-                className="text-border"
-                strokeWidth={0.5}
-                strokeDasharray="2,2"
-              />
-              {/* Tooltip bg */}
-              <rect
-                x={tooltipX}
-                y={tooltipY}
-                width={tooltipW}
-                height={46}
-                rx={4}
-                fill="var(--background, #fff)"
-                stroke="var(--border, #e5e7eb)"
-                strokeWidth={0.5}
-              />
-              <text
-                x={tooltipX + 8}
-                y={tooltipY + 14}
-                fontSize={10}
-                fontWeight={600}
-                className="fill-foreground"
-              >
-                {p.label}
-              </text>
-              <text
-                x={tooltipX + 8}
-                y={tooltipY + 26}
-                fontSize={9}
-                fontFamily="monospace"
-                className="fill-foreground"
-              >
-                {primaryMetric}: {p.y.toFixed(4)}
-              </text>
-              <text
-                x={tooltipX + 8}
-                y={tooltipY + 38}
-                fontSize={9}
-                className="fill-muted-foreground"
-              >
-                {p.branch}
-                {p.verdict ? ` \u00B7 ${p.verdict}` : ""}
-              </text>
-            </g>
+            <line
+              x1={tx} x2={tx}
+              y1={PAD.top} y2={PAD.top + chartH}
+              stroke="currentColor" className="text-border pointer-events-none"
+              strokeWidth={0.5} strokeDasharray="2,2"
+            />
           );
         })()}
       </svg>
+
+      {/* HTML tooltip — positioned absolutely over the chart */}
+      {hoveredIdx !== null && (() => {
+        const p = points[hoveredIdx];
+        // Calculate percentage position within the chart for CSS positioning
+        const xPct = (scaleX(p.x) / W) * 100;
+        const flipLeft = xPct > 60;
+        return (
+          <div
+            className="absolute pointer-events-none z-20"
+            style={{
+              left: flipLeft ? "auto" : `${xPct}%`,
+              right: flipLeft ? `${100 - xPct}%` : "auto",
+              bottom: "100%",
+              marginBottom: 4,
+            }}
+          >
+            <div className="bg-background border border-border rounded-lg shadow-lg px-3 py-2 text-left whitespace-nowrap">
+              <p className="text-xs font-semibold">{p.label}</p>
+              <p className="text-xs font-mono mt-0.5">{primaryMetric}: <strong>{p.y.toFixed(4)}</strong></p>
+              <p className="text-[11px] text-muted-foreground mt-0.5">
+                {p.branch}{p.verdict ? ` · ${p.verdict}` : ""}
+              </p>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }

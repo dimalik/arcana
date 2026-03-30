@@ -780,6 +780,7 @@ export const AgentActivityBar = forwardRef<AgentActivityHandle, AgentActivityBar
       <div className="relative rounded-md border border-border bg-card overflow-visible">
         {/* Compact status bar — always visible */}
         <div
+          data-console-toggle
           className="flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-muted/50 transition-colors"
           onClick={() => setExpanded(!expanded)}
         >
@@ -954,33 +955,16 @@ export const AgentActivityBar = forwardRef<AgentActivityHandle, AgentActivityBar
                     <div ref={feedEndRef} />
                   </div>
 
-                  {/* Input bar */}
-                  <div className="shrink-0 border-t border-border px-2 py-1.5 flex items-center gap-2">
-                    {!running ? (
-                      <>
-                        <input
-                          value={userInput}
-                          onChange={(e) => setUserInput(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter" && !e.shiftKey) {
-                              e.preventDefault();
-                              if (userInput.trim()) { handleSend(); } else { startAgent(); }
-                            }
-                          }}
-                          placeholder="Guide the agent or press Enter to restart..."
-                          className="flex-1 rounded border border-input bg-background px-2 py-1 text-[11px] focus:outline-none focus:ring-1 focus:ring-ring"
-                        />
-                        <button
-                          onClick={() => userInput.trim() ? handleSend() : startAgent()}
-                          className="inline-flex h-6 w-6 items-center justify-center rounded bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
-                        >
-                          <Send className="h-3 w-3" />
-                        </button>
-                      </>
-                    ) : (
+                  {/* Status bar — input moved to Chat tab */}
+                  <div className="shrink-0 border-t border-border px-3 py-1.5 flex items-center gap-2">
+                    {running ? (
                       <span className="flex-1 text-[11px] text-muted-foreground flex items-center gap-1.5">
                         <Loader2 className="h-3 w-3 animate-spin" />
                         Agent is working... {elapsed > 0 && <span className="text-[10px] tabular-nums">{elapsedStr}</span>}
+                      </span>
+                    ) : (
+                      <span className="flex-1 text-[11px] text-muted-foreground">
+                        Agent stopped. Use the Chat tab to give directions.
                       </span>
                     )}
                   </div>

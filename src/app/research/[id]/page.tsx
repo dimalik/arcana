@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Pause, Play, MoreVertical, Loader2, RotateCcw, Download, FileText, FolderArchive, Check, Target, MessageCircle } from "lucide-react";
+import { ArrowLeft, Pause, Play, MoreVertical, Loader2, RotateCcw, Download, FileText, FolderArchive, Check, Target } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -19,7 +19,6 @@ import {
 
 import { ResearchDashboard } from "@/components/research/research-dashboard";
 import { AgentActivityBar, AgentActivityHandle } from "@/components/research/agent-activity-bar";
-import { ResearchChat } from "@/components/research/research-chat";
 import { BenchmarkPanel } from "@/components/research/benchmark-panel";
 import { NotificationBell } from "@/components/research/notification-bell";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -147,7 +146,8 @@ interface Project {
   experimentResults?: ExperimentResult[];
   experimentJobs?: ExperimentJob[];
   hypothesesById?: Record<string, string>;
-  summary?: string | null;
+  summaryShort?: string | null;
+  summaryFull?: string | null;
   gates?: Record<string, GateStatus>;
   benchmark?: {
     isBenchmark: boolean;
@@ -269,7 +269,6 @@ export default function ResearchWorkspacePage({ params }: { params: { id: string
   };
 
   const [exportOpen, setExportOpen] = useState(false);
-  const [chatOpen, setChatOpen] = useState(false);
   const [exportResearch, setExportResearch] = useState(true);
   const [exportPapers, setExportPapers] = useState(true);
   const [exportCode, setExportCode] = useState(true);
@@ -351,19 +350,37 @@ export default function ResearchWorkspacePage({ params }: { params: { id: string
 
         {/* Center: phase progress dots */}
         <div className="flex items-center gap-2">
-          {["literature", "hypothesis", "experiment", "analysis", "reflection"].map((phase, i) => {
+          {(["literature", "hypothesis", "experiment", "analysis", "reflection"] as const).map((phase, i) => {
             const PHASE_ORDER = ["literature", "hypothesis", "experiment", "analysis", "reflection"];
+            const PHASE_LABELS: Record<string, string> = {
+              literature: "Reading papers",
+              hypothesis: "Forming hypotheses",
+              experiment: "Running experiments",
+              analysis: "Analyzing results",
+              reflection: "Reflecting & planning",
+            };
             const currentIdx = PHASE_ORDER.indexOf(project.currentPhase);
             const isCompleted = i < currentIdx;
             const isCurrent = i === currentIdx;
+            const isActive = isCurrent && project.status === "ACTIVE";
             return (
               <div key={phase} className="flex items-center gap-2">
-                {i > 0 && <div className={`w-4 h-px ${isCompleted ? "bg-emerald-500" : "bg-border"}`} />}
-                <div className={`h-2.5 w-2.5 rounded-full transition-colors ${
-                  isCompleted ? "bg-emerald-500"
-                  : isCurrent ? "bg-primary ring-2 ring-primary/20"
-                  : "bg-border"
-                }`} title={phase} />
+                {i > 0 && <div className={`w-5 h-px ${isCompleted ? "bg-emerald-500" : "bg-border"}`} />}
+                <div className="relative" title={`${phase.charAt(0).toUpperCase() + phase.slice(1)}${isCurrent ? " (current)" : isCompleted ? " (done)" : ""}`}>
+                  {isActive && (
+                    <span className="absolute inset-0 rounded-full animate-ping bg-primary/40" />
+                  )}
+                  <div className={`relative h-3 w-3 rounded-full transition-colors ${
+                    isCompleted ? "bg-emerald-500"
+                    : isCurrent ? "bg-primary"
+                    : "bg-border"
+                  }`} />
+                </div>
+                {isCurrent && (
+                  <span className="text-[11px] text-muted-foreground hidden sm:inline">
+                    {PHASE_LABELS[phase]}
+                  </span>
+                )}
               </div>
             );
           })}
@@ -372,13 +389,6 @@ export default function ResearchWorkspacePage({ params }: { params: { id: string
         {/* Right: notifications + chat + menu */}
         <div className="flex items-center gap-1">
           <NotificationBell projectId={project.id} />
-          <button
-            onClick={() => setChatOpen(prev => !prev)}
-            className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
-            title="Ask about this research"
-          >
-            <MessageCircle className="h-4 w-4" />
-          </button>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors">
@@ -425,7 +435,8 @@ export default function ResearchWorkspacePage({ params }: { params: { id: string
           } : null}
           onRefresh={fetchProject}
           logEntries={project.log}
-          summary={project.summary || undefined}
+          summaryShort={project.summaryShort || undefined}
+          summaryFull={project.summaryFull || undefined}
         />
       </div>
 
@@ -495,8 +506,6 @@ export default function ResearchWorkspacePage({ params }: { params: { id: string
         </DialogContent>
       </Dialog>
 
-      {/* Research chat */}
-      <ResearchChat projectId={project.id} projectTitle={project.title} externalOpen={chatOpen} onExternalClose={() => setChatOpen(false)} />
     </div>
   );
 }

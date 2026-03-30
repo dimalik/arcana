@@ -41,6 +41,9 @@ const summarySchema = z.object({
   currentStatus: z
     .string()
     .describe("1 sentence: overall status of the research"),
+  tldr: z
+    .string()
+    .describe("One paragraph (2-3 sentences) executive summary of the entire research so far — key question, best result, main insight. This is shown when collapsed."),
 });
 
 // ── Public API ────────────────────────────────────────────────────
@@ -50,10 +53,15 @@ const summarySchema = z.object({
  * a structured research summary, format it as markdown, write it to
  * RESEARCH_SUMMARY.md in workDir, and return the markdown string.
  */
+export interface ResearchSummaryData {
+  short: string;  // 2-3 sentence executive summary
+  full: string;   // full markdown document
+}
+
 export async function generateResearchSummary(
   projectId: string,
   workDir: string,
-): Promise<string> {
+): Promise<ResearchSummaryData> {
   // ── 1. Fetch project with all relations ──────────────────────
   const project = await prisma.researchProject.findUnique({
     where: { id: projectId },
@@ -87,8 +95,8 @@ export async function generateResearchSummary(
   });
 
   if (!project) {
-    const empty = `# Research Summary\n\nProject not found (${projectId}).\n`;
-    await safeWriteFile(workDir, empty);
+    const empty: ResearchSummaryData = { short: "Project not found.", full: "# Research Summary\n\nProject not found.\n" };
+    await safeWriteFile(workDir, JSON.stringify(empty));
     return empty;
   }
 
@@ -137,11 +145,18 @@ export async function generateResearchSummary(
   const now = new Date().toISOString().replace("T", " ").slice(0, 16);
 
   const md = formatMarkdown(object, totalExperiments, totalApproaches, now);
+  const short = object.tldr || object.currentStatus || md.split("\n\n").find(p => !p.startsWith("#") && p.trim().length > 20) || "";
 
-  // ── 6. Write to disk ──────────────────────────────────────────
-  await safeWriteFile(workDir, md);
+  const result: ResearchSummaryData = { short, full: md };
 
-  return md;
+  // ── 6. Write to disk as JSON ────────────────────────────────
+  await safeWriteFile(workDir, JSON.stringify(result));
+  // Also write markdown for the agent's context
+  try {
+    await writeFile(path.join(workDir, "RESEARCH_SUMMARY.md"), md, "utf-8");
+  } catch { /* non-fatal */ }
+
+  return result;
 }
 
 /**
@@ -151,7 +166,7 @@ export async function generateResearchSummary(
 export async function getResearchSummaryForDisplay(
   projectId: string,
   workDir: string,
-): Promise<string | null> {
+): Promise<ResearchSummaryData | null> {
   try {
     return await generateResearchSummary(projectId, workDir);
   } catch {
@@ -308,6 +323,9 @@ function formatMarkdown(
   const sections: string[] = [];
 
   sections.push("# Research Summary");
+  if (summary.tldr) {
+    sections.push(`\n> ${summary.tldr}`);
+  }
   sections.push(`\n## Introduction\n${summary.introduction}`);
 
   // Key Findings

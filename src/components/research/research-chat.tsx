@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
-import { MessageCircle, X, Send, Loader2, Sparkles, Copy, BookmarkPlus, Download, Check, RefreshCw, Plus, Trash2, ChevronLeft } from "lucide-react";
+import { MessageCircle, X, Send, Loader2, Sparkles, Copy, BookmarkPlus, Download, Check, RefreshCw, Plus, Trash2, ChevronLeft, History, ArrowUp } from "lucide-react";
 import { toast } from "sonner";
 import { MarkdownRenderer } from "@/components/ui/markdown-renderer";
 
@@ -66,8 +66,8 @@ function deriveTitle(messages: Message[]): string {
 
 // ── Main component ──────────────────────────────────────────────
 
-export function ResearchChat({ projectId, projectTitle, externalOpen, onExternalClose }: {
-  projectId: string; projectTitle: string; externalOpen?: boolean; onExternalClose?: () => void;
+export function ResearchChat({ projectId, projectTitle, externalOpen, onExternalClose, embedded }: {
+  projectId: string; projectTitle: string; externalOpen?: boolean; onExternalClose?: () => void; embedded?: boolean;
 }) {
   const [open, setOpen] = useState(false);
 
@@ -119,18 +119,77 @@ export function ResearchChat({ projectId, projectTitle, externalOpen, onExternal
     else if (!activeThreadId) setActiveThreadId(threads[0].id);
   };
 
+  // Auto-open and auto-create thread when embedded
+  useEffect(() => {
+    if (embedded) {
+      setOpen(true);
+      if (threads.length === 0) {
+        const t: ChatThread = { id: `t-${Date.now()}`, title: "New chat", messages: [], createdAt: Date.now() };
+        setThreads(prev => [t, ...prev]);
+        setActiveThreadId(t.id);
+      } else if (!activeThreadId) {
+        setActiveThreadId(threads[0].id);
+      }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [embedded]);
+
+  // Embedded mode — uses the same ChatView with streaming, clean layout
+  if (embedded && open) {
+    return (
+      <div className="flex flex-col h-full">
+        {showList ? (
+          <div className="flex flex-col h-full">
+            <div className="flex items-center justify-between px-4 py-2 border-b border-border/40">
+              <span className="text-xs font-medium">Chat History</span>
+              <button onClick={() => setShowList(false)} className="text-xs text-primary hover:underline">Back</button>
+            </div>
+            <div className="flex-1 overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+              {threads.filter(t => t.messages.length > 0).map(t => (
+                <button key={t.id} onClick={() => { setActiveThreadId(t.id); setShowList(false); }}
+                  className={`w-full text-left px-4 py-2.5 border-b border-border/10 hover:bg-muted/50 transition-colors ${t.id === activeThreadId ? "bg-muted/30" : ""}`}>
+                  <p className="text-sm truncate">{t.title}</p>
+                  <p className="text-[11px] text-muted-foreground/40">{new Date(t.createdAt).toLocaleDateString()}</p>
+                </button>
+              ))}
+            </div>
+            <div className="px-4 py-2 border-t border-border/40">
+              <button onClick={() => { createThread(); setShowList(false); }}
+                className="text-xs text-primary hover:underline">New conversation</button>
+            </div>
+          </div>
+        ) : (
+          <div className="flex flex-col h-full relative">
+            <button onClick={() => setShowList(true)}
+              className="absolute top-2 right-2 z-10 h-7 w-7 flex items-center justify-center rounded-md text-muted-foreground/40 hover:text-foreground hover:bg-muted/50 transition-colors"
+              title="Chat history">
+              <History className="h-3.5 w-3.5" />
+            </button>
+            {activeThread ? (
+              <div className="flex-1 min-h-0 flex flex-col [&>*:first-child]:flex-1 [&>*:first-child]:max-h-none [&>*:first-child]:min-h-0">
+              <ChatView
+                projectId={projectId}
+                thread={activeThread}
+                onUpdateMessages={(msgs) => updateThreadMessages(activeThread.id, msgs)}
+              />
+              </div>
+            ) : (
+              <div className="flex-1 flex items-center justify-center text-sm text-muted-foreground">
+                No conversation selected
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  }
+
   return (
     <>
       {open && (
         <div className="fixed bottom-16 right-8 z-40 w-[400px] max-h-[70vh] flex flex-col rounded-xl border border-border/60 bg-background shadow-2xl animate-in slide-in-from-bottom-2 fade-in-0 duration-200">
           {/* Header */}
           <div className="relative px-4 py-2.5 border-b border-border/40">
-            <button
-              onClick={handleClose}
-              className="absolute -top-2 -right-2 inline-flex h-5 w-5 items-center justify-center rounded-full bg-muted border border-border/60 text-muted-foreground/60 hover:text-foreground hover:bg-accent shadow-sm transition-colors z-10"
-            >
-              <X className="h-3 w-3" />
-            </button>
             <div className="flex items-center gap-2">
               {!showList && threads.length > 1 && (
                 <button

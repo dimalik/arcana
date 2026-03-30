@@ -14,10 +14,12 @@ import {
   FolderOpen,
   ScrollText,
   Image,
+  MessageCircle,
 } from "lucide-react";
 import Link from "next/link";
 import { ExperimentCard } from "./experiment-card";
 import { FilePreview } from "./file-preview";
+import { ResearchChat } from "./research-chat";
 import { MetricChart } from "./metric-chart";
 import { MarkdownRenderer } from "@/components/ui/markdown-renderer";
 
@@ -117,7 +119,8 @@ export interface ResearchDashboardProps {
   } | null;
   onRefresh: () => void;
   logEntries?: LogEntry[];
-  summary?: string;
+  summaryShort?: string;
+  summaryFull?: string;
 }
 
 /* ------------------------------------------------------------------ */
@@ -719,7 +722,8 @@ export function ResearchDashboard({
   papers,
   iteration,
   logEntries,
-  summary,
+  summaryShort,
+  summaryFull,
 }: ResearchDashboardProps) {
   const {
     hypotheses,
@@ -730,8 +734,33 @@ export function ResearchDashboard({
   } = project;
 
   const [filter, setFilter] = useState<FilterKey>("all");
-  type RightTab = "status" | "summary" | "papers" | "files" | "figures";
+  type RightTab = "status" | "summary" | "papers" | "files" | "figures" | "chat";
   const [rightTab, setRightTab] = useState<RightTab>("status");
+
+  // Keyboard shortcuts (ignored when typing in inputs)
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement)?.tagName;
+      const isTyping = tag === "INPUT" || tag === "TEXTAREA" || (e.target as HTMLElement)?.isContentEditable;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+
+      if (e.key === "Escape") {
+        setRightTab("status");
+        return;
+      }
+      if (isTyping) return;
+      if (e.key === "c") setRightTab("chat");
+      if (e.key === "`" || e.key === "~") {
+        e.preventDefault();
+        // Toggle the agent console by clicking its expand button
+        const consoleToggle = document.querySelector("[data-console-toggle]") as HTMLElement;
+        consoleToggle?.click();
+      }
+    };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, []);
+
   const [previewFile, setPreviewFile] = useState<{ name: string; path: string } | null>(null);
   const [lightboxImage, setLightboxImage] = useState<{ name: string; path: string; caption?: string } | null>(null);
   const [selectedMetric, setSelectedMetric] = useState<string | null>(null);
@@ -790,14 +819,8 @@ export function ResearchDashboard({
     (j) => j.status === "RUNNING"
   );
 
-  // Parse summary intro
-  const summaryIntro = useMemo(() => {
-    if (!summary) return null;
-    // Take first paragraph (up to double newline)
-    const firstPara = summary.split(/\n\n/)[0];
-    // Strip markdown headers
-    return firstPara.replace(/^#+\s*/gm, "").trim();
-  }, [summary]);
+  // Short summary for collapsed view (from API)
+  const summaryIntro = summaryShort || null;
 
   // Build unified timeline
   const timeline = useMemo(() => {
@@ -1096,6 +1119,7 @@ export function ResearchDashboard({
           { key: "papers", icon: FileText, label: "Papers" },
           { key: "figures", icon: Image, label: "Figures" },
           { key: "files", icon: FolderOpen, label: "Files" },
+          { key: "chat", icon: MessageCircle, label: "Chat" },
         ];
 
         return (
@@ -1119,7 +1143,17 @@ export function ResearchDashboard({
               ))}
             </div>
 
-            {/* Tab content */}
+            {/* Chat tab — rendered outside ScrollFadePanel to avoid gradient over input */}
+            {rightTab === "chat" && (
+              <div className="flex-1 min-h-0 flex flex-col">
+                <div className="flex-1 min-h-0">
+                  <ResearchChat projectId={project.id} projectTitle={project.title} externalOpen embedded />
+                </div>
+              </div>
+            )}
+
+            {/* Other tab content — with scroll fade */}
+            {rightTab !== "chat" && (
             <ScrollFadePanel className="flex-1 min-h-0">
               <div className="p-4">
 
@@ -1129,7 +1163,7 @@ export function ResearchDashboard({
                   {/* Summary preview */}
                   <div className="rounded-lg border border-border/60 p-4">
                     <h3 className="text-xs font-medium uppercase tracking-wide text-muted-foreground mb-2">Summary</h3>
-                    {summary ? (
+                    {(summaryShort || summaryFull) ? (
                       <>
                         <p className="text-sm leading-relaxed text-muted-foreground line-clamp-3">{summaryIntro}</p>
                         <button onClick={() => setRightTab("summary")} className="text-xs text-primary mt-1.5 hover:underline">Read full summary</button>
@@ -1183,8 +1217,8 @@ export function ResearchDashboard({
               {/* SUMMARY TAB */}
               {rightTab === "summary" && (
                 <div className="prose prose-sm prose-neutral dark:prose-invert max-w-none [&>*:first-child]:mt-0 [&_h1]:text-sm [&_h2]:text-sm [&_h3]:text-xs [&_h1]:font-semibold [&_h2]:font-semibold [&_h3]:font-medium [&_p]:text-sm [&_p]:leading-relaxed [&_p]:my-1.5 [&_ul]:my-1 [&_ol]:my-1 [&_li]:my-0.5 [&_li]:text-sm [&_code]:text-xs [&_pre]:text-xs [&_pre]:my-2">
-                  {summary ? (
-                    <MarkdownRenderer content={summary} />
+                  {summaryFull ? (
+                    <MarkdownRenderer content={summaryFull} />
                   ) : (
                     <p className="text-sm text-muted-foreground/50">Summary will appear after first experiments complete.</p>
                   )}
@@ -1342,7 +1376,7 @@ export function ResearchDashboard({
                     </div>
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img src={imgUrl(lightboxImage.path)} alt={lightboxImage.name}
-                      className="max-w-full max-h-[80vh] object-contain rounded-lg bg-white" />
+                      className="max-w-[85vw] max-h-[80vh] min-w-[40vw] object-contain rounded-lg bg-white" />
                     <div className="mt-3 text-center max-w-2xl">
                       {lightboxImage.caption && <p className="text-sm text-white/80">{lightboxImage.caption}</p>}
                       <p className="text-xs text-white/40 mt-1 font-mono">{lightboxImage.name}</p>
@@ -1353,6 +1387,7 @@ export function ResearchDashboard({
 
               </div>
             </ScrollFadePanel>
+            )}
           </div>
         );
       })()}
