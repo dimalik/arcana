@@ -16,6 +16,7 @@ import { searchAllSources, isFigureOrSupplementDoi } from "@/lib/import/semantic
 import { findAndDownloadPdf } from "@/lib/import/pdf-finder";
 import { processingQueue } from "@/lib/processing/queue";
 import { submitRemoteJob, probeGpus, quickRemoteCommand } from "./remote-executor";
+import { routeScript } from "./resource-router";
 import { classifyTaskCategory } from "./task-classifier";
 import { processQuery, scoreWeighted, scoreText, filterByRelevance } from "./search-utils";
 import { getAllResourcePreferences, recordResourceChoice, CONFIDENCE_THRESHOLD } from "./resource-preferences";
@@ -96,6 +97,7 @@ async function drainPdfDownloadQueue() {
 
 /** Tools only available in specific phases. Benchmark projects bypass all gates. */
 const PHASE_RESTRICTED_TOOLS: Record<string, string[]> = {
+  run_experiment: ["experiment"],
   execute_remote: ["experiment"],
   run_experiment_sweep: ["experiment"],
   validate_environment: ["experiment"],
@@ -857,7 +859,7 @@ Check RESEARCH_LOG.md for the detailed research narrative.
   let totalExperimentsRun = 0;
   let totalPaperConsultations = 0;
   const LIT_TOOLS = new Set(["search_papers", "read_paper", "search_library", "query_insights"]);
-  const EXPERIMENT_TOOLS = new Set(["execute_command", "execute_remote"]);
+  const EXPERIMENT_TOOLS = new Set(["execute_command", "execute_remote", "run_experiment"]);
   let iterationNudged = false;
   const iterationStepsAtStart = stepSortOrder; // total steps already in this iteration
 
@@ -889,7 +891,7 @@ Check RESEARCH_LOG.md for the detailed research narrative.
       // Hypotheses & findings
       "log_finding", "update_hypothesis", "adversarial_review",
       // Experiment
-      "write_file", "execute_remote", "check_job", "wait_for_jobs",
+      "write_file", "run_experiment", "execute_remote", "check_job", "wait_for_jobs",
       // File management
       "read_file", "list_files", "get_workspace", "read_remote_file",
       // Sub-agents
@@ -1007,7 +1009,7 @@ Check RESEARCH_LOG.md for the detailed research narrative.
           stepBudget.literature++;
         } else if (["write_file", "log_finding", "update_hypothesis"].includes(tc.toolName)) {
           stepBudget.design++;
-        } else if (["execute_remote", "validate_environment"].includes(tc.toolName)) {
+        } else if (["execute_remote", "run_experiment", "validate_environment"].includes(tc.toolName)) {
           stepBudget.experiment++;
         } else if (["check_job", "monitor_experiment", "read_file", "get_workspace", "read_remote_file"].includes(tc.toolName)) {
           stepBudget.analysis++;
@@ -1116,8 +1118,8 @@ Check RESEARCH_LOG.md for the detailed research narrative.
       } else if (phase === "experiment") {
         if (!toolsUsedThisSession.has("write_file")) {
           directive = "You are in the EXPERIMENT phase. Call write_file to create a poc_ or exp_ Python script that tests your hypothesis.";
-        } else if (!toolsUsedThisSession.has("execute_remote")) {
-          directive = "Script written. Call execute_remote to run it on the remote server.";
+        } else if (!toolsUsedThisSession.has("run_experiment") && !toolsUsedThisSession.has("execute_remote")) {
+          directive = "Script written. Call run_experiment to run it — the system will automatically route to local or remote based on resource rules.";
         } else {
           directive = "Experiment submitted. Call check_job to monitor progress, or call advance_phase to move to analysis.";
         }
@@ -1316,9 +1318,9 @@ To prevent this:
   const prefSection = (() => {
     if (!resourcePreferences || resourcePreferences.length === 0) return "";
     const lines = resourcePreferences.map((p) => {
-      const label = p.preference === "local" ? "use execute_command (local)"
-        : p.preference.startsWith("remote:") ? `use execute_remote on "${p.preference.slice(7)}"`
-        : p.preference === "remote" ? "use execute_remote"
+      const label = p.preference === "local" ? "routes locally"
+        : p.preference.startsWith("remote:") ? `routes to remote "${p.preference.slice(7)}"`
+        : p.preference === "remote" ? "routes to remote"
         : "no preference yet";
       const conf = p.usageCount >= CONFIDENCE_THRESHOLD ? `[${p.usageCount} uses — auto-apply]` : `[${p.usageCount} use${p.usageCount !== 1 ? "s" : ""} — not yet confirmed]`;
       return `- ${p.taskCategory.replace(/_/g, " ")} tasks: ${label} ${conf}`;
@@ -1338,18 +1340,19 @@ ${remoteHosts.map((h) => `- "${h.alias}"${h.gpuType ? ` (${h.gpuType})` : ""}${h
 ${gpuSection}
 ${prefSection}
 **Tool selection guide:**
-- \`execute_remote\` → submit experiments to GPU servers (syncs files, starts job, returns IMMEDIATELY). The job runs in the background — you can do other work while it runs.
+- \`run_experiment\` → **PREFERRED** for running Python experiment scripts. Automatically routes to local or remote GPU based on resource rules. You never need to decide where to run — just provide the script name.
 - \`check_job\` → check status of a background job (quick, non-blocking). Call periodically to monitor progress.
 - \`wait_for_jobs\` → block until specific jobs complete (use when you need results before proceeding, e.g., to compare outputs).
 - \`get_workspace\` → PREFERRED: structured view of all files, results, packages, job status (cached, fast)
 - \`read_remote_file\` → read a specific file from the remote experiment directory (e.g., results.json, stderr.log, output/metrics.csv) when get_workspace doesn't show its full contents
-- \`execute_command\` → local tasks (editing files, data prep, lightweight compute)
+- \`execute_command\` → local shell tasks (data prep, lightweight compute). For Python experiment scripts, prefer \`run_experiment\`.
+- \`execute_remote\` → DEPRECATED, use \`run_experiment\` instead.
 
 ### Parallel Workflow (YOU MUST DO THIS — NOT OPTIONAL)
 You have the ability to do multiple things at once. **Use it aggressively.** Sequential one-at-a-time work is unacceptable when you have tools for parallelism.
 
 **Experiments run in background — ALWAYS keep working:**
-1. Submit experiment with \`execute_remote\` → get job ID → **immediately** start your next task
+1. Submit experiment with \`run_experiment\` → get job ID → **immediately** start your next task
 2. While experiments run: search for papers, read papers, write code for the NEXT experiment, analyze PREVIOUS results
 3. Submit 2-3 experiment variants at once when testing different approaches — don't wait for one to finish before submitting the next
 4. Use \`check_job\` periodically to see if jobs finished. It fetches live logs from the remote.
@@ -1393,7 +1396,7 @@ Writing a Python script to do \`nvidia-smi\` or \`ps aux\` or \`cat logs\` is NE
 4. \`collect_results\` (architect proposals) → implement cheapest validation experiment
 5. Run experiment → analyze results yourself → \`dispatch_architect\` with synthesis + results → iterate
 
-${!resourcePreferences || resourcePreferences.length === 0 ? "**Default: use execute_remote for running experiments** (training, evaluation). Use execute_command for local-only tasks.\n" : ""}### Environment Setup (AUTOMATIC — but validate first!)
+${!resourcePreferences || resourcePreferences.length === 0 ? "**Default: use run_experiment for all Python experiment scripts** — it auto-routes to local or remote based on resource rules. Use execute_command only for non-experiment shell tasks.\n" : ""}### Environment Setup (AUTOMATIC — but validate first!)
 The remote execution system **automatically handles Python environments**:
 - Creates a \`.venv\` if one doesn't exist and \`requirements.txt\` is present
 - Installs/updates packages when \`requirements.txt\` changes (tracked via hash)
@@ -1548,7 +1551,7 @@ This is not optional. A plan that is never revised is a bad plan. The act of rep
 ## Phase-Gated Workflow
 
 Your research operates in a structured phase system. Some tools are ONLY available in certain phases:
-- **EXPERIMENT phase only:** execute_remote, run_experiment_sweep, validate_environment, write Python scripts
+- **EXPERIMENT phase only:** run_experiment, execute_remote, run_experiment_sweep, validate_environment, write Python scripts
 - **REFLECTION phase only:** complete_iteration
 
 Use \`advance_phase\` to transition between phases. Each transition has gates:
@@ -1816,9 +1819,9 @@ Think of iterations like chapters — each should have a coherent narrative. Sta
 - **NEVER claim a result without comparing to a baseline.** "We got 92% accuracy" is meaningless without "compared to baseline X which gets Y%."
 - **NEVER accept results without statistical rigor.** Run experiments multiple times with different seeds. Report mean and standard deviation.
 - **NEVER generate synthetic toy data when a real dataset exists.** If a paper evaluates on GLUE, use GLUE. If on SQuAD, use SQuAD. Generating 50 random samples to "simulate" a dataset invalidates the entire experiment. Use \`datasets\` library, \`torchvision.datasets\`, or direct download URLs from the papers.
-- **NEVER manage the Python environment manually when using execute_remote.** The remote wrapper handles venv creation, package installation, and activation automatically. Just write a \`requirements.txt\` and run \`python3 script.py\`. For local runs with execute_command, create a venv once: \`python3 -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt && python3 script.py\`, then reuse on subsequent runs.
-- **execute_remote handles EVERYTHING automatically and returns immediately.** The remote wrapper: (1) cds into the experiment directory, (2) creates .venv if needed, (3) installs requirements.txt if changed, (4) activates .venv, (5) runs your command, (6) captures exit code. So your command should be JUST the experiment, e.g. \`python3 experiment.py\`. NEVER include: \`cd\`, \`source .venv/bin/activate\`, \`python3 -m venv\`, \`pip install\`, \`bash -c\`, \`timeout\`, \`nohup\`, absolute paths to python or .venv/bin/python3. These WILL break the command. After submitting, **keep working** — don't just call check_job in a loop. Do something useful (read papers, write code) and check back later.
-- **NEVER use execute_remote for checking files, reading logs, or listing results.** Use read_remote_file or get_workspace for that. execute_remote does a full rsync which is slow and can fail.
+- **Use \`run_experiment\` for all Python experiment scripts.** It auto-routes to local or remote based on resource rules. You never need to decide where to run. For remote execution, the wrapper handles venv creation, package installation, and activation automatically. Just write a \`requirements.txt\` and provide the script name.
+- **run_experiment (remote path) handles EVERYTHING automatically and returns immediately.** The remote wrapper: (1) cds into the experiment directory, (2) creates .venv if needed, (3) installs requirements.txt if changed, (4) activates .venv, (5) runs your command, (6) captures exit code. So just provide the script name, e.g. \`run_experiment(script="experiment.py")\`. After submitting, **keep working** — don't just call check_job in a loop. Do something useful (read papers, write code) and check back later.
+- **NEVER use execute_remote or run_experiment for checking files, reading logs, or listing results.** Use read_remote_file or get_workspace for that.
 - **ALWAYS use flush=True in print() and save results incrementally.** Remote jobs buffer stdout — without flushing you won't see progress. Without incremental saves, a crash after training means zero results.
 - **Save lessons with save_lesson whenever you fix a non-obvious bug or discover a practical trick.** Future you (and other projects) will benefit. Don't save obvious things — save things that cost you time to figure out.
 - Use log_finding liberally: record hypotheses, findings, decisions, and breakthroughs. This is your lab notebook.
@@ -1964,6 +1967,8 @@ function thinkingHint(toolCalls?: { toolName: string; input: unknown }[]): strin
       return "Analyzing command output...";
     case "read_remote_file":
       return "Reading remote file...";
+    case "run_experiment":
+      return "Experiment routed — processing...";
     case "execute_remote":
       return "Job submitted — continuing with other work...";
     case "check_job":
@@ -3192,8 +3197,271 @@ function createTools(
       },
     }),
 
+    run_experiment: tool({
+      description: "Run an experiment script. The system automatically determines WHERE to run it (local or remote GPU) based on resource rules — you never need to choose. Just provide the script name and optional args. For exp_* and poc_* scripts, it routes to remote GPU servers. For analysis_* scripts, it runs locally. Use this instead of execute_remote or execute_command for running Python experiment scripts.",
+      inputSchema: z.object({
+        script: z.string().describe("Script filename to run (e.g., 'exp_003_lora.py')"),
+        args: z.string().optional().describe("Command-line arguments (e.g., '--seed 42 --epochs 10')"),
+        hypothesis_id: z.string().optional().describe("ID of the hypothesis this experiment tests. Required for exp_ scripts."),
+      }),
+      execute: async ({ script, args, hypothesis_id }: { script: string; args?: string; hypothesis_id?: string }) => {
+        // ── Validate script name ──
+        if (!script.endsWith(".py")) {
+          return "BLOCKED — run_experiment only runs Python scripts. Provide a .py filename.";
+        }
+
+        // ── Check script exists ──
+        const scriptPath = path.join(workDir, script);
+        try {
+          await stat(scriptPath);
+        } catch {
+          return `BLOCKED — Script "${script}" does not exist in the experiment directory. Write it first with write_file.`;
+        }
+
+        // ── Route the script ──
+        const hostCount = await prisma.remoteHost.count();
+        const routing = await routeScript(projectId, script, hostCount > 0);
+
+        emit({ type: "tool_output", toolName: "run_experiment", content: `Routing: ${routing.reason}` });
+
+        const command = `python3 ${script}${args ? ` ${args}` : ""}`;
+
+        if (routing.runtime.type === "local") {
+          // ════════════════════════════════════════════
+          // LOCAL EXECUTION
+          // ════════════════════════════════════════════
+          emit({ type: "tool_output", toolName: "run_experiment", content: `$ [local] ${command}` });
+
+          const logFile = path.join(workDir, `.run-${Date.now()}.log`);
+
+          return new Promise<string>((resolve) => {
+            const proc = spawn("bash", ["-c", command], {
+              cwd: workDir,
+              timeout: 600_000, // 10 min for local runs
+              env: { ...process.env, PYTHONUNBUFFERED: "1" },
+            });
+
+            let stdout = "";
+            let stderr = "";
+
+            proc.stdout?.on("data", (chunk: Buffer) => {
+              const text = chunk.toString();
+              stdout += text;
+              for (const line of text.split("\n").filter(Boolean)) {
+                emit({ type: "tool_output", toolName: "run_experiment", content: line });
+                appendFile(logFile, `[stdout] ${line}\n`).catch(() => {});
+              }
+            });
+
+            proc.stderr?.on("data", (chunk: Buffer) => {
+              const text = chunk.toString();
+              stderr += text;
+              for (const line of text.split("\n").filter(Boolean)) {
+                emit({ type: "tool_output", toolName: "run_experiment", content: `[stderr] ${line}` });
+                appendFile(logFile, `[stderr] ${line}\n`).catch(() => {});
+              }
+            });
+
+            proc.on("close", async (code) => {
+              const succeeded = code === 0;
+              await recordStep(
+                "run_experiment",
+                `Local: ${command.slice(0, 80)}`,
+                succeeded ? "COMPLETED" : "FAILED",
+                { stdout: stdout.slice(-2000), stderr: stderr.slice(-500), exitCode: code, logFile, routing: routing.reason },
+                "experiment",
+              );
+              if (succeeded) {
+                const taskCat = classifyTaskCategory(command);
+                recordResourceChoice(userId, taskCat, "local", command.slice(0, 80), projectId).catch(() => {});
+                resolve(`[local] ${script} completed successfully.\n\nOutput:\n${stdout.slice(-3000)}`);
+              } else {
+                resolve(`[local] ${script} failed (exit ${code}). YOU MUST read the error, fix the code, and re-run.\n\nstdout:\n${stdout.slice(-2000)}\n\nstderr:\n${stderr.slice(-1000)}`);
+              }
+            });
+
+            proc.on("error", async (err) => {
+              await recordStep("run_experiment", `Local: ${command.slice(0, 80)}`, "FAILED", { error: err.message, routing: routing.reason });
+              resolve(`[local] Failed to run ${script}: ${err.message}`);
+            });
+          });
+        } else {
+          // ════════════════════════════════════════════
+          // REMOTE EXECUTION
+          // ════════════════════════════════════════════
+
+          // ── Failure reflection gate ──
+          if (!isBenchmarkProject) {
+            const failedJobIds = await prisma.remoteJob.findMany({
+              where: { projectId, status: "FAILED" },
+              select: { id: true },
+            });
+            if (failedJobIds.length > 0) {
+              const addressedJobIds = await prisma.experimentResult.findMany({
+                where: { projectId, jobId: { not: null } },
+                select: { jobId: true },
+              });
+              const addressedSet = new Set(addressedJobIds.map(r => r.jobId));
+              const unaddressed = failedJobIds.filter(j => !addressedSet.has(j.id));
+              if (unaddressed.length > 0) {
+                return `BLOCKED — ${unaddressed.length} failed experiment(s) need reflection before you can submit more. Call reflect_on_failure for job "${unaddressed[0].id}" first.`;
+              }
+            }
+          }
+
+          // ── Synthesis gate ──
+          const completedExperiments = await prisma.remoteJob.count({
+            where: { projectId, status: "COMPLETED" },
+          });
+          if (completedExperiments >= 3) {
+            const analysisSteps = await prisma.researchStep.count({
+              where: {
+                iteration: { projectId },
+                type: "analyze_results",
+                status: "COMPLETED",
+              },
+            });
+            const requiredAnalyses = Math.floor(completedExperiments / 3);
+            if (analysisSteps < requiredAnalyses) {
+              return `BLOCKED — ${completedExperiments} experiments completed but only ${analysisSteps} analysis steps recorded. ` +
+                `Before running more experiments:\n` +
+                `1. Use update_hypothesis to mark hypotheses SUPPORTED/REFUTED with evidence\n` +
+                `2. Use log_finding(type="finding") to record what you learned`;
+            }
+          }
+
+          // ── Find host ──
+          const hostWhere = routing.runtime.hostAlias
+            ? { alias: routing.runtime.hostAlias }
+            : { isDefault: true as const };
+          let host = await prisma.remoteHost.findFirst({ where: hostWhere });
+          if (!host) host = await prisma.remoteHost.findFirst();
+          if (!host) return "No remote hosts configured. Add a remote host in Settings, or set a resource rule for local execution.";
+
+          // ── Sanitize command ──
+          let sanitized = command;
+          sanitized = sanitized.replace(/\bpython\b(?!3)/g, "python3");
+          sanitized = sanitized.replace(/\s+/g, " ").trim();
+
+          // ── Mandatory hypothesis link for full experiments ──
+          const isFullExperiment = /python3?\s+exp_\d+/.test(sanitized);
+          let resolvedHypothesisId = hypothesis_id;
+          if (isFullExperiment) {
+            if (!hypothesis_id) {
+              const hypotheses = await prisma.researchHypothesis.findMany({
+                where: { projectId },
+                select: { id: true, statement: true, status: true },
+              });
+              if (hypotheses.length === 0) {
+                return "BLOCKED — No hypotheses exist. Before running a full experiment (exp_*), use log_finding(type='hypothesis') to state what you expect to learn.";
+              }
+              return `BLOCKED — Full experiments (exp_*) must reference a hypothesis via the hypothesis_id parameter. Available hypotheses:\n${hypotheses.map(h => `- ${h.id}: [${h.status}] ${h.statement.slice(0, 100)}`).join("\n")}`;
+            }
+            const allHyps = await prisma.researchHypothesis.findMany({ where: { projectId } });
+            const hyp = allHyps.find(h => h.id === hypothesis_id || h.id.startsWith(hypothesis_id));
+            if (!hyp) {
+              return `BLOCKED — Hypothesis "${hypothesis_id}" not found. Available:\n${allHyps.map(h => `- ${h.id}: [${h.status}] ${h.statement.slice(0, 80)}`).join("\n")}`;
+            }
+            resolvedHypothesisId = hyp.id;
+            if (hyp.status === "PROPOSED") {
+              await prisma.researchHypothesis.update({ where: { id: hyp.id }, data: { status: "TESTING" } });
+            }
+          }
+
+          // ── Pre-flight validation ──
+          const isPoc = /python3?\s+poc_\d+/.test(sanitized);
+          const preflightGpuCount = cachedGpuInfo?.find((g: { alias: string }) => g.alias === host!.alias)?.gpuCount ?? 1;
+          if (isPoc) {
+            emit({ type: "tool_output", toolName: "run_experiment", content: `PoC script detected — skipping pre-flight checks` });
+          }
+          try {
+            const { validateExperiment } = await import("./preflight");
+            const preflight = isPoc ? { ok: true, violations: [], summary: "" } : await validateExperiment(workDir, sanitized, preflightGpuCount);
+            if (!preflight.ok) {
+              emit({ type: "tool_output", toolName: "run_experiment", content: `\n⛔ PRE-FLIGHT CHECK FAILED\n${preflight.summary}` });
+              return `BLOCKED — pre-flight validation found ${preflight.violations.filter(v => v.severity === "error").length} error(s). Fix these before submitting:\n\n${preflight.summary}`;
+            }
+            if (preflight.violations.length > 0) {
+              emit({ type: "tool_output", toolName: "run_experiment", content: `\n⚠ Pre-flight warnings:\n${preflight.summary}` });
+            }
+          } catch (preflightErr) {
+            console.warn("[agent] preflight validation error:", preflightErr);
+          }
+
+          // ── DB-backed failure tracking ──
+          const scriptContent = await readFile(scriptPath, "utf-8");
+          const { createHash } = await import("crypto");
+          const scriptHash = createHash("sha256").update(scriptContent).digest("hex").slice(0, 16);
+
+          const exactFailCount = await prisma.remoteJob.count({
+            where: { projectId, status: "FAILED", command: { contains: script } },
+          });
+          if (exactFailCount >= 2) {
+            return `BLOCKED — "${script}" has failed ${exactFailCount} times. Rewrite from scratch or try a completely different approach.`;
+          }
+
+          const hashFailCount = await prisma.remoteJob.count({
+            where: { projectId, status: "FAILED", scriptHash },
+          });
+          if (hashFailCount >= 3) {
+            return `BLOCKED — This exact code has failed ${hashFailCount} times (under different filenames). The approach itself is broken. Try something fundamentally different.`;
+          }
+
+          const totalFails = await prisma.remoteJob.count({
+            where: { projectId, status: "FAILED" },
+          });
+          if (totalFails >= 8) {
+            emit({ type: "text", content: `\n\n[System: WARNING — ${totalFails} total experiment failures. Step back and REPLAN before running more experiments.]\n\n` });
+          }
+
+          // ── PoC gate ──
+          if (script.startsWith("exp_") && !script.includes("debug")) {
+            const successfulPocs = await prisma.remoteJob.count({
+              where: { projectId, status: "COMPLETED", command: { contains: "poc_" } },
+            });
+            if (successfulPocs === 0) {
+              return `BLOCKED — No successful PoC experiments yet. Run a poc_NNN script first to validate your approach before scaling to a full exp_NNN experiment.`;
+            }
+          }
+
+          // ── Submit remote job ──
+          emit({ type: "tool_output", toolName: "run_experiment", content: `$ [${host.alias}] ${sanitized}` });
+          emit({ type: "tool_progress", toolName: "run_experiment", content: `Syncing files to ${host.alias}...` });
+
+          let jobId: string;
+          try {
+            const result = await submitRemoteJob({
+              hostId: host.id,
+              localDir: workDir,
+              command: sanitized,
+              projectId,
+              scriptHash,
+              hypothesisId: resolvedHypothesisId,
+            });
+            jobId = result.jobId;
+          } catch (submitErr) {
+            const errMsg = submitErr instanceof Error ? submitErr.message : String(submitErr);
+            emit({ type: "tool_output", toolName: "run_experiment", content: `ERROR: Failed to submit job: ${errMsg}` });
+            await recordStep("run_experiment", `Remote (${host.alias}): ${command.slice(0, 60)}`, "FAILED", { host: host.alias, error: errMsg, routing: routing.reason });
+            return `Failed to submit remote job to ${host.alias}:\n${errMsg}\n\nThis likely means rsync or SSH failed. Check the remote host configuration.`;
+          }
+
+          activeJobIds.add(jobId);
+
+          emit({ type: "tool_output", toolName: "run_experiment", content: `Job submitted (${jobId.slice(0, 8)}). Running in background on ${host.alias}.` });
+          emit({ type: "tool_progress", toolName: "run_experiment", content: `Job submitted to ${host.alias}. Continuing...` });
+
+          await recordStep("run_experiment", `Remote (${host.alias}): ${command.slice(0, 60)}`, "COMPLETED", { host: host.alias, jobId, status: "SUBMITTED", routing: routing.reason }, "experiment");
+          const taskCat = classifyTaskCategory(command);
+          recordResourceChoice(userId, taskCat, `remote:${host.alias}`, command.slice(0, 80), projectId).catch(() => {});
+
+          return `Job submitted to ${host.alias} (ID: ${jobId.slice(0, 8)}). Routing: ${routing.reason}\n\n**Continue with other work** — read papers, write code for the next experiment, analyze previous results. Use \`check_job\` with job_id="${jobId}" to check progress, or \`wait_for_jobs\` when you need results before proceeding.\n\nActive jobs this session: ${activeJobIds.size}`;
+        }
+      },
+    }),
+
     execute_remote: tool({
-      description: "Submit an experiment to a remote GPU server. Syncs files and starts the job, then returns IMMEDIATELY — the job runs in the background. Use check_job to monitor progress, or wait_for_jobs if you need results before continuing. This lets you submit multiple experiments and do other work (read papers, write code) while they run. ONLY use for running experiments (python scripts). For checking files/logs, use read_remote_file or get_workspace instead.",
+      description: "DEPRECATED — use run_experiment instead, which automatically routes to local or remote based on resource rules. This tool is kept for backward compatibility but run_experiment is preferred.",
       inputSchema: z.object({
         command: z.string().describe("The experiment command ONLY — e.g. 'python3 experiment.py'. Do NOT include: cd, source .venv/bin/activate, bash -c wrappers, timeout, absolute paths, or nohup. The system handles all of that automatically."),
         host_alias: z.string().optional().describe("Remote host alias. Omit to use the default host."),

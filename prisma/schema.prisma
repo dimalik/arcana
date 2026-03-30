@@ -553,6 +553,7 @@ model ResearchProject {
   approaches        ApproachBranch[]
   experimentResults ExperimentResult[]
   artifacts         Artifact[]
+  resourceRules     ResourceRule[]
 
   @@index([userId])
 }
@@ -761,6 +762,22 @@ model Artifact {
   @@index([projectId])
   @@index([resultId])
   @@index([type])
+}
+
+model ResourceRule {
+  id          String   @id @default(uuid())
+  projectId   String
+  pattern     String                       // glob-like: "analysis_*", "exp_*", "poc_001_*.py", "*"
+  runtime     String                       // "local" | "remote" | "remote:<alias>" (specific host)
+  needs       String?                      // JSON array: ["gpu", "openai_proxy", "large_memory"]
+  reason      String?                      // human-readable: "needs local LLM proxy"
+  priority    Int       @default(0)        // higher = wins over lower when multiple match
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  project     ResearchProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
 }
 
 // ── Agent Capabilities (user-defined tools/resources the agent can use) ──
