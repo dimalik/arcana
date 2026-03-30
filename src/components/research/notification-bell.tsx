@@ -78,7 +78,7 @@ function timeAgo(dateStr: string): string {
   return `${days}d ago`;
 }
 
-export function NotificationBell({ projectId }: { projectId: string }) {
+export function NotificationBell({ projectId, onOpenInChat }: { projectId: string; onOpenInChat?: (message: string) => void }) {
   const [items, setItems] = useState<AttentionItem[]>([]);
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -272,6 +272,7 @@ export function NotificationBell({ projectId }: { projectId: string }) {
                 onSetAlternativeText={setAlternativeText}
                 onSendResponse={handleSendResponse}
                 onSendAlternative={handleSendAlternative}
+                onOpenInChat={onOpenInChat ? (msg: string) => { setOpen(false); onOpenInChat(msg); } : undefined}
               />
             ))}
           </div>
@@ -296,6 +297,7 @@ function NotificationItem({
   onSetAlternativeText,
   onSendResponse,
   onSendAlternative,
+  onOpenInChat,
 }: {
   item: AttentionItem;
   resolving: Set<string>;
@@ -311,6 +313,7 @@ function NotificationItem({
   onSetAlternativeText: (text: string) => void;
   onSendResponse: (item: AttentionItem) => Promise<void>;
   onSendAlternative: (item: AttentionItem) => Promise<void>;
+  onOpenInChat?: (message: string) => void;
 }) {
   const meta = CATEGORY_META[item.category] || CATEGORY_META.general;
   const Icon = meta.icon;
@@ -555,6 +558,15 @@ function NotificationItem({
             </p>
           )}
           {renderActions()}
+          {onOpenInChat && (
+            <button
+              onClick={() => onOpenInChat(`The agent needs help with: ${item.title}\n\nDetails: ${item.detail}\n${item.suggestion ? `Suggestion: ${item.suggestion}` : ""}\n\nHow should I handle this?`)}
+              className="inline-flex items-center gap-1 text-[11px] text-primary hover:underline mt-1"
+            >
+              <MessageSquare className="h-3 w-3" />
+              Open in Chat
+            </button>
+          )}
         </div>
         <button
           onClick={() => onDismiss(item.id)}

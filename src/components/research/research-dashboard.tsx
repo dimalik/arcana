@@ -761,6 +761,19 @@ export function ResearchDashboard({
     return () => document.removeEventListener("keydown", handler);
   }, []);
 
+  // Listen for "open in chat" events from notifications
+  const [chatPrefill, setChatPrefill] = useState<string | null>(null);
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const msg = (e as CustomEvent).detail as string;
+      setChatPrefill(msg);
+      setRightTab("chat");
+    };
+    window.addEventListener("arcana:open-chat", handler);
+    return () => window.removeEventListener("arcana:open-chat", handler);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const [previewFile, setPreviewFile] = useState<{ name: string; path: string } | null>(null);
   const [lightboxImage, setLightboxImage] = useState<{ name: string; path: string; caption?: string } | null>(null);
   const [selectedMetric, setSelectedMetric] = useState<string | null>(null);
@@ -1147,7 +1160,7 @@ export function ResearchDashboard({
             {rightTab === "chat" && (
               <div className="flex-1 min-h-0 flex flex-col">
                 <div className="flex-1 min-h-0">
-                  <ResearchChat projectId={project.id} projectTitle={project.title} externalOpen embedded />
+                  <ResearchChat projectId={project.id} projectTitle={project.title} externalOpen embedded prefillMessage={chatPrefill} onPrefillConsumed={() => setChatPrefill(null)} />
                 </div>
               </div>
             )}

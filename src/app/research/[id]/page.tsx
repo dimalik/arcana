@@ -388,7 +388,9 @@ export default function ResearchWorkspacePage({ params }: { params: { id: string
 
         {/* Right: notifications + chat + menu */}
         <div className="flex items-center gap-1">
-          <NotificationBell projectId={project.id} />
+          <NotificationBell projectId={project.id} onOpenInChat={(msg) => {
+            window.dispatchEvent(new CustomEvent("arcana:open-chat", { detail: msg }));
+          }} />
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors">

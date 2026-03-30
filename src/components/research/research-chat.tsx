@@ -66,8 +66,9 @@ function deriveTitle(messages: Message[]): string {
 
 // ── Main component ──────────────────────────────────────────────
 
-export function ResearchChat({ projectId, projectTitle, externalOpen, onExternalClose, embedded }: {
+export function ResearchChat({ projectId, projectTitle, externalOpen, onExternalClose, embedded, prefillMessage, onPrefillConsumed }: {
   projectId: string; projectTitle: string; externalOpen?: boolean; onExternalClose?: () => void; embedded?: boolean;
+  prefillMessage?: string | null; onPrefillConsumed?: () => void;
 }) {
   const [open, setOpen] = useState(false);
 
@@ -171,6 +172,8 @@ export function ResearchChat({ projectId, projectTitle, externalOpen, onExternal
                 projectId={projectId}
                 thread={activeThread}
                 onUpdateMessages={(msgs) => updateThreadMessages(activeThread.id, msgs)}
+                initialInput={prefillMessage}
+                onInitialInputConsumed={onPrefillConsumed}
               />
               </div>
             ) : (
@@ -266,10 +269,12 @@ export function ResearchChat({ projectId, projectTitle, externalOpen, onExternal
 
 // ── Chat view (single thread) ───────────────────────────────────
 
-function ChatView({ projectId, thread, onUpdateMessages }: {
+function ChatView({ projectId, thread, onUpdateMessages, initialInput, onInitialInputConsumed }: {
   projectId: string;
   thread: ChatThread;
   onUpdateMessages: (messages: Message[]) => void;
+  initialInput?: string | null;
+  onInitialInputConsumed?: () => void;
 }) {
   const messages = thread.messages;
   const [input, setInput] = useState("");
@@ -278,6 +283,17 @@ function ChatView({ projectId, thread, onUpdateMessages }: {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+
+  // Prefill input from notification "Open in Chat"
+  useEffect(() => {
+    if (initialInput) {
+      setInput(initialInput);
+      onInitialInputConsumed?.();
+      // Focus the input
+      setTimeout(() => inputRef.current?.focus(), 100);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialInput]);
 
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
