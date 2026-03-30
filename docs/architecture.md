@@ -11,7 +11,9 @@ Next.js App Router
     ├── Pages (src/app/**/page.tsx)
     ├── API Routes (src/app/api/**/route.ts)
     ├── Library layer (src/lib/**)
-    │   ├── Research Agent (streamText loop + tools)
+    │   ├── Research Agent (streamText loop + tools + phase gates)
+    │   ├── Auto-fix layer (error classification + code patching)
+    │   ├── Sub-agents (scouts, synthesizer, architect, reviewer, provocateur, visualizer)
     │   ├── LLM providers (OpenAI, Anthropic, proxy)
     │   ├── Import pipeline (arXiv, S2, CrossRef, PDF)
     │   └── Synthesis engine
@@ -27,11 +29,11 @@ src/
     (main)/                   # Main layout group
     api/
       papers/[id]/            # Paper CRUD, LLM ops, references, concepts
-      research/[id]/          # Research projects, agent, steps, hypotheses
+      research/[id]/          # Research projects, agent, steps, hypotheses, chat, figures
       mind-palace/            # Rooms, insights, review sessions
       synthesis/[id]/         # Multi-paper synthesis
       discovery/              # Citation graph exploration
-      admin/                  # Usage stats, events, users
+      admin/                  # Usage stats, events, users, batch processing
       auth/                   # Login, signup, sessions
       settings/               # Model config, API keys, remote hosts
       search/                 # Full-text search, recommendations
@@ -39,14 +41,24 @@ src/
       collections/            # Collection CRUD
       notebook/               # Research notebook entries
   components/
-    research/                 # Agent workspace, phase tabs, step cards
+    research/                 # Dashboard, experiment cards, metric chart, chat, notification bell
     mind-palace/              # Insight cards, review UI
     synthesis/                # Synthesis progress and output
     chat/                     # Paper chat, selection popover
     layout/                   # App shell, sidebar, header
     ui/                       # shadcn/ui primitives
   lib/
-    research/                 # Agent core, remote executor, sub-agents
+    research/                 # Agent core, phase gates, auto-fix, sub-agents, remote executor
+      agent.ts                # Main agent loop with phase-gated tools
+      auto-fix.ts             # Error classification and code patching
+      sub-agent.ts            # Scout, synthesizer, architect, reviewer, provocateur, visualizer
+      remote-executor.ts      # SSH + rsync job submission with ControlMaster
+      research-state.ts       # Structured state document for agent context
+      research-summary.ts     # Paper-style summary generation
+      metric-recompute.ts     # Canonical metric remapping
+      figure-captioner.ts     # Auto-caption figures as Artifact records
+      workspace.ts            # Cached workspace state (file manifests, packages, results)
+      task-classifier.ts      # Experiment taxonomy classification
     llm/                      # Provider abstraction, prompts, models
     import/                   # arXiv, Semantic Scholar, CrossRef, PDF
     mind-palace/              # SM-2 spaced repetition
@@ -57,7 +69,7 @@ src/
     usage.ts                  # LLM cost tracking
     logger.ts                 # Structured event logging
 prisma/
-  schema.prisma               # Database schema (~45 models)
+  schema.prisma               # Database schema (~50 models)
   dev.db                      # SQLite database
 ```
 
@@ -84,21 +96,40 @@ User adds URL/arXiv ID/PDF
 ```
 User starts agent session
   → API route creates SSE stream
-  → startResearchAgent() builds system prompt with:
-      - Project brief and methodology
-      - Papers in collection
-      - Remote host info + GPU probes
-      - Agent capabilities and process memories
-      - Shared utilities
-  → streamText() loop with tools
-      - Agent calls tools (search, read, write, execute, etc.)
-      - Tool results feed back into the conversation
+  → startResearchAgent() runs as detached background process
+  → Builds system prompt (or condensed version for non-Claude models)
+  → Injects RESEARCH_STATE.md (structured project state from DB)
+  → streamText() loop with ~40 tools, phase-gated
+      - Phase gates enforce: literature → hypothesis → experiment → analysis → reflection
+      - Tool calls checked against current phase (e.g., execute_remote blocked outside experiment)
       - Steps logged to DB as ResearchStep records
       - Findings logged as ResearchLogEntry records
-      - Hypotheses tracked as ResearchHypothesis records
+      - Experiment results recorded as ExperimentResult records
+      - Approach branches tracked in ApproachBranch tree
+      - Artifacts (figures, results) registered and auto-captioned
+  → Auto-fix layer intercepts failed jobs:
+      - CODE_ERROR → patch + resubmit (up to 2 attempts)
+      - RESEARCH_FAILURE → record as real result
+      - RESOURCE_ERROR → queue for user attention
   → Sub-agents run in parallel (AgentTask records)
   → Remote jobs run independently (RemoteJob records)
-  → Session auto-continues when step limit reached
+  → Session auto-continues when step limit reached (up to 20 sessions)
+  → Non-Claude models: outer directive loop with phase-specific prompts
+```
+
+### Research chat
+
+```
+User sends a message in project chat
+  → Server-side retrieval gathers context from DB:
+      - Hypotheses, experiment results, approaches
+      - Breakthroughs and decisions from research log
+      - Paper summaries, file listings, figure artifacts
+  → If question references an image file:
+      - Read the image from disk
+      - Attach as multimodal vision input
+  → streamText() with retrieved context as system prompt
+  → User directives forwarded to running agent via research log
 ```
 
 ### Synthesis
@@ -115,14 +146,24 @@ User selects papers + depth
 
 ## Database
 
-SQLite in WAL mode. The schema has ~45 models organized into groups:
+SQLite in WAL mode. The schema has ~50 models organized into groups:
 
 - **Auth & Observability**: User, UserSession, LlmUsageLog, AppEvent
 - **Core**: Paper, Tag, TagCluster, Collection, Reference, Conversation, ChatMessage
-- **Research**: ResearchProject, ResearchIteration, ResearchStep, ResearchHypothesis, RemoteHost, RemoteJob, AgentTask, AgentMemory, AgentCapability
+- **Research**: ResearchProject, ResearchIteration, ResearchStep, ResearchHypothesis, ResearchLogEntry, RemoteHost, RemoteJob, AgentTask, AgentMemory, AgentCapability
+- **Experiment Tracking**: ApproachBranch (tree structure), ExperimentResult (metrics + verdict), Artifact (figures, files, captioned)
 - **Knowledge**: MindPalaceRoom, Insight, NotebookEntry, DiscoverySession, DiscoveryProposal
 - **Synthesis**: SynthesisSession, SynthesisSection, SynthesisPaper
 - **Processing**: ProcessingBatch, PaperFigure, PaperEngagement
+
+Key schema additions:
+
+- `ResearchProject.currentPhase` — tracks the phase state machine (literature/hypothesis/experiment/analysis/reflection)
+- `ResearchProject.metricSchema` — JSON array of canonical metrics with name, direction, and description
+- `ApproachBranch` — self-referential tree (parent/children) for organizing research directions
+- `ExperimentResult` — links job, hypothesis, approach branch, canonical metrics, raw metrics, verdict, and reflection
+- `Artifact` — typed files (figure/model/results/code/log) with captions and key takeaways, linked to experiments
+- `RemoteJob.fixAttempts` / `errorClass` — tracks auto-fix attempts and error classification
 
 Prisma generates the client to `src/generated/prisma/client`. The singleton lives at `src/lib/prisma.ts` with dev-mode caching on `globalThis`.
 
@@ -138,4 +179,4 @@ Cookie-based sessions. `getCurrentUser()` in `src/lib/auth.ts` reads the session
 - **Anthropic** — direct API
 - **Proxy** — any OpenAI-compatible endpoint (OpenRouter, LiteLLM, Azure, vLLM, etc.)
 
-Model selection is configurable in settings. The provider instruments all calls for cost tracking via `src/lib/usage.ts`.
+Model selection is configurable in settings. The provider instruments all calls for cost tracking via `src/lib/usage.ts`. Non-Claude models receive condensed system prompts and phase-specific directive loops to compensate for different tool-calling behavior.

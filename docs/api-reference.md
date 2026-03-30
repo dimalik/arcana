@@ -65,7 +65,7 @@ All API routes live under `src/app/api/`. The application is designed for local 
 |--------|----------|-------------|
 | GET | `/api/research` | List research projects |
 | POST | `/api/research` | Create a new project |
-| GET | `/api/research/[id]` | Get project details |
+| GET | `/api/research/[id]` | Get project details (includes approaches, results, gates) |
 | PATCH | `/api/research/[id]` | Update project |
 | DELETE | `/api/research/[id]` | Delete project |
 | POST | `/api/research/[id]/export` | Export project as JSON |
@@ -75,6 +75,7 @@ All API routes live under `src/app/api/`. The application is designed for local 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | POST | `/api/research/[id]/agent` | Start agent session (SSE stream) |
+| POST | `/api/research/[id]/restart` | Restart a stopped agent |
 
 ### Steps
 | Method | Endpoint | Description |
@@ -95,13 +96,32 @@ All API routes live under `src/app/api/`. The application is designed for local 
 |--------|----------|-------------|
 | GET | `/api/research/[id]/log` | Get research log entries |
 
-### Files & Remote
+### Research Chat
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/api/research/[id]/files` | List experiment files |
+| POST | `/api/research/[id]/chat` | Chat about project findings (SSE stream, with retrieval + vision) |
+
+### Files, Figures & Remote
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/research/[id]/files` | List experiment files (tree structure) |
 | GET | `/api/research/[id]/files?path=...` | Read a specific file |
+| GET | `/api/research/[id]/figures` | List project figures (Artifact records) |
 | GET | `/api/research/[id]/agent-tasks` | List sub-agent tasks |
 | GET | `/api/research/remote-hosts` | List configured remote hosts |
+| GET | `/api/research/remote-hosts/[hostId]` | Get host details |
+| PATCH | `/api/research/remote-hosts/[hostId]` | Update host config (base requirements, env notes) |
+| GET | `/api/research/remote-hosts/ssh-config` | List SSH config aliases |
+| GET | `/api/research/remote-jobs` | List remote jobs |
+| GET | `/api/research/remote-jobs/[jobId]` | Get job details (includes errorClass, fixAttempts) |
+
+### Benchmark
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/research/benchmark` | List benchmark projects |
+| POST | `/api/research/benchmark` | Create a benchmark project |
+| POST | `/api/research/benchmark/evaluate` | Run benchmark evaluation |
+| GET | `/api/research/benchmark/judges` | List benchmark judges |
 
 ## Mind Palace
 
@@ -179,6 +199,7 @@ All API routes live under `src/app/api/`. The application is designed for local 
 ### Admin
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/api/admin/usage` | LLM usage statistics |
+| GET | `/api/admin/usage` | LLM usage statistics (with per-paper and per-project breakdowns) |
 | GET | `/api/admin/events` | Application event logs |
 | GET | `/api/admin/users` | User management |
+| POST | `/api/admin/repair-pdfs` | Batch repair missing/broken PDFs |
