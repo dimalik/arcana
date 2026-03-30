@@ -141,22 +141,22 @@ export function ResearchChat({ projectId, projectTitle, externalOpen, onExternal
       <div className="flex flex-col h-full">
         {showList ? (
           <div className="flex flex-col h-full">
-            <div className="flex items-center justify-between px-4 py-2 border-b border-border/40">
-              <span className="text-xs font-medium">Chat History</span>
-              <button onClick={() => setShowList(false)} className="text-xs text-primary hover:underline">Back</button>
+            <div className="flex items-center justify-between px-3 py-1.5 border-b border-border/30">
+              <button onClick={() => setShowList(false)}
+                className="h-6 w-6 flex items-center justify-center rounded-md text-muted-foreground/40 hover:text-foreground hover:bg-muted/50 transition-colors">
+                <ChevronLeft className="h-3.5 w-3.5" />
+              </button>
+              <span className="text-[11px] font-medium text-muted-foreground/60">History</span>
+              <div className="w-6" />
             </div>
             <div className="flex-1 overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
               {threads.filter(t => t.messages.length > 0).map(t => (
                 <button key={t.id} onClick={() => { setActiveThreadId(t.id); setShowList(false); }}
                   className={`w-full text-left px-4 py-2.5 border-b border-border/10 hover:bg-muted/50 transition-colors ${t.id === activeThreadId ? "bg-muted/30" : ""}`}>
-                  <p className="text-sm truncate">{t.title}</p>
+                  <p className="text-xs truncate">{t.title}</p>
                   <p className="text-[11px] text-muted-foreground/40">{new Date(t.createdAt).toLocaleDateString()}</p>
                 </button>
               ))}
-            </div>
-            <div className="px-4 py-2 border-t border-border/40">
-              <button onClick={() => { createThread(); setShowList(false); }}
-                className="text-xs text-primary hover:underline">New conversation</button>
             </div>
           </div>
         ) : (
