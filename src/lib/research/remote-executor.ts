@@ -162,8 +162,17 @@ function hostToConfig(host: { host: string; port: number; user: string; keyPath:
 
 function sshArgs(host: HostConfig): string[] {
   const isConfigAlias = !host.user || host.user === "-";
-  const args = ["-o", "ConnectTimeout=30"];
-  // For SSH config aliases, don't override settings — let config handle it
+  const args = [
+    "-o", "ConnectTimeout=30",
+    // Connection multiplexing: reuse SSH connections instead of opening new ones
+    // Eliminates repeated handshakes during polling (6/min → 0)
+    "-o", "ControlMaster=auto",
+    "-o", `ControlPath=/tmp/arcana-ssh-%r@%h:%p`,
+    "-o", "ControlPersist=300",  // Keep master alive for 5 minutes after last use
+    // Keep-alive: detect dead connections faster
+    "-o", "ServerAliveInterval=15",
+    "-o", "ServerAliveCountMax=4",  // Give up after 60s of no response
+  ];
   if (!isConfigAlias) {
     args.push("-o", "StrictHostKeyChecking=accept-new");
     if (host.keyPath) args.push("-i", host.keyPath);
@@ -178,11 +187,8 @@ function sshTarget(host: HostConfig): string {
   return `${host.user}@${host.host}`;
 }
 
-async function sshExec(host: HostConfig, cmd: string): Promise<string> {
+async function sshExecOnce(host: HostConfig, cmd: string): Promise<string> {
   const { execFile: execFileCb } = await import("child_process");
-
-  // Use execFile with explicit args to avoid all shell quoting issues.
-  // SSH takes the remote command as remaining args after the destination.
   const args = ["-T", ...sshArgs(host), sshTarget(host), "--", cmd];
 
   return new Promise((resolve, reject) => {
@@ -191,13 +197,10 @@ async function sshExec(host: HostConfig, cmd: string): Promise<string> {
       const errOut = (stderr || "").trim();
 
       if (err) {
-        // If we got stdout despite error, return it (remote command ran but exited non-zero)
         if (out) {
-          console.warn(`[remote-executor] sshExec non-zero exit but got stdout (${out.length} chars), stderr: ${errOut.slice(0, 200)}`);
           resolve(out);
           return;
         }
-        // Genuine failure — include stderr in the error message
         const msg = errOut || err.message || "SSH command failed";
         reject(new Error(msg));
         return;
@@ -209,6 +212,35 @@ async function sshExec(host: HostConfig, cmd: string): Promise<string> {
       resolve(out);
     });
   });
+}
+
+/**
+ * SSH exec with automatic retry on transient failures.
+ * Retries up to 2 times with exponential backoff (3s, 9s).
+ * Connection errors, timeouts, and "Connection reset" are retried.
+ * Command-level errors (non-zero exit without stdout) are NOT retried.
+ */
+async function sshExec(host: HostConfig, cmd: string): Promise<string> {
+  const MAX_RETRIES = 2;
+  const RETRYABLE = /connect|timeout|reset|broken pipe|connection refused|no route|network is unreachable/i;
+
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      return await sshExecOnce(host, cmd);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      const isRetryable = RETRYABLE.test(msg);
+
+      if (!isRetryable || attempt === MAX_RETRIES) {
+        throw err;
+      }
+
+      const delay = 3000 * Math.pow(3, attempt); // 3s, 9s
+      console.warn(`[remote-executor] SSH retry ${attempt + 1}/${MAX_RETRIES} in ${delay}ms: ${msg.slice(0, 100)}`);
+      await new Promise(r => setTimeout(r, delay));
+    }
+  }
+  throw new Error("SSH exec failed after retries"); // unreachable but satisfies TS
 }
 
 /**
@@ -452,14 +484,17 @@ async function runAndPoll(
       data: { remotePid: pid },
     });
 
-    // 2. Poll via helper status — single SSH call per cycle replaces isAlive + getLogs + exit_code
+    // 2. Poll via helper status — SSH ControlMaster reuses connections
+    // With connection multiplexing + retry, transient failures are handled automatically.
+    // We use adaptive polling: 10s initially, backing off to 30s after SSH issues.
     let done = false;
     let consecutiveSshFailures = 0;
-    const MAX_SSH_FAILURES = 18; // ~9 min of unreachability before giving up (heavy GPU load can slow SSH)
+    const MAX_SSH_FAILURES = 36; // ~30 min of unreachability (SSH has retries + ControlMaster)
+    let pollInterval = 10_000; // Start at 10s, increase on SSH issues
     let finalStatus: HelperStatus | null = null;
 
     while (!done) {
-      await new Promise((r) => setTimeout(r, 10_000)); // poll every 10s
+      await new Promise((r) => setTimeout(r, pollInterval));
 
       // Re-check job hasn't been cancelled
       const current = await prisma.remoteJob.findUnique({ where: { id: jobId } });
@@ -471,6 +506,7 @@ async function runAndPoll(
       try {
         const status = await getHelperStatus(config, remoteDir);
         consecutiveSshFailures = 0;
+        pollInterval = 10_000; // Reset to fast polling on success
 
         // Update logs from helper response
         await prisma.remoteJob.update({
@@ -484,9 +520,11 @@ async function runAndPoll(
         }
       } catch (err) {
         consecutiveSshFailures++;
-        console.warn(`[remote-executor] Job ${jobId}: helper status SSH failure #${consecutiveSshFailures}: ${err}`);
+        // Back off polling interval: 10s → 20s → 30s (caps at 30s)
+        pollInterval = Math.min(30_000, 10_000 + consecutiveSshFailures * 5_000);
+        console.warn(`[remote-executor] Job ${jobId}: SSH failure #${consecutiveSshFailures} (next poll in ${pollInterval / 1000}s): ${err instanceof Error ? err.message.slice(0, 100) : err}`);
         if (consecutiveSshFailures >= MAX_SSH_FAILURES) {
-          console.error(`[remote-executor] Job ${jobId}: ${MAX_SSH_FAILURES} consecutive SSH failures, marking as failed`);
+          console.error(`[remote-executor] Job ${jobId}: ${MAX_SSH_FAILURES} consecutive SSH failures (~30min), marking as indeterminate`);
           done = true;
         }
       }
@@ -550,30 +588,33 @@ async function runAndPoll(
     const indeterminate = exitCode === null && !finalStatus;
 
     // ── Auto-fix layer: classify error and attempt fix for code bugs ──
-    // This runs BEFORE marking as FAILED — if the fix succeeds, a new job is submitted
-    // and this job is marked as FIXED (not FAILED), so it doesn't pollute failure counts.
+    // Classifies ALL failures and stores errorClass on the job.
+    // CODE_ERROR: attempts auto-fix + resubmit. RESOURCE_ERROR: creates help request.
+    // RESEARCH_FAILURE: recorded as a real failure requiring reflection.
+    let classifiedErrorClass: string | null = null;
     if (failed && !indeterminate && localDir) {
       try {
         const { classifyAndFix } = await import("./auto-fix");
         const fixResult = await classifyAndFix(
           jobId, exitCode, finalStderr, finalStdout, localDir, command,
         );
+        classifiedErrorClass = fixResult.fixed ? "AUTO_FIXED" : fixResult.errorClass;
 
         if (fixResult.fixed && fixResult.resubmitJobId) {
-          // Code error was auto-fixed and resubmitted — mark this job as FIXED, not FAILED
+          // Code error was auto-fixed and resubmitted
           await prisma.remoteJob.update({
             where: { id: jobId },
             data: {
-              status: "CANCELLED", // Not FAILED — doesn't count in failure tracking
+              status: "CANCELLED",
               exitCode,
               stdout: finalStdout,
               stderr: `${finalStderr}\n\n[AUTO-FIXED] ${fixResult.reason}. Resubmitted as job ${fixResult.resubmitJobId.slice(0, 8)}.`,
+              errorClass: "AUTO_FIXED",
               resultsSynced: true,
               completedAt: new Date(),
             },
           });
 
-          // Don't run the rest of the failure handling — the new job will handle it
           if (localDir) {
             import("./workspace").then(({ invalidateWorkspace }) => {
               const job2 = prisma.remoteJob.findUnique({ where: { id: jobId }, select: { projectId: true } });
@@ -582,16 +623,8 @@ async function runAndPoll(
           }
           return; // Exit runAndPoll — new job takes over
         }
-
-        if (fixResult.errorClass === "RESOURCE_ERROR") {
-          // Resource error — mark as FAILED but with clear messaging
-          // Help request is created below in the existing logic
-          console.log(`[auto-fix] Resource error for job ${jobId.slice(0, 8)}: ${fixResult.reason}`);
-        }
-        // RESEARCH_FAILURE or unfixable CODE_ERROR — continue to normal failure handling
       } catch (fixErr) {
         console.warn("[auto-fix] Error in auto-fix layer:", fixErr);
-        // Don't block normal failure handling if auto-fix itself errors
       }
     }
 
@@ -606,6 +639,7 @@ async function runAndPoll(
         stderr: indeterminate
           ? `${finalStderr}\n\n[INDETERMINATE] Could not determine job outcome — SSH was unreachable. Check the remote host manually.`.trim()
           : finalStderr,
+        ...(classifiedErrorClass ? { errorClass: classifiedErrorClass } : {}),
         resultsSynced: true,
         completedAt: new Date(),
       },
@@ -713,9 +747,16 @@ async function runAndPoll(
             });
             // Dynamic import to avoid circular dependency
             import("./sub-agent").then(({ runSubAgent }) => {
-              runSubAgent(vizTask.id).catch((e) =>
-                console.error("[auto-viz] Visualizer sub-agent failed:", e)
-              );
+              runSubAgent(vizTask.id)
+                .then(() => {
+                  // Caption new figures after visualizer completes
+                  if (localDir) {
+                    import("./figure-captioner").then(({ captionNewFigures }) => {
+                      captionNewFigures(job.projectId!, localDir).catch(() => {});
+                    }).catch(() => {});
+                  }
+                })
+                .catch((e) => console.error("[auto-viz] Visualizer sub-agent failed:", e));
             }).catch(() => {});
 
             await prisma.researchLogEntry.create({

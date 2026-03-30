@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Pause, Play, MoreVertical, Loader2, RotateCcw, Download, FileText, FolderArchive, Check, Target } from "lucide-react";
+import { ArrowLeft, Pause, Play, MoreVertical, Loader2, RotateCcw, Download, FileText, FolderArchive, Check, Target, MessageCircle } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -16,18 +16,12 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { PhaseTabs } from "@/components/research/phase-tabs";
-import { ContextSidebar } from "@/components/research/context-sidebar";
-import { LiteraturePhase } from "@/components/research/literature-phase";
-import { HypothesisPhase } from "@/components/research/hypothesis-phase";
-import { ExperimentPhase } from "@/components/research/experiment-phase";
-import { AnalysisPhase } from "@/components/research/analysis-phase";
-import { ReflectionPhase } from "@/components/research/reflection-phase";
+
+import { ResearchDashboard } from "@/components/research/research-dashboard";
 import { AgentActivityBar, AgentActivityHandle } from "@/components/research/agent-activity-bar";
 import { ResearchChat } from "@/components/research/research-chat";
 import { BenchmarkPanel } from "@/components/research/benchmark-panel";
-import { AttentionQueue } from "@/components/research/attention-queue";
-import { FiguresPanel } from "@/components/research/figures-panel";
+import { NotificationBell } from "@/components/research/notification-bell";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
 
@@ -70,6 +64,7 @@ interface Hypothesis {
   rationale: string | null;
   status: string;
   evidence: string | null;
+  theme?: string | null;
   parent?: { id: string; statement: string } | null;
   children?: { id: string; statement: string; status: string }[];
 }
@@ -91,6 +86,7 @@ interface Approach {
   id: string;
   name: string;
   status: string;
+  parentId: string | null;
   description: string | null;
   results: ApproachResult[];
   children: {
@@ -124,6 +120,7 @@ interface ExperimentJob {
   startedAt: string | null;
   completedAt: string | null;
   stderr: string | null;
+  errorClass: string | null;
   host: { alias: string; gpuType: string | null };
 }
 
@@ -150,6 +147,7 @@ interface Project {
   experimentResults?: ExperimentResult[];
   experimentJobs?: ExperimentJob[];
   hypothesesById?: Record<string, string>;
+  summary?: string | null;
   gates?: Record<string, GateStatus>;
   benchmark?: {
     isBenchmark: boolean;
@@ -197,20 +195,6 @@ export default function ResearchWorkspacePage({ params }: { params: { id: string
   const shouldAutoStart = project?.status === "ACTIVE" && !project.iterations.some((i) =>
     i.steps.some((s) => s.status === "COMPLETED" || s.status === "RUNNING")
   );
-
-  const handlePhaseChange = async (phase: string) => {
-    if (!project) return;
-    try {
-      await fetch(`/api/research/${id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ currentPhase: phase }),
-      });
-      setProject({ ...project, currentPhase: phase });
-    } catch {
-      toast.error("Failed to change phase");
-    }
-  };
 
   const handleTogglePause = async () => {
     if (!project) return;
@@ -285,6 +269,7 @@ export default function ResearchWorkspacePage({ params }: { params: { id: string
   };
 
   const [exportOpen, setExportOpen] = useState(false);
+  const [chatOpen, setChatOpen] = useState(false);
   const [exportResearch, setExportResearch] = useState(true);
   const [exportPapers, setExportPapers] = useState(true);
   const [exportCode, setExportCode] = useState(true);
@@ -322,12 +307,12 @@ export default function ResearchWorkspacePage({ params }: { params: { id: string
 
   if (loading) {
     return (
-      <div className="max-w-6xl mx-auto space-y-4">
+      <div className="max-w-7xl mx-auto space-y-4">
         <Skeleton className="h-8 w-64" />
         <Skeleton className="h-10 w-full" />
         <div className="flex gap-4">
           <Skeleton className="h-96 flex-1" />
-          <Skeleton className="h-96 w-56" />
+          <Skeleton className="h-96 w-80" />
         </div>
       </div>
     );
@@ -337,26 +322,11 @@ export default function ResearchWorkspacePage({ params }: { params: { id: string
 
   const papers = project.collection?.papers.map((cp) => cp.paper) || [];
   const activeIteration = project.iterations.find((i) => i.status === "ACTIVE") || project.iterations[0];
-  const currentSteps = activeIteration?.steps || [];
-  const previousIterations = project.iterations.filter((i) => i.status === "COMPLETED");
-
-  const PHASE_STEP_TYPES: Record<string, string[]> = {
-    literature: ["search_papers", "discover_papers"],
-    hypothesis: ["formulate_hypothesis", "synthesize"],
-    experiment: ["generate_code", "run_experiment"],
-    analysis: ["analyze_results", "run_experiment"],
-    reflection: [],
-  };
-  const stepsForPhase = (phase: string) => {
-    const types = PHASE_STEP_TYPES[phase];
-    if (!types || types.length === 0) return currentSteps;
-    return currentSteps.filter((s) => types.includes(s.type));
-  };
-
   return (
-    <div className="max-w-6xl mx-auto flex flex-col gap-3 h-[calc(100vh-4rem)]">
+    <div className="max-w-7xl mx-auto flex flex-col h-[calc(100vh-48px-40px)] overflow-hidden">
       {/* Header */}
-      <div className="flex items-center justify-between shrink-0">
+      <div className="flex items-center justify-between shrink-0 py-2">
+        {/* Left: back + title + badges */}
         <div className="flex items-center gap-2">
           <button
             onClick={() => router.push("/research")}
@@ -364,35 +334,65 @@ export default function ResearchWorkspacePage({ params }: { params: { id: string
           >
             <ArrowLeft className="h-4 w-4" />
           </button>
-          <h1 className="text-sm font-medium">{project.title}</h1>
+          <h1 className="text-base font-semibold">{project.title}</h1>
           {project.benchmark?.isBenchmark && (
-            <span className="text-[10px] text-purple-500 bg-purple-500/10 px-1.5 py-0.5 rounded-full flex items-center gap-1">
+            <span className="text-[11px] text-purple-500 bg-purple-500/10 px-1.5 py-0.5 rounded-full flex items-center gap-1">
               <Target className="h-2.5 w-2.5" />
               Benchmark
             </span>
           )}
           {project.status === "PAUSED" && (
-            <span className="text-[10px] text-amber-500 bg-amber-500/10 px-1.5 py-0.5 rounded-full">Paused</span>
+            <span className="text-[11px] text-amber-500 bg-amber-500/10 px-1.5 py-0.5 rounded-full">Paused</span>
           )}
           {project.status === "COMPLETED" && (
-            <span className="text-[10px] text-blue-500 bg-blue-500/10 px-1.5 py-0.5 rounded-full">Completed</span>
+            <span className="text-[11px] text-blue-500 bg-blue-500/10 px-1.5 py-0.5 rounded-full">Completed</span>
           )}
         </div>
+
+        {/* Center: phase progress dots */}
+        <div className="flex items-center gap-2">
+          {["literature", "hypothesis", "experiment", "analysis", "reflection"].map((phase, i) => {
+            const PHASE_ORDER = ["literature", "hypothesis", "experiment", "analysis", "reflection"];
+            const currentIdx = PHASE_ORDER.indexOf(project.currentPhase);
+            const isCompleted = i < currentIdx;
+            const isCurrent = i === currentIdx;
+            return (
+              <div key={phase} className="flex items-center gap-2">
+                {i > 0 && <div className={`w-4 h-px ${isCompleted ? "bg-emerald-500" : "bg-border"}`} />}
+                <div className={`h-2.5 w-2.5 rounded-full transition-colors ${
+                  isCompleted ? "bg-emerald-500"
+                  : isCurrent ? "bg-primary ring-2 ring-primary/20"
+                  : "bg-border"
+                }`} title={phase} />
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Right: notifications + chat + menu */}
         <div className="flex items-center gap-1">
+          <NotificationBell projectId={project.id} />
           <button
-            onClick={handleTogglePause}
-            className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
-            title={project.status === "PAUSED" ? "Resume" : "Pause"}
+            onClick={() => setChatOpen(prev => !prev)}
+            className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+            title="Ask about this research"
           >
-            {project.status === "PAUSED" ? <Play className="h-3.5 w-3.5" /> : <Pause className="h-3.5 w-3.5" />}
+            <MessageCircle className="h-4 w-4" />
           </button>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <button className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors">
-                <MoreVertical className="h-3.5 w-3.5" />
+              <button className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors">
+                <MoreVertical className="h-4 w-4" />
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-40 p-1 [&_[role=menuitem]]:px-2.5 [&_[role=menuitem]]:py-1.5 [&_[role=menuitem]]:text-xs">
+              <DropdownMenuItem onClick={handleTogglePause}>
+                {project.status === "PAUSED" ? (
+                  <><Play className="h-3 w-3 mr-1.5" /> Resume Agent</>
+                ) : (
+                  <><Pause className="h-3 w-3 mr-1.5" /> Pause Agent</>
+                )}
+              </DropdownMenuItem>
               <DropdownMenuItem onClick={handleRestart} disabled={restarting}>
                 {restarting ? (
                   <><Loader2 className="h-3 w-3 mr-1.5 animate-spin" /> Restarting...</>
@@ -413,101 +413,33 @@ export default function ResearchWorkspacePage({ params }: { params: { id: string
         </div>
       </div>
 
-      {/* Phase tabs */}
-      <div className="shrink-0">
-        <PhaseTabs
-          current={project.currentPhase}
-          onChange={handlePhaseChange}
-          counts={{
-            literature: stepsForPhase("literature").filter(s => s.status === "COMPLETED").length,
-            hypothesis: project.hypotheses.length,
-            experiment: stepsForPhase("experiment").filter(s => s.status === "COMPLETED" || s.status === "FAILED").length,
-            analysis: stepsForPhase("analysis").filter(s => s.status === "COMPLETED").length,
-          }}
-          gates={project.gates}
+      {/* Main content: unified dashboard */}
+      <div className="flex-1 min-h-0 overflow-hidden">
+        <ResearchDashboard
+          project={project}
+          papers={papers.map(p => ({ id: p.id, title: p.title, authors: p.authors, year: p.year, processingStatus: p.processingStatus }))}
+          iteration={activeIteration ? {
+            number: activeIteration.number,
+            goal: activeIteration.goal,
+            steps: activeIteration.steps.map(s => ({ status: s.status })),
+          } : null}
+          onRefresh={fetchProject}
+          logEntries={project.log}
+          summary={project.summary || undefined}
         />
-      </div>
-
-      {/* Main layout: Content | Context */}
-      <div className="flex gap-3 flex-1 min-h-0">
-        {/* Center: Phase content */}
-        <div className="flex-1 min-w-0 overflow-auto">
-          {project.currentPhase === "literature" && (
-            <LiteraturePhase
-              projectId={project.id}
-              papers={papers}
-              steps={stepsForPhase("literature")}
-              onRefresh={fetchProject}
-            />
-          )}
-          {project.currentPhase === "hypothesis" && (
-            <HypothesisPhase
-              projectId={project.id}
-              hypotheses={project.hypotheses}
-              steps={stepsForPhase("hypothesis")}
-              onRefresh={fetchProject}
-            />
-          )}
-          {project.currentPhase === "experiment" && (
-            <ExperimentPhase
-              projectId={project.id}
-              steps={stepsForPhase("experiment")}
-              hypotheses={project.hypotheses}
-              onRefresh={fetchProject}
-              experimentResults={project.experimentResults}
-              experimentJobs={project.experimentJobs}
-              hypothesesById={project.hypothesesById}
-            />
-          )}
-          {project.currentPhase === "analysis" && (
-            <AnalysisPhase
-              projectId={project.id}
-              steps={stepsForPhase("analysis")}
-              hypotheses={project.hypotheses}
-              onRefresh={fetchProject}
-            />
-          )}
-          {project.currentPhase === "reflection" && (
-            <ReflectionPhase
-              projectId={project.id}
-              steps={currentSteps}
-              currentIteration={activeIteration || null}
-              previousIterations={previousIterations}
-              onRefresh={fetchProject}
-            />
-          )}
-        </div>
-
-        {/* Right: Context sidebar + Figures */}
-        <div className="w-56 shrink-0 overflow-hidden space-y-3">
-          <ContextSidebar
-            project={project}
-            papers={papers.map((p) => ({ id: p.id, title: p.title }))}
-            hypotheses={project.hypotheses.map((h) => ({ id: h.id, statement: h.statement, status: h.status }))}
-            iteration={activeIteration ? {
-              number: activeIteration.number,
-              goal: activeIteration.goal,
-              steps: activeIteration.steps.map((s) => ({ status: s.status })),
-            } : null}
-            approaches={project.approaches}
-            experimentResults={project.experimentResults}
-          />
-          <FiguresPanel projectId={project.id} />
-        </div>
       </div>
 
       {/* Benchmark panel — only for benchmark projects */}
       {project.benchmark?.isBenchmark && (
-        <BenchmarkPanel
-          projectId={project.id}
-          groundTruth={project.benchmark.groundTruth}
-        />
+        <div className="shrink-0">
+          <BenchmarkPanel
+            projectId={project.id}
+            groundTruth={project.benchmark.groundTruth}
+          />
+        </div>
       )}
 
-      {/* Attention queue — user-resolvable issues */}
-      <AttentionQueue projectId={project.id} />
-
-      {/* Bottom: Agent activity bar — always visible */}
+      {/* Bottom: Agent activity bar — compact by default */}
       <div className="shrink-0">
         <AgentActivityBar
           ref={agentRef}
@@ -545,7 +477,7 @@ export default function ResearchWorkspacePage({ params }: { params: { id: string
                   </div>
                   <div className="min-w-0">
                     <span className="text-xs">{opt.label}</span>
-                    <p className="text-[10px] text-muted-foreground/50">{opt.desc}</p>
+                    <p className="text-[11px] text-muted-foreground/50">{opt.desc}</p>
                   </div>
                 </button>
               ))}
@@ -564,7 +496,7 @@ export default function ResearchWorkspacePage({ params }: { params: { id: string
       </Dialog>
 
       {/* Research chat */}
-      <ResearchChat projectId={project.id} projectTitle={project.title} />
+      <ResearchChat projectId={project.id} projectTitle={project.title} externalOpen={chatOpen} onExternalClose={() => setChatOpen(false)} />
     </div>
   );
 }

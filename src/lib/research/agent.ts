@@ -147,6 +147,12 @@ async function checkPhaseGate(
         where: { projectId, type: "decision", content: { contains: "echanism" } }, // matches "Mechanism" or "mechanism"
       });
       if (mechDesignCount === 0) return { ok: false, reason: "Gate: need a mechanism design document. Before coding, log your approach design with log_finding(type='decision') describing: problem formulation, pseudocode, key design choices with paper references, expected behavior, and failure modes." };
+      // Require metric schema before experimenting
+      const projectForMetrics = await prisma.researchProject.findUnique({
+        where: { id: projectId },
+        select: { metricSchema: true },
+      });
+      if (!projectForMetrics?.metricSchema) return { ok: false, reason: "Gate: need to define project metrics first. Use define_metrics to set canonical metrics (e.g., f1, accuracy) before running experiments." };
       break;
     }
     case "experiment->analysis": {
@@ -723,9 +729,9 @@ Use \`advance_phase\` to move between phases. Each transition has requirements.
 
 **Phases:** literature → hypothesis → experiment → analysis → reflection
 - literature: Search papers (search_papers, dispatch_scouts), read them (read_paper), synthesize (dispatch_synthesizer)
-- hypothesis: Formulate hypotheses (log_finding type="hypothesis"), get architecture proposals (dispatch_architect), write mechanism design (log_finding type="decision")
+- hypothesis: Formulate hypotheses (log_finding type="hypothesis"), define canonical metrics (define_metrics), get architecture proposals (dispatch_architect), write mechanism design (log_finding type="decision")
 - experiment: Write scripts (write_file), run them (execute_remote), check results (check_job)
-- analysis: Record results (record_result), reflect on failures (reflect_on_failure), review (dispatch_reviewer, adversarial_review), update hypotheses (update_hypothesis)
+- analysis: Record results (record_result with canonical metrics + raw_metrics), reflect on failures (reflect_on_failure), review (dispatch_reviewer, adversarial_review), update hypotheses (update_hypothesis)
 - reflection: Complete iteration (complete_iteration)
 
 ## Rules
@@ -876,7 +882,7 @@ Check RESEARCH_LOG.md for the detailed research narrative.
   if (isNonClaude) {
     const ESSENTIAL_TOOLS = new Set([
       // Phase management
-      "advance_phase", "register_approach", "record_result", "reflect_on_failure",
+      "advance_phase", "register_approach", "define_metrics", "record_result", "reflect_on_failure",
       "query_results", "view_approach_tree",
       // Literature
       "search_papers", "read_paper", "search_library",
@@ -1101,7 +1107,7 @@ Check RESEARCH_LOG.md for the detailed research narrative.
         }
       } else if (phase === "hypothesis") {
         if (!toolsUsedThisSession.has("log_finding")) {
-          directive = "You are in the HYPOTHESIS phase. Call log_finding with type='hypothesis' and a testable hypothesis statement NOW.";
+          directive = "You are in the HYPOTHESIS phase. Call log_finding with type='hypothesis', a testable hypothesis statement, and a theme string to group related hypotheses (e.g., 'Position Effects', 'Model Architecture').";
         } else if (!toolsUsedThisSession.has("dispatch_architect")) {
           directive = "Hypothesis formulated. Call dispatch_architect to get novel approach proposals before experimenting.";
         } else {
@@ -1547,7 +1553,7 @@ Your research operates in a structured phase system. Some tools are ONLY availab
 
 Use \`advance_phase\` to transition between phases. Each transition has gates:
 - **literature → hypothesis:** 3+ papers collected OR scout dispatched
-- **hypothesis → experiment:** 1+ hypothesis formulated
+- **hypothesis → experiment:** 1+ hypothesis formulated + metrics defined (use \`define_metrics\`)
 - **experiment → analysis:** 1+ completed experiment
 - **analysis → reflection:** 1+ hypothesis updated with evidence
 
@@ -1567,8 +1573,11 @@ You can always go backwards (e.g., experiment → hypothesis to reformulate). Fo
 Use \`register_approach\` to create branches in your approach tree. Every distinct research direction should be a registered approach. Sub-approaches (refinements) link to parents.
 Use \`view_approach_tree\` to see all approaches and their status.
 
+### Metrics
+Use \`define_metrics\` in the hypothesis phase to set canonical metrics (e.g., f1, accuracy, loss) — this enables cross-experiment comparison. All experiments will be measured against these canonical metrics.
+
 ### Results
-After EVERY completed experiment, call \`record_result\` with structured metrics and a verdict (better/worse/inconclusive).
+After EVERY completed experiment, call \`record_result\` with both canonical metrics (matching \`define_metrics\`) and \`raw_metrics\` (experiment-specific values). Provide a verdict (better/worse/inconclusive).
 After EVERY failed experiment, call \`reflect_on_failure\` with root cause analysis before submitting another experiment.
 Use \`query_results\` to see a formatted comparison table.
 
@@ -1586,8 +1595,9 @@ RESEARCH_STATE.md is auto-generated and shows your current structured state: hyp
 3. **\`dispatch_synthesizer\`** with the imported paper titles and your research focus → the synthesizer (Opus) reads them all together and finds contradictions, complementary techniques, and unexplored combinations
 4. \`collect_results\` (synthesis) → use the cross-paper analysis to formulate hypotheses
 5. Formulate 2-3 testable hypotheses using log_finding(type="hypothesis"). Write PLAIN TEXT — no markdown, no headers, no bold. Be specific: "Model X will outperform Y on dataset Z by N% because of mechanism W."
-6. **\`dispatch_architect\`** with the synthesis output and your goal → the architect (Opus) proposes novel approaches with risk ratings and validation experiments
-7. \`collect_results\` (architect proposals) → pick the cheapest validation experiment to try first
+6. **\`define_metrics\`** — set canonical metrics (e.g., f1, accuracy, loss) so all experiments are measured consistently. Required before advancing to the experiment phase.
+7. **\`dispatch_architect\`** with the synthesis output and your goal → the architect (Opus) proposes novel approaches with risk ratings and validation experiments
+8. \`collect_results\` (architect proposals) → pick the cheapest validation experiment to try first
 
 - Use the synthesizer and architect in parallel while you read papers — don't wait idly.
 
@@ -2167,6 +2177,17 @@ function createTools(
           const parent = await prisma.approachBranch.findFirst({ where: { id: parent_id, projectId } });
           if (!parent) return `Parent approach "${parent_id}" not found.`;
         }
+        // Deduplicate: return existing approach if one with the same name exists
+        const existing = await prisma.approachBranch.findFirst({
+          where: { projectId, name, parentId: parent_id || null },
+        });
+        if (existing) {
+          // Update description if provided
+          if (description && description !== existing.description) {
+            await prisma.approachBranch.update({ where: { id: existing.id }, data: { description } });
+          }
+          return `Approach "${name}" already exists (ID: ${existing.id.slice(0, 8)}). Use this ID in record_result.`;
+        }
         const branch = await prisma.approachBranch.create({
           data: { projectId, name, description, parentId: parent_id },
         });
@@ -2177,27 +2198,104 @@ function createTools(
       },
     }),
 
+    define_metrics: tool({
+      description: "Define the canonical metrics for this research project. All experiments will be measured against these metrics, enabling cross-experiment comparison. Call this in the hypothesis phase before running experiments. If the metric schema changes, existing results are automatically recomputed.",
+      inputSchema: z.object({
+        metrics: z.array(z.object({
+          name: z.string().describe("Short metric name (e.g., 'f1', 'accuracy', 'loss')"),
+          direction: z.enum(["higher", "lower"]).describe("Whether higher or lower values are better"),
+          description: z.string().describe("What this metric measures"),
+        })).min(1).describe("The canonical metrics for this project"),
+      }),
+      execute: async ({ metrics }: { metrics: Array<{ name: string; direction: string; description: string }> }) => {
+        // Store the schema
+        await prisma.researchProject.update({
+          where: { id: projectId },
+          data: { metricSchema: JSON.stringify(metrics) },
+        });
+
+        // Recompute existing results if any have rawMetrics
+        const existingWithRaw = await prisma.experimentResult.count({
+          where: { projectId, rawMetrics: { not: null } },
+        });
+
+        if (existingWithRaw > 0) {
+          // Trigger recompute in background
+          import("./metric-recompute").then(({ recomputeMetrics }) => {
+            recomputeMetrics(projectId).then(count => {
+              console.log(`[define_metrics] Recomputed ${count} experiment results`);
+            }).catch(err => console.warn("[define_metrics] Recompute failed:", err));
+          });
+        }
+
+        await prisma.researchLogEntry.create({
+          data: {
+            projectId,
+            type: "decision",
+            content: `Defined project metrics: ${metrics.map(m => `${m.name} (${m.direction} is better)`).join(", ")}`,
+          },
+        });
+
+        return `Metrics defined: ${metrics.map(m => `${m.name} (${m.direction})`).join(", ")}. All experiments will be measured against these.${existingWithRaw > 0 ? ` Recomputing ${existingWithRaw} existing results in background.` : ""}`;
+      },
+    }),
+
     record_result: tool({
-      description: "Record structured experiment results. Call this after EVERY completed experiment. Builds the results database for tracking progress and comparisons.",
+      description: "Record structured experiment results. Call this after EVERY completed experiment. Builds the results database for tracking progress and comparisons. Provide canonical metrics (matching define_metrics) and optionally raw_metrics for the full experiment-specific detail.",
       inputSchema: z.object({
         job_id: z.string().describe("Job ID from execute_remote or check_job"),
         approach_id: z.string().optional().describe("ApproachBranch ID from register_approach"),
         hypothesis_id: z.string().optional().describe("Hypothesis ID being tested"),
         baseline_id: z.string().optional().describe("ExperimentResult ID to compare against"),
         metrics: z.record(z.string(), z.number()).describe("Key metrics: { accuracy: 0.85, loss: 0.23, f1: 0.81 }"),
+        raw_metrics: z.record(z.string(), z.number()).optional().describe("Original experiment-specific metrics (full detail, any names)"),
+        condition: z.string().optional().describe("Experimental condition (e.g., 'single agent, hypothesis-driven, budget=60')"),
         verdict: z.enum(["better", "worse", "inconclusive", "error"]).describe("How this compares to baseline or expectations"),
         summary: z.string().describe("One sentence: what this experiment demonstrated"),
       }),
-      execute: async ({ job_id, approach_id, hypothesis_id, baseline_id, metrics, verdict, summary }: {
+      execute: async ({ job_id, approach_id, hypothesis_id, baseline_id, metrics, raw_metrics, condition, verdict, summary }: {
         job_id: string; approach_id?: string; hypothesis_id?: string; baseline_id?: string;
-        metrics: Record<string, number>; verdict: string; summary: string;
+        metrics: Record<string, number>; raw_metrics?: Record<string, number>; condition?: string;
+        verdict: string; summary: string;
       }) => {
         // Check for duplicate
         const existing = await prisma.experimentResult.findUnique({ where: { jobId: job_id } });
         if (existing) return `Result already recorded for job ${job_id.slice(0, 8)}.`;
 
         const job = await prisma.remoteJob.findUnique({ where: { id: job_id } });
-        const scriptName = job?.command?.match(/python3?\s+(\S+\.py)/)?.[1] || "unknown";
+        if (!job) {
+          // List recent jobs so the agent can use the correct ID
+          const recentJobs = await prisma.remoteJob.findMany({
+            where: { projectId },
+            orderBy: { createdAt: "desc" },
+            take: 5,
+            select: { id: true, command: true, status: true },
+          });
+          const jobList = recentJobs.map(j => `- ${j.id}: ${j.command.slice(0, 60)} [${j.status}]`).join("\n");
+          return `BLOCKED — Job "${job_id}" not found. Use a real job ID from execute_remote or check_job.\n\nRecent jobs:\n${jobList}`;
+        }
+        const scriptName = job.command?.match(/python3?\s+(\S+\.py)/)?.[1] || job.command.slice(0, 40);
+
+        // If project has a metric schema, validate canonical metrics
+        const projectRecord = await prisma.researchProject.findUnique({
+          where: { id: projectId },
+          select: { metricSchema: true },
+        });
+
+        let canonicalMetrics = metrics;
+        if (projectRecord?.metricSchema) {
+          const schema: { name: string }[] = JSON.parse(projectRecord.metricSchema);
+          const schemaNames = new Set(schema.map(m => m.name));
+          const providedNames = Object.keys(metrics);
+
+          // Check if provided metrics match schema
+          const matching = providedNames.filter(n => schemaNames.has(n));
+          if (matching.length === 0 && raw_metrics) {
+            // None match — agent provided raw metrics as canonical. Store as raw, warn.
+            canonicalMetrics = {};
+            // Will be recomputed by the metric system
+          }
+        }
 
         // Compute comparison delta if baseline provided
         let comparison: Record<string, number> | null = null;
@@ -2207,7 +2305,7 @@ function createTools(
             try {
               const baseMetrics = JSON.parse(baseline.metrics) as Record<string, number>;
               comparison = {};
-              for (const [k, v] of Object.entries(metrics)) {
+              for (const [k, v] of Object.entries(canonicalMetrics)) {
                 if (typeof baseMetrics[k] === "number") comparison[k] = Number((v - baseMetrics[k]).toFixed(6));
               }
             } catch {}
@@ -2219,7 +2317,9 @@ function createTools(
             projectId, jobId: job_id, hypothesisId: hypothesis_id, branchId: approach_id,
             baselineId: baseline_id, scriptName,
             parameters: job?.command ? JSON.stringify({ command: job.command }) : null,
-            metrics: JSON.stringify(metrics),
+            metrics: JSON.stringify(canonicalMetrics),
+            rawMetrics: raw_metrics ? JSON.stringify(raw_metrics) : (Object.keys(canonicalMetrics).length === 0 ? JSON.stringify(metrics) : null),
+            condition: condition || null,
             comparison: comparison ? JSON.stringify(comparison) : null,
             verdict, reflection: summary,
           },
@@ -2243,7 +2343,7 @@ function createTools(
         }
 
         await recordStep("analyze_results", `Result: ${scriptName} → ${verdict}`, "COMPLETED",
-          { resultId: result.id, metrics, verdict });
+          { resultId: result.id, metrics: canonicalMetrics, verdict });
 
         // Regenerate research state
         try {
@@ -2268,8 +2368,17 @@ function createTools(
         job_id: string; root_cause: string; what_this_teaches: string; next_approach_should: string;
       }) => {
         const job = await prisma.remoteJob.findUnique({ where: { id: job_id } });
-        if (!job) return `Job "${job_id}" not found.`;
-        const scriptName = job.command?.match(/python3?\s+(\S+\.py)/)?.[1] || "unknown";
+        if (!job) {
+          const recentJobs = await prisma.remoteJob.findMany({
+            where: { projectId, status: "FAILED" },
+            orderBy: { createdAt: "desc" },
+            take: 5,
+            select: { id: true, command: true },
+          });
+          const jobList = recentJobs.map(j => `- ${j.id}: ${j.command.slice(0, 60)}`).join("\n");
+          return `BLOCKED — Job "${job_id}" not found. Use a real job ID.\n\nRecent failed jobs:\n${jobList}`;
+        }
+        const scriptName = job.command?.match(/python3?\s+(\S+\.py)/)?.[1] || job.command.slice(0, 40);
 
         // Check for duplicate
         const existing = await prisma.experimentResult.findUnique({ where: { jobId: job_id } });
@@ -3091,21 +3200,22 @@ function createTools(
         hypothesis_id: z.string().optional().describe("ID of the hypothesis this experiment tests. REQUIRED for exp_ scripts. Use log_finding(type='hypothesis') to create one first, then reference its ID here."),
       }),
       execute: async ({ command, host_alias, hypothesis_id }: { command: string; host_alias?: string; hypothesis_id?: string }) => {
-        // ── Failure reflection gate: require reflect_on_failure after failures ──
+        // ── Failure reflection gate: require reflect_on_failure or record_result after failures ──
+        // Any ExperimentResult for the failed job unblocks (not just verdict="error")
         if (!isBenchmarkProject) {
           const failedJobIds = await prisma.remoteJob.findMany({
             where: { projectId, status: "FAILED" },
             select: { id: true },
           });
           if (failedJobIds.length > 0) {
-            const reflectedJobIds = await prisma.experimentResult.findMany({
-              where: { projectId, verdict: "error", jobId: { not: null } },
+            const addressedJobIds = await prisma.experimentResult.findMany({
+              where: { projectId, jobId: { not: null } },
               select: { jobId: true },
             });
-            const reflectedSet = new Set(reflectedJobIds.map(r => r.jobId));
-            const unreflected = failedJobIds.filter(j => !reflectedSet.has(j.id));
-            if (unreflected.length > 0) {
-              return `BLOCKED — ${unreflected.length} failed experiment(s) need reflection before you can submit more. Call reflect_on_failure for job "${unreflected[0].id}" first.\n\nThis forces you to analyze what went wrong before trying again.`;
+            const addressedSet = new Set(addressedJobIds.map(r => r.jobId));
+            const unaddressed = failedJobIds.filter(j => !addressedSet.has(j.id));
+            if (unaddressed.length > 0) {
+              return `BLOCKED — ${unaddressed.length} failed experiment(s) need reflection before you can submit more. Call reflect_on_failure for job "${unaddressed[0].id}" first.\n\nThis forces you to analyze what went wrong before trying again.`;
             }
           }
         }
@@ -4362,9 +4472,10 @@ Be harsh but fair. Vague praise is useless. Specific criticism saves months of w
       inputSchema: z.object({
         type: z.enum(["finding", "hypothesis", "decision", "question", "breakthrough"]).describe("Type of entry"),
         content: z.string().describe("What you found/decided/hypothesized. For hypotheses: plain text claim, no markdown formatting."),
+        theme: z.string().optional().describe("For hypotheses only: research theme group (e.g., 'Position Effects', 'Prior Knowledge', 'Architecture Design'). Hypotheses with the same theme are grouped together in the UI."),
         related_paper_title: z.string().optional().describe("Title (or fragment) of a paper this finding relates to. If provided, the insight will be linked to that paper in the Mind Palace."),
       }),
-      execute: async ({ type, content, related_paper_title }: { type: string; content: string; related_paper_title?: string }) => {
+      execute: async ({ type, content, theme, related_paper_title }: { type: string; content: string; theme?: string; related_paper_title?: string }) => {
         const logType = type === "finding" ? "observation"
           : type === "hypothesis" ? "agent_suggestion"
           : type === "breakthrough" ? "breakthrough"
@@ -4423,8 +4534,9 @@ Be harsh but fair. Vague praise is useless. Specific criticism saves months of w
           await prisma.researchHypothesis.create({
             data: {
               projectId,
-              statement: statement.slice(0, 500),
+              statement: statement.slice(0, 2000),
               rationale,
+              theme: theme || null,
               status: "PROPOSED",
             },
           });

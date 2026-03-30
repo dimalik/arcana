@@ -66,8 +66,20 @@ function deriveTitle(messages: Message[]): string {
 
 // ── Main component ──────────────────────────────────────────────
 
-export function ResearchChat({ projectId, projectTitle }: { projectId: string; projectTitle: string }) {
+export function ResearchChat({ projectId, projectTitle, externalOpen, onExternalClose }: {
+  projectId: string; projectTitle: string; externalOpen?: boolean; onExternalClose?: () => void;
+}) {
   const [open, setOpen] = useState(false);
+
+  // Sync with external open state
+  useEffect(() => {
+    if (externalOpen) setOpen(true);
+  }, [externalOpen]);
+
+  const handleClose = () => {
+    setOpen(false);
+    onExternalClose?.();
+  };
   const [threads, setThreads] = useState<ChatThread[]>(() => loadThreads(projectId));
   const [activeThreadId, setActiveThreadId] = useState<string | null>(() => threads[0]?.id ?? null);
   const [showList, setShowList] = useState(false);
@@ -109,23 +121,12 @@ export function ResearchChat({ projectId, projectTitle }: { projectId: string; p
 
   return (
     <>
-      {!open && (
-        <button
-          onClick={handleOpen}
-          className="fixed bottom-16 right-8 z-40 inline-flex items-center gap-1.5 rounded-full bg-foreground/90 text-background pl-3 pr-3.5 py-1.5 text-[11px] font-medium shadow-lg hover:bg-foreground hover:shadow-xl transition-all duration-200 backdrop-blur-sm"
-          title="Chat about this research"
-        >
-          <MessageCircle className="h-3 w-3" />
-          Ask
-        </button>
-      )}
-
       {open && (
         <div className="fixed bottom-16 right-8 z-40 w-[400px] max-h-[70vh] flex flex-col rounded-xl border border-border/60 bg-background shadow-2xl animate-in slide-in-from-bottom-2 fade-in-0 duration-200">
           {/* Header */}
           <div className="relative px-4 py-2.5 border-b border-border/40">
             <button
-              onClick={() => setOpen(false)}
+              onClick={handleClose}
               className="absolute -top-2 -right-2 inline-flex h-5 w-5 items-center justify-center rounded-full bg-muted border border-border/60 text-muted-foreground/60 hover:text-foreground hover:bg-accent shadow-sm transition-colors z-10"
             >
               <X className="h-3 w-3" />

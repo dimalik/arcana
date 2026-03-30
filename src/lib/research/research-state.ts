@@ -188,6 +188,9 @@ export async function generateResearchState(
 
   await safeWriteFile(workDir, markdown);
 
+  // Trigger summary generation in background (non-blocking, rate-limited)
+  triggerSummaryIfNeeded(projectId, workDir);
+
   return markdown;
 }
 
@@ -214,6 +217,37 @@ async function safeWriteFile(workDir: string, content: string): Promise<void> {
   } catch {
     // Non-fatal — the workDir might not exist yet
   }
+}
+
+/**
+ * Trigger summary generation alongside state. Runs in background (non-blocking).
+ * Only generates when there are 2+ experiment results to summarize.
+ */
+export function triggerSummaryIfNeeded(projectId: string, workDir: string): void {
+  // Check experiment count before making an LLM call
+  prisma.experimentResult.count({ where: { projectId } }).then(count => {
+    if (count < 2) return;
+    // Check if summary exists and is recent (don't regenerate within 10 minutes)
+    import("fs/promises").then(({ stat, readFile: rf }) => {
+      const summaryPath = path.join(workDir, "RESEARCH_SUMMARY.md");
+      stat(summaryPath).then(s => {
+        const ageMs = Date.now() - s.mtimeMs;
+        if (ageMs < 600_000) return; // Less than 10 min old, skip
+        import("./research-summary").then(({ generateResearchSummary }) => {
+          generateResearchSummary(projectId, workDir).catch(e =>
+            console.warn("[research-state] Summary generation failed:", e)
+          );
+        });
+      }).catch(() => {
+        // File doesn't exist — generate it
+        import("./research-summary").then(({ generateResearchSummary }) => {
+          generateResearchSummary(projectId, workDir).catch(e =>
+            console.warn("[research-state] Summary generation failed:", e)
+          );
+        });
+      });
+    });
+  }).catch(() => {});
 }
 
 /** Build a compact "5 completed, 2 failed, 1 running" string. */

@@ -7,7 +7,6 @@ import {
 } from "lucide-react";
 import { MarkdownRenderer } from "@/components/ui/markdown-renderer";
 import { useStepActions } from "./use-step-actions";
-import { FiguresGallery } from "./figures-gallery";
 
 interface Step {
   id: string;
@@ -99,9 +98,6 @@ export function AnalysisPhase({ projectId, steps, hypotheses, onRefresh }: Analy
 
   return (
     <div className="space-y-4 pr-2">
-      {/* Inline figures gallery */}
-      <FiguresGallery projectId={projectId} />
-
       {/* Running indicator */}
       {runningSteps.length > 0 && (
         <div className="rounded-md border border-blue-500/30 bg-blue-500/5 p-3 flex items-center gap-2">

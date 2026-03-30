@@ -538,6 +538,7 @@ model ResearchProject {
   status          String   @default("SETUP")    // SETUP | ACTIVE | PAUSED | COMPLETED | ARCHIVED
   methodology     String?  // experimental | survey | design_science | analytical | exploratory
   currentPhase    String   @default("literature") // literature | hypothesis | experiment | analysis | reflection
+  metricSchema    String?  // JSON: [{ name, direction, description }] — canonical metrics for this project
   collectionId    String?  @unique
   outputFolder    String?
   createdAt       DateTime @default(now())
@@ -551,6 +552,7 @@ model ResearchProject {
   agentTasks        AgentTask[]
   approaches        ApproachBranch[]
   experimentResults ExperimentResult[]
+  artifacts         Artifact[]
 
   @@index([userId])
 }
@@ -600,6 +602,7 @@ model ResearchHypothesis {
   rationale   String?
   status      String   @default("PROPOSED") // PROPOSED | TESTING | SUPPORTED | REFUTED | REVISED
   evidence    String?  // JSON: [{ type, ref, summary, supports }]
+  theme       String?  // Research theme grouping (e.g., "Position Effects", "Prior Knowledge")
   parentId    String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -650,6 +653,7 @@ model RemoteJob {
   scriptHash    String?                     // SHA-256 prefix of script content at submission
   hypothesisId  String?                     // FK to ResearchHypothesis being tested
   fixAttempts   Int       @default(0)       // Auto-fix attempts (code errors only, max 2)
+  errorClass    String?                     // CODE_ERROR | RESEARCH_FAILURE | RESOURCE_ERROR | AUTO_FIXED
   createdAt     DateTime  @default(now())
   startedAt     DateTime?
   completedAt   DateTime?
@@ -722,17 +726,41 @@ model ExperimentResult {
   baselineId   String?              // links to another ExperimentResult for comparison
   scriptName   String
   parameters   String?              // JSON: hyperparameters
-  metrics      String?              // JSON: { accuracy: 0.85, loss: 0.23 }
-  comparison   String?              // JSON: delta vs baseline
+  metrics      String?              // JSON: canonical metrics matching project schema { f1: 0.85, precision: 0.97 }
+  rawMetrics   String?              // JSON: original experiment-specific metrics (full detail)
+  condition    String?              // Experimental condition (e.g., "single agent, budget=60")
+  comparison   String?              // JSON: delta vs baseline on canonical metrics
   verdict      String?              // better | worse | inconclusive | error
   reflection   String?              // post-experiment analysis or failure reflection
   createdAt    DateTime  @default(now())
 
   project      ResearchProject  @relation(fields: [projectId], references: [id], onDelete: Cascade)
   branch       ApproachBranch?  @relation(fields: [branchId], references: [id])
+  artifacts    Artifact[]
 
   @@index([projectId])
   @@index([branchId])
+}
+
+model Artifact {
+  id           String   @id @default(uuid())
+  projectId    String
+  resultId     String?                      // FK to ExperimentResult that produced this
+  type         String                       // figure | model | results | code | log
+  filename     String                       // fig_08_rag_strategy.png, model_checkpoint/, results_008.json
+  path         String                       // relative path in workdir
+  caption      String?                      // human-readable description
+  keyTakeaway  String?                      // one-line insight (for figures)
+  size         Int?                         // file size in bytes
+  createdAt    DateTime @default(now())
+
+  project      ResearchProject   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  result       ExperimentResult? @relation(fields: [resultId], references: [id])
+
+  @@unique([projectId, filename])
+  @@index([projectId])
+  @@index([resultId])
+  @@index([type])
 }
 
 // ── Agent Capabilities (user-defined tools/resources the agent can use) ──

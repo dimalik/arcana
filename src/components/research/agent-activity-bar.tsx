@@ -777,7 +777,7 @@ export const AgentActivityBar = forwardRef<AgentActivityHandle, AgentActivityBar
     const lastOutputLine = latestExecTool?.outputLines?.slice(-1)[0];
 
     return (
-      <div className="rounded-md border border-border bg-card overflow-hidden">
+      <div className="relative rounded-md border border-border bg-card overflow-visible">
         {/* Compact status bar — always visible */}
         <div
           className="flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-muted/50 transition-colors"
@@ -859,11 +859,11 @@ export const AgentActivityBar = forwardRef<AgentActivityHandle, AgentActivityBar
           )}
         </div>
 
-        {/* Expanded detail section */}
+        {/* Expanded detail section — overlays upward */}
         {expanded && (
-          <>
+          <div className="absolute bottom-full left-0 right-0 bg-card border border-border rounded-t-md shadow-lg z-30">
             {/* Tab switcher + expand button */}
-            <div className="border-t border-border flex items-center">
+            <div className="border-b border-border flex items-center">
               <button
                 onClick={() => setActiveTab("console")}
                 className={`flex items-center gap-1 px-3 py-1.5 text-[10px] font-medium transition-colors border-b-2 ${
@@ -896,11 +896,11 @@ export const AgentActivityBar = forwardRef<AgentActivityHandle, AgentActivityBar
               </button>
             </div>
 
-            {/* Fixed-height content area — same for both tabs */}
-            <div className="h-80 flex flex-col">
+            {/* Content area — overlays upward so it doesn't push the dashboard */}
+            <div className="h-64 flex flex-col">
               {activeTab === "console" ? (
                 <>
-                  <div className="flex-1 overflow-auto space-y-1.5 p-2">
+                  <div className="flex-1 overflow-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden space-y-1.5 p-2">
                     {feed.length === 0 && !running && (
                       <p className="text-[11px] text-muted-foreground text-center py-4">
                         No agent activity yet.
@@ -944,7 +944,7 @@ export const AgentActivityBar = forwardRef<AgentActivityHandle, AgentActivityBar
                           </pre>
                         )}
                         {activeJob.stdout && (
-                          <pre className="text-[9px] text-muted-foreground bg-background/50 rounded p-1.5 max-h-28 overflow-auto whitespace-pre-wrap font-mono">
+                          <pre className="text-[9px] text-muted-foreground bg-background/50 rounded p-1.5 max-h-28 overflow-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden whitespace-pre-wrap font-mono">
                             {activeJob.stdout.split("\n").filter(Boolean).slice(-15).join("\n")}
                           </pre>
                         )}
@@ -989,7 +989,7 @@ export const AgentActivityBar = forwardRef<AgentActivityHandle, AgentActivityBar
                 <NotebookTab projectId={projectId} />
               )}
             </div>
-          </>
+          </div>
         )}
 
         {/* Fullscreen overlay */}
@@ -1082,7 +1082,7 @@ function CompactFeedItem({ item }: { item: FeedItem }) {
 
         {/* Args/result for non-execution tools */}
         {showDetail && !isExec && item.args && (
-          <pre className="mt-1 text-[9px] text-muted-foreground bg-background/50 rounded p-1.5 max-h-40 overflow-auto whitespace-pre-wrap">
+          <pre className="mt-1 text-[9px] text-muted-foreground bg-background/50 rounded p-1.5 max-h-40 overflow-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden whitespace-pre-wrap">
             {item.args}
           </pre>
         )}
@@ -1109,7 +1109,7 @@ function CompactFeedItem({ item }: { item: FeedItem }) {
           )}
         </button>
         {showDetail && item.args && (
-          <pre className="mt-1 text-[9px] text-destructive/70 bg-destructive/5 rounded p-1.5 max-h-40 overflow-auto whitespace-pre-wrap font-mono">
+          <pre className="mt-1 text-[9px] text-destructive/70 bg-destructive/5 rounded p-1.5 max-h-40 overflow-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden whitespace-pre-wrap font-mono">
             {item.args}
           </pre>
         )}
@@ -1426,7 +1426,7 @@ function FullscreenPanel({
         {/* Body */}
         {activeTab === "console" ? (
           <div className="flex-1 flex flex-col min-h-0">
-            <div className="flex-1 overflow-auto space-y-1.5 p-3">
+            <div className="flex-1 overflow-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden space-y-1.5 p-3">
               {feed.length === 0 && !running && (
                 <p className="text-xs text-muted-foreground text-center py-8">No agent activity yet.</p>
               )}
@@ -1462,7 +1462,7 @@ function FullscreenPanel({
                     </pre>
                   )}
                   {activeJob.stdout && (
-                    <pre className="text-[10px] text-muted-foreground bg-background/50 rounded p-2 max-h-60 overflow-auto whitespace-pre-wrap font-mono">
+                    <pre className="text-[10px] text-muted-foreground bg-background/50 rounded p-2 max-h-60 overflow-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden whitespace-pre-wrap font-mono">
                       {activeJob.stdout.split("\n").filter(Boolean).slice(-30).join("\n")}
                     </pre>
                   )}
@@ -1505,7 +1505,7 @@ function FullscreenPanel({
           <div className="flex-1 flex min-h-0">
             {/* Table of contents */}
             {toc.length > 0 && !nbEditing && (
-              <div className="w-52 shrink-0 border-r border-border overflow-auto py-3 px-3">
+              <div className="w-52 shrink-0 border-r border-border overflow-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden py-3 px-3">
                 <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide mb-2">Contents</p>
                 <nav className="space-y-0.5">
                   {toc.map((item, i) => (
@@ -1553,7 +1553,7 @@ function FullscreenPanel({
                 autoFocus
               />
             ) : (
-              <div ref={nbScrollRef} className="flex-1 overflow-auto px-6 py-4">
+              <div ref={nbScrollRef} className="flex-1 overflow-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden px-6 py-4">
                 <div className="prose-sm max-w-none text-[13px] leading-relaxed" ref={markdownRef}>
                   <MarkdownRenderer content={nbContent} />
                 </div>
@@ -1588,7 +1588,7 @@ function TerminalOutput({ lines, isRunning, progress }: { lines: string[]; isRun
       </div>
       <div
         ref={termRef}
-        className="p-1.5 max-h-48 overflow-auto font-mono text-[9px] leading-[1.5] text-[#e6edf3] selection:bg-blue-500/30"
+        className="p-1.5 max-h-48 overflow-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden font-mono text-[9px] leading-[1.5] text-[#e6edf3] selection:bg-blue-500/30"
       >
         {lines.length === 0 && isRunning && (
           <span className="text-[#7d8590]">Waiting for output...</span>

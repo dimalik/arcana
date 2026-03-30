@@ -108,29 +108,67 @@ export function FiguresGallery({ projectId, collapsible = false }: FiguresGaller
         </button>
       </div>
 
-      {/* Figure grid */}
-      {!collapsed && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-          {figures.map((fig) => (
-            <button
-              key={fig.path}
-              onClick={() => setSelectedFigure(fig.path)}
-              className="group rounded-lg border border-border/50 overflow-hidden hover:border-foreground/20 transition-colors bg-white"
-            >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={imgUrl(fig.path)}
-                alt={fig.name}
-                className="w-full object-contain bg-white"
-                loading="lazy"
-              />
-              <div className="px-3 py-2 bg-background border-t border-border/30">
-                <p className="text-xs text-muted-foreground truncate">{fig.name}</p>
+      {/* Figures grouped by experiment/topic */}
+      {!collapsed && (() => {
+        // Group figures by experiment number or topic prefix
+        // fig_08_rag_strategy → group "exp_008" / "rag strategy"
+        // fig_comparison_all → group "summary"
+        const groups = new Map<string, FigureFile[]>();
+        for (const fig of figures) {
+          // Extract experiment number: fig_03_..., fig_exp003_..., exp_003_...
+          const expMatch = fig.name.match(/(?:fig_?|exp_?)(\d{2,3})/i);
+          const groupKey = expMatch ? `Experiment ${parseInt(expMatch[1])}` : "Summary";
+          if (!groups.has(groupKey)) groups.set(groupKey, []);
+          groups.get(groupKey)!.push(fig);
+        }
+
+        // Sort: experiments by number, summary last
+        const sortedGroups = Array.from(groups.entries()).sort((a: [string, FigureFile[]], b: [string, FigureFile[]]) => {
+          if (a[0] === "Summary") return 1;
+          if (b[0] === "Summary") return -1;
+          return a[0].localeCompare(b[0], undefined, { numeric: true });
+        });
+
+        return (
+          <div className="space-y-4">
+            {sortedGroups.map(([groupName, groupFigs]) => (
+              <div key={groupName}>
+                <h4 className="text-xs font-medium text-muted-foreground mb-2">{groupName}</h4>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {groupFigs.map((fig: FigureFile) => {
+                    // Readable label from filename
+                    const label = fig.name
+                      .replace(/\.(png|jpg|jpeg|svg|gif|pdf)$/i, "")
+                      .replace(/^fig_?\d*_?/, "")
+                      .replace(/_/g, " ")
+                      .replace(/\b\w/g, (c: string) => c.toUpperCase())
+                      .trim() || fig.name;
+
+                    return (
+                      <button
+                        key={fig.path}
+                        onClick={() => setSelectedFigure(fig.path)}
+                        className="group rounded-lg border border-border/50 overflow-hidden hover:border-foreground/20 transition-colors bg-white text-left"
+                      >
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={imgUrl(fig.path)}
+                          alt={fig.name}
+                          className="w-full object-contain bg-white"
+                          loading="lazy"
+                        />
+                        <div className="px-3 py-2 bg-background border-t border-border/30">
+                          <p className="text-xs font-medium text-foreground/80 leading-snug">{label}</p>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
-            </button>
-          ))}
-        </div>
-      )}
+            ))}
+          </div>
+        );
+      })()}
 
       {/* Lightbox */}
       {selectedFigure && (

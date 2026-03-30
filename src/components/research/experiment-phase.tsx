@@ -4,7 +4,6 @@ import { useEffect, useState, useCallback } from "react";
 import { Loader2, Sparkles, Server, FileCode, Check, AlertCircle, ChevronDown, Play, X, RotateCcw, Monitor, FlaskConical } from "lucide-react";
 import { useStepActions } from "./use-step-actions";
 import { ExperimentCard } from "./experiment-card";
-import { FiguresGallery } from "./figures-gallery";
 import { toast } from "sonner";
 
 interface Step {
@@ -31,6 +30,7 @@ interface RemoteJob {
   stdout: string | null;
   stderr: string | null;
   exitCode: number | null;
+  errorClass: string | null;
   localDir: string;
   hostId: string;
   host: { alias: string; gpuType: string | null };
@@ -60,6 +60,7 @@ interface ExperimentJobData {
   startedAt: string | null;
   completedAt: string | null;
   stderr: string | null;
+  errorClass: string | null;
   host: { alias: string; gpuType: string | null };
 }
 
@@ -130,14 +131,14 @@ function PendingStepRow({
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <span className="text-xs font-medium">{step.title}</span>
-          <span className="text-[10px] text-muted-foreground">{step.status === "APPROVED" ? "Queued" : "Up next"}</span>
+          <span className="text-[11px] text-muted-foreground">{step.status === "APPROVED" ? "Queued" : "Up next"}</span>
         </div>
         <div className="flex items-center gap-1">
           {showSelector && (
             <select
               value={resourcePref}
               onChange={(e) => setResourcePref(e.target.value)}
-              className="h-6 rounded-md border border-border bg-background px-1 text-[10px] text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+              className="h-6 rounded-md border border-border bg-background px-1 text-[11px] text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
               title="Where to run"
             >
               <option value="auto">Auto</option>
@@ -524,7 +525,7 @@ export function ExperimentPhase({
       {/* Host info */}
       {hosts.length > 0 && (
         <div className="flex items-center gap-3">
-          <span className="text-[10px] text-muted-foreground">
+          <span className="text-[11px] text-muted-foreground">
             <Server className="h-3 w-3 inline mr-0.5" />
             {hosts.length} remote host{hosts.length !== 1 ? "s" : ""}
           </span>
@@ -538,12 +539,12 @@ export function ExperimentPhase({
             <div className="flex items-center gap-2">
               <Loader2 className="h-3.5 w-3.5 animate-spin text-blue-500" />
               <h4 className="text-xs font-medium">{step.title}</h4>
-              <span className="text-[10px] text-blue-400">Running...</span>
+              <span className="text-[11px] text-blue-400">Running...</span>
             </div>
             <button
               onClick={() => handleRestore(step.id)}
               disabled={loadingStep === step.id}
-              className="inline-flex h-6 items-center gap-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted px-1.5 text-[10px] transition-colors"
+              className="inline-flex h-6 items-center gap-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted px-1.5 text-[11px] transition-colors"
             >
               <X className="h-3 w-3" /> Cancel
             </button>
@@ -617,8 +618,6 @@ export function ExperimentPhase({
         </div>
       )}
 
-      {/* Collapsible figures gallery */}
-      <FiguresGallery projectId={projectId} collapsible />
     </div>
   );
 }
@@ -668,8 +667,11 @@ function ExperimentGroupCard({
   const totalRuns = runningJobs.length + completedJobs.length + localRuns.length;
   const successCount = completedJobs.filter((j) => j.status === "COMPLETED").length
     + localRuns.filter((s) => s.status === "COMPLETED").length;
-  const failCount = completedJobs.filter((j) => j.status === "FAILED").length
+  // Only count RESEARCH_FAILURE as real failures — code bugs and resource errors don't count
+  const failCount = completedJobs.filter((j) => j.status === "FAILED" && j.errorClass === "RESEARCH_FAILURE").length
     + localRuns.filter((s) => s.status === "FAILED").length;
+  const codeBugCount = completedJobs.filter((j) => j.errorClass === "CODE_ERROR" || j.errorClass === "AUTO_FIXED").length;
+  const resourceCount = completedJobs.filter((j) => j.errorClass === "RESOURCE_ERROR").length;
 
   return (
     <div className="rounded-md border border-border/60 overflow-hidden">
@@ -681,16 +683,18 @@ function ExperimentGroupCard({
         <ChevronDown className={`h-3 w-3 text-muted-foreground transition-transform ${collapsed ? "-rotate-90" : ""}`} />
         <span className="text-xs font-medium flex-1 truncate">{group.name}</span>
         {runningJobs.length > 0 && (
-          <span className="flex items-center gap-1 text-[10px] text-blue-400">
+          <span className="flex items-center gap-1 text-[11px] text-blue-400">
             <Loader2 className="h-2.5 w-2.5 animate-spin" />
             running
           </span>
         )}
         {totalRuns > 0 && (
-          <span className="text-[10px] text-muted-foreground">
+          <span className="text-[11px] text-muted-foreground">
             {totalRuns} run{totalRuns !== 1 ? "s" : ""}
             {successCount > 0 && <span className="text-emerald-500 ml-1">{successCount} ok</span>}
             {failCount > 0 && <span className="text-destructive ml-1">{failCount} fail</span>}
+            {codeBugCount > 0 && <span className="text-blue-500 ml-1">{codeBugCount} fixed</span>}
+            {resourceCount > 0 && <span className="text-amber-500 ml-1">{resourceCount} setup</span>}
           </span>
         )}
       </button>
@@ -700,7 +704,7 @@ function ExperimentGroupCard({
           {/* Files */}
           {group.scripts.length > 0 && (
             <div>
-              <p className="text-[10px] text-muted-foreground/60 mb-1">Files</p>
+              <p className="text-[11px] text-muted-foreground/60 mb-1">Files</p>
               <div className="space-y-0.5">
               {group.scripts.map((step) => {
                 const out = parseOutput(step.output);
@@ -712,12 +716,12 @@ function ExperimentGroupCard({
                     <span className="text-[11px] font-mono truncate flex-1">{filename}</span>
                     {step.status === "COMPLETED" && <Check className="h-3 w-3 text-emerald-500 shrink-0" />}
                     {step.status === "FAILED" && <AlertCircle className="h-3 w-3 text-destructive shrink-0" />}
-                    {out?.bytes && <span className="text-[9px] text-muted-foreground/50">{(out.bytes / 1024).toFixed(1)}KB</span>}
+                    {out?.bytes && <span className="text-[11px] text-muted-foreground/50">{(out.bytes / 1024).toFixed(1)}KB</span>}
                     {canDeploy && (
                       <button
                         onClick={() => onDeploy(step.id)}
                         disabled={deploying}
-                        className="opacity-0 group-hover:opacity-100 inline-flex items-center gap-1 rounded text-[10px] text-muted-foreground hover:text-foreground px-1 py-0.5 hover:bg-muted transition-all"
+                        className="opacity-0 group-hover:opacity-100 inline-flex items-center gap-1 rounded text-[11px] text-muted-foreground hover:text-foreground px-1 py-0.5 hover:bg-muted transition-all"
                       >
                         <Server className="h-2.5 w-2.5" /> Deploy
                       </button>
@@ -731,7 +735,7 @@ function ExperimentGroupCard({
 
           {/* Runs */}
           {(runningJobs.length > 0 || completedJobs.length > 0 || localRuns.length > 0) && (
-            <p className="text-[10px] text-muted-foreground/60 mb-1">Runs</p>
+            <p className="text-[11px] text-muted-foreground/60 mb-1">Runs</p>
           )}
 
           {/* Running jobs */}
@@ -741,28 +745,28 @@ function ExperimentGroupCard({
                 <div className="flex items-center gap-2">
                   <Loader2 className="h-3 w-3 animate-spin text-blue-500" />
                   <span className="text-[11px] font-medium">{job.host.alias}</span>
-                  {job.host.gpuType && <span className="text-[10px] text-muted-foreground">{job.host.gpuType}</span>}
-                  <span className="text-[10px] text-blue-400">{job.status}</span>
+                  {job.host.gpuType && <span className="text-[11px] text-muted-foreground">{job.host.gpuType}</span>}
+                  <span className="text-[11px] text-blue-400">{job.status}</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <button
                     onClick={() => onRunLocally(job)}
                     disabled={runningLocally === job.id}
-                    className="inline-flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
+                    className="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
                   >
                     {runningLocally === job.id ? <Loader2 className="h-2.5 w-2.5 animate-spin" /> : <Monitor className="h-2.5 w-2.5" />}
                     Local
                   </button>
-                  <button onClick={() => onCancelJob(job.id)} className="text-[10px] text-muted-foreground hover:text-destructive transition-colors">
+                  <button onClick={() => onCancelJob(job.id)} className="text-[11px] text-muted-foreground hover:text-destructive transition-colors">
                     Cancel
                   </button>
                 </div>
               </div>
-              <pre className="mt-1 text-[9px] text-muted-foreground/60 font-mono bg-background/30 rounded px-1.5 py-0.5 whitespace-pre-wrap break-all">
+              <pre className="mt-1 text-[11px] text-muted-foreground/60 font-mono bg-background/30 rounded px-1.5 py-0.5 whitespace-pre-wrap break-all">
                 $ {job.command}
               </pre>
               {job.stdout && (
-                <pre className="mt-1 text-[10px] text-muted-foreground bg-background/50 rounded p-2 max-h-24 overflow-auto whitespace-pre-wrap font-mono">
+                <pre className="mt-1 text-[11px] text-muted-foreground bg-background/50 rounded p-2 max-h-24 overflow-auto whitespace-pre-wrap font-mono">
                   {job.stdout.split("\n").filter(Boolean).slice(-8).join("\n")}
                 </pre>
               )}
@@ -785,14 +789,27 @@ function ExperimentGroupCard({
                       >
                         {job.status === "COMPLETED"
                           ? <Check className="h-3 w-3 text-emerald-500 shrink-0" />
-                          : <AlertCircle className="h-3 w-3 text-destructive shrink-0" />
+                          : job.errorClass === "AUTO_FIXED" || job.errorClass === "CODE_ERROR"
+                            ? <AlertCircle className="h-3 w-3 text-blue-500 shrink-0" />
+                            : job.errorClass === "RESOURCE_ERROR"
+                              ? <AlertCircle className="h-3 w-3 text-amber-500 shrink-0" />
+                              : <AlertCircle className="h-3 w-3 text-destructive shrink-0" />
                         }
                         <span className="text-[11px] truncate">{job.host.alias}</span>
-                        <span className={`text-[10px] ${job.status === "COMPLETED" ? "text-emerald-500" : "text-destructive"}`}>
-                          {job.status.toLowerCase()}
+                        <span className={`text-[11px] ${
+                          job.status === "COMPLETED" ? "text-emerald-500"
+                            : job.errorClass === "AUTO_FIXED" ? "text-blue-500"
+                            : job.errorClass === "CODE_ERROR" ? "text-blue-400"
+                            : job.errorClass === "RESOURCE_ERROR" ? "text-amber-500"
+                            : "text-destructive"
+                        }`}>
+                          {job.errorClass === "AUTO_FIXED" ? "auto-fixed"
+                            : job.errorClass === "CODE_ERROR" ? "code bug"
+                            : job.errorClass === "RESOURCE_ERROR" ? "needs setup"
+                            : job.status.toLowerCase()}
                         </span>
                         {job.completedAt && (
-                          <span className="text-[9px] text-muted-foreground/50">
+                          <span className="text-[11px] text-muted-foreground/50">
                             {new Date(job.completedAt).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
                           </span>
                         )}
@@ -802,7 +819,7 @@ function ExperimentGroupCard({
                         <button
                           onClick={() => onRetryJob(job)}
                           disabled={deploying}
-                          className="inline-flex items-center gap-1 rounded text-[10px] text-muted-foreground hover:text-foreground px-1.5 py-0.5 hover:bg-muted transition-colors shrink-0"
+                          className="inline-flex items-center gap-1 rounded text-[11px] text-muted-foreground hover:text-foreground px-1.5 py-0.5 hover:bg-muted transition-colors shrink-0"
                         >
                           <RotateCcw className="h-2.5 w-2.5" /> Retry
                         </button>
@@ -810,26 +827,26 @@ function ExperimentGroupCard({
                     </div>
                     {isExpanded && (
                       <div className="ml-5 mb-1">
-                        <pre className="text-[9px] text-muted-foreground/60 font-mono bg-background/30 rounded px-1.5 py-0.5 mb-1 whitespace-pre-wrap break-all">
+                        <pre className="text-[11px] text-muted-foreground/60 font-mono bg-background/30 rounded px-1.5 py-0.5 mb-1 whitespace-pre-wrap break-all">
                           $ {job.command}
                         </pre>
                         {job.stdout && (
-                          <pre className="text-[10px] text-muted-foreground bg-muted/50 rounded p-2 max-h-48 overflow-auto whitespace-pre-wrap font-mono">
+                          <pre className="text-[11px] text-muted-foreground bg-muted/50 rounded p-2 max-h-48 overflow-auto whitespace-pre-wrap font-mono">
                             {job.stdout.split("\n").filter(Boolean).slice(-30).join("\n")}
                           </pre>
                         )}
                         {job.status !== "COMPLETED" && (
                           <div className="mt-1 space-y-1">
                             {job.exitCode != null && (
-                              <span className="text-[9px] text-destructive/60 font-mono">exit code: {job.exitCode}</span>
+                              <span className="text-[11px] text-destructive/60 font-mono">exit code: {job.exitCode}</span>
                             )}
                             {job.stderr && (
-                              <pre className="text-[10px] text-destructive/70 bg-destructive/5 rounded p-2 max-h-48 overflow-auto whitespace-pre-wrap font-mono">
+                              <pre className="text-[11px] text-destructive/70 bg-destructive/5 rounded p-2 max-h-48 overflow-auto whitespace-pre-wrap font-mono">
                                 {job.stderr.split("\n").filter(Boolean).slice(-30).join("\n")}
                               </pre>
                             )}
                             {!job.stderr && !job.stdout && (
-                              <p className="text-[10px] text-destructive/50 italic">No output captured — job may have failed during environment setup (venv/pip install).</p>
+                              <p className="text-[11px] text-destructive/50 italic">No output captured — job may have failed during environment setup (venv/pip install).</p>
                             )}
                           </div>
                         )}
@@ -845,8 +862,8 @@ function ExperimentGroupCard({
                     ? <Check className="h-3 w-3 text-emerald-500 shrink-0" />
                     : <AlertCircle className="h-3 w-3 text-destructive shrink-0" />
                   }
-                  <span className="text-[10px] text-muted-foreground">local</span>
-                  <span className={`text-[10px] ${step.status === "COMPLETED" ? "text-emerald-500" : "text-destructive"}`}>
+                  <span className="text-[11px] text-muted-foreground">local</span>
+                  <span className={`text-[11px] ${step.status === "COMPLETED" ? "text-emerald-500" : "text-destructive"}`}>
                     {step.status.toLowerCase()}
                   </span>
                 </div>
@@ -856,7 +873,7 @@ function ExperimentGroupCard({
 
           {/* No runs yet */}
           {totalRuns === 0 && group.scripts.length > 0 && (
-            <p className="text-[10px] text-muted-foreground/40 pl-5">No runs yet</p>
+            <p className="text-[11px] text-muted-foreground/40 pl-5">No runs yet</p>
           )}
         </div>
       )}

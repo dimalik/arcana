@@ -43,8 +43,9 @@ export async function GET(_request: NextRequest, { params }: Params) {
           orderBy: { createdAt: "asc" },
         },
         log: {
+          where: { type: { not: "agent_suggestion" } },
           orderBy: { createdAt: "desc" },
-          take: 50,
+          take: 100,
         },
         collection: {
           include: {
@@ -85,9 +86,10 @@ export async function GET(_request: NextRequest, { params }: Params) {
     const hypCount = project.hypotheses?.length || 0;
     const architectCount = await prisma.agentTask.count({ where: { projectId: id, role: "architect", status: "COMPLETED" } });
     const mechDesignCount = await prisma.researchLogEntry.count({ where: { projectId: id, type: "decision", content: { contains: "echanism" } } });
+    const hasMetricSchema = !!project.metricSchema;
     gates["experiment"] = {
-      met: hypCount > 0 && architectCount > 0 && mechDesignCount > 0,
-      progress: `${hypCount} hypotheses, ${architectCount} architect, ${mechDesignCount} mechanism design`,
+      met: hypCount > 0 && architectCount > 0 && mechDesignCount > 0 && hasMetricSchema,
+      progress: `${hypCount} hypotheses, ${architectCount} architect, ${mechDesignCount} mechanism, ${hasMetricSchema ? "metrics defined" : "no metrics"}`,
     };
 
     const completedJobs = await prisma.remoteJob.count({ where: { projectId: id, status: "COMPLETED" } });
@@ -134,7 +136,17 @@ export async function GET(_request: NextRequest, { params }: Params) {
       hypothesesById[h.id] = h.statement;
     }
 
-    return NextResponse.json({ ...project, benchmark, gates, experimentJobs, hypothesesById });
+    // Read research summary if it exists
+    let summary: string | null = null;
+    if (project.outputFolder) {
+      try {
+        const { readFile } = await import("fs/promises");
+        const path = await import("path");
+        summary = await readFile(path.join(project.outputFolder, "RESEARCH_SUMMARY.md"), "utf-8");
+      } catch { /* file doesn't exist yet */ }
+    }
+
+    return NextResponse.json({ ...project, benchmark, gates, experimentJobs, hypothesesById, summary });
   } catch (err) {
     console.error("[api/research/[id]] GET error:", err);
     return NextResponse.json({ error: "Failed to fetch project" }, { status: 500 });

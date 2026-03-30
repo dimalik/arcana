@@ -52,6 +52,7 @@ interface ContextSidebarProps {
   iteration: { number: number; goal: string; steps: { status: string }[] } | null;
   approaches?: ApproachData[];
   experimentResults?: ExperimentResultData[];
+  currentPhase?: string;
 }
 
 const STATUS_DOT: Record<string, string> = {
@@ -109,7 +110,17 @@ function isPreviewable(name: string): boolean {
   return ["py", "txt", "log", "md", "json", "csv", "html", "sh", "yaml", "yml", "toml", "cfg", "ini", "r"].includes(ext || "");
 }
 
-export function ContextSidebar({ project, papers, hypotheses, iteration, approaches, experimentResults }: ContextSidebarProps) {
+export function ContextSidebar({ project, papers, hypotheses, iteration, approaches, experimentResults, currentPhase }: ContextSidebarProps) {
+  const phase = currentPhase || "literature";
+
+  // Section visibility per phase
+  const showBrief = true; // always show
+  const showPapers = ["literature", "hypothesis"].includes(phase);
+  const showHypotheses = ["hypothesis", "experiment", "analysis", "reflection"].includes(phase);
+  const showApproaches = ["experiment", "analysis", "reflection"].includes(phase);
+  const showResults = ["analysis", "reflection"].includes(phase);
+  const showIteration = true; // always show at bottom
+
   const [briefExpanded, setBriefExpanded] = useState(false);
   const [papersExpanded, setPapersExpanded] = useState(false);
   const [memoriesExpanded, setMemoriesExpanded] = useState(false);
@@ -223,43 +234,50 @@ export function ContextSidebar({ project, papers, hypotheses, iteration, approac
     <div className="h-full flex flex-col">
       <div className="flex-1 overflow-auto px-3 py-2 space-y-3">
         {/* Brief */}
+        {showBrief && (
         <div>
           <button
             onClick={() => setBriefExpanded(!briefExpanded)}
-            className="flex items-center gap-1 text-[11px] font-medium text-muted-foreground hover:text-foreground w-full"
+            className="flex items-center justify-between w-full py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
           >
-            {briefExpanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
-            <FlaskConical className="h-3 w-3" />
-            Research Brief
+            <span className="flex items-center gap-1">
+              {briefExpanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+              <FlaskConical className="h-3 w-3" />
+              Research Brief
+            </span>
           </button>
           {briefExpanded && (
             <div className="mt-1 space-y-1 text-[11px] text-muted-foreground">
               <p className="font-medium text-foreground/80">{brief.question}</p>
               {project.methodology && (
-                <span className="inline-block rounded-full bg-muted px-1.5 py-0.5 text-[10px]">
+                <span className="inline-block rounded-full bg-muted px-1.5 py-0.5 text-[11px]">
                   {project.methodology}
                 </span>
               )}
               {brief.subQuestions?.length > 0 && (
                 <div className="space-y-0.5">
                   {brief.subQuestions.map((q: string, i: number) => (
-                    <p key={i} className="text-[10px]">{i + 1}. {q}</p>
+                    <p key={i} className="text-[11px]">{i + 1}. {q}</p>
                   ))}
                 </div>
               )}
             </div>
           )}
         </div>
+        )}
 
         {/* Papers */}
+        {showPapers && (
         <div>
           <button
             onClick={() => setPapersExpanded(!papersExpanded)}
-            className="flex items-center gap-1 text-[11px] font-medium text-muted-foreground hover:text-foreground w-full"
+            className="flex items-center justify-between w-full py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
           >
-            {papersExpanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
-            <BookOpen className="h-3 w-3" />
-            Papers ({papers.length})
+            <span className="flex items-center gap-1">
+              {papersExpanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+              <BookOpen className="h-3 w-3" />
+              Papers ({papers.length})
+            </span>
           </button>
           {papersExpanded && (
             <div className="mt-1 space-y-0.5">
@@ -267,40 +285,43 @@ export function ContextSidebar({ project, papers, hypotheses, iteration, approac
                 <Link
                   key={p.id}
                   href={`/papers/${p.id}`}
-                  className="flex items-start gap-1 text-[10px] text-muted-foreground hover:text-foreground transition-colors"
+                  className="flex items-start gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors"
                 >
                   <FileText className="h-3 w-3 mt-0.5 shrink-0" />
                   <span className="line-clamp-1">{p.title}</span>
                 </Link>
               ))}
               {papers.length > 15 && (
-                <p className="text-[10px] text-muted-foreground/50 pl-4">+{papers.length - 15} more</p>
+                <p className="text-[11px] text-muted-foreground/50 pl-4">+{papers.length - 15} more</p>
               )}
             </div>
           )}
         </div>
+        )}
 
         {/* Hypotheses */}
-        {hypotheses.length > 0 && (
+        {showHypotheses && hypotheses.length > 0 && (
           <div>
             <button
               onClick={() => setHypothesesExpanded(!hypothesesExpanded)}
-              className="flex items-center gap-1 text-[11px] font-medium text-muted-foreground hover:text-foreground w-full"
+              className="flex items-center justify-between w-full py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
             >
-              {hypothesesExpanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
-              <Lightbulb className="h-3 w-3" />
-              Hypotheses ({hypotheses.length})
+              <span className="flex items-center gap-1">
+                {hypothesesExpanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+                <Lightbulb className="h-3 w-3" />
+                Hypotheses ({hypotheses.length})
+              </span>
             </button>
             {hypothesesExpanded && (
               <div className="mt-1 space-y-0.5">
                 {hypotheses.slice(0, 8).map((h) => (
                   <div key={h.id} className="flex items-start gap-1.5">
-                    <div className={`h-1.5 w-1.5 rounded-full mt-1.5 shrink-0 ${STATUS_DOT[h.status] || "bg-muted"}`} />
-                    <p className="text-[10px] text-muted-foreground line-clamp-1">{h.statement}</p>
+                    <div className={`h-2 w-2 rounded-full mt-1.5 shrink-0 ${STATUS_DOT[h.status] || "bg-muted"}`} />
+                    <p className="text-[11px] text-muted-foreground line-clamp-1">{h.statement}</p>
                   </div>
                 ))}
                 {hypotheses.length > 8 && (
-                  <p className="text-[10px] text-muted-foreground/50 pl-4">+{hypotheses.length - 8} more</p>
+                  <p className="text-[11px] text-muted-foreground/50 pl-4">+{hypotheses.length - 8} more</p>
                 )}
               </div>
             )}
@@ -308,15 +329,17 @@ export function ContextSidebar({ project, papers, hypotheses, iteration, approac
         )}
 
         {/* Approaches */}
-        {approaches && approaches.length > 0 && (
+        {showApproaches && approaches && approaches.length > 0 && (
           <div>
             <button
               onClick={() => setApproachesExpanded(!approachesExpanded)}
-              className="flex items-center gap-1 text-[11px] font-medium text-muted-foreground hover:text-foreground w-full"
+              className="flex items-center justify-between w-full py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
             >
-              {approachesExpanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
-              <GitBranch className="h-3 w-3" />
-              Approaches ({approaches.length})
+              <span className="flex items-center gap-1">
+                {approachesExpanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+                <GitBranch className="h-3 w-3" />
+                Approaches ({approaches.length})
+              </span>
             </button>
             {approachesExpanded && (
               <div className="mt-1 space-y-0.5">
@@ -329,15 +352,17 @@ export function ContextSidebar({ project, papers, hypotheses, iteration, approac
         )}
 
         {/* Results Summary */}
-        {experimentResults && experimentResults.length > 0 && (
+        {showResults && experimentResults && experimentResults.length > 0 && (
           <div>
             <button
               onClick={() => setResultsExpanded(!resultsExpanded)}
-              className="flex items-center gap-1 text-[11px] font-medium text-muted-foreground hover:text-foreground w-full"
+              className="flex items-center justify-between w-full py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
             >
-              {resultsExpanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
-              <BarChart3 className="h-3 w-3" />
-              Results ({experimentResults.length})
+              <span className="flex items-center gap-1">
+                {resultsExpanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+                <BarChart3 className="h-3 w-3" />
+                Results ({experimentResults.length})
+              </span>
             </button>
             {resultsExpanded && (
               <ResultsSummary results={experimentResults} />
@@ -353,11 +378,13 @@ export function ContextSidebar({ project, papers, hypotheses, iteration, approac
           <div className="flex items-center w-full">
             <button
               onClick={() => setMemoriesExpanded(!memoriesExpanded)}
-              className="flex items-center gap-1 text-[11px] font-medium text-muted-foreground hover:text-foreground flex-1"
+              className="flex items-center justify-between w-full py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
             >
-              {memoriesExpanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
-              <Brain className="h-3 w-3" />
-              Process Memory {memories.length > 0 && `(${memories.length})`}
+              <span className="flex items-center gap-1">
+                {memoriesExpanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+                <Brain className="h-3 w-3" />
+                Process Memory {memories.length > 0 && `(${memories.length})`}
+              </span>
             </button>
           </div>
           {memoriesExpanded && (
@@ -375,17 +402,19 @@ export function ContextSidebar({ project, papers, hypotheses, iteration, approac
           <div className="flex items-center w-full">
             <button
               onClick={() => setFilesExpanded(!filesExpanded)}
-              className="flex items-center gap-1 text-[11px] font-medium text-muted-foreground hover:text-foreground flex-1"
+              className="flex items-center justify-between w-full py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
             >
-              {filesExpanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
-              <FolderOpen className="h-3 w-3" />
-              Files {totalFiles > 0 && `(${totalFiles})`}
+              <span className="flex items-center gap-1">
+                {filesExpanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+                <FolderOpen className="h-3 w-3" />
+                Files {totalFiles > 0 && `(${totalFiles})`}
+              </span>
             </button>
             {filesExpanded && (
               <button
                 onClick={loadFiles}
                 disabled={filesLoading}
-                className="text-[9px] text-muted-foreground/50 hover:text-muted-foreground flex items-center gap-0.5 transition-colors shrink-0"
+                className="text-[11px] text-muted-foreground/50 hover:text-muted-foreground flex items-center gap-0.5 transition-colors shrink-0"
               >
                 <RefreshCw className={`h-2.5 w-2.5 ${filesLoading ? "animate-spin" : ""}`} />
               </button>
@@ -394,7 +423,7 @@ export function ContextSidebar({ project, papers, hypotheses, iteration, approac
           {filesExpanded && (
             <div className="mt-1">
               {files.length === 0 && !filesLoading && (
-                <p className="text-[10px] text-muted-foreground/40 pl-4">No files yet</p>
+                <p className="text-[11px] text-muted-foreground/40 pl-4">No files yet</p>
               )}
               {files.length > 0 && (
                 <FileTree
@@ -409,7 +438,7 @@ export function ContextSidebar({ project, papers, hypotheses, iteration, approac
       </div>
 
       {/* Iteration — pinned to bottom */}
-      {iteration && (
+      {showIteration && iteration && (
         <div className="shrink-0 border-t border-border px-3 py-2">
           <div className="flex items-center gap-1 mb-1">
             <IterationCcw className="h-3 w-3 text-muted-foreground" />
@@ -417,7 +446,7 @@ export function ContextSidebar({ project, papers, hypotheses, iteration, approac
               Iteration #{iteration.number}
             </p>
           </div>
-          <p className="text-[10px] text-muted-foreground line-clamp-2">{iteration.goal}</p>
+          <p className="text-[11px] text-muted-foreground line-clamp-2">{iteration.goal}</p>
           {totalSteps > 0 && (
             <div className="mt-1.5 flex items-center gap-1.5">
               <div className="h-1 flex-1 rounded-full bg-muted overflow-hidden">
@@ -426,7 +455,7 @@ export function ContextSidebar({ project, papers, hypotheses, iteration, approac
                   style={{ width: `${(completedSteps / totalSteps) * 100}%` }}
                 />
               </div>
-              <span className="text-[9px] text-muted-foreground/50">
+              <span className="text-[11px] text-muted-foreground/50">
                 {completedSteps}/{totalSteps}
               </span>
             </div>
@@ -516,7 +545,7 @@ function FileTreeItem({
       <div>
         <button
           onClick={() => setExpanded(!expanded)}
-          className="flex items-center gap-1 py-0.5 text-[10px] text-muted-foreground hover:text-foreground w-full transition-colors"
+          className="flex items-center gap-1 py-0.5 text-[11px] text-muted-foreground hover:text-foreground w-full transition-colors"
         >
           {expanded ? <ChevronDown className="h-2.5 w-2.5" /> : <ChevronUp className="h-2.5 w-2.5 rotate-90" />}
           <FolderOpen className="h-3 w-3 text-amber-500/70" />
@@ -542,12 +571,12 @@ function FileTreeItem({
   return (
     <button
       onClick={handleClick}
-      className="group grid grid-cols-[auto_1fr_auto] items-center gap-x-1.5 py-0.5 text-[10px] text-muted-foreground hover:text-foreground transition-colors w-full text-left"
+      className="group grid grid-cols-[auto_1fr_auto] items-center gap-x-1.5 py-0.5 text-[11px] text-muted-foreground hover:text-foreground transition-colors w-full text-left"
       title={canPreview ? `Preview ${entry.name}` : `Download ${entry.name}`}
     >
       <span className="shrink-0">{fileIcon(entry.name)}</span>
       <span className="truncate min-w-0">{entry.name}</span>
-      <span className="text-[8px] text-muted-foreground/40 group-hover:text-muted-foreground/60 tabular-nums text-right w-[3.5rem]">{formatSize(entry.size)}</span>
+      <span className="text-[11px] text-muted-foreground/40 group-hover:text-muted-foreground/60 tabular-nums text-right w-[3.5rem]">{formatSize(entry.size)}</span>
     </button>
   );
 }
@@ -595,7 +624,7 @@ function MemoryItem({
         <select
           value={editCategory}
           onChange={(e) => setEditCategory(e.target.value)}
-          className="w-full h-5 rounded border border-border bg-background px-1 text-[10px] focus:outline-none focus:ring-1 focus:ring-ring"
+          className="w-full h-5 rounded border border-border bg-background px-1 text-[11px] focus:outline-none focus:ring-1 focus:ring-ring"
         >
           {MEMORY_CATEGORIES.map((cat) => (
             <option key={cat} value={cat}>{cat}</option>
@@ -604,28 +633,28 @@ function MemoryItem({
         <textarea
           value={editLesson}
           onChange={(e) => setEditLesson(e.target.value)}
-          className="w-full rounded border border-border bg-background px-1.5 py-1 text-[10px] focus:outline-none focus:ring-1 focus:ring-ring resize-none"
+          className="w-full rounded border border-border bg-background px-1.5 py-1 text-[11px] focus:outline-none focus:ring-1 focus:ring-ring resize-none"
           rows={3}
           placeholder="Lesson learned..."
         />
         <textarea
           value={editContext}
           onChange={(e) => setEditContext(e.target.value)}
-          className="w-full rounded border border-border bg-background px-1.5 py-1 text-[10px] text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring resize-none"
+          className="w-full rounded border border-border bg-background px-1.5 py-1 text-[11px] text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring resize-none"
           rows={2}
           placeholder="Context (optional) — when/why was this learned?"
         />
         <div className="flex items-center gap-1 justify-end">
           <button
             onClick={handleCancel}
-            className="px-1.5 py-0.5 text-[10px] text-muted-foreground hover:text-foreground transition-colors"
+            className="px-1.5 py-0.5 text-[11px] text-muted-foreground hover:text-foreground transition-colors"
           >
             Cancel
           </button>
           <button
             onClick={handleSave}
             disabled={saving || !editLesson.trim()}
-            className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] rounded bg-primary text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"
+            className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[11px] rounded bg-primary text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"
           >
             {saving ? <Loader2 className="h-2.5 w-2.5 animate-spin" /> : <CheckIcon className="h-2.5 w-2.5" />}
             Save
@@ -642,10 +671,10 @@ function MemoryItem({
         className="flex items-center gap-1 w-full text-left py-0.5"
       >
         <ChevronDown className={`h-2.5 w-2.5 text-muted-foreground/40 shrink-0 transition-transform ${expanded ? "" : "-rotate-90"}`} />
-        <span className="text-[9px] text-muted-foreground/50 bg-muted rounded px-1 shrink-0">
+        <span className="text-[11px] text-muted-foreground/50 bg-muted rounded px-1 shrink-0">
           {memory.category}
         </span>
-        <span className="text-[10px] text-muted-foreground truncate flex-1 min-w-0">{memory.lesson}</span>
+        <span className="text-[11px] text-muted-foreground truncate flex-1 min-w-0">{memory.lesson}</span>
         <span className="opacity-0 group-hover:opacity-100 flex items-center gap-0.5 shrink-0">
           <button
             onClick={(e) => { e.stopPropagation(); setExpanded(true); setEditing(true); }}
@@ -665,15 +694,15 @@ function MemoryItem({
       </button>
       {expanded && !editing && (
         <div className="pl-4 pb-1 space-y-0.5">
-          <p className="text-[10px] text-muted-foreground leading-relaxed">
+          <p className="text-[11px] text-muted-foreground leading-relaxed">
             {memory.lesson}
           </p>
           {memory.context && (
-            <p className="text-[9px] text-muted-foreground/50 italic">
+            <p className="text-[11px] text-muted-foreground/50 italic">
               {memory.context}
             </p>
           )}
-          <span className="text-[8px] text-muted-foreground/30">used {memory.usageCount}x</span>
+          <span className="text-[11px] text-muted-foreground/30">used {memory.usageCount}x</span>
         </div>
       )}
     </div>
@@ -703,7 +732,7 @@ function AddMemoryForm({ onAdd }: { onAdd: (category: string, lesson: string, co
     return (
       <button
         onClick={() => setOpen(true)}
-        className="flex items-center gap-1 text-[10px] text-muted-foreground/50 hover:text-muted-foreground transition-colors py-1"
+        className="flex items-center gap-1 text-[11px] text-muted-foreground/50 hover:text-muted-foreground transition-colors py-1"
       >
         <Plus className="h-2.5 w-2.5" />
         Add memory
@@ -716,7 +745,7 @@ function AddMemoryForm({ onAdd }: { onAdd: (category: string, lesson: string, co
       <select
         value={category}
         onChange={(e) => setCategory(e.target.value)}
-        className="w-full h-5 rounded border border-border bg-background px-1 text-[10px] focus:outline-none focus:ring-1 focus:ring-ring"
+        className="w-full h-5 rounded border border-border bg-background px-1 text-[11px] focus:outline-none focus:ring-1 focus:ring-ring"
       >
         {MEMORY_CATEGORIES.map((cat) => (
           <option key={cat} value={cat}>{cat}</option>
@@ -725,7 +754,7 @@ function AddMemoryForm({ onAdd }: { onAdd: (category: string, lesson: string, co
       <textarea
         value={lesson}
         onChange={(e) => setLesson(e.target.value)}
-        className="w-full rounded border border-border bg-background px-1.5 py-1 text-[10px] focus:outline-none focus:ring-1 focus:ring-ring resize-none"
+        className="w-full rounded border border-border bg-background px-1.5 py-1 text-[11px] focus:outline-none focus:ring-1 focus:ring-ring resize-none"
         rows={3}
         placeholder="Lesson to remember..."
         autoFocus
@@ -733,21 +762,21 @@ function AddMemoryForm({ onAdd }: { onAdd: (category: string, lesson: string, co
       <textarea
         value={context}
         onChange={(e) => setContext(e.target.value)}
-        className="w-full rounded border border-border bg-background px-1.5 py-1 text-[10px] text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring resize-none"
+        className="w-full rounded border border-border bg-background px-1.5 py-1 text-[11px] text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring resize-none"
         rows={2}
         placeholder="Context (optional) — when/why?"
       />
       <div className="flex items-center gap-1 justify-end">
         <button
           onClick={() => { setOpen(false); setLesson(""); setContext(""); }}
-          className="px-1.5 py-0.5 text-[10px] text-muted-foreground hover:text-foreground transition-colors"
+          className="px-1.5 py-0.5 text-[11px] text-muted-foreground hover:text-foreground transition-colors"
         >
           Cancel
         </button>
         <button
           onClick={handleSubmit}
           disabled={saving || !lesson.trim()}
-          className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] rounded bg-primary text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"
+          className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[11px] rounded bg-primary text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"
         >
           {saving ? <Loader2 className="h-2.5 w-2.5 animate-spin" /> : <Plus className="h-2.5 w-2.5" />}
           Add
@@ -808,7 +837,7 @@ function SubAgentSection({ projectId }: { projectId: string }) {
         <Users className="h-3 w-3" />
         Sub-Agents ({tasks.length})
         {running > 0 && (
-          <span className="ml-auto text-[10px] text-blue-500 flex items-center gap-1">
+          <span className="ml-auto text-[11px] text-blue-500 flex items-center gap-1">
             <Loader2 className="h-2.5 w-2.5 animate-spin" />
             {running} active
           </span>
@@ -818,18 +847,18 @@ function SubAgentSection({ projectId }: { projectId: string }) {
         <div className="mt-1 space-y-0.5">
           {tasks.slice(0, 10).map((t) => (
             <div key={t.id} className="flex items-start gap-1.5">
-              <div className={`h-1.5 w-1.5 rounded-full mt-1.5 shrink-0 ${TASK_STATUS_DOT[t.status] || "bg-muted"}`} />
+              <div className={`h-2 w-2 rounded-full mt-1.5 shrink-0 ${TASK_STATUS_DOT[t.status] || "bg-muted"}`} />
               <div className="min-w-0 flex-1">
-                <p className="text-[10px] text-muted-foreground line-clamp-1">
+                <p className="text-[11px] text-muted-foreground line-clamp-1">
                   <span className="text-foreground/60">[{t.role}]</span> {t.goal}
                 </p>
                 {t.status === "COMPLETED" && t.completedAt && (
-                  <p className="text-[9px] text-muted-foreground/50">
+                  <p className="text-[11px] text-muted-foreground/50">
                     done {new Date(t.completedAt).toLocaleTimeString()}
                   </p>
                 )}
                 {t.status === "FAILED" && t.error && (
-                  <p className="text-[9px] text-red-400 line-clamp-2">
+                  <p className="text-[11px] text-red-400 line-clamp-2">
                     {t.error}
                   </p>
                 )}
@@ -837,9 +866,9 @@ function SubAgentSection({ projectId }: { projectId: string }) {
             </div>
           ))}
           {tasks.length > 10 && (
-            <p className="text-[10px] text-muted-foreground/50 pl-4">+{tasks.length - 10} more</p>
+            <p className="text-[11px] text-muted-foreground/50 pl-4">+{tasks.length - 10} more</p>
           )}
-          <p className="text-[10px] text-muted-foreground/50 pl-4">
+          <p className="text-[11px] text-muted-foreground/50 pl-4">
             {completed} completed{failed > 0 ? `, ${failed} failed` : ""}{running > 0 ? `, ${running} active` : ""}
           </p>
         </div>
@@ -862,12 +891,12 @@ function ApproachItem({ approach }: { approach: ApproachData }) {
   return (
     <div>
       <div className="flex items-start gap-1.5">
-        <div className={`h-1.5 w-1.5 rounded-full mt-1.5 shrink-0 ${APPROACH_STATUS_DOT[approach.status] || "bg-muted"}`} />
+        <div className={`h-2 w-2 rounded-full mt-1.5 shrink-0 ${APPROACH_STATUS_DOT[approach.status] || "bg-muted"}`} />
         <div className="min-w-0 flex-1">
-          <p className="text-[10px] text-muted-foreground line-clamp-1">
+          <p className="text-[11px] text-muted-foreground line-clamp-1">
             {approach.name}
             {resultCount > 0 && (
-              <span className="text-[8px] text-muted-foreground/50 ml-1">
+              <span className="text-[11px] text-muted-foreground/50 ml-1">
                 {resultCount} exp
               </span>
             )}
@@ -878,11 +907,11 @@ function ApproachItem({ approach }: { approach: ApproachData }) {
         <div className="ml-3 border-l border-border/50 pl-1.5 space-y-0.5">
           {approach.children.map((child) => (
             <div key={child.id} className="flex items-start gap-1.5">
-              <div className={`h-1.5 w-1.5 rounded-full mt-1.5 shrink-0 ${APPROACH_STATUS_DOT[child.status] || "bg-muted"}`} />
-              <p className="text-[10px] text-muted-foreground line-clamp-1">
+              <div className={`h-2 w-2 rounded-full mt-1.5 shrink-0 ${APPROACH_STATUS_DOT[child.status] || "bg-muted"}`} />
+              <p className="text-[11px] text-muted-foreground line-clamp-1">
                 {child.name}
                 {child.results.length > 0 && (
-                  <span className="text-[8px] text-muted-foreground/50 ml-1">
+                  <span className="text-[11px] text-muted-foreground/50 ml-1">
                     {child.results.length} exp
                   </span>
                 )}
@@ -920,7 +949,7 @@ function ResultsSummary({ results }: { results: ExperimentResultData[] }) {
   }
 
   return (
-    <div className="mt-1 space-y-0.5 text-[10px] text-muted-foreground">
+    <div className="mt-1 space-y-0.5 text-[11px] text-muted-foreground">
       <p>
         {completed} completed{failed > 0 ? `, ${failed} failed` : ""}
       </p>

@@ -35,7 +35,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       ) : (
         <div className="flex h-screen flex-col overflow-hidden">
           <CleanTopbar />
-          <main className="flex-1 min-h-0 overflow-y-auto pl-8 pr-10 py-5">
+          <main className="flex-1 min-h-0 overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden pl-8 pr-10 py-5">
             {children}
           </main>
         </div>

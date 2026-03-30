@@ -54,6 +54,25 @@ export async function validateExperiment(
   const lines = code.split("\n");
   const violations: PreflightViolation[] = [];
 
+  // ── Python syntax check — catches SyntaxError before burning GPU time ──
+  try {
+    const { execFile } = await import("child_process");
+    const { promisify } = await import("util");
+    const execFileAsync = promisify(execFile);
+    await execFileAsync("python3", ["-c", `import ast; ast.parse(open(${JSON.stringify(scriptPath)}).read())`], { timeout: 5000 });
+  } catch (syntaxErr) {
+    const msg = syntaxErr instanceof Error ? (syntaxErr as { stderr?: string }).stderr || syntaxErr.message : "Unknown syntax error";
+    violations.push({
+      severity: "error",
+      code: "SYNTAX_ERROR",
+      message: `Python syntax error: ${msg.split("\n").filter(Boolean).slice(-2).join(" ")}`,
+      line: 1,
+      fix: "Fix the syntax error in the script before submitting.",
+    });
+    // Return immediately — no point checking other things if syntax is broken
+    return { ok: false, violations, summary: violations.map(v => `[${v.code}] ${v.message}\n  Fix: ${v.fix}`).join("\n") };
+  }
+
   // ── Resolve top-level constants to their numeric values ────────
   const constants = resolveConstants(lines);
 

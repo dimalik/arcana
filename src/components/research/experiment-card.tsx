@@ -32,6 +32,7 @@ interface ExperimentCardProps {
     startedAt: string | null;
     completedAt: string | null;
     stderr: string | null;
+    errorClass: string | null;
     host: { alias: string; gpuType: string | null };
   };
   hypothesisStatement?: string;
@@ -107,11 +108,26 @@ export function ExperimentCard({
   const [lightboxImage, setLightboxImage] = useState<string | null>(null);
 
   const verdictKey = (result.verdict || "").toLowerCase();
-  const verdictStyle = VERDICT_STYLES[verdictKey] || {
-    border: "border-l-muted-foreground/30",
-    badge: "bg-muted text-muted-foreground",
-    label: result.verdict?.toUpperCase() || "N/A",
-  };
+  const errorClass = job?.errorClass || null;
+
+  // Override verdict styling based on error classification
+  // Code errors and auto-fixes show as info (blue), not failure (red)
+  // Resource errors show as warning (amber), not failure
+  // Only RESEARCH_FAILURE stays red
+  let verdictStyle: { border: string; badge: string; label: string };
+  if (errorClass === "AUTO_FIXED") {
+    verdictStyle = { border: "border-l-blue-500", badge: "bg-blue-500/10 text-blue-600", label: "AUTO-FIXED" };
+  } else if (errorClass === "CODE_ERROR") {
+    verdictStyle = { border: "border-l-blue-400", badge: "bg-blue-400/10 text-blue-500", label: "CODE BUG" };
+  } else if (errorClass === "RESOURCE_ERROR") {
+    verdictStyle = { border: "border-l-amber-500", badge: "bg-amber-500/10 text-amber-600", label: "NEEDS SETUP" };
+  } else {
+    verdictStyle = VERDICT_STYLES[verdictKey] || {
+      border: "border-l-muted-foreground/30",
+      badge: "bg-muted text-muted-foreground",
+      label: result.verdict?.toUpperCase() || "N/A",
+    };
+  }
 
   const metrics = parseJson(result.metrics) as Record<string, number> | null;
   const comparison = parseJson(result.comparison) as Record<string, number> | null;
@@ -119,7 +135,8 @@ export function ExperimentCard({
   const comparisonEntries = comparison ? Object.entries(comparison) : [];
 
   const duration = job ? formatDuration(job.startedAt, job.completedAt) : null;
-  const isError = verdictKey === "error";
+  const isError = verdictKey === "error" && errorClass === "RESEARCH_FAILURE";
+  const isCodeBug = errorClass === "CODE_ERROR" || errorClass === "AUTO_FIXED";
 
   const imgUrl = (filePath: string) =>
     `/api/research/${projectId}/files/download?path=${encodeURIComponent(filePath)}`;
@@ -131,7 +148,7 @@ export function ExperimentCard({
     <>
       <div
         className={`rounded-md border border-border/60 border-l-[3px] ${verdictStyle.border} ${
-          isError ? "bg-red-500/[0.02]" : ""
+          isError ? "bg-red-500/[0.02]" : isCodeBug ? "bg-blue-500/[0.02]" : ""
         } overflow-hidden`}
       >
         {/* Collapsed header - always visible */}
@@ -148,19 +165,19 @@ export function ExperimentCard({
             {result.scriptName}
           </span>
           {firstMetric && !expanded && (
-            <span className="text-[10px] font-mono text-muted-foreground">
+            <span className="text-[11px] font-mono text-muted-foreground">
               {firstMetric[0]}: {typeof firstMetric[1] === "number" ? firstMetric[1].toFixed(3) : String(firstMetric[1])}
             </span>
           )}
           {duration && !expanded && (
-            <span className="text-[9px] text-muted-foreground/50 flex items-center gap-0.5">
+            <span className="text-[11px] text-muted-foreground/50 flex items-center gap-0.5">
               <Clock className="h-2.5 w-2.5" />
               {duration}
             </span>
           )}
           <span className="flex-1" />
           <span
-            className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium shrink-0 ${verdictStyle.badge}`}
+            className={`text-[11px] px-1.5 py-0.5 rounded-full font-medium shrink-0 ${verdictStyle.badge}`}
           >
             {verdictStyle.label}
           </span>
@@ -186,7 +203,7 @@ export function ExperimentCard({
                 <span className="text-muted-foreground/60">Approach:</span>{" "}
                 {result.branch.name}
                 <span
-                  className={`text-[9px] px-1 py-0 rounded-full ${
+                  className={`text-[11px] px-1 py-0 rounded-full ${
                     APPROACH_STATUS_BADGE[result.branch.status] ||
                     "bg-muted text-muted-foreground"
                   }`}
@@ -204,10 +221,10 @@ export function ExperimentCard({
                     key={key}
                     className="inline-flex items-center gap-1 rounded-md bg-muted/50 border border-border/40 px-2 py-0.5"
                   >
-                    <span className="text-[10px] text-muted-foreground">
+                    <span className="text-[11px] text-muted-foreground">
                       {key}:
                     </span>
-                    <span className="text-[10px] font-mono font-medium">
+                    <span className="text-[11px] font-mono font-medium">
                       {typeof value === "number" ? value.toFixed(3) : String(value)}
                     </span>
                   </span>
@@ -218,7 +235,7 @@ export function ExperimentCard({
             {/* Comparison deltas */}
             {comparisonEntries.length > 0 && (
               <div className="flex flex-wrap gap-2">
-                <span className="text-[10px] text-muted-foreground/60">
+                <span className="text-[11px] text-muted-foreground/60">
                   vs baseline:
                 </span>
                 {comparisonEntries.map(([key, delta]) => {
@@ -228,7 +245,7 @@ export function ExperimentCard({
                   return (
                     <span
                       key={key}
-                      className={`text-[10px] font-mono ${
+                      className={`text-[11px] font-mono ${
                         isPositive
                           ? "text-emerald-600"
                           : isNegative
@@ -262,7 +279,7 @@ export function ExperimentCard({
 
             {/* Stderr for errors */}
             {isError && job?.stderr && (
-              <pre className="text-[10px] text-red-600/70 bg-red-500/5 rounded p-2 max-h-32 overflow-auto whitespace-pre-wrap font-mono">
+              <pre className="text-[11px] text-red-600/70 bg-red-500/5 rounded p-2 max-h-32 overflow-auto whitespace-pre-wrap font-mono">
                 {job.stderr.split("\n").filter(Boolean).slice(-15).join("\n")}
               </pre>
             )}
@@ -289,7 +306,7 @@ export function ExperimentCard({
                             className="h-[48px] object-contain rounded"
                             loading="lazy"
                           />
-                          <span className="text-[9px] text-muted-foreground/60 max-w-[80px] truncate">
+                          <span className="text-[11px] text-muted-foreground/60 max-w-[80px] truncate">
                             {artifact.name}
                           </span>
                         </button>
@@ -305,7 +322,7 @@ export function ExperimentCard({
                           ) : (
                             <Image className="h-3 w-3 text-muted-foreground/50" />
                           )}
-                          <span className="text-[9px] text-muted-foreground/60 max-w-[100px] truncate">
+                          <span className="text-[11px] text-muted-foreground/60 max-w-[100px] truncate">
                             {artifact.name}
                           </span>
                         </a>
@@ -318,7 +335,7 @@ export function ExperimentCard({
 
             {/* Duration + host */}
             {job && (
-              <div className="flex items-center gap-2 text-[9px] text-muted-foreground/50">
+              <div className="flex items-center gap-2 text-[11px] text-muted-foreground/50">
                 {duration && (
                   <span className="flex items-center gap-0.5">
                     <Clock className="h-2.5 w-2.5" />
