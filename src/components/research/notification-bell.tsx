@@ -321,162 +321,74 @@ function NotificationItem({
   const isResponding = respondingTo === item.id;
   const isAlternative = alternativeFor === item.id;
 
+  // Shared button style
+  const btnPrimary = "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-foreground text-background hover:bg-foreground/90 transition-colors disabled:opacity-50";
+  const btnSecondary = "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs text-muted-foreground border border-border/50 hover:bg-muted/50 transition-colors disabled:opacity-50";
+
   const renderActions = () => {
     switch (item.category) {
       case "package":
         return (
-          <div className="flex flex-col gap-1.5 mt-2">
-            <div className="flex gap-1.5 flex-wrap">
-              <button
-                disabled={isResolving}
-                onClick={() =>
-                  onResolve(item.id, "User confirmed package installed")
-                }
-                className="inline-flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/20 transition-colors disabled:opacity-50"
-              >
-                <CheckCircle className="h-3 w-3" />
-                I installed it
-              </button>
-              <button
-                disabled={isResolving}
-                onClick={() => {
-                  if (isAlternative) {
-                    onSetAlternativeFor(null);
-                    onSetAlternativeText("");
-                  } else {
-                    onSetAlternativeFor(item.id);
-                  }
-                }}
-                className="inline-flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium bg-muted text-muted-foreground hover:bg-muted/80 transition-colors disabled:opacity-50"
-              >
-                <ArrowRightLeft className="h-3 w-3" />
-                Use alternative
-              </button>
-            </div>
+          <>
+            <button disabled={isResolving} onClick={() => onResolve(item.id, "User confirmed package installed")} className={btnPrimary}>
+              Installed
+            </button>
+            <button disabled={isResolving} onClick={() => isAlternative ? (onSetAlternativeFor(null), onSetAlternativeText("")) : onSetAlternativeFor(item.id)} className={btnSecondary}>
+              Use alternative
+            </button>
             {isAlternative && (
-              <div className="flex gap-1.5 items-end">
-                <input
-                  type="text"
-                  value={alternativeText}
-                  onChange={(e) => onSetAlternativeText(e.target.value)}
-                  onKeyDown={(e) =>
-                    e.key === "Enter" && onSendAlternative(item)
-                  }
-                  placeholder="Package name..."
-                  className="flex-1 text-[11px] px-2 py-1.5 rounded border border-border/50 bg-background focus:outline-none focus:ring-1 focus:ring-ring placeholder:text-muted-foreground/40"
-                  autoFocus
-                />
-                <button
-                  disabled={!alternativeText.trim() || isResolving}
-                  onClick={() => onSendAlternative(item)}
-                  className="inline-flex items-center gap-1 px-2 py-1.5 rounded text-[10px] font-medium bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/20 transition-colors disabled:opacity-50"
-                >
+              <div className="w-full flex gap-2 mt-1">
+                <input type="text" value={alternativeText} onChange={(e) => onSetAlternativeText(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && onSendAlternative(item)}
+                  placeholder="Package name..." autoFocus
+                  className="flex-1 text-xs px-3 py-1.5 rounded-md border border-border/50 bg-background focus:outline-none focus:ring-1 focus:ring-ring" />
+                <button disabled={!alternativeText.trim() || isResolving} onClick={() => onSendAlternative(item)} className={btnPrimary}>
                   <Send className="h-3 w-3" />
                 </button>
               </div>
             )}
-          </div>
+          </>
         );
 
       case "api_key":
         return (
-          <div className="flex gap-1.5 flex-wrap mt-2">
-            <Link
-              href="/settings"
-              className="inline-flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium bg-blue-500/10 text-blue-600 dark:text-blue-400 hover:bg-blue-500/20 transition-colors"
-            >
-              <ExternalLink className="h-3 w-3" />
-              Configure in Settings
+          <>
+            <Link href="/settings" className={btnSecondary}>
+              <ExternalLink className="h-3 w-3" /> Settings
             </Link>
-            <button
-              disabled={isResolving}
-              onClick={() =>
-                onResolve(item.id, "User confirmed API key configured")
-              }
-              className="inline-flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/20 transition-colors disabled:opacity-50"
-            >
-              <CheckCircle className="h-3 w-3" />
-              I set it up
+            <button disabled={isResolving} onClick={() => onResolve(item.id, "User confirmed API key configured")} className={btnPrimary}>
+              Done
             </button>
-          </div>
+          </>
         );
 
       case "env_issue":
         return (
-          <div className="flex flex-col gap-1.5 mt-2">
-            <div className="flex gap-1.5 flex-wrap">
-              <button
-                disabled={isResolving}
-                onClick={() =>
-                  onResolve(
-                    item.id,
-                    "User confirmed environment issue fixed"
-                  )
-                }
-                className="inline-flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/20 transition-colors disabled:opacity-50"
-              >
-                <Wrench className="h-3 w-3" />
-                Fixed
-              </button>
-              <button
-                disabled={isResolving}
-                onClick={() => {
-                  if (isResponding) {
-                    onSetRespondingTo(null);
-                    onSetResponseText("");
-                  } else {
-                    onSetRespondingTo(item.id);
-                  }
-                }}
-                className="inline-flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium bg-muted text-muted-foreground hover:bg-muted/80 transition-colors disabled:opacity-50"
-              >
-                <MessageSquare className="h-3 w-3" />
-                Respond
-              </button>
-            </div>
-            {isResponding && renderResponseInput()}
-          </div>
+          <>
+            <button disabled={isResolving} onClick={() => onResolve(item.id, "User confirmed environment issue fixed")} className={btnPrimary}>
+              Fixed
+            </button>
+            <button disabled={isResolving} onClick={() => isResponding ? (onSetRespondingTo(null), onSetResponseText("")) : onSetRespondingTo(item.id)} className={btnSecondary}>
+              Respond
+            </button>
+            {isResponding && <div className="w-full mt-1">{renderResponseInput()}</div>}
+          </>
         );
 
       case "user_input":
-        return (
-          <div className="flex flex-col gap-1.5 mt-2">
-            {renderResponseInput(true)}
-          </div>
-        );
+        return renderResponseInput(true);
 
       default:
         return (
-          <div className="flex flex-col gap-1.5 mt-2">
-            <div className="flex gap-1.5 flex-wrap">
-              <button
-                disabled={isResolving}
-                onClick={() =>
-                  onResolve(item.id, "User resolved this issue")
-                }
-                className="inline-flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/20 transition-colors disabled:opacity-50"
-              >
-                <CheckCircle className="h-3 w-3" />
-                Resolved
-              </button>
-              <button
-                disabled={isResolving}
-                onClick={() => {
-                  if (isResponding) {
-                    onSetRespondingTo(null);
-                    onSetResponseText("");
-                  } else {
-                    onSetRespondingTo(item.id);
-                  }
-                }}
-                className="inline-flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium bg-muted text-muted-foreground hover:bg-muted/80 transition-colors disabled:opacity-50"
-              >
-                <MessageSquare className="h-3 w-3" />
-                Respond
-              </button>
-            </div>
-            {isResponding && renderResponseInput()}
-          </div>
+          <>
+            <button disabled={isResolving} onClick={() => onResolve(item.id, "User resolved this issue")} className={btnPrimary}>
+              Resolved
+            </button>
+            <button disabled={isResolving} onClick={() => isResponding ? (onSetRespondingTo(null), onSetResponseText("")) : onSetRespondingTo(item.id)} className={btnSecondary}>
+              Respond
+            </button>
+            {isResponding && <div className="w-full mt-1">{renderResponseInput()}</div>}
+          </>
         );
     }
   };
@@ -510,21 +422,12 @@ function NotificationItem({
           }}
           placeholder="Your response will be visible to the research agent..."
           rows={prominent ? 3 : 2}
-          className={`w-full text-[11px] px-2 py-1.5 rounded border bg-background focus:outline-none focus:ring-1 focus:ring-ring placeholder:text-muted-foreground/40 resize-y min-h-[48px] ${
-            prominent
-              ? "border-purple-500/30 focus:ring-purple-500/40"
-              : "border-border/50"
-          }`}
+          className="w-full text-xs px-3 py-2 rounded-md border border-border/50 bg-background focus:outline-none focus:ring-1 focus:ring-ring placeholder:text-muted-foreground/40 resize-y min-h-[48px]"
           autoFocus={!prominent}
         />
         <div className="flex justify-end">
-          <button
-            disabled={!text.trim() || resolving.has(item.id)}
-            onClick={() => onSendResponse(item)}
-            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded text-[10px] font-medium bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/20 transition-colors disabled:opacity-50"
-          >
-            <Send className="h-3 w-3" />
-            Send Response
+          <button disabled={!text.trim() || resolving.has(item.id)} onClick={() => onSendResponse(item)} className={btnPrimary}>
+            Send
           </button>
         </div>
       </div>
@@ -532,49 +435,45 @@ function NotificationItem({
   };
 
   return (
-    <div className="px-4 py-3">
-      <div className="flex items-start gap-2">
-        <Icon className={`h-3.5 w-3.5 shrink-0 mt-0.5 ${meta.color}`} />
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2">
-            <span className="text-[11px] font-semibold leading-tight">
-              {item.title}
-            </span>
-            <span
-              className={`text-[9px] px-1.5 py-0.5 rounded-full font-medium ${meta.bgColor}`}
-            >
-              {meta.label}
-            </span>
-            <span className="text-[9px] text-muted-foreground/40 ml-auto shrink-0">
-              {timeAgo(item.createdAt)}
-            </span>
-          </div>
-          <p className="text-[11px] text-muted-foreground/60 mt-0.5 leading-relaxed line-clamp-2">
-            {item.detail}
-          </p>
-          {item.suggestion && (
-            <p className="text-[11px] text-muted-foreground/80 mt-0.5 italic border-l-2 border-muted-foreground/20 pl-2 line-clamp-1">
-              {item.suggestion}
-            </p>
-          )}
-          {renderActions()}
-          {onOpenInChat && (
-            <button
-              onClick={() => onOpenInChat(`The agent needs help with: ${item.title}\n\nDetails: ${item.detail}\n${item.suggestion ? `Suggestion: ${item.suggestion}` : ""}\n\nHow should I handle this?`)}
-              className="inline-flex items-center gap-1 text-[11px] text-primary hover:underline mt-1"
-            >
-              <MessageSquare className="h-3 w-3" />
-              Open in Chat
-            </button>
-          )}
+    <div className="px-4 py-4">
+      {/* Title row */}
+      <div className="flex items-start justify-between gap-3 mb-2">
+        <div className="flex items-center gap-2 min-w-0">
+          <span className={`inline-flex h-5 w-5 items-center justify-center rounded-full shrink-0 ${meta.bgColor}`}>
+            <Icon className="h-3 w-3" />
+          </span>
+          <span className="text-sm font-medium leading-tight truncate">{item.title}</span>
         </div>
-        <button
-          onClick={() => onDismiss(item.id)}
-          className="h-5 w-5 inline-flex items-center justify-center rounded text-muted-foreground/30 hover:text-muted-foreground hover:bg-muted/50 transition-colors shrink-0"
-          title="Dismiss"
-        >
-          <X className="h-3 w-3" />
-        </button>
+        <div className="flex items-center gap-1.5 shrink-0">
+          <span className="text-[11px] text-muted-foreground/40">{timeAgo(item.createdAt)}</span>
+          <button onClick={() => onDismiss(item.id)} className="h-6 w-6 inline-flex items-center justify-center rounded-md text-muted-foreground/30 hover:text-muted-foreground hover:bg-muted/50 transition-colors" title="Dismiss">
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      </div>
+
+      {/* Detail */}
+      <p className="text-xs text-muted-foreground/70 leading-relaxed mb-3">{item.detail}</p>
+
+      {/* Suggestion */}
+      {item.suggestion && (
+        <p className="text-xs text-muted-foreground/50 bg-muted/30 rounded-md px-3 py-2 mb-3 leading-relaxed">
+          {item.suggestion}
+        </p>
+      )}
+
+      {/* Actions — clean row */}
+      <div className="flex items-center gap-2 flex-wrap">
+        {renderActions()}
+        {onOpenInChat && (
+          <button
+            onClick={() => onOpenInChat(`The agent needs help with: ${item.title}\n\nDetails: ${item.detail}\n${item.suggestion ? `Suggestion: ${item.suggestion}` : ""}\n\nHow should I handle this?`)}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
+          >
+            <MessageSquare className="h-3 w-3" />
+            Chat
+          </button>
+        )}
       </div>
     </div>
   );
