@@ -160,12 +160,30 @@ export function ResearchChat({ projectId, projectTitle, externalOpen, onExternal
             </div>
           </div>
         ) : (
-          <div className="flex flex-col h-full relative">
-            <button onClick={() => setShowList(true)}
-              className="absolute top-2 right-2 z-10 h-7 w-7 flex items-center justify-center rounded-md text-muted-foreground/40 hover:text-foreground hover:bg-muted/50 transition-colors"
-              title="Chat history">
-              <History className="h-3.5 w-3.5" />
-            </button>
+          <div className="flex flex-col h-full">
+            {/* Top bar: back to list + new conversation + history */}
+            <div className="flex items-center justify-between px-3 py-1.5 border-b border-border/30 shrink-0">
+              <button onClick={() => setShowList(true)}
+                className="h-6 w-6 flex items-center justify-center rounded-md text-muted-foreground/40 hover:text-foreground hover:bg-muted/50 transition-colors"
+                title="Chat history">
+                <ChevronLeft className="h-3.5 w-3.5" />
+              </button>
+              <span className="text-[11px] text-muted-foreground/40 truncate px-2">
+                {activeThread?.title !== "New chat" ? activeThread?.title : ""}
+              </span>
+              <div className="flex items-center gap-0.5">
+                <button onClick={() => { createThread(); setShowList(false); }}
+                  className="h-6 w-6 flex items-center justify-center rounded-md text-muted-foreground/40 hover:text-foreground hover:bg-muted/50 transition-colors"
+                  title="New conversation">
+                  <Plus className="h-3.5 w-3.5" />
+                </button>
+                <button onClick={() => setShowList(true)}
+                  className="h-6 w-6 flex items-center justify-center rounded-md text-muted-foreground/40 hover:text-foreground hover:bg-muted/50 transition-colors"
+                  title="Chat history">
+                  <History className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            </div>
             {activeThread ? (
               <div className="flex-1 min-h-0 flex flex-col [&>*:first-child]:flex-1 [&>*:first-child]:max-h-none [&>*:first-child]:min-h-0">
               <ChatView
