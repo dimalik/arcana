@@ -204,35 +204,35 @@ export async function POST(request: NextRequest, { params }: Params) {
     // Detect resource routing directives and create rules automatically
     if (lastUserMsg) {
       const msg = lastUserMsg.content.toLowerCase();
-      const hasRunDirective = msg.includes("run") && (msg.includes("local") || msg.includes("remote"));
-      const hasProxyDirective = msg.includes("proxy") || msg.includes("api key") || msg.includes("api_key");
+      const mentionsLocal = msg.includes("local") || msg.includes("locally");
+      const mentionsRemote = msg.includes("remote") || msg.includes("gpu");
+      const mentionsProxy = msg.includes("proxy") || msg.includes("api key") || msg.includes("api_key");
+      const mentionsRun = msg.includes("run") || msg.includes("execute") || msg.includes("should");
 
-      if (hasRunDirective || hasProxyDirective) {
+      if ((mentionsRun || mentionsProxy) && (mentionsLocal || mentionsRemote)) {
         const { upsertResourceRule } = await import("@/lib/research/resource-router");
+        const targetRuntime = mentionsLocal ? "local" : "remote";
 
-        // Detect pattern: "run analysis locally", "analysis scripts should run local"
-        const analysisLocal = msg.includes("analysis") && msg.includes("local");
-        const allLocal = (msg.includes("everything") || msg.includes("all scripts")) && msg.includes("local");
-        const proxyLocal = hasProxyDirective && msg.includes("local");
+        // Check if the user mentions a specific script type
+        const mentionsAnalysis = msg.includes("analysis");
+        const mentionsExp = msg.includes("exp_") || msg.includes("experiment");
+        const mentionsPoc = msg.includes("poc");
 
-        if (analysisLocal) {
-          await upsertResourceRule(id, "analysis_*", "local", "User directive: analysis scripts run locally");
-        }
-        if (allLocal) {
-          await upsertResourceRule(id, "*", "local", "User directive: all scripts run locally", undefined, -1);
-        }
-        if (proxyLocal && !analysisLocal) {
-          // Scripts that need a proxy should run locally
-          await upsertResourceRule(id, "analysis_*", "local", "User directive: needs local proxy", ["proxy"]);
-        }
-
-        // Detect specific script patterns
+        // Check for specific script filename
         const scriptMatch = msg.match(/\b((?:exp|poc|analysis|sweep)_\d{3}\S*\.py)\b/);
+
         if (scriptMatch) {
-          const runtime = msg.includes("local") ? "local" : msg.includes("remote") ? "remote" : null;
-          if (runtime) {
-            await upsertResourceRule(id, scriptMatch[1], runtime, `User directive from chat`, undefined, 10);
-          }
+          // Most specific: exact script
+          await upsertResourceRule(id, scriptMatch[1], targetRuntime, "User directive from chat", undefined, 10);
+        } else if (mentionsAnalysis && !mentionsExp && !mentionsPoc) {
+          await upsertResourceRule(id, "analysis_*", targetRuntime, `User directive: analysis scripts ${targetRuntime}`);
+        } else if (mentionsExp && !mentionsAnalysis && !mentionsPoc) {
+          await upsertResourceRule(id, "exp_*", targetRuntime, `User directive: experiments ${targetRuntime}`);
+        } else if (mentionsPoc && !mentionsAnalysis && !mentionsExp) {
+          await upsertResourceRule(id, "poc_*", targetRuntime, `User directive: PoC scripts ${targetRuntime}`);
+        } else {
+          // No specific type mentioned — apply to ALL scripts
+          await upsertResourceRule(id, "*", targetRuntime, `User directive: all scripts ${targetRuntime}${mentionsProxy ? " (needs local proxy)" : ""}`, mentionsProxy ? ["proxy"] : undefined, -1);
         }
       }
     }
