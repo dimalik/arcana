@@ -7,6 +7,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   Loader2,
   ArrowRight,
   ArrowLeft,
@@ -20,6 +27,11 @@ import {
   Plus,
   X,
   UserSearch,
+  Key,
+  Plug,
+  Zap,
+  CheckCircle2,
+  XCircle,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -56,6 +68,32 @@ const DOMAIN_SUGGESTIONS = [
   "recommender-systems", "neuroscience", "bioinformatics",
   "quantum-computing", "climate-science", "materials-science",
   "drug-discovery", "autonomous-driving", "multimodal-learning",
+];
+
+type ProxyVendor = "openrouter" | "litellm" | "azure" | "custom";
+
+const PROXY_VENDORS: Record<ProxyVendor, { label: string; baseUrl: string; headerName: string; prefix: string }> = {
+  openrouter: { label: "OpenRouter", baseUrl: "https://openrouter.ai/api/v1", headerName: "Authorization", prefix: "Bearer " },
+  litellm: { label: "LiteLLM", baseUrl: "http://localhost:4000/v1", headerName: "Authorization", prefix: "Bearer " },
+  azure: { label: "Azure OpenAI", baseUrl: "https://<resource>.openai.azure.com/openai/deployments/<deployment>/v1", headerName: "api-key", prefix: "" },
+  custom: { label: "Custom", baseUrl: "", headerName: "Authorization", prefix: "Bearer " },
+};
+
+const OPENAI_MODELS = [
+  { id: "gpt-4o", label: "GPT-4o" },
+  { id: "gpt-4o-mini", label: "GPT-4o Mini" },
+];
+
+const ANTHROPIC_MODELS = [
+  { id: "claude-opus-4-20250514", label: "Claude Opus 4" },
+  { id: "claude-sonnet-4-20250514", label: "Claude Sonnet 4" },
+  { id: "claude-haiku-4-5-20251001", label: "Claude Haiku 4.5" },
+];
+
+const LLM_PROVIDERS = [
+  { value: "openai" as const, label: "OpenAI", desc: "GPT-4o, GPT-4", icon: Key },
+  { value: "anthropic" as const, label: "Anthropic", desc: "Claude Opus, Sonnet", icon: Key },
+  { value: "proxy" as const, label: "Proxy / Custom", desc: "OpenRouter, Azure", icon: Plug },
 ];
 
 // ── Types ────────────────────────────────────────────────────────
@@ -144,6 +182,411 @@ function PaperList({
   );
 }
 
+// ── LLM Setup step component ────────────────────────────────────
+
+function LlmSetupStep({
+  llmProvider, setLlmProvider,
+  llmApiKey, setLlmApiKey,
+  llmModel, setLlmModel,
+  llmProxyVendor, setLlmProxyVendor,
+  llmProxyUrl, setLlmProxyUrl,
+  llmProxyHeaderName, setLlmProxyHeaderName,
+  llmProxyHeaderValue, setLlmProxyHeaderValue,
+  llmProxyModels, setLlmProxyModels,
+  llmTesting, setLlmTesting,
+  llmTestResult, setLlmTestResult,
+  llmTestMessage, setLlmTestMessage,
+  llmSaving, setLlmSaving,
+  llmDetected,
+  onBack, onContinue, onSkip,
+}: {
+  llmProvider: "openai" | "anthropic" | "proxy";
+  setLlmProvider: (v: "openai" | "anthropic" | "proxy") => void;
+  llmApiKey: string;
+  setLlmApiKey: (v: string) => void;
+  llmModel: string;
+  setLlmModel: (v: string) => void;
+  llmProxyVendor: ProxyVendor;
+  setLlmProxyVendor: (v: ProxyVendor) => void;
+  llmProxyUrl: string;
+  setLlmProxyUrl: (v: string) => void;
+  llmProxyHeaderName: string;
+  setLlmProxyHeaderName: (v: string) => void;
+  llmProxyHeaderValue: string;
+  setLlmProxyHeaderValue: (v: string) => void;
+  llmProxyModels: string;
+  setLlmProxyModels: (v: string) => void;
+  llmTesting: boolean;
+  setLlmTesting: (v: boolean) => void;
+  llmTestResult: "success" | "error" | null;
+  setLlmTestResult: (v: "success" | "error" | null) => void;
+  llmTestMessage: string;
+  setLlmTestMessage: (v: string) => void;
+  llmSaving: boolean;
+  setLlmSaving: (v: boolean) => void;
+  llmDetected: { provider: string; source: string } | null;
+  onBack: () => void;
+  onContinue: () => void;
+  onSkip: () => void;
+}) {
+  const handleProviderChange = (provider: "openai" | "anthropic" | "proxy") => {
+    setLlmProvider(provider);
+    setLlmTestResult(null);
+    setLlmTestMessage("");
+    if (provider === "openai") {
+      setLlmModel("gpt-4o");
+    } else if (provider === "anthropic") {
+      setLlmModel("claude-sonnet-4-20250514");
+    } else {
+      setLlmModel("");
+    }
+  };
+
+  const handleProxyVendorChange = (vendor: ProxyVendor) => {
+    setLlmProxyVendor(vendor);
+    const preset = PROXY_VENDORS[vendor];
+    if (vendor !== "custom") {
+      setLlmProxyUrl(preset.baseUrl);
+      setLlmProxyHeaderName(preset.headerName);
+    }
+    setLlmTestResult(null);
+    setLlmTestMessage("");
+  };
+
+  const handleTestConnection = async () => {
+    setLlmTesting(true);
+    setLlmTestResult(null);
+    setLlmTestMessage("");
+    try {
+      const body: Record<string, string> = { provider: llmProvider };
+      if (llmProvider === "openai" || llmProvider === "anthropic") {
+        body.apiKey = llmApiKey;
+        body.modelId = llmModel;
+      } else {
+        body.vendor = llmProxyVendor;
+        body.baseUrl = llmProxyUrl;
+        body.headerName = llmProxyHeaderName;
+        // Build header value: for known vendors, prefix + raw value
+        if (llmProxyVendor !== "custom") {
+          const preset = PROXY_VENDORS[llmProxyVendor];
+          body.headerValue = preset.prefix + llmProxyHeaderValue;
+        } else {
+          body.headerValue = llmProxyHeaderValue;
+        }
+        body.modelId = llmProxyModels.split(",")[0]?.trim() || "gpt-3.5-turbo";
+      }
+      const res = await fetch("/api/onboarding/test-llm", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        setLlmTestResult("success");
+        setLlmTestMessage("Connected successfully");
+      } else {
+        setLlmTestResult("error");
+        setLlmTestMessage(data.error || "Connection failed");
+      }
+    } catch (e) {
+      setLlmTestResult("error");
+      setLlmTestMessage(e instanceof Error ? e.message : "Connection failed");
+    } finally {
+      setLlmTesting(false);
+    }
+  };
+
+  const handleSaveAndContinue = async () => {
+    setLlmSaving(true);
+    try {
+      // Save API key for direct providers
+      if (llmProvider === "openai" || llmProvider === "anthropic") {
+        if (llmApiKey) {
+          const keyBody: Record<string, string> = {};
+          keyBody[llmProvider] = llmApiKey;
+          const keyRes = await fetch("/api/settings/api-keys", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(keyBody),
+          });
+          if (!keyRes.ok) throw new Error("Failed to save API key");
+        }
+
+        // Save default provider + model
+        const modelRes = await fetch("/api/settings/default-model", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ provider: llmProvider, modelId: llmModel }),
+        });
+        if (!modelRes.ok) throw new Error("Failed to save model");
+      }
+
+      // Save proxy config
+      if (llmProvider === "proxy") {
+        const preset = PROXY_VENDORS[llmProxyVendor];
+        const headerValue = llmProxyVendor !== "custom"
+          ? preset.prefix + llmProxyHeaderValue
+          : llmProxyHeaderValue;
+
+        const proxyRes = await fetch("/api/settings/proxy", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            enabled: true,
+            vendor: llmProxyVendor,
+            baseUrl: llmProxyUrl,
+            apiKey: llmProxyHeaderValue || null,
+            headerName: llmProxyHeaderName,
+            headerValue: llmProxyVendor === "custom" ? headerValue : "",
+            modelId: llmProxyModels,
+            contextWindow: "128000",
+            maxTokens: "4096",
+          }),
+        });
+        if (!proxyRes.ok) throw new Error("Failed to save proxy config");
+
+        // Also set default provider to proxy
+        const firstModel = llmProxyModels.split(",")[0]?.trim() || "";
+        if (firstModel) {
+          await fetch("/api/settings/default-model", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ provider: "proxy", modelId: firstModel }),
+          });
+        }
+      }
+
+      toast.success("LLM configuration saved");
+      onContinue();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to save configuration");
+    } finally {
+      setLlmSaving(false);
+    }
+  };
+
+  const canTest = llmProvider === "proxy"
+    ? llmProxyUrl && llmProxyHeaderValue && llmProxyModels
+    : llmApiKey || llmDetected?.provider === llmProvider;
+
+  return (
+    <div className="space-y-6">
+      <div className="text-center">
+        <h1 className="text-2xl font-bold tracking-tight">LLM Setup</h1>
+        <p className="text-muted-foreground mt-1">
+          Connect an AI provider to power paper analysis, research agents, and chat.
+        </p>
+      </div>
+
+      {/* Detected config banner */}
+      {llmDetected && (
+        <div className="flex items-center gap-2 rounded-lg border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-900/20 px-3 py-2">
+          <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
+          <span className="text-sm text-emerald-700 dark:text-emerald-400">
+            {llmDetected.provider === "openai" ? "OpenAI" : "Anthropic"} API key detected from {llmDetected.source}
+          </span>
+        </div>
+      )}
+
+      {/* Provider selection */}
+      <div className="grid grid-cols-3 gap-3">
+        {LLM_PROVIDERS.map(({ value, label, desc, icon: Icon }) => (
+          <button
+            key={value}
+            onClick={() => handleProviderChange(value)}
+            className={`flex flex-col items-center gap-2 rounded-lg border px-3 py-4 text-center transition-colors ${
+              llmProvider === value
+                ? "border-foreground bg-foreground/5 font-medium"
+                : "border-border hover:border-foreground/30"
+            }`}
+          >
+            <Icon className="h-5 w-5" />
+            <div>
+              <p className={`text-sm ${llmProvider === value ? "font-medium" : ""}`}>{label}</p>
+              <p className="text-xs text-muted-foreground">{desc}</p>
+            </div>
+          </button>
+        ))}
+      </div>
+
+      {/* Provider-specific config */}
+      <div className="space-y-4">
+        {/* OpenAI config */}
+        {llmProvider === "openai" && (
+          <div className="space-y-4">
+            <div>
+              <Label className="text-sm font-medium">API Key</Label>
+              <Input
+                type="password"
+                value={llmApiKey}
+                onChange={(e) => { setLlmApiKey(e.target.value); setLlmTestResult(null); }}
+                placeholder={llmDetected?.provider === "openai" ? "Using detected key — enter to override" : "sk-..."}
+                className="mt-1.5 font-mono text-sm"
+              />
+            </div>
+            <div>
+              <Label className="text-sm font-medium">Model</Label>
+              <Select value={llmModel} onValueChange={setLlmModel}>
+                <SelectTrigger className="mt-1.5">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {OPENAI_MODELS.map((m) => (
+                    <SelectItem key={m.id} value={m.id}>{m.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+        )}
+
+        {/* Anthropic config */}
+        {llmProvider === "anthropic" && (
+          <div className="space-y-4">
+            <div>
+              <Label className="text-sm font-medium">API Key</Label>
+              <Input
+                type="password"
+                value={llmApiKey}
+                onChange={(e) => { setLlmApiKey(e.target.value); setLlmTestResult(null); }}
+                placeholder={llmDetected?.provider === "anthropic" ? "Using detected key — enter to override" : "sk-ant-..."}
+                className="mt-1.5 font-mono text-sm"
+              />
+            </div>
+            <div>
+              <Label className="text-sm font-medium">Model</Label>
+              <Select value={llmModel} onValueChange={setLlmModel}>
+                <SelectTrigger className="mt-1.5">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {ANTHROPIC_MODELS.map((m) => (
+                    <SelectItem key={m.id} value={m.id}>{m.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+        )}
+
+        {/* Proxy config */}
+        {llmProvider === "proxy" && (
+          <div className="space-y-4">
+            <div>
+              <Label className="text-sm font-medium">Vendor</Label>
+              <Select value={llmProxyVendor} onValueChange={(v) => handleProxyVendorChange(v as ProxyVendor)}>
+                <SelectTrigger className="mt-1.5">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {(Object.entries(PROXY_VENDORS) as [ProxyVendor, { label: string }][]).map(([key, { label }]) => (
+                    <SelectItem key={key} value={key}>{label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label className="text-sm font-medium">Base URL</Label>
+              <Input
+                value={llmProxyUrl}
+                onChange={(e) => { setLlmProxyUrl(e.target.value); setLlmTestResult(null); }}
+                placeholder="https://..."
+                className="mt-1.5 font-mono text-sm"
+              />
+            </div>
+            <div>
+              <Label className="text-sm font-medium">Auth Header Name</Label>
+              <Input
+                value={llmProxyHeaderName}
+                onChange={(e) => setLlmProxyHeaderName(e.target.value)}
+                placeholder="Authorization"
+                className="mt-1.5 font-mono text-sm"
+              />
+            </div>
+            <div>
+              <Label className="text-sm font-medium">Auth Header Value</Label>
+              <Input
+                type="password"
+                value={llmProxyHeaderValue}
+                onChange={(e) => { setLlmProxyHeaderValue(e.target.value); setLlmTestResult(null); }}
+                placeholder={llmProxyVendor !== "custom" ? "API key (prefix added automatically)" : "Full header value"}
+                className="mt-1.5 font-mono text-sm"
+              />
+            </div>
+            <div>
+              <Label className="text-sm font-medium">Model(s)</Label>
+              <Input
+                value={llmProxyModels}
+                onChange={(e) => setLlmProxyModels(e.target.value)}
+                placeholder="gpt-4o, claude-sonnet-4-20250514"
+                className="mt-1.5 font-mono text-sm"
+              />
+              <p className="text-xs text-muted-foreground mt-1">Comma-separated. The first model will be used as default.</p>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Test connection */}
+      <div className="space-y-2">
+        <div className="flex items-center gap-3">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleTestConnection}
+            disabled={llmTesting || !canTest}
+          >
+            {llmTesting ? (
+              <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+            ) : (
+              <Zap className="mr-1.5 h-4 w-4" />
+            )}
+            Test Connection
+          </Button>
+          {llmTestResult && (
+            <div className={`flex items-center gap-1.5 text-sm ${
+              llmTestResult === "success"
+                ? "text-emerald-600 dark:text-emerald-400"
+                : "text-red-600 dark:text-red-400"
+            }`}>
+              {llmTestResult === "success" ? (
+                <CheckCircle2 className="h-4 w-4 shrink-0" />
+              ) : (
+                <XCircle className="h-4 w-4 shrink-0" />
+              )}
+              <span className="text-xs">{llmTestMessage}</span>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Navigation */}
+      <div className="flex items-center justify-between pt-2">
+        <Button variant="ghost" onClick={onBack}>
+          <ArrowLeft className="mr-1.5 h-4 w-4" />
+          Back
+        </Button>
+        <div className="flex flex-col items-end gap-1.5">
+          <Button onClick={handleSaveAndContinue} disabled={llmSaving}>
+            {llmSaving ? (
+              <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+            ) : (
+              <ArrowRight className="mr-1.5 h-4 w-4" />
+            )}
+            Continue
+          </Button>
+          <button
+            onClick={onSkip}
+            className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+          >
+            Skip for now
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Main component ───────────────────────────────────────────────
 
 export default function OnboardingPage() {
@@ -175,6 +618,22 @@ export default function OnboardingPage() {
   const [searching, setSearching] = useState(false);
   const [importing, setImporting] = useState(false);
 
+  // Step 2: LLM Setup
+  const [llmProvider, setLlmProvider] = useState<"openai" | "anthropic" | "proxy">("openai");
+  const [llmApiKey, setLlmApiKey] = useState("");
+  const [llmModel, setLlmModel] = useState("gpt-4o");
+  const [llmProxyVendor, setLlmProxyVendor] = useState<ProxyVendor>("openrouter");
+  const [llmProxyUrl, setLlmProxyUrl] = useState("");
+  const [llmProxyHeaderName, setLlmProxyHeaderName] = useState("Authorization");
+  const [llmProxyHeaderValue, setLlmProxyHeaderValue] = useState("");
+  const [llmProxyModels, setLlmProxyModels] = useState("");
+  const [llmTesting, setLlmTesting] = useState(false);
+  const [llmTestResult, setLlmTestResult] = useState<"success" | "error" | null>(null);
+  const [llmTestMessage, setLlmTestMessage] = useState("");
+  const [llmSaving, setLlmSaving] = useState(false);
+  const [llmDetected, setLlmDetected] = useState<{ provider: string; source: string } | null>(null);
+  const [llmSkipped, setLlmSkipped] = useState(false);
+
   // Load existing data
   useEffect(() => {
     fetch("/api/auth/me")
@@ -195,6 +654,34 @@ export default function OnboardingPage() {
       })
       .catch(() => {});
   }, [router]);
+
+  // Auto-detect existing LLM configuration
+  useEffect(() => {
+    Promise.all([
+      fetch("/api/settings/api-keys").then((r) => (r.ok ? r.json() : null)),
+      fetch("/api/settings/default-model").then((r) => (r.ok ? r.json() : null)),
+    ])
+      .then(([keyStatus, modelStatus]) => {
+        if (modelStatus?.provider && modelStatus?.modelId) {
+          setLlmProvider(modelStatus.provider);
+          setLlmModel(modelStatus.modelId);
+        }
+        if (keyStatus?.openai?.set) {
+          setLlmDetected({ provider: "openai", source: keyStatus.openai.source === "env" ? "environment" : "database" });
+          if (!modelStatus?.provider) {
+            setLlmProvider("openai");
+            setLlmModel("gpt-4o");
+          }
+        } else if (keyStatus?.anthropic?.set) {
+          setLlmDetected({ provider: "anthropic", source: keyStatus.anthropic.source === "env" ? "environment" : "database" });
+          if (!modelStatus?.provider) {
+            setLlmProvider("anthropic");
+            setLlmModel("claude-sonnet-4-20250514");
+          }
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   // ── Author search ──────────────────────────────────────────────
 
@@ -434,7 +921,7 @@ export default function OnboardingPage() {
       <div className="w-full max-w-2xl">
         {/* Progress indicator */}
         <div className="flex items-center justify-center gap-2 mb-8">
-          {["Your Profile", "Seed Library", "Ready"].map((label, i) => (
+          {["Your Profile", "Seed Library", "LLM Setup", "Ready"].map((label, i) => (
             <div key={label} className="flex items-center gap-2">
               <div
                 className={`flex h-8 w-8 items-center justify-center rounded-full text-xs font-medium transition-colors ${
@@ -450,7 +937,7 @@ export default function OnboardingPage() {
               <span className={`text-sm hidden sm:block ${i === step ? "font-medium" : "text-muted-foreground"}`}>
                 {label}
               </span>
-              {i < 2 && <div className="w-8 h-px bg-border" />}
+              {i < 3 && <div className="w-8 h-px bg-border" />}
             </div>
           ))}
         </div>
@@ -852,8 +1339,42 @@ export default function OnboardingPage() {
           </div>
         )}
 
-        {/* ── Step 2: Ready ────────────────────────────────────────── */}
+        {/* ── Step 2: LLM Setup ─────────────────────────────────── */}
         {step === 2 && (
+          <LlmSetupStep
+            llmProvider={llmProvider}
+            setLlmProvider={setLlmProvider}
+            llmApiKey={llmApiKey}
+            setLlmApiKey={setLlmApiKey}
+            llmModel={llmModel}
+            setLlmModel={setLlmModel}
+            llmProxyVendor={llmProxyVendor}
+            setLlmProxyVendor={setLlmProxyVendor}
+            llmProxyUrl={llmProxyUrl}
+            setLlmProxyUrl={setLlmProxyUrl}
+            llmProxyHeaderName={llmProxyHeaderName}
+            setLlmProxyHeaderName={setLlmProxyHeaderName}
+            llmProxyHeaderValue={llmProxyHeaderValue}
+            setLlmProxyHeaderValue={setLlmProxyHeaderValue}
+            llmProxyModels={llmProxyModels}
+            setLlmProxyModels={setLlmProxyModels}
+            llmTesting={llmTesting}
+            setLlmTesting={setLlmTesting}
+            llmTestResult={llmTestResult}
+            setLlmTestResult={setLlmTestResult}
+            llmTestMessage={llmTestMessage}
+            setLlmTestMessage={setLlmTestMessage}
+            llmSaving={llmSaving}
+            setLlmSaving={setLlmSaving}
+            llmDetected={llmDetected}
+            onBack={() => setStep(1)}
+            onContinue={() => setStep(3)}
+            onSkip={() => { setLlmSkipped(true); setStep(3); }}
+          />
+        )}
+
+        {/* ── Step 3: Ready ────────────────────────────────────────── */}
+        {step === 3 && (
           <div className="space-y-6 text-center">
             <div className="flex justify-center">
               <div className="flex h-16 w-16 items-center justify-center rounded-full bg-emerald-100 dark:bg-emerald-900/30">
@@ -866,6 +1387,12 @@ export default function OnboardingPage() {
                 Arcana will personalize paper reviews based on your profile.
                 You can always update your preferences in Settings → Profile.
               </p>
+              {llmSkipped && (
+                <p className="text-sm text-amber-600 dark:text-amber-400 mt-3">
+                  LLM not configured yet — paper analysis, chat, and research agents
+                  won&apos;t work until you set up a provider in Settings → LLM.
+                </p>
+              )}
             </div>
             <Button size="lg" onClick={completeOnboarding} disabled={completing}>
               {completing ? (
