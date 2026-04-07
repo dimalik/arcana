@@ -231,6 +231,7 @@ function LlmSetupStep({
   onContinue: () => void;
   onSkip: () => void;
 }) {
+  const [showSkipWarning, setShowSkipWarning] = useState(false);
   const handleProviderChange = (provider: "openai" | "anthropic" | "proxy") => {
     setLlmProvider(provider);
     setLlmTestResult(null);
@@ -578,15 +579,28 @@ function LlmSetupStep({
             Continue
           </Button>
           <button
-            onClick={() => {
-              if (window.confirm("Without an LLM provider, paper analysis, research agents, chat, and auto-processing won't work. You can configure it later in Settings → LLM.\n\nSkip setup?")) {
-                onSkip();
-              }
-            }}
+            onClick={() => setShowSkipWarning(true)}
             className="text-xs text-muted-foreground/50 hover:text-muted-foreground transition-colors"
           >
             Skip for now
           </button>
+          {showSkipWarning && (
+            <div className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/5 px-4 py-3 text-left animate-in fade-in-0 slide-in-from-bottom-2 duration-200">
+              <p className="text-sm font-medium text-amber-600 dark:text-amber-400">Are you sure?</p>
+              <p className="text-xs text-amber-600/70 dark:text-amber-400/70 mt-1">
+                Without an LLM provider, paper analysis, research agents, chat, and auto-processing won&apos;t work.
+                You can configure it later in Settings → LLM.
+              </p>
+              <div className="flex gap-2 mt-3">
+                <Button size="sm" variant="outline" onClick={() => setShowSkipWarning(false)}>
+                  Go back
+                </Button>
+                <Button size="sm" variant="ghost" className="text-amber-600 hover:text-amber-700" onClick={onSkip}>
+                  Skip anyway
+                </Button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>
