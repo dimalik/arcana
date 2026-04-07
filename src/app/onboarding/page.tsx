@@ -80,13 +80,15 @@ const PROXY_VENDORS: Record<ProxyVendor, { label: string; baseUrl: string; heade
 };
 
 const OPENAI_MODELS = [
+  { id: "gpt-5.4", label: "GPT-5.4" },
+  { id: "gpt-4.1", label: "GPT-4.1" },
   { id: "gpt-4o", label: "GPT-4o" },
   { id: "gpt-4o-mini", label: "GPT-4o Mini" },
 ];
 
 const ANTHROPIC_MODELS = [
-  { id: "claude-opus-4-20250514", label: "Claude Opus 4" },
-  { id: "claude-sonnet-4-20250514", label: "Claude Sonnet 4" },
+  { id: "claude-opus-4-6", label: "Claude Opus 4.6" },
+  { id: "claude-sonnet-4-6", label: "Claude Sonnet 4.6" },
   { id: "claude-haiku-4-5-20251001", label: "Claude Haiku 4.5" },
 ];
 
@@ -234,9 +236,9 @@ function LlmSetupStep({
     setLlmTestResult(null);
     setLlmTestMessage("");
     if (provider === "openai") {
-      setLlmModel("gpt-4o");
+      setLlmModel("gpt-5.4");
     } else if (provider === "anthropic") {
-      setLlmModel("claude-sonnet-4-20250514");
+      setLlmModel("claude-sonnet-4-6");
     } else {
       setLlmModel("");
     }
@@ -518,7 +520,7 @@ function LlmSetupStep({
               <Input
                 value={llmProxyModels}
                 onChange={(e) => setLlmProxyModels(e.target.value)}
-                placeholder="gpt-4o, claude-sonnet-4-20250514"
+                placeholder="gpt-5.4, claude-sonnet-4-6"
                 className="mt-1.5 font-mono text-sm"
               />
               <p className="text-xs text-muted-foreground mt-1">Comma-separated. The first model will be used as default.</p>
@@ -576,8 +578,12 @@ function LlmSetupStep({
             Continue
           </Button>
           <button
-            onClick={onSkip}
-            className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+            onClick={() => {
+              if (window.confirm("Without an LLM provider, paper analysis, research agents, chat, and auto-processing won't work. You can configure it later in Settings → LLM.\n\nSkip setup?")) {
+                onSkip();
+              }
+            }}
+            className="text-xs text-muted-foreground/50 hover:text-muted-foreground transition-colors"
           >
             Skip for now
           </button>
@@ -621,7 +627,7 @@ export default function OnboardingPage() {
   // Step 2: LLM Setup
   const [llmProvider, setLlmProvider] = useState<"openai" | "anthropic" | "proxy">("openai");
   const [llmApiKey, setLlmApiKey] = useState("");
-  const [llmModel, setLlmModel] = useState("gpt-4o");
+  const [llmModel, setLlmModel] = useState("gpt-5.4");
   const [llmProxyVendor, setLlmProxyVendor] = useState<ProxyVendor>("openrouter");
   const [llmProxyUrl, setLlmProxyUrl] = useState("");
   const [llmProxyHeaderName, setLlmProxyHeaderName] = useState("Authorization");
@@ -670,13 +676,13 @@ export default function OnboardingPage() {
           setLlmDetected({ provider: "openai", source: keyStatus.openai.source === "env" ? "environment" : "database" });
           if (!modelStatus?.provider) {
             setLlmProvider("openai");
-            setLlmModel("gpt-4o");
+            setLlmModel("gpt-5.4");
           }
         } else if (keyStatus?.anthropic?.set) {
           setLlmDetected({ provider: "anthropic", source: keyStatus.anthropic.source === "env" ? "environment" : "database" });
           if (!modelStatus?.provider) {
             setLlmProvider("anthropic");
-            setLlmModel("claude-sonnet-4-20250514");
+            setLlmModel("claude-sonnet-4-6");
           }
         }
       })
@@ -1388,10 +1394,13 @@ export default function OnboardingPage() {
                 You can always update your preferences in Settings → Profile.
               </p>
               {llmSkipped && (
-                <p className="text-sm text-amber-600 dark:text-amber-400 mt-3">
-                  LLM not configured yet — paper analysis, chat, and research agents
-                  won&apos;t work until you set up a provider in Settings → LLM.
-                </p>
+                <div className="mt-4 rounded-lg border border-amber-500/30 bg-amber-500/5 px-4 py-3 text-left max-w-md mx-auto">
+                  <p className="text-sm font-medium text-amber-600 dark:text-amber-400">LLM not configured</p>
+                  <p className="text-xs text-amber-600/70 dark:text-amber-400/70 mt-1">
+                    Paper analysis, research agents, chat, and auto-processing require an LLM provider.
+                    Configure one in <strong>Settings → LLM</strong> before using these features.
+                  </p>
+                </div>
               )}
             </div>
             <Button size="lg" onClick={completeOnboarding} disabled={completing}>
