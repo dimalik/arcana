@@ -30,6 +30,12 @@
 
 Arcana is for researchers who don't just read papers — they act on them. It connects the full arc from literature review to novel findings: search the literature, spot gaps, write experiment code, execute it on your GPU cluster, analyze results, and loop back with better hypotheses.
 
+<p align="center">
+  <img src="docs/screenshots/research-dashboard.png" alt="Research Dashboard" width="800">
+  <br>
+  <em>The research narrative dashboard — breakthroughs, experiments, decisions, and metric tracking in one view.</em>
+</p>
+
 ## Highlights
 
 - **[Multi-source paper import](#import-from-anywhere)** — arXiv, DOI, OpenReview, ACL Anthology, URL, PDF. Auto-fetches metadata from OpenAlex, Semantic Scholar, CrossRef. Web search fallback for paywalled papers.
@@ -89,7 +95,7 @@ npx prisma db push
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000). First run auto-creates a default user (`user@localhost` / `1234`). Configure your LLM provider (API keys or proxy) in **Settings > LLM**.
+Open [http://localhost:3000](http://localhost:3000). The onboarding wizard will guide you through profile setup, library seeding, and LLM configuration. See the [Getting Started guide](docs/getting-started.md) for details.
 
 ## Everything we built so far
 
@@ -97,9 +103,13 @@ Open [http://localhost:3000](http://localhost:3000). First run auto-creates a de
 
 arXiv, DOI, OpenReview, ACL Anthology, URL, or raw PDF upload. Metadata auto-fetched from OpenAlex, Semantic Scholar, and CrossRef. Full text extraction with OCR fallback. Smart tagging and deduplication. Filters out publisher figure/table DOIs that pollute search results. Web search as last resort for paywalled papers under different titles.
 
+<img src="docs/screenshots/library.png" alt="Paper Library" width="700">
+
 ### Talk to your papers
 
 Ask questions grounded in the actual paper content. Highlight passages for instant explanations. Compare methodologies across papers. Extract code from methods sections. Run custom prompts against any paper or selection.
+
+<img src="docs/screenshots/paper-detail.png" alt="Paper Detail" width="700">
 
 ### Autonomous research projects
 
@@ -115,7 +125,9 @@ Each phase transition is enforced by **gates** — the agent cannot skip from li
 
 The agent runs as a **background process** decoupled from the browser — navigate away, close the tab, it keeps running. Server-side auto-continue chains up to 20 sessions automatically. A persistent `RESEARCH_LOG.md` lets you steer direction at any time.
 
-Resource-aware: choose Auto, Local-only, or specific GPU hosts per project. Methodology auto-inferred from topic (Experiment, Survey, Build, Explore) with manual override. Constraints passed directly to the agent prompt.
+Scripts auto-route to local or remote based on **resource rules** — declared per project, not decided per invocation. Tell the chat "run analysis locally" and the system creates a persistent rule.
+
+<img src="docs/screenshots/research-list.png" alt="Research Projects" width="700">
 
 ### Structured experiment tracking
 
@@ -167,6 +179,15 @@ The unified research dashboard (`/research/[id]`) is a two-panel layout:
 **Metric chart**: An inline SVG chart that tracks the primary metric across experiments, color-coded by approach branch. Hover for tooltips with full details. Supports metric selection when the project has multiple canonical metrics.
 
 **Keyboard shortcuts**: `c` opens chat, `Esc` returns to status, `` ` `` toggles the agent console.
+
+<details>
+<summary>More dashboard views</summary>
+
+| Tab | Screenshot |
+|-----|-----------|
+| Settings | <img src="docs/screenshots/settings.png" alt="Settings" width="500"> |
+
+</details>
 
 ### Research chat
 
