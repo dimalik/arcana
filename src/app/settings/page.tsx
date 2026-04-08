@@ -391,8 +391,9 @@ function LLMSection() {
   const [proxyRoutes, setProxyRoutes] = useState<Array<{ provider: string; path: string; targetUrl: string; models: string }>>([
     { provider: "openai", path: "openai/v1", targetUrl: "", models: "" },
     { provider: "anthropic", path: "anthropic/v1", targetUrl: "https://api.anthropic.com", models: "" },
-    { provider: "google", path: "google_ai_studio/v1", targetUrl: "https://generativelanguage.googleapis.com/", models: "" },
   ]);
+  const [routeTestResults, setRouteTestResults] = useState<Record<number, { ok: boolean; message: string } | null>>({});
+  const [routeTesting, setRouteTesting] = useState<number | null>(null);
   const [proxyApiKey, setProxyApiKey] = useState("");
   const [proxyHeaderName, setProxyHeaderName] = useState("Authorization");
   const [proxyHeaderValue, setProxyHeaderValue] = useState("");
@@ -697,42 +698,98 @@ function LLMSection() {
               </div>
             )}
 
-            {/* Gateway: provider routes table */}
+            {/* Gateway: provider routes */}
             {proxyVendor === "gateway" && (
-              <div className="space-y-2">
-                <Label className="text-xs">Provider Routes</Label>
-                <p className="text-[11px] text-muted-foreground/50">Each provider gets its own path within the gateway. The SDK appends its own suffix.</p>
-                <div className="space-y-2">
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <Label className="text-xs">Provider Routes</Label>
+                    <p className="text-[11px] text-muted-foreground/50">Each provider gets its own path. The SDK appends its own suffix.</p>
+                  </div>
+                  <Button variant="outline" size="sm" onClick={() => {
+                    setProxyRoutes([...proxyRoutes, { provider: "", path: "", targetUrl: "", models: "" }]);
+                  }}>+ Add Route</Button>
+                </div>
+                <div className="space-y-3">
                   {proxyRoutes.map((route, i) => (
-                    <div key={route.provider} className="grid grid-cols-[100px_1fr_1fr_1fr] gap-2 items-end">
-                      <div>
-                        <Label className="text-[10px] text-muted-foreground">{i === 0 ? "Provider" : ""}</Label>
-                        <div className="text-xs font-medium capitalize px-2 py-1.5 rounded border border-border/40 bg-muted/20">{route.provider}</div>
+                    <div key={i} className="rounded-md border border-border/40 p-3 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <Input value={route.provider} onChange={(e) => {
+                            const updated = [...proxyRoutes];
+                            updated[i] = { ...updated[i], provider: e.target.value };
+                            setProxyRoutes(updated);
+                          }} placeholder="openai" className="font-mono text-xs w-28 h-7" />
+                          <span className="text-[10px] text-muted-foreground">provider</span>
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <Button variant="ghost" size="sm" className="h-7 px-2 text-[11px]"
+                            disabled={routeTesting === i || !route.models.trim() || !route.path.trim()}
+                            onClick={async () => {
+                              setRouteTesting(i);
+                              setRouteTestResults(prev => ({ ...prev, [i]: null }));
+                              try {
+                                const headerValue = buildHeaderValue();
+                                const firstModel = route.models.split(",").map(m => m.trim()).filter(Boolean)[0];
+                                if (!firstModel) { setRouteTestResults(prev => ({ ...prev, [i]: { ok: false, message: "No models" } })); setRouteTesting(null); return; }
+                                const res = await fetch("/api/settings/proxy", {
+                                  method: "POST", headers: { "Content-Type": "application/json" },
+                                  body: JSON.stringify({
+                                    baseUrl: proxyBaseUrl, headerName: proxyHeaderName, headerValue,
+                                    modelId: firstModel, vendor: "gateway",
+                                    routes: [{ provider: route.provider, path: route.path.trim(), targetUrl: route.targetUrl.trim() || undefined, models: route.models.split(",").map(m => m.trim()).filter(Boolean) }],
+                                  }),
+                                });
+                                const data = await res.json();
+                                setRouteTestResults(prev => ({ ...prev, [i]: data.ok ? { ok: true, message: `${firstModel} ✓` } : { ok: false, message: data.error || "Failed" } }));
+                              } catch (e) {
+                                setRouteTestResults(prev => ({ ...prev, [i]: { ok: false, message: e instanceof Error ? e.message : "Failed" } }));
+                              }
+                              setRouteTesting(null);
+                            }}>
+                            {routeTesting === i ? <Loader2 className="h-3 w-3 animate-spin" /> : <Zap className="h-3 w-3" />}
+                            <span className="ml-1">Test</span>
+                          </Button>
+                          <Button variant="ghost" size="sm" className="h-7 w-7 px-0 text-muted-foreground/40 hover:text-destructive"
+                            onClick={() => {
+                              setProxyRoutes(proxyRoutes.filter((_, j) => j !== i));
+                              setRouteTestResults(prev => { const next = { ...prev }; delete next[i]; return next; });
+                            }}>
+                            <XCircle className="h-3 w-3" />
+                          </Button>
+                        </div>
                       </div>
-                      <div>
-                        <Label className="text-[10px] text-muted-foreground">{i === 0 ? "Path" : ""}</Label>
-                        <Input value={route.path} onChange={(e) => {
-                          const updated = [...proxyRoutes];
-                          updated[i] = { ...updated[i], path: e.target.value };
-                          setProxyRoutes(updated);
-                        }} placeholder="openai/v1" className="font-mono text-xs" />
+                      <div className="grid grid-cols-3 gap-2">
+                        <div>
+                          <Label className="text-[10px] text-muted-foreground">Path</Label>
+                          <Input value={route.path} onChange={(e) => {
+                            const updated = [...proxyRoutes];
+                            updated[i] = { ...updated[i], path: e.target.value };
+                            setProxyRoutes(updated);
+                          }} placeholder="openai/v1" className="font-mono text-xs h-7" />
+                        </div>
+                        <div>
+                          <Label className="text-[10px] text-muted-foreground">Target URL <span className="text-muted-foreground/30">(optional)</span></Label>
+                          <Input value={route.targetUrl} onChange={(e) => {
+                            const updated = [...proxyRoutes];
+                            updated[i] = { ...updated[i], targetUrl: e.target.value };
+                            setProxyRoutes(updated);
+                          }} placeholder="" className="font-mono text-xs h-7" />
+                        </div>
+                        <div>
+                          <Label className="text-[10px] text-muted-foreground">Models</Label>
+                          <Input value={route.models} onChange={(e) => {
+                            const updated = [...proxyRoutes];
+                            updated[i] = { ...updated[i], models: e.target.value };
+                            setProxyRoutes(updated);
+                          }} placeholder="model-1, model-2" className="font-mono text-xs h-7" />
+                        </div>
                       </div>
-                      <div>
-                        <Label className="text-[10px] text-muted-foreground">{i === 0 ? "Target URL (optional)" : ""}</Label>
-                        <Input value={route.targetUrl} onChange={(e) => {
-                          const updated = [...proxyRoutes];
-                          updated[i] = { ...updated[i], targetUrl: e.target.value };
-                          setProxyRoutes(updated);
-                        }} placeholder="https://api.openai.com" className="font-mono text-xs" />
-                      </div>
-                      <div>
-                        <Label className="text-[10px] text-muted-foreground">{i === 0 ? "Models" : ""}</Label>
-                        <Input value={route.models} onChange={(e) => {
-                          const updated = [...proxyRoutes];
-                          updated[i] = { ...updated[i], models: e.target.value };
-                          setProxyRoutes(updated);
-                        }} placeholder="model-1, model-2" className="font-mono text-xs" />
-                      </div>
+                      {routeTestResults[i] && (
+                        <p className={`text-[11px] ${routeTestResults[i]!.ok ? "text-emerald-600" : "text-red-500"}`}>
+                          {routeTestResults[i]!.message}
+                        </p>
+                      )}
                     </div>
                   ))}
                 </div>
