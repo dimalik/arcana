@@ -2,7 +2,7 @@ import { streamText, LanguageModel } from "ai";
 import { createOpenAI } from "@ai-sdk/openai";
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { getModelInfo, type LLMProvider } from "./models";
-import { isAnthropicModel, type ProxyConfig } from "./proxy-settings";
+import { resolveEndpointForModel, type ProxyConfig } from "./proxy-settings";
 import { logLlmUsage } from "../usage";
 import { logger } from "../logger";
 
@@ -33,44 +33,42 @@ async function getResolvedApiKey(provider: "openai" | "anthropic"): Promise<stri
 
 export async function getModel(provider: LLMProvider, modelId: string, proxyConfig?: ProxyConfig): Promise<LanguageModel> {
   if (provider === "proxy") {
-    // Use provided proxyConfig, or fall back to env vars
-    const baseUrl = proxyConfig?.baseUrl || process.env.LLM_PROXY_URL;
     const headerName = proxyConfig?.headerName || process.env.LLM_PROXY_HEADER_NAME || "X-LLM-Proxy-Calling-Service";
     const headerValue = proxyConfig?.headerValue || process.env.LLM_PROXY_HEADER_VALUE;
 
     if (!headerValue) {
-      throw new Error("Proxy provider is not configured. Configure it in Settings or set LLM_PROXY_HEADER_VALUE in .env");
+      throw new Error("Endpoint not configured. Set it up in Settings → LLM.");
     }
 
-    // Route Claude models through the Anthropic SDK with the Anthropic proxy URL
-    if (isAnthropicModel(modelId)) {
-      const anthropicUrl = proxyConfig?.anthropicBaseUrl;
-      if (!anthropicUrl) {
-        throw new Error("Anthropic Endpoint URL is not configured. Go to Settings → LLM → Proxy and set the 'Anthropic Endpoint URL' field to your proxy's Anthropic path (e.g., https://your-proxy.com/anthropic/v1). The SDK appends /v1/messages to this URL.");
-      }
+    // Resolve the correct endpoint URL and SDK for this model.
+    // For gateway proxies: routes each provider to its own URL path.
+    // For simple proxies (OpenRouter, LiteLLM): same base URL for all.
+    const config = proxyConfig || { baseUrl: process.env.LLM_PROXY_URL || "", anthropicBaseUrl: "", routes: [] } as unknown as ProxyConfig;
+    const { baseUrl, extraHeaders, sdkProvider } = resolveEndpointForModel(config, modelId);
+
+    if (!baseUrl) {
+      throw new Error(`No endpoint URL configured for ${modelId}. Check Settings → LLM.`);
+    }
+
+    const headers: Record<string, string> = { [headerName]: headerValue, ...extraHeaders };
+
+    if (sdkProvider === "anthropic") {
       const anthropic = createAnthropic({
-        baseURL: anthropicUrl,
-        apiKey: "not-needed",
-        headers: {
-          [headerName]: headerValue,
-          "X-LLM-Proxy-Target-URL": "https://api.anthropic.com",
-        },
+        baseURL: baseUrl,
+        apiKey: proxyConfig?.apiKey || "not-needed",
+        headers,
       });
       return anthropic(modelId);
     }
 
-    if (!baseUrl) {
-      throw new Error("Proxy base URL is not configured. Configure it in Settings or set LLM_PROXY_URL in .env");
-    }
-
-    const proxy = createOpenAI({
+    // Google models also route through OpenAI-compatible SDK
+    // (most proxies expose Gemini via OpenAI-compatible endpoints)
+    const openai = createOpenAI({
       baseURL: baseUrl.replace(/\/chat\/completions$/, ""),
-      apiKey: "not-needed",
-      headers: {
-        [headerName]: headerValue,
-      },
+      apiKey: proxyConfig?.apiKey || "not-needed",
+      headers,
     });
-    return proxy(modelId);
+    return openai(modelId);
   }
 
   if (provider === "openai") {

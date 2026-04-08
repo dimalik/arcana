@@ -38,7 +38,6 @@ export async function PUT(req: NextRequest) {
     }
 
     await saveProxyConfig({
-      enabled: Boolean(body.enabled),
       vendor,
       baseUrl: body.baseUrl || "",
       anthropicBaseUrl: body.anthropicBaseUrl || "",
