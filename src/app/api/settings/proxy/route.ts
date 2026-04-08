@@ -59,13 +59,12 @@ export async function PUT(req: NextRequest) {
 
 /**
  * POST — test proxy connectivity with a minimal LLM call.
+ * Supports both simple and gateway modes via resolveEndpointForModel.
  */
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
 
-    const baseUrl = body.baseUrl;
-    const anthropicBaseUrl = body.anthropicBaseUrl;
     const headerName = body.headerName || "Authorization";
     const headerValue = body.headerValue || "";
     const modelId = body.modelId || "gpt-3.5-turbo";
@@ -73,31 +72,47 @@ export async function POST(req: NextRequest) {
     if (!headerValue) {
       return NextResponse.json({ error: "Header value / API key is required" }, { status: 400 });
     }
+    if (!body.baseUrl) {
+      return NextResponse.json({ error: "Base URL is required" }, { status: 400 });
+    }
+
+    // Build a ProxyConfig for resolveEndpointForModel
+    const { resolveEndpointForModel } = await import("@/lib/llm/proxy-settings");
+    const testConfig = {
+      enabled: true,
+      vendor: body.vendor || "custom",
+      baseUrl: body.baseUrl,
+      anthropicBaseUrl: body.anthropicBaseUrl || "",
+      apiKey: "",
+      headerName,
+      headerValue,
+      modelId,
+      contextWindow: 128000,
+      maxTokens: 4096,
+      routes: body.routes || [],
+    } as unknown as import("@/lib/llm/proxy-settings").ProxyConfig;
+
+    const { baseUrl: resolvedUrl, extraHeaders, sdkProvider } = resolveEndpointForModel(testConfig, modelId);
+
+    if (!resolvedUrl) {
+      return NextResponse.json({ error: `No endpoint URL resolved for model "${modelId}". Check the routes configuration.` }, { status: 400 });
+    }
+
+    const headers: Record<string, string> = { [headerName]: headerValue, ...extraHeaders };
 
     let model;
-    if (isAnthropicModel(modelId)) {
-      if (!anthropicBaseUrl) {
-        return NextResponse.json({ error: "Anthropic Base URL is required for Claude models" }, { status: 400 });
-      }
+    if (sdkProvider === "anthropic") {
       const anthropic = createAnthropic({
-        baseURL: anthropicBaseUrl,
+        baseURL: resolvedUrl,
         apiKey: "not-needed",
-        headers: {
-          [headerName]: headerValue,
-          "X-LLM-Proxy-Target-URL": "https://api.anthropic.com",
-        },
+        headers,
       });
       model = anthropic(modelId);
     } else {
-      if (!baseUrl) {
-        return NextResponse.json({ error: "Base URL is required" }, { status: 400 });
-      }
       const proxy = createOpenAI({
-        baseURL: baseUrl.replace(/\/chat\/completions$/, ""),
+        baseURL: resolvedUrl.replace(/\/chat\/completions$/, ""),
         apiKey: "not-needed",
-        headers: {
-          [headerName]: headerValue,
-        },
+        headers,
       });
       model = proxy(modelId);
     }

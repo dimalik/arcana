@@ -495,7 +495,7 @@ function LLMSection() {
   }, []);
 
   const buildHeaderValue = useCallback(() => {
-    if (proxyVendor === "custom") return proxyHeaderValue;
+    if (proxyVendor === "custom" || proxyVendor === "gateway") return proxyHeaderValue;
     const preset = VENDOR_PRESETS[proxyVendor];
     return preset.prefix + proxyApiKey;
   }, [proxyVendor, proxyApiKey, proxyHeaderValue]);
@@ -541,11 +541,22 @@ function LLMSection() {
     setProxyTestResult(null);
     try {
       const headerValue = buildHeaderValue();
-      const firstModel = proxyModels.split(",").map(s => s.trim()).filter(Boolean)[0] || "gpt-3.5-turbo";
+      // Get first model: from routes in gateway mode, from models field otherwise
+      const allModels = proxyVendor === "gateway"
+        ? proxyRoutes.flatMap(r => r.models.split(",").map(m => m.trim())).filter(Boolean)
+        : proxyModels.split(",").map(s => s.trim()).filter(Boolean);
+      const firstModel = allModels[0] || "gpt-3.5-turbo";
+      const routes = proxyVendor === "gateway"
+        ? proxyRoutes.filter(r => r.path.trim()).map(r => ({
+            provider: r.provider, path: r.path.trim(),
+            targetUrl: r.targetUrl.trim() || undefined,
+            models: r.models.split(",").map(m => m.trim()).filter(Boolean),
+          }))
+        : undefined;
       const res = await fetch("/api/settings/proxy", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ baseUrl: proxyBaseUrl, anthropicBaseUrl: proxyAnthropicBaseUrl, headerName: proxyHeaderName, headerValue, modelId: firstModel }),
+        body: JSON.stringify({ baseUrl: proxyBaseUrl, anthropicBaseUrl: proxyAnthropicBaseUrl, headerName: proxyHeaderName, headerValue, modelId: firstModel, vendor: proxyVendor, routes }),
       });
       const data = await res.json();
       if (data.ok) setProxyTestResult({ ok: true, message: `Connected! Model: ${firstModel}` });
@@ -769,7 +780,7 @@ function LLMSection() {
             )}
 
             <div className="flex gap-2">
-              <Button variant="outline" size="sm" onClick={handleProxyTest} disabled={proxyTesting || !proxyBaseUrl || !proxyModels}>
+              <Button variant="outline" size="sm" onClick={handleProxyTest} disabled={proxyTesting || !proxyBaseUrl || (proxyVendor !== "gateway" && !proxyModels) || (proxyVendor === "gateway" && !proxyRoutes.some(r => r.models.trim()))}>
                 {proxyTesting ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Zap className="mr-1.5 h-3.5 w-3.5" />}
                 Test
               </Button>
