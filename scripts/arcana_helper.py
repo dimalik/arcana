@@ -31,7 +31,7 @@ import time
 import hashlib
 from pathlib import Path
 
-HELPER_VERSION = "5"
+HELPER_VERSION = "6"
 ARCANA_DIR = ".arcana"
 STATUS_FILE = "status.json"
 REQS_HASH_FILE = "reqs_hash"
@@ -85,14 +85,24 @@ def read_status(workdir):
 
 
 def write_status(workdir, status):
-    """Write status.json atomically."""
+    """Write status.json — atomic when possible, direct write as fallback for NFS."""
     arcana_dir = os.path.join(workdir, ARCANA_DIR)
     os.makedirs(arcana_dir, exist_ok=True)
     status_path = os.path.join(arcana_dir, STATUS_FILE)
     tmp_path = status_path + ".tmp"
-    with open(tmp_path, "w") as f:
-        json.dump(status, f, default=str)
-    os.rename(tmp_path, status_path)
+    content = json.dumps(status, default=str)
+    try:
+        with open(tmp_path, "w") as f:
+            f.write(content)
+            f.flush()
+            os.fsync(f.fileno())
+        os.rename(tmp_path, status_path)
+    except OSError:
+        # NFS may not support atomic rename — write directly
+        with open(status_path, "w") as f:
+            f.write(content)
+            f.flush()
+            os.fsync(f.fileno())
 
 
 def file_hash(path):

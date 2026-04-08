@@ -15,7 +15,7 @@ const execAsync = promisify(exec);
 
 // ── Helper management ────────────────────────────────────────────
 
-const HELPER_VERSION = "5";
+const HELPER_VERSION = "6";
 const helperInstalledHosts = new Map<string, boolean>();
 
 /**
