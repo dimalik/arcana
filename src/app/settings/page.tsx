@@ -362,6 +362,47 @@ function DatabaseImportExport() {
   );
 }
 
+/** Model pill input — type a model name, press Enter/comma to add as pill */
+function ModelPills({ models, onChange }: { models: string[]; onChange: (models: string[]) => void }) {
+  const [input, setInput] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const addModel = (name: string) => {
+    const trimmed = name.trim();
+    if (trimmed && !models.includes(trimmed)) {
+      onChange([...models, trimmed]);
+    }
+    setInput("");
+  };
+
+  return (
+    <div
+      className="flex flex-wrap gap-1 min-h-[28px] px-2 py-1 rounded-md border border-border/40 bg-background cursor-text"
+      onClick={() => inputRef.current?.focus()}
+    >
+      {models.map(m => (
+        <span key={m} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-muted text-xs font-mono">
+          {m}
+          <button onClick={(e) => { e.stopPropagation(); onChange(models.filter(x => x !== m)); }}
+            className="text-muted-foreground/40 hover:text-destructive">×</button>
+        </span>
+      ))}
+      <input
+        ref={inputRef}
+        value={input}
+        onChange={(e) => setInput(e.target.value)}
+        onKeyDown={(e) => {
+          if ((e.key === "Enter" || e.key === ",") && input.trim()) { e.preventDefault(); addModel(input); }
+          if (e.key === "Backspace" && !input && models.length > 0) { onChange(models.slice(0, -1)); }
+        }}
+        onBlur={() => { if (input.trim()) addModel(input); }}
+        placeholder={models.length === 0 ? "Type model name, press Enter" : ""}
+        className="flex-1 min-w-[100px] bg-transparent text-xs font-mono outline-none placeholder:text-muted-foreground/30"
+      />
+    </div>
+  );
+}
+
 // ── LLM ────────────────────────────────────────────────────────────
 
 interface KeyStatus {
@@ -778,11 +819,14 @@ function LLMSection() {
                         </div>
                         <div>
                           <Label className="text-[10px] text-muted-foreground">Models</Label>
-                          <Input value={route.models} onChange={(e) => {
-                            const updated = [...proxyRoutes];
-                            updated[i] = { ...updated[i], models: e.target.value };
-                            setProxyRoutes(updated);
-                          }} placeholder="model-1, model-2" className="font-mono text-xs h-7" />
+                          <ModelPills
+                            models={route.models.split(",").map(m => m.trim()).filter(Boolean)}
+                            onChange={(models) => {
+                              const updated = [...proxyRoutes];
+                              updated[i] = { ...updated[i], models: models.join(", ") };
+                              setProxyRoutes(updated);
+                            }}
+                          />
                         </div>
                       </div>
                       {routeTestResults[i] && (

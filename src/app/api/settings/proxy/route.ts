@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getProxyConfig, saveProxyConfig, isAnthropicModel, VENDOR_PRESETS, type ProxyVendor } from "@/lib/llm/proxy-settings";
 import { createOpenAI } from "@ai-sdk/openai";
 import { createAnthropic } from "@ai-sdk/anthropic";
-import { streamText } from "ai";
+import { generateText } from "ai";
 
 /**
  * GET — return proxy config with API key masked.
@@ -117,12 +117,11 @@ export async function POST(req: NextRequest) {
       model = proxy(modelId);
     }
 
-    const result = streamText({
+    const result = await generateText({
       model,
       prompt: "Say 'ok' and nothing else.",
-      maxOutputTokens: 10,
     });
-    const text = await result.text;
+    const text = result.text;
 
     return NextResponse.json({ ok: true, response: text.trim() });
   } catch (e) {
