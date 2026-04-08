@@ -67,7 +67,7 @@ For **proxy** setups, select your vendor (OpenRouter, LiteLLM, Azure, or Custom)
 
 Click **Test Connection** to verify before continuing.
 
-> **Tip:** If your organization uses an LLM proxy, select "Proxy / Custom" and enter the proxy URL. You can also set `LLM_PROXY_URL` and `LLM_PROXY_HEADER_VALUE` in your `.env` file — Arcana will auto-detect them.
+> **Tip:** If your organization uses an OpenAI-compatible endpoint, select "Proxy / Custom" and enter the base URL. You can also configure this in your `.env` file — Arcana will auto-detect it on startup.
 
 If you skip this step, paper analysis, research agents, and chat won't work until you configure a provider in **Settings → LLM**.
 
@@ -117,9 +117,9 @@ See `.env.example` for all available options:
 | `DATABASE_URL` | No | SQLite path (default: `file:./dev.db`) |
 | `OPENAI_API_KEY` | One of these | OpenAI API key |
 | `ANTHROPIC_API_KEY` | One of these | Anthropic API key |
-| `LLM_PROXY_URL` | One of these | Proxy base URL |
-| `LLM_PROXY_HEADER_NAME` | With proxy | Auth header name |
-| `LLM_PROXY_HEADER_VALUE` | With proxy | Auth header value |
+| `LLM_PROXY_URL` | One of these | OpenAI-compatible endpoint URL |
+| `LLM_PROXY_HEADER_NAME` | With endpoint | Auth header name (default: `Authorization`) |
+| `LLM_PROXY_HEADER_VALUE` | With endpoint | Auth header value |
 | `S2_API_KEY` | No | Semantic Scholar API key (higher rate limits) |
 | `CROSSREF_MAILTO` | No | Email for CrossRef API (polite access) |
 

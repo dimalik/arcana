@@ -26,13 +26,13 @@ Supports Claude models (Claude 4.5/4.6 Sonnet, Opus, Haiku).
 
 ### OpenAI-compatible proxy
 
-For services that expose an OpenAI-compatible API (OpenRouter, LiteLLM, Azure OpenAI, vLLM, Ollama, etc.):
+For services that expose an OpenAI-compatible API (OpenRouter, LiteLLM, Azure OpenAI, vLLM, Ollama, etc.), configure the endpoint in **Settings → LLM → Proxy / Custom**, or set the environment variable:
 
 ```env
-LLM_PROXY_URL="https://your-proxy.example.com/v1"
+LLM_PROXY_URL="https://your-endpoint.example.com/v1"
 ```
 
-Some proxies require an API key in the `Authorization` header — configure this in Settings > LLM.
+Some endpoints require authentication — configure the auth header in Settings → LLM.
 
 ## Model selection
 
