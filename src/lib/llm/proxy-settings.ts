@@ -68,9 +68,15 @@ const PROXY_KEYS = [
  */
 function deriveAnthropicUrl(openaiUrl: string): string {
   if (!openaiUrl) return "";
+  // Pattern: .../openai/... → .../anthropic/...
   if (openaiUrl.includes("/openai/")) {
     return openaiUrl.replace("/openai/", "/anthropic/");
   }
+  // For OpenRouter-style URLs, the same base works for both providers
+  if (openaiUrl.includes("openrouter.ai")) {
+    return openaiUrl;
+  }
+  // Can't auto-derive — user must set it explicitly in "Anthropic Endpoint URL"
   return "";
 }
 

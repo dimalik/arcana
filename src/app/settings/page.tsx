@@ -636,8 +636,9 @@ function LLMSection() {
               <Input value={proxyBaseUrl} onChange={(e) => setProxyBaseUrl(e.target.value)} placeholder="https://openrouter.ai/api/v1" className="font-mono text-sm" />
             </div>
             <div className="space-y-1">
-              <Label className="text-xs">Anthropic Base URL</Label>
+              <Label className="text-xs">Anthropic Endpoint URL</Label>
               <Input value={proxyAnthropicBaseUrl} onChange={(e) => setProxyAnthropicBaseUrl(e.target.value)} placeholder="Auto-derived if blank" className="font-mono text-sm" />
+              <p className="text-[11px] text-muted-foreground/50">The proxy URL for Anthropic models (SDK appends /v1/messages). Leave blank to auto-derive from Base URL.</p>
             </div>
 
             <div className="space-y-1">

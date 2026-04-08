@@ -46,7 +46,7 @@ export async function getModel(provider: LLMProvider, modelId: string, proxyConf
     if (isAnthropicModel(modelId)) {
       const anthropicUrl = proxyConfig?.anthropicBaseUrl;
       if (!anthropicUrl) {
-        throw new Error("Anthropic proxy base URL is not configured. Set it in Settings.");
+        throw new Error("Anthropic Endpoint URL is not configured. Go to Settings → LLM → Proxy and set the 'Anthropic Endpoint URL' field to your proxy's Anthropic path (e.g., https://your-proxy.com/anthropic/v1). The SDK appends /v1/messages to this URL.");
       }
       const anthropic = createAnthropic({
         baseURL: anthropicUrl,
