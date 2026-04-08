@@ -771,18 +771,28 @@ function LLMSection() {
                               setRouteTestResults(prev => ({ ...prev, [i]: null }));
                               try {
                                 const headerValue = buildHeaderValue();
-                                const firstModel = route.models.split(",").map(m => m.trim()).filter(Boolean)[0];
-                                if (!firstModel) { setRouteTestResults(prev => ({ ...prev, [i]: { ok: false, message: "No models" } })); setRouteTesting(null); return; }
-                                const res = await fetch("/api/settings/proxy", {
-                                  method: "POST", headers: { "Content-Type": "application/json" },
-                                  body: JSON.stringify({
-                                    baseUrl: proxyBaseUrl, headerName: proxyHeaderName, headerValue,
-                                    modelId: firstModel, vendor: "gateway",
-                                    routes: [{ provider: route.provider, path: route.path.trim(), targetUrl: route.targetUrl.trim() || undefined, models: route.models.split(",").map(m => m.trim()).filter(Boolean) }],
-                                  }),
-                                });
-                                const data = await res.json();
-                                setRouteTestResults(prev => ({ ...prev, [i]: data.ok ? { ok: true, message: `${firstModel} ✓` } : { ok: false, message: data.error || "Failed" } }));
+                                const models = route.models.split(",").map(m => m.trim()).filter(Boolean);
+                                if (models.length === 0) { setRouteTestResults(prev => ({ ...prev, [i]: { ok: false, message: "No models" } })); setRouteTesting(null); return; }
+                                // Test ALL models sequentially
+                                const results: string[] = [];
+                                let allOk = true;
+                                for (const modelId of models) {
+                                  setRouteTestResults(prev => ({ ...prev, [i]: { ok: true, message: `Testing ${modelId}...` } }));
+                                  try {
+                                    const res = await fetch("/api/settings/proxy", {
+                                      method: "POST", headers: { "Content-Type": "application/json" },
+                                      body: JSON.stringify({
+                                        baseUrl: proxyBaseUrl, headerName: proxyHeaderName, headerValue,
+                                        modelId, vendor: "gateway",
+                                        routes: [{ provider: route.provider, path: route.path.trim(), targetUrl: route.targetUrl.trim() || undefined, models }],
+                                      }),
+                                    });
+                                    const data = await res.json();
+                                    if (data.ok) { results.push(`${modelId} ✓`); }
+                                    else { results.push(`${modelId} ✗`); allOk = false; }
+                                  } catch { results.push(`${modelId} ✗`); allOk = false; }
+                                }
+                                setRouteTestResults(prev => ({ ...prev, [i]: { ok: allOk, message: results.join("  ") } }));
                               } catch (e) {
                                 setRouteTestResults(prev => ({ ...prev, [i]: { ok: false, message: e instanceof Error ? e.message : "Failed" } }));
                               }
