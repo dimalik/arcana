@@ -47,6 +47,7 @@ export async function PUT(req: NextRequest) {
       modelId: body.modelId || "",
       contextWindow: parseInt(body.contextWindow, 10) || 128000,
       maxTokens: parseInt(body.maxTokens, 10) || 4096,
+      routes: body.routes || undefined,
     });
 
     return NextResponse.json({ ok: true });

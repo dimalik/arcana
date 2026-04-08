@@ -55,13 +55,14 @@ const TAG_COLORS = [
   "#8B5CF6", "#EC4899", "#06B6D4", "#F97316",
 ];
 
-type ProxyVendor = "openrouter" | "litellm" | "azure" | "custom";
+type ProxyVendor = "openrouter" | "litellm" | "azure" | "custom" | "gateway";
 
 const VENDOR_PRESETS: Record<ProxyVendor, { label: string; baseUrl: string; headerName: string; prefix: string }> = {
   openrouter: { label: "OpenRouter", baseUrl: "https://openrouter.ai/api/v1", headerName: "Authorization", prefix: "Bearer " },
   litellm: { label: "LiteLLM", baseUrl: "http://localhost:4000/v1", headerName: "Authorization", prefix: "Bearer " },
   azure: { label: "Azure OpenAI", baseUrl: "https://<resource>.openai.azure.com/openai/deployments/<deployment>/v1", headerName: "api-key", prefix: "" },
   custom: { label: "Custom", baseUrl: "", headerName: "Authorization", prefix: "Bearer " },
+  gateway: { label: "Gateway (multi-provider)", baseUrl: "", headerName: "X-LLM-Proxy-Calling-Service", prefix: "" },
 };
 
 type Section = "general" | "llm" | "tags" | "remote" | "agent" | "insights";
@@ -387,6 +388,11 @@ function LLMSection() {
   const [proxyVendor, setProxyVendor] = useState<ProxyVendor>("openrouter");
   const [proxyBaseUrl, setProxyBaseUrl] = useState("");
   const [proxyAnthropicBaseUrl, setProxyAnthropicBaseUrl] = useState("");
+  const [proxyRoutes, setProxyRoutes] = useState<Array<{ provider: string; path: string; targetUrl: string; models: string }>>([
+    { provider: "openai", path: "openai/v1", targetUrl: "", models: "" },
+    { provider: "anthropic", path: "anthropic/v1", targetUrl: "https://api.anthropic.com", models: "" },
+    { provider: "google", path: "google_ai_studio/v1", targetUrl: "https://generativelanguage.googleapis.com/", models: "" },
+  ]);
   const [proxyApiKey, setProxyApiKey] = useState("");
   const [proxyHeaderName, setProxyHeaderName] = useState("Authorization");
   const [proxyHeaderValue, setProxyHeaderValue] = useState("");
@@ -427,6 +433,14 @@ function LLMSection() {
         setProxyContextWindow(String(data.contextWindow || 128000));
         setProxyMaxTokens(String(data.maxTokens || 4096));
         setProxyHasExistingKey(!!data.apiKey);
+        if (data.routes && Array.isArray(data.routes) && data.routes.length > 0) {
+          setProxyRoutes(data.routes.map((r: { provider: string; path: string; targetUrl?: string; models?: string[] }) => ({
+            provider: r.provider,
+            path: r.path || "",
+            targetUrl: r.targetUrl || "",
+            models: Array.isArray(r.models) ? r.models.join(", ") : "",
+          })));
+        }
         setProxyLoaded(true);
       })
       .catch(() => setProxyLoaded(true));
@@ -493,10 +507,22 @@ function LLMSection() {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          enabled: proxyEnabled, vendor: proxyVendor, baseUrl: proxyBaseUrl,
+          vendor: proxyVendor, baseUrl: proxyBaseUrl,
           anthropicBaseUrl: proxyAnthropicBaseUrl, apiKey: proxyApiKey || null,
-          headerName: proxyHeaderName, headerValue: proxyVendor === "custom" ? proxyHeaderValue : "",
-          modelId: proxyModels, contextWindow: proxyContextWindow, maxTokens: proxyMaxTokens,
+          headerName: proxyHeaderName,
+          headerValue: (proxyVendor === "custom" || proxyVendor === "gateway") ? proxyHeaderValue : "",
+          modelId: proxyVendor === "gateway"
+            ? proxyRoutes.flatMap(r => r.models.split(",").map(m => m.trim())).filter(Boolean).join(", ")
+            : proxyModels,
+          contextWindow: proxyContextWindow, maxTokens: proxyMaxTokens,
+          routes: proxyVendor === "gateway"
+            ? proxyRoutes.filter(r => r.path.trim()).map(r => ({
+                provider: r.provider,
+                path: r.path.trim(),
+                targetUrl: r.targetUrl.trim() || undefined,
+                models: r.models.split(",").map(m => m.trim()).filter(Boolean),
+              }))
+            : undefined,
         }),
       });
       if (res.ok) {
@@ -627,26 +653,19 @@ function LLMSection() {
                   <SelectItem value="litellm">LiteLLM</SelectItem>
                   <SelectItem value="azure">Azure OpenAI</SelectItem>
                   <SelectItem value="custom">Custom</SelectItem>
+                  <SelectItem value="gateway">Gateway (multi-provider)</SelectItem>
                 </SelectContent>
               </Select>
             </div>
 
             <div className="space-y-1">
-              <Label className="text-xs">Base URL</Label>
-              <Input value={proxyBaseUrl} onChange={(e) => setProxyBaseUrl(e.target.value)} placeholder="https://openrouter.ai/api/v1" className="font-mono text-sm" />
-            </div>
-            <div className="space-y-1">
-              <Label className="text-xs">Anthropic Endpoint URL</Label>
-              <Input value={proxyAnthropicBaseUrl} onChange={(e) => setProxyAnthropicBaseUrl(e.target.value)} placeholder="Auto-derived if blank" className="font-mono text-sm" />
-              <p className="text-[11px] text-muted-foreground/50">The proxy URL for Anthropic models (SDK appends /v1/messages). Leave blank to auto-derive from Base URL.</p>
+              <Label className="text-xs">{proxyVendor === "gateway" ? "Gateway Base URL" : "Base URL"}</Label>
+              <Input value={proxyBaseUrl} onChange={(e) => setProxyBaseUrl(e.target.value)} placeholder={proxyVendor === "gateway" ? "https://proxy.corp.com/api" : "https://openrouter.ai/api/v1"} className="font-mono text-sm" />
+              {proxyVendor === "gateway" && <p className="text-[11px] text-muted-foreground/50">The gateway base — provider paths are appended from routes below.</p>}
             </div>
 
-            <div className="space-y-1">
-              <Label className="text-xs">API Key</Label>
-              <Input type="password" value={proxyApiKey} onChange={(e) => setProxyApiKey(e.target.value)} placeholder={proxyHasExistingKey ? "Saved — leave blank to keep" : "sk-or-..."} className="font-mono text-sm" />
-            </div>
-
-            {proxyVendor === "custom" && (
+            {/* Auth — always shown for gateway and custom, hidden for presets (they use API key) */}
+            {(proxyVendor === "custom" || proxyVendor === "gateway") && (
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
                   <Label className="text-xs">Auth Header Name</Label>
@@ -659,11 +678,73 @@ function LLMSection() {
               </div>
             )}
 
-            <div className="space-y-1">
-              <Label className="text-xs">Models</Label>
-              <Input value={proxyModels} onChange={(e) => setProxyModels(e.target.value)} placeholder="gpt-4o, claude-sonnet-4-6" className="font-mono text-sm" />
-              <p className="text-[11px] text-muted-foreground">Comma-separated model IDs. These appear in the model picker above.</p>
-            </div>
+            {/* API Key — for simple vendors */}
+            {proxyVendor !== "gateway" && proxyVendor !== "custom" && (
+              <div className="space-y-1">
+                <Label className="text-xs">API Key</Label>
+                <Input type="password" value={proxyApiKey} onChange={(e) => setProxyApiKey(e.target.value)} placeholder={proxyHasExistingKey ? "Saved — leave blank to keep" : "sk-or-..."} className="font-mono text-sm" />
+              </div>
+            )}
+
+            {/* Gateway: provider routes table */}
+            {proxyVendor === "gateway" && (
+              <div className="space-y-2">
+                <Label className="text-xs">Provider Routes</Label>
+                <p className="text-[11px] text-muted-foreground/50">Each provider gets its own path within the gateway. The SDK appends its own suffix.</p>
+                <div className="space-y-2">
+                  {proxyRoutes.map((route, i) => (
+                    <div key={route.provider} className="grid grid-cols-[100px_1fr_1fr_1fr] gap-2 items-end">
+                      <div>
+                        <Label className="text-[10px] text-muted-foreground">{i === 0 ? "Provider" : ""}</Label>
+                        <div className="text-xs font-medium capitalize px-2 py-1.5 rounded border border-border/40 bg-muted/20">{route.provider}</div>
+                      </div>
+                      <div>
+                        <Label className="text-[10px] text-muted-foreground">{i === 0 ? "Path" : ""}</Label>
+                        <Input value={route.path} onChange={(e) => {
+                          const updated = [...proxyRoutes];
+                          updated[i] = { ...updated[i], path: e.target.value };
+                          setProxyRoutes(updated);
+                        }} placeholder="openai/v1" className="font-mono text-xs" />
+                      </div>
+                      <div>
+                        <Label className="text-[10px] text-muted-foreground">{i === 0 ? "Target URL (optional)" : ""}</Label>
+                        <Input value={route.targetUrl} onChange={(e) => {
+                          const updated = [...proxyRoutes];
+                          updated[i] = { ...updated[i], targetUrl: e.target.value };
+                          setProxyRoutes(updated);
+                        }} placeholder="https://api.openai.com" className="font-mono text-xs" />
+                      </div>
+                      <div>
+                        <Label className="text-[10px] text-muted-foreground">{i === 0 ? "Models" : ""}</Label>
+                        <Input value={route.models} onChange={(e) => {
+                          const updated = [...proxyRoutes];
+                          updated[i] = { ...updated[i], models: e.target.value };
+                          setProxyRoutes(updated);
+                        }} placeholder="model-1, model-2" className="font-mono text-xs" />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Anthropic URL — only for non-gateway single-URL modes */}
+            {proxyVendor !== "gateway" && (
+              <div className="space-y-1">
+                <Label className="text-xs">Anthropic Endpoint URL</Label>
+                <Input value={proxyAnthropicBaseUrl} onChange={(e) => setProxyAnthropicBaseUrl(e.target.value)} placeholder="Auto-derived if blank" className="font-mono text-sm" />
+                <p className="text-[11px] text-muted-foreground/50">For Anthropic models. Leave blank to auto-derive from Base URL.</p>
+              </div>
+            )}
+
+            {/* Models — for non-gateway modes */}
+            {proxyVendor !== "gateway" && (
+              <div className="space-y-1">
+                <Label className="text-xs">Models</Label>
+                <Input value={proxyModels} onChange={(e) => setProxyModels(e.target.value)} placeholder="gpt-4o, claude-sonnet-4-6" className="font-mono text-sm" />
+                <p className="text-[11px] text-muted-foreground">Comma-separated model IDs. These appear in the model picker above.</p>
+              </div>
+            )}
 
             <div className="flex gap-3">
               <div className="space-y-1 flex-1">
