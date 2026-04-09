@@ -7,17 +7,21 @@ Self-contained (stdlib only). Handles:
 - Virtual environment management
 - Structured JSON status reporting
 - Resource monitoring (CPU RAM, GPU memory)
+- Workspace lifecycle (archive, prune, restore)
 
 Invoked via: python3 ~/.arcana/helper.py <command> [args...]
 
 Commands:
-  run <workdir> -- <command...>   Launch experiment in background
+  run <workdir> [--run <name>] -- <command...>   Launch experiment in background
   status <workdir>                Get structured status JSON
   logs <workdir> [--lines N]     Tail stdout/stderr
   kill <workdir>                  Kill experiment process group
   setup-env <workdir>            Setup venv + install requirements
   info                           Host info (RAM, GPUs, disk)
   manifest <workdir>             Structured workspace manifest (files, results, packages)
+  archive <workdir> <run_name> [--include-checkpoints]  Archive a completed run
+  prune <workdir> [--keep-recent N] [--max-archives N] [--dry-run]  Bulk cleanup
+  restore <workdir> <run_name>   Restore an archived run
   version                        Print helper version
 """
 
@@ -31,7 +35,7 @@ import time
 import hashlib
 from pathlib import Path
 
-HELPER_VERSION = "6"
+HELPER_VERSION = "7"
 ARCANA_DIR = ".arcana"
 STATUS_FILE = "status.json"
 REQS_HASH_FILE = "reqs_hash"
@@ -342,7 +346,7 @@ def get_venv_python(workdir):
 
 # ── Commands ──────────────────────────────────────────────────────
 
-def cmd_run(workdir, command):
+def cmd_run(workdir, command, run_name=None):
     """Launch experiment in background with monitoring."""
     workdir = os.path.abspath(workdir)
     if not os.path.isdir(workdir):
@@ -380,6 +384,12 @@ def cmd_run(workdir, command):
             status["completed_at"] = time.strftime("%Y-%m-%dT%H:%M:%S")
             write_status(workdir, status)
 
+    # Create run directory if --run was specified
+    run_dir = None
+    if run_name:
+        run_dir = os.path.join(workdir, run_name)
+        os.makedirs(run_dir, exist_ok=True)
+
     # Check for pre-existing environment (user-configured venv/conda)
     conda_env = os.environ.get("ARCANA_CONDA", "")
     has_existing_env = bool(conda_env.strip())
@@ -387,6 +397,7 @@ def cmd_run(workdir, command):
     write_status(workdir, {
         "status": "setup",
         "started_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+        "run_name": run_name,
     })
 
     # Only create/install venv if NO pre-existing environment is configured
@@ -399,11 +410,14 @@ def cmd_run(workdir, command):
                 "error": msg,
                 "started_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
                 "completed_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                "run_name": run_name,
             })
             json_err(f"Environment setup failed: {msg}")
 
     # Build the actual command to run
-    shell_parts = [f"cd {workdir}"]
+    # Working directory is the run dir if specified, otherwise workdir
+    cwd = run_dir or workdir
+    shell_parts = [f"cd {cwd}"]
 
     # Pre-existing env takes priority
     if has_existing_env:
@@ -429,15 +443,19 @@ def cmd_run(workdir, command):
     if setup_cmd:
         shell_parts.append(setup_cmd)
 
+    # Set ARCANA_OUTPUT_DIR so scripts can find the output path if needed
+    if run_dir:
+        shell_parts.append(f"export ARCANA_OUTPUT_DIR='{run_dir}'")
+
     # Wrap command to capture its exit code — the monitor can't use waitpid
     # because the experiment is a sibling, not a child process.
     exit_code_file = os.path.join(workdir, ARCANA_DIR, "exit_code")
     shell_parts.append(f'({command}); __ec=$?; echo $__ec > {exit_code_file}; exit $__ec')
     full_cmd = " && ".join(shell_parts)
 
-    # Launch as background process
-    stdout_path = os.path.join(workdir, "stdout.log")
-    stderr_path = os.path.join(workdir, "stderr.log")
+    # Launch as background process — stdout/stderr go to run dir if specified
+    stdout_path = os.path.join(cwd, "stdout.log")
+    stderr_path = os.path.join(cwd, "stderr.log")
 
     stdout_f = open(stdout_path, "w")
     stderr_f = open(stderr_path, "w")
@@ -446,7 +464,7 @@ def cmd_run(workdir, command):
         ["bash", "-c", full_cmd],
         stdout=stdout_f,
         stderr=stderr_f,
-        cwd=workdir,
+        cwd=cwd,
         start_new_session=True,  # new process group
         close_fds=True,
     )
@@ -465,6 +483,7 @@ def cmd_run(workdir, command):
         "oom_detected": False,
         "oom_detail": "",
         "env_setup_msg": msg,
+        "run_name": run_name,
         "resource_snapshots": [take_snapshot()],
         "stdout_tail": "",
         "stderr_tail": "",
@@ -492,7 +511,7 @@ def cmd_run(workdir, command):
     with open(os.path.join(arcana_dir, MONITOR_PID_FILE), "w") as f:
         f.write(str(monitor_proc.pid))
 
-    json_out({"ok": True, "pid": pid, "pgid": pgid})
+    json_out({"ok": True, "pid": pid, "pgid": pgid, "run_name": run_name})
 
 
 def cmd_monitor(workdir, pid, pgid):
@@ -525,8 +544,11 @@ def cmd_monitor(workdir, pid, pgid):
                 snapshots = snapshots[-MAX_SNAPSHOTS:]
 
             status["resource_snapshots"] = snapshots
-            status["stdout_tail"] = tail_file(os.path.join(workdir, "stdout.log"), 50)
-            status["stderr_tail"] = tail_file(os.path.join(workdir, "stderr.log"), 20)
+            # Read log paths — from run dir if set, else workdir root
+            run_name = status.get("run_name")
+            log_base = os.path.join(workdir, run_name) if run_name else workdir
+            status["stdout_tail"] = tail_file(os.path.join(log_base, "stdout.log"), 50)
+            status["stderr_tail"] = tail_file(os.path.join(log_base, "stderr.log"), 20)
             write_status(workdir, status)
         except Exception as e:
             # Don't let snapshot/IO errors crash the monitor — keep watching the process
@@ -623,6 +645,8 @@ def cmd_monitor(workdir, pid, pgid):
         elif exit_code == 137:
             diagnosis = "SIGKILL — Process was killed externally (likely OOM killer or resource limit)."
 
+    run_name = status.get("run_name")
+    log_base = os.path.join(workdir, run_name) if run_name else workdir
     status.update({
         "status": final_status,
         "exit_code": exit_code,
@@ -631,8 +655,8 @@ def cmd_monitor(workdir, pid, pgid):
         "oom_detail": oom_detail,
         "diagnosis": diagnosis,
         "resource_snapshots": snapshots[-MAX_SNAPSHOTS:],
-        "stdout_tail": tail_file(os.path.join(workdir, "stdout.log"), 100),
-        "stderr_tail": tail_file(os.path.join(workdir, "stderr.log"), 50),
+        "stdout_tail": tail_file(os.path.join(log_base, "stdout.log"), 100),
+        "stderr_tail": tail_file(os.path.join(log_base, "stderr.log"), 50),
     })
     write_status(workdir, status)
 
@@ -701,8 +725,10 @@ def cmd_status(workdir):
             write_status(workdir, status)
 
     # Always refresh log tails
-    status["stdout_tail"] = tail_file(os.path.join(workdir, "stdout.log"), 100)
-    status["stderr_tail"] = tail_file(os.path.join(workdir, "stderr.log"), 50)
+    run_name = status.get("run_name") if status else None
+    log_base = os.path.join(workdir, run_name) if run_name else workdir
+    status["stdout_tail"] = tail_file(os.path.join(log_base, "stdout.log"), 100)
+    status["stderr_tail"] = tail_file(os.path.join(log_base, "stderr.log"), 50)
     status["ok"] = True
 
     json_out(status)
@@ -711,10 +737,14 @@ def cmd_status(workdir):
 def cmd_logs(workdir, lines=200, stderr_lines=50):
     """Tail stdout/stderr."""
     workdir = os.path.abspath(workdir)
+    # Check if there's an active run with a run dir
+    status = read_status(workdir)
+    run_name = status.get("run_name") if status else None
+    log_base = os.path.join(workdir, run_name) if run_name else workdir
     json_out({
         "ok": True,
-        "stdout": tail_file(os.path.join(workdir, "stdout.log"), lines),
-        "stderr": tail_file(os.path.join(workdir, "stderr.log"), stderr_lines),
+        "stdout": tail_file(os.path.join(log_base, "stdout.log"), lines),
+        "stderr": tail_file(os.path.join(log_base, "stderr.log"), stderr_lines),
     })
 
 
@@ -833,7 +863,7 @@ def cmd_manifest(workdir):
     files = []
     results = []
     for root, dirs, filenames in os.walk(workdir):
-        dirs[:] = [d for d in dirs if not d.startswith('.') and d != '.venv' and d != '__pycache__' and d != '.arcana']
+        dirs[:] = [d for d in dirs if (not d.startswith('.') or d == '.archive') and d != '.venv' and d != '__pycache__' and d != '.arcana']
         rel_root = os.path.relpath(root, workdir)
         for fname in filenames:
             fpath = os.path.join(root, fname)
@@ -884,6 +914,297 @@ def cmd_manifest(workdir):
     })
 
 
+def cmd_archive(workdir, run_name, include_checkpoints=False):
+    """Archive a completed experiment run into .archive/."""
+    import shutil
+    import tarfile
+
+    workdir = os.path.abspath(workdir)
+    run_dir = os.path.join(workdir, run_name)
+
+    if not os.path.isdir(run_dir):
+        json_err(f"Run directory does not exist: {run_name}")
+
+    # Safety: refuse to archive if the current job is still running in this run dir
+    status = read_status(workdir)
+    if status and status.get("status") == "running" and status.get("run_name") == run_name:
+        pid = status.get("pid")
+        if pid and is_pid_alive(pid):
+            json_err(f"Cannot archive {run_name} — experiment is still running (PID {pid})")
+
+    # Delete checkpoints before archiving (unless --include-checkpoints)
+    if not include_checkpoints:
+        for item in os.listdir(run_dir):
+            item_path = os.path.join(run_dir, item)
+            if item == "checkpoints" and os.path.isdir(item_path):
+                shutil.rmtree(item_path, ignore_errors=True)
+            elif "ckpt" in item.lower() and os.path.isdir(item_path):
+                shutil.rmtree(item_path, ignore_errors=True)
+
+    # Count files and measure size before archiving
+    file_count = 0
+    total_size = 0
+    for root, _dirs, files in os.walk(run_dir):
+        for f in files:
+            fpath = os.path.join(root, f)
+            try:
+                total_size += os.path.getsize(fpath)
+                file_count += 1
+            except OSError:
+                pass
+
+    # Create .archive/ directory
+    archive_dir = os.path.join(workdir, ".archive")
+    os.makedirs(archive_dir, exist_ok=True)
+
+    # Create tarball
+    archive_path = os.path.join(archive_dir, f"{run_name}.tar.gz")
+    try:
+        with tarfile.open(archive_path, "w:gz") as tar:
+            tar.add(run_dir, arcname=run_name)
+    except Exception as e:
+        json_err(f"Failed to create archive: {e}")
+
+    archive_size = os.path.getsize(archive_path)
+
+    # Delete the flat run directory
+    shutil.rmtree(run_dir, ignore_errors=True)
+
+    # Update manifest
+    manifest_path = os.path.join(archive_dir, "manifest.json")
+    manifest = []
+    try:
+        with open(manifest_path) as f:
+            manifest = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        pass
+
+    manifest.append({
+        "name": run_name,
+        "archivedAt": time.strftime("%Y-%m-%dT%H:%M:%S"),
+        "sizeBytes": archive_size,
+        "originalSizeBytes": total_size,
+        "fileCount": file_count,
+        "hadCheckpoints": include_checkpoints,
+    })
+
+    with open(manifest_path, "w") as f:
+        json.dump(manifest, f, indent=2)
+
+    saved_bytes = total_size - archive_size
+    json_out({
+        "ok": True,
+        "archived": run_name,
+        "savedBytes": saved_bytes,
+        "archiveSize": archive_size,
+        "archivePath": f".archive/{run_name}.tar.gz",
+        "fileCount": file_count,
+    })
+
+
+def cmd_prune(workdir, keep_recent=0, max_archives=20, dry_run=False):
+    """Bulk workspace cleanup: archive stale runs, trim old archives, remove orphans."""
+    import shutil
+    import tarfile
+    import glob as glob_mod
+
+    workdir = os.path.abspath(workdir)
+    if not os.path.isdir(workdir):
+        json_err(f"Workdir does not exist: {workdir}")
+
+    result = {
+        "archivedRuns": [],
+        "deletedArchives": [],
+        "orphansCleaned": 0,
+        "bytesFreed": 0,
+    }
+
+    # Check current running status
+    status = read_status(workdir)
+    running_run_name = None
+    if status and status.get("status") == "running":
+        pid = status.get("pid")
+        if pid and is_pid_alive(pid):
+            running_run_name = status.get("run_name")
+
+    # 1. Archive any unarchived run_* dirs (except running and recent)
+    run_dirs = sorted([
+        d for d in os.listdir(workdir)
+        if d.startswith("run_") and os.path.isdir(os.path.join(workdir, d))
+    ])
+
+    # Skip the most recent N run dirs
+    archivable = run_dirs[:-keep_recent] if keep_recent > 0 and len(run_dirs) > keep_recent else run_dirs
+
+    archive_dir = os.path.join(workdir, ".archive")
+
+    for rd in archivable:
+        if rd == running_run_name:
+            continue
+        run_path = os.path.join(workdir, rd)
+        existing_archive = os.path.join(archive_dir, f"{rd}.tar.gz")
+        if os.path.exists(existing_archive):
+            continue
+
+        if dry_run:
+            result["archivedRuns"].append(rd)
+        else:
+            try:
+                os.makedirs(archive_dir, exist_ok=True)
+
+                dir_size = 0
+                file_count = 0
+                for root, _dirs, files in os.walk(run_path):
+                    for f in files:
+                        try:
+                            dir_size += os.path.getsize(os.path.join(root, f))
+                            file_count += 1
+                        except OSError:
+                            pass
+
+                archive_path = os.path.join(archive_dir, f"{rd}.tar.gz")
+                with tarfile.open(archive_path, "w:gz") as tar:
+                    tar.add(run_path, arcname=rd)
+
+                archive_size = os.path.getsize(archive_path)
+                shutil.rmtree(run_path, ignore_errors=True)
+
+                # Update manifest
+                manifest_path = os.path.join(archive_dir, "manifest.json")
+                manifest = []
+                try:
+                    with open(manifest_path) as mf:
+                        manifest = json.load(mf)
+                except (FileNotFoundError, json.JSONDecodeError):
+                    pass
+                manifest.append({
+                    "name": rd,
+                    "archivedAt": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                    "sizeBytes": archive_size,
+                    "originalSizeBytes": dir_size,
+                    "fileCount": file_count,
+                    "hadCheckpoints": False,
+                })
+                with open(manifest_path, "w") as mf:
+                    json.dump(manifest, mf, indent=2)
+
+                result["archivedRuns"].append(rd)
+                result["bytesFreed"] += dir_size - archive_size
+            except Exception as e:
+                sys.stderr.write(f"[prune] Failed to archive {rd}: {e}\n")
+
+    # 2. Trim old archives beyond max_archives
+    if os.path.isdir(archive_dir):
+        archives = sorted(glob_mod.glob(os.path.join(archive_dir, "run_*.tar.gz")))
+        if len(archives) > max_archives:
+            to_delete = archives[:len(archives) - max_archives]
+            for ap in to_delete:
+                name = os.path.basename(ap).replace(".tar.gz", "")
+                if dry_run:
+                    result["deletedArchives"].append(name)
+                else:
+                    try:
+                        sz = os.path.getsize(ap)
+                        os.remove(ap)
+                        result["deletedArchives"].append(name)
+                        result["bytesFreed"] += sz
+                    except OSError:
+                        pass
+
+            # Update manifest to remove deleted entries
+            if not dry_run:
+                manifest_path = os.path.join(archive_dir, "manifest.json")
+                try:
+                    with open(manifest_path) as mf:
+                        manifest = json.load(mf)
+                    deleted_names = set(result["deletedArchives"])
+                    manifest = [e for e in manifest if e.get("name") not in deleted_names]
+                    with open(manifest_path, "w") as mf:
+                        json.dump(manifest, mf, indent=2)
+                except Exception:
+                    pass
+
+    # 3. Remove orphaned output files in root (pre-migration leftovers)
+    orphan_patterns = ["*.png", "*.pdf", "fig_*", "*ckpt*", "pub_fig*", "final_fig*"]
+    for pattern in orphan_patterns:
+        for fpath in glob_mod.glob(os.path.join(workdir, pattern)):
+            if os.path.isfile(fpath):
+                if dry_run:
+                    result["orphansCleaned"] += 1
+                else:
+                    try:
+                        sz = os.path.getsize(fpath)
+                        os.remove(fpath)
+                        result["orphansCleaned"] += 1
+                        result["bytesFreed"] += sz
+                    except OSError:
+                        pass
+            elif os.path.isdir(fpath) and "ckpt" in fpath.lower():
+                if dry_run:
+                    result["orphansCleaned"] += 1
+                else:
+                    try:
+                        dir_sz = sum(
+                            os.path.getsize(os.path.join(r, f_))
+                            for r, _, fs in os.walk(fpath)
+                            for f_ in fs
+                        )
+                        shutil.rmtree(fpath, ignore_errors=True)
+                        result["orphansCleaned"] += 1
+                        result["bytesFreed"] += dir_sz
+                    except Exception:
+                        pass
+
+    # 4. Remove broken .venv dirs
+    venv_path = os.path.join(workdir, ".venv")
+    if os.path.isdir(venv_path) and not os.path.exists(os.path.join(venv_path, "bin")):
+        if not dry_run:
+            import shutil as shutil2
+            shutil2.rmtree(venv_path, ignore_errors=True)
+
+    result["ok"] = True
+    result["dryRun"] = dry_run
+    json_out(result)
+
+
+def cmd_restore(workdir, run_name):
+    """Restore an archived run directory."""
+    import tarfile
+
+    workdir = os.path.abspath(workdir)
+    archive_dir = os.path.join(workdir, ".archive")
+    archive_path = os.path.join(archive_dir, f"{run_name}.tar.gz")
+
+    if not os.path.exists(archive_path):
+        json_err(f"Archive not found: .archive/{run_name}.tar.gz")
+
+    run_dir = os.path.join(workdir, run_name)
+    if os.path.exists(run_dir):
+        json_err(f"Run directory already exists: {run_name}. Remove it first.")
+
+    try:
+        with tarfile.open(archive_path, "r:gz") as tar:
+            tar.extractall(path=workdir)
+    except Exception as e:
+        json_err(f"Failed to extract archive: {e}")
+
+    # Remove the tarball
+    os.remove(archive_path)
+
+    # Update manifest — remove this entry
+    manifest_path = os.path.join(archive_dir, "manifest.json")
+    try:
+        with open(manifest_path) as f:
+            manifest = json.load(f)
+        manifest = [e for e in manifest if e.get("name") != run_name]
+        with open(manifest_path, "w") as f:
+            json.dump(manifest, f, indent=2)
+    except Exception:
+        pass
+
+    json_out({"ok": True, "restored": run_name, "path": run_name + "/"})
+
+
 def cmd_version():
     """Print version."""
     json_out({"ok": True, "version": HELPER_VERSION})
@@ -904,18 +1225,26 @@ def main():
         elif cmd == "info":
             cmd_info()
         elif cmd == "run":
-            # Parse: run <workdir> -- <command...>
-            if "--" not in sys.argv:
+            # Parse: run <workdir> [--run <name>] -- <command...>
+            args = sys.argv[2:]
+            run_name = None
+            # Extract --run <name> if present
+            if "--run" in args:
+                ri = args.index("--run")
+                if ri + 1 < len(args):
+                    run_name = args[ri + 1]
+                    args = args[:ri] + args[ri + 2:]
+            if "--" not in args:
                 # Fallback: run <workdir> <command as single string>
-                if len(sys.argv) < 4:
-                    json_err("Usage: run <workdir> -- <command...>")
-                workdir = sys.argv[2]
-                command = " ".join(sys.argv[3:])
+                if len(args) < 2:
+                    json_err("Usage: run <workdir> [--run <name>] -- <command...>")
+                workdir = args[0]
+                command = " ".join(args[1:])
             else:
-                sep_idx = sys.argv.index("--")
-                workdir = sys.argv[2]
-                command = " ".join(sys.argv[sep_idx + 1:])
-            cmd_run(workdir, command)
+                sep_idx = args.index("--")
+                workdir = args[0]
+                command = " ".join(args[sep_idx + 1:])
+            cmd_run(workdir, command, run_name=run_name)
         elif cmd == "status":
             if len(sys.argv) < 3:
                 json_err("Usage: status <workdir>")
@@ -943,6 +1272,27 @@ def main():
             if len(sys.argv) < 3:
                 json_err("Usage: manifest <workdir>")
             cmd_manifest(sys.argv[2])
+        elif cmd == "archive":
+            if len(sys.argv) < 4:
+                json_err("Usage: archive <workdir> <run_name> [--include-checkpoints]")
+            include_ckpt = "--include-checkpoints" in sys.argv
+            cmd_archive(sys.argv[2], sys.argv[3], include_checkpoints=include_ckpt)
+        elif cmd == "prune":
+            if len(sys.argv) < 3:
+                json_err("Usage: prune <workdir> [--keep-recent N] [--max-archives N] [--dry-run]")
+            keep_recent = 0
+            max_archives = 20
+            dry_run = "--dry-run" in sys.argv
+            for i, arg in enumerate(sys.argv):
+                if arg == "--keep-recent" and i + 1 < len(sys.argv):
+                    keep_recent = int(sys.argv[i + 1])
+                if arg == "--max-archives" and i + 1 < len(sys.argv):
+                    max_archives = int(sys.argv[i + 1])
+            cmd_prune(sys.argv[2], keep_recent=keep_recent, max_archives=max_archives, dry_run=dry_run)
+        elif cmd == "restore":
+            if len(sys.argv) < 4:
+                json_err("Usage: restore <workdir> <run_name>")
+            cmd_restore(sys.argv[2], sys.argv[3])
         elif cmd == "_monitor":
             # Internal: _monitor <workdir> <pid> <pgid>
             if len(sys.argv) < 5:

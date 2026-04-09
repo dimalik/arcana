@@ -630,6 +630,8 @@ model RemoteHost {
   baseRequirements String?                 // base requirements.txt content (tested, known-good packages)
   envNotes         String?                 // user notes about this host's quirks (shown to agent)
   envVars          String?                 // JSON: { "HF_TOKEN": "hf_...", "WANDB_API_KEY": "..." }
+  cleanupPolicy    String   @default("archive")  // "archive" | "archive-with-checkpoints" | "delete" | "none"
+  maxArchives      Int      @default(20)          // Max tarballs in .archive/ before oldest are pruned
   isDefault   Boolean  @default(false)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -655,6 +657,8 @@ model RemoteJob {
   hypothesisId  String?                     // FK to ResearchHypothesis being tested
   fixAttempts   Int       @default(0)       // Auto-fix attempts (code errors only, max 2)
   errorClass    String?                     // CODE_ERROR | RESEARCH_FAILURE | RESOURCE_ERROR | AUTO_FIXED
+  runDir        String?                     // Run directory name (e.g., "run_055")
+  archivedAt    DateTime?                   // When remote outputs were archived post-sync
   createdAt     DateTime  @default(now())
   startedAt     DateTime?
   completedAt   DateTime?
