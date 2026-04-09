@@ -15,7 +15,7 @@ const execAsync = promisify(exec);
 
 // ── Helper management ────────────────────────────────────────────
 
-const HELPER_VERSION = "6";
+const HELPER_VERSION = "7";
 const helperInstalledHosts = new Map<string, boolean>();
 
 /**
@@ -126,13 +126,13 @@ export interface ExecutorBackend {
   /** Sync local directory to remote, return the remote path */
   syncUp(localDir: string, host: HostConfig): Promise<string>;
   /** Start the experiment, return remote PID */
-  run(remoteDir: string, command: string, host: HostConfig): Promise<number>;
+  run(remoteDir: string, command: string, host: HostConfig, runName?: string): Promise<number>;
   /** Check if job is still running */
   isAlive(pid: number, host: HostConfig): Promise<boolean>;
   /** Get tail of stdout/stderr */
   getLogs(remoteDir: string, host: HostConfig): Promise<{ stdout: string; stderr: string }>;
   /** Sync results back from remote to local */
-  syncDown(remoteDir: string, localDir: string, host: HostConfig): Promise<void>;
+  syncDown(remoteDir: string, localDir: string, host: HostConfig, runName?: string): Promise<void>;
   /** Kill a running job */
   kill(pid: number, host: HostConfig): Promise<void>;
 }
@@ -156,6 +156,18 @@ function hostToConfig(host: { host: string; port: number; user: string; keyPath:
     host: host.host, port: host.port, user: host.user, keyPath: host.keyPath,
     workDir: host.workDir, conda: host.conda, setupCmd: host.setupCmd, envVars,
   };
+}
+
+/** Derive a run directory name from an experiment command.
+ *  e.g. "python3 exp_055.py" → "run_055"
+ *       "python3 baseline_bert.py --lr 0.001" → "run_baseline_bert"
+ */
+function deriveRunName(command: string): string {
+  const scriptMatch = command.match(/python3?\s+(\S+\.py)/);
+  if (!scriptMatch) return `run_${Date.now()}`;
+  const scriptName = scriptMatch[1].replace(/\.py$/, "");
+  const cleaned = scriptName.replace(/^exp_/, "");
+  return `run_${cleaned}`;
 }
 
 // ── SSH executor ──────────────────────────────────────────────────
@@ -282,7 +294,7 @@ export const sshExecutor: ExecutorBackend = {
     const target = sshTarget(host);
 
     // Exclude NFS lock files (.nfs*), venvs (created on remote, not local), and use --ignore-errors to not fail on busy files
-    const rsyncCmd = `rsync -azP --delete --exclude='.nfs*' --exclude='.venv' --exclude='__pycache__' --exclude='*.pyc' --exclude='stdout.log' --exclude='stderr.log' --exclude='.exit_code' --exclude='.arcana' --ignore-errors -e "${sshCmd}" "${src}" "${target}:${remoteDir}/"`;
+    const rsyncCmd = `rsync -azP --delete --exclude='.nfs*' --exclude='.venv' --exclude='__pycache__' --exclude='*.pyc' --exclude='stdout.log' --exclude='stderr.log' --exclude='.exit_code' --exclude='.arcana' --exclude='run_*' --exclude='.archive' --ignore-errors -e "${sshCmd}" "${src}" "${target}:${remoteDir}/"`;
 
     try {
       await execAsync(rsyncCmd, { timeout: 120_000 });
@@ -307,7 +319,7 @@ export const sshExecutor: ExecutorBackend = {
     return remoteDir;
   },
 
-  async run(remoteDir: string, command: string, host: HostConfig): Promise<number> {
+  async run(remoteDir: string, command: string, host: HostConfig, runName?: string): Promise<number> {
     // Command is already sanitized by agent.ts — don't double-sanitize.
     // Just trim whitespace.
     const cleanCmd = command.replace(/\s+/g, " ").trim();
@@ -315,7 +327,8 @@ export const sshExecutor: ExecutorBackend = {
     // Shell-escape the command for safe transport through SSH → remote shell → helper.
     // Single-quote the entire command, escaping internal single quotes.
     const escaped = cleanCmd.replace(/'/g, "'\\''");
-    const raw = await invokeHelper(host, `run ${remoteDir} -- '${escaped}'`);
+    const runFlag = runName ? `--run ${runName} ` : "";
+    const raw = await invokeHelper(host, `run ${remoteDir} ${runFlag}-- '${escaped}'`);
     const result = parseHelperResponse<{ ok: boolean; pid: number; pgid: number }>(raw);
     return result.pid;
   },
@@ -345,29 +358,42 @@ export const sshExecutor: ExecutorBackend = {
     }
   },
 
-  async syncDown(remoteDir: string, localDir: string, host: HostConfig): Promise<void> {
+  async syncDown(remoteDir: string, localDir: string, host: HostConfig, runName?: string): Promise<void> {
     const sshCmd = `ssh ${sshArgs(host).join(" ")}`;
     const target = sshTarget(host);
     const SYNC_TIMEOUT = 600_000; // 10 min — large model outputs can take a while
 
-    // Sync results/ directory back if it exists
+    if (runName) {
+      // Targeted sync: grab the entire run directory
+      const localRunDir = path.join(localDir, runName);
+      const fs = await import("fs");
+      fs.mkdirSync(localRunDir, { recursive: true });
+
+      await execAsync(
+        `rsync -azP -e "${sshCmd}" "${target}:${remoteDir}/${runName}/" "${localRunDir}/"`,
+        { timeout: SYNC_TIMEOUT },
+      ).catch((err) => {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (msg.includes("code 23") || msg.includes("code 24") || msg.includes("some files vanished")) {
+          console.warn("[remote-executor] syncDown had non-fatal errors, continuing");
+        } else {
+          console.warn(`[remote-executor] syncDown from ${runName}/ failed: ${msg.slice(0, 200)}`);
+        }
+      });
+      return;
+    }
+
+    // Legacy: no run name — sync from root (existing behavior)
     await execAsync(
       `rsync -azP -e "${sshCmd}" "${target}:${remoteDir}/results/" "${localDir}/results/"`,
       { timeout: SYNC_TIMEOUT },
-    ).catch(() => {
-      // results/ may not exist, that's ok
-    });
+    ).catch(() => {});
 
-    // Sync result files from experiment root (results.json, *.csv, *.json outputs)
-    // Use rsync with include/exclude to grab only output files, not code or venv
     await execAsync(
       `rsync -azP --include='*.json' --include='*.csv' --include='*.txt' --include='*.png' --include='*.log' --exclude='*/' --exclude='*.py' --exclude='requirements.txt' -e "${sshCmd}" "${target}:${remoteDir}/" "${localDir}/"`,
       { timeout: SYNC_TIMEOUT },
-    ).catch(() => {
-      // Non-critical — some files may not exist
-    });
+    ).catch(() => {});
 
-    // Also grab log files explicitly (in case the rsync above missed them)
     for (const f of ["stdout.log", "stderr.log"]) {
       const scpArgs = sshArgs(host).map(a => `"${a}"`).join(" ");
       await execAsync(
@@ -417,6 +443,8 @@ export async function submitRemoteJob(params: {
 
   const backend = getBackend(host.backend);
 
+  const runName = deriveRunName(params.command);
+
   // Create job record
   const job = await prisma.remoteJob.create({
     data: {
@@ -428,6 +456,7 @@ export async function submitRemoteJob(params: {
       command: params.command,
       scriptHash: params.scriptHash || null,
       hypothesisId: params.hypothesisId || null,
+      runDir: runName,
       status: "SYNCING",
     },
   });
@@ -461,7 +490,7 @@ export async function submitRemoteJob(params: {
   }
 
   // Start the experiment + poll in the background
-  runAndPoll(job.id, config, backend, remoteDir, params.command, params.localDir).catch((err) => {
+  runAndPoll(job.id, config, backend, remoteDir, params.command, params.localDir, runName).catch((err) => {
     console.error(`[remote-executor] Job ${job.id} background error:`, err);
   });
 
@@ -475,10 +504,11 @@ async function runAndPoll(
   remoteDir: string,
   command: string,
   localDir?: string,
+  runName?: string,
 ) {
   try {
     // 1. Start the command on the remote (via helper — handles venv, supervision, OOM detection)
-    const pid = await backend.run(remoteDir, command, config);
+    const pid = await backend.run(remoteDir, command, config, runName);
     await prisma.remoteJob.update({
       where: { id: jobId },
       data: { remotePid: pid },
@@ -555,10 +585,11 @@ async function runAndPoll(
     // 4. Sync results back — ALWAYS, even on failure (to recover partial results)
     if (localDir) {
       try {
-        await backend.syncDown(remoteDir, localDir, config);
+        await backend.syncDown(remoteDir, localDir, config, runName);
       } catch (syncErr) {
         console.warn(`[remote-executor] syncDown failed for job ${jobId}:`, syncErr);
       }
+
     }
 
     // 5. Final logs (use helper status if available, otherwise fetch)
@@ -644,6 +675,16 @@ async function runAndPoll(
         completedAt: new Date(),
       },
     });
+
+    // Archive the run on the remote host (best-effort, post-sync, only on success)
+    if (runName && localDir && !failed && !indeterminate) {
+      const hostRecord2 = await prisma.remoteHost.findFirst({
+        where: { jobs: { some: { id: jobId } } },
+        select: { cleanupPolicy: true },
+      });
+      const policy = hostRecord2?.cleanupPolicy || "archive";
+      await archiveRun(jobId, config, remoteDir, runName, policy);
+    }
 
     // Auto-create help requests for user-fixable failures
     const jobRecord = await prisma.remoteJob.findUnique({ where: { id: jobId }, select: { projectId: true } });
@@ -942,6 +983,43 @@ export async function cleanupStaleJobs(projectId?: string): Promise<number> {
   }
 
   return cleaned;
+}
+
+// ── Workspace lifecycle ──────────────────────────────────────────
+
+/**
+ * Archive a completed run on the remote host.
+ * Called after successful syncDown. Best-effort — failures are logged, not thrown.
+ */
+async function archiveRun(
+  jobId: string,
+  config: HostConfig,
+  remoteDir: string,
+  runName: string,
+  cleanupPolicy: string,
+): Promise<void> {
+  if (cleanupPolicy === "none") return;
+
+  const includeCheckpoints = cleanupPolicy === "archive-with-checkpoints";
+  const ckptFlag = includeCheckpoints ? " --include-checkpoints" : "";
+
+  try {
+    if (cleanupPolicy === "delete") {
+      await sshExec(config, `rm -rf ${remoteDir}/${runName}`);
+      console.log(`[remote-executor] Deleted ${runName} on remote (policy=delete)`);
+    } else {
+      const raw = await invokeHelper(config, `archive ${remoteDir} ${runName}${ckptFlag}`);
+      const result = parseHelperResponse<{ archived: string; savedBytes: number }>(raw);
+      console.log(`[remote-executor] Archived ${runName}: saved ${Math.round(result.savedBytes / 1024)}KB`);
+    }
+
+    await prisma.remoteJob.update({
+      where: { id: jobId },
+      data: { archivedAt: new Date() },
+    });
+  } catch (err) {
+    console.warn(`[remote-executor] archiveRun failed for ${runName}:`, err instanceof Error ? err.message : err);
+  }
 }
 
 // ── Utility ───────────────────────────────────────────────────────

@@ -13,9 +13,10 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     const body = await request.json();
 
     const data: Record<string, unknown> = {};
-    for (const key of ["alias", "host", "port", "user", "keyPath", "workDir", "gpuType", "conda", "setupCmd", "backend", "isDefault", "baseRequirements", "envNotes", "envVars"]) {
+    for (const key of ["alias", "host", "port", "user", "keyPath", "workDir", "gpuType", "conda", "setupCmd", "backend", "isDefault", "baseRequirements", "envNotes", "envVars", "cleanupPolicy"]) {
       if (body[key] !== undefined) data[key] = body[key];
     }
+    if (body.maxArchives !== undefined) data.maxArchives = parseInt(body.maxArchives, 10) || 20;
 
     // If setting as default, unset others first
     if (body.isDefault === true) {

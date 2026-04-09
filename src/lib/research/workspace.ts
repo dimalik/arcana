@@ -22,6 +22,10 @@ export interface WorkspaceState {
   jobStatus: string | null;
   jobExitCode: number | null;
   oomDetected: boolean;
+  runDirs: { name: string; fileCount: number; sizeBytes: number }[];
+  archiveCount: number;
+  archiveTotalBytes: number;
+  workspaceHealth: "clean" | "needs_attention";
   cachedAt: number;
 }
 
@@ -53,6 +57,26 @@ export async function getWorkspaceState(
     const parsed = JSON.parse(result.output);
     if (!parsed.ok) return cached || null;
 
+    // Compute run dirs and archive stats from file listing
+    const runDirMap = new Map<string, { fileCount: number; sizeBytes: number }>();
+    for (const f of (parsed.files || [])) {
+      const match = (f.path as string).match(/^(run_[^/]+)\//);
+      if (match) {
+        const rd = match[1];
+        const existing = runDirMap.get(rd) || { fileCount: 0, sizeBytes: 0 };
+        existing.fileCount++;
+        existing.sizeBytes += f.size || 0;
+        runDirMap.set(rd, existing);
+      }
+    }
+    const runDirs = Array.from(runDirMap.entries()).map(([name, stats]) => ({ name, ...stats }));
+
+    const archiveFiles = (parsed.files || []).filter((f: { path: string }) => (f.path as string).startsWith(".archive/"));
+    const archiveCount = archiveFiles.filter((f: { path: string }) => (f.path as string).endsWith(".tar.gz")).length;
+    const archiveTotalBytes = archiveFiles.reduce((sum: number, f: { size: number }) => sum + (f.size || 0), 0);
+
+    const workspaceHealth = (parsed.file_count > 500 || runDirs.length > 10) ? "needs_attention" as const : "clean" as const;
+
     const state: WorkspaceState = {
       files: parsed.files || [],
       fileCount: parsed.file_count || 0,
@@ -61,6 +85,10 @@ export async function getWorkspaceState(
       jobStatus: parsed.job_status || null,
       jobExitCode: parsed.job_exit_code ?? null,
       oomDetected: parsed.oom_detected || false,
+      runDirs,
+      archiveCount,
+      archiveTotalBytes,
+      workspaceHealth,
       cachedAt: Date.now(),
     };
 
@@ -120,8 +148,23 @@ export function formatWorkspace(state: WorkspaceState): string {
     }
   }
 
+  if (state.runDirs.length > 0) {
+    parts.push(`\n**Run Dirs (${state.runDirs.length}):**`);
+    for (const rd of state.runDirs.slice(0, 10)) {
+      parts.push(`- ${rd.name} (${rd.fileCount} files, ${formatSize(rd.sizeBytes)})`);
+    }
+  }
+
+  if (state.archiveCount > 0) {
+    parts.push(`\n**Archives:** ${state.archiveCount} archived runs (${formatSize(state.archiveTotalBytes)} total)`);
+  }
+
   if (state.jobStatus) {
     parts.push(`\n**Last Job:** ${state.jobStatus}${state.jobExitCode != null ? ` (exit ${state.jobExitCode})` : ''}${state.oomDetected ? ' ⚠ OOM DETECTED' : ''}`);
+  }
+
+  if (state.workspaceHealth === "needs_attention") {
+    parts.push(`\n**⚠ Workspace needs attention** — ${state.fileCount} files, ${state.runDirs.length} unarchived runs. Consider calling \`clean_workspace\`.`);
   }
 
   return parts.join('\n');

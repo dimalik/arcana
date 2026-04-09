@@ -37,6 +37,8 @@ interface RemoteHost {
   baseRequirements: string | null;
   envNotes: string | null;
   envVars: string | null;
+  cleanupPolicy: string;
+  maxArchives: number;
   isDefault: boolean;
   _count: { jobs: number };
 }
@@ -745,6 +747,40 @@ export function RemoteHostsManager() {
                       })()}
                       <p className="text-[10px] text-muted-foreground/50">
                         Injected into every remote job. Values are stored locally and never sent to LLMs.
+                      </p>
+                    </div>
+
+                    {/* Workspace Cleanup */}
+                    <div className="space-y-1.5 pt-3 border-t border-border/40">
+                      <label className="text-[9px] text-muted-foreground uppercase tracking-wide">Workspace Cleanup</label>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-[10px] text-muted-foreground mb-1">After experiment sync</label>
+                          <select
+                            className="w-full px-2 py-1.5 text-[11px] border border-input rounded-md bg-background focus:outline-none focus:ring-1 focus:ring-ring"
+                            value={pendingEdits[h.id]?.cleanupPolicy ?? h.cleanupPolicy ?? "archive"}
+                            onChange={(e) => setPendingEdit(h.id, "cleanupPolicy", e.target.value)}
+                          >
+                            <option value="archive">Archive (no checkpoints)</option>
+                            <option value="archive-with-checkpoints">Archive with checkpoints</option>
+                            <option value="delete">Delete after sync</option>
+                            <option value="none">Keep everything</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-[10px] text-muted-foreground mb-1">Max archives</label>
+                          <input
+                            type="number"
+                            min={1}
+                            max={100}
+                            className="w-full px-2 py-1.5 text-[11px] border border-input rounded-md bg-background focus:outline-none focus:ring-1 focus:ring-ring"
+                            value={pendingEdits[h.id]?.maxArchives ?? h.maxArchives ?? 20}
+                            onChange={(e) => setPendingEdit(h.id, "maxArchives", e.target.value)}
+                          />
+                        </div>
+                      </div>
+                      <p className="text-[10px] text-muted-foreground/50">
+                        Controls what happens to experiment outputs after results are synced back locally.
                       </p>
                     </div>
 

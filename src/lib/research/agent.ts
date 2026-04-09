@@ -3156,6 +3156,66 @@ function createTools(
       },
     }),
 
+    clean_workspace: tool({
+      description: "Clean up the remote experiment workspace. Archives old experiment run directories into compressed tarballs, removes orphaned output files from root (pre-migration leftovers), and trims old archives beyond the host's max. Use when get_workspace shows 'needs_attention' or when sync is slow. Supports dry_run to preview without acting.",
+      inputSchema: z.object({
+        dry_run: z.boolean().optional().default(false).describe("Preview what would be cleaned without actually doing it"),
+        keep_recent: z.number().optional().default(0).describe("Number of recent run dirs to keep unarchived"),
+      }),
+      execute: async ({ dry_run, keep_recent }: { dry_run?: boolean; keep_recent?: number }) => {
+        const hostWhere = { isDefault: true as const };
+        let host = await prisma.remoteHost.findFirst({ where: hostWhere });
+        if (!host) host = await prisma.remoteHost.findFirst();
+        if (!host) return "No remote hosts configured.";
+
+        emit({ type: "tool_progress", toolName: "clean_workspace", content: dry_run ? "Previewing workspace cleanup..." : "Cleaning workspace..." });
+
+        try {
+          const maxArchives = host.maxArchives || 20;
+          const flags = [
+            (keep_recent ?? 0) > 0 ? `--keep-recent ${keep_recent}` : "",
+            `--max-archives ${maxArchives}`,
+            dry_run ? "--dry-run" : "",
+          ].filter(Boolean).join(" ");
+
+          const workDirGlob = `~/experiments/*${projectId.slice(0, 8)}*`;
+          const { ok, output, error } = await quickRemoteCommand(host.id,
+            `python3 ~/.arcana/helper.py prune ${workDirGlob} ${flags} 2>/dev/null || echo '{"ok":false}'`
+          );
+
+          if (!ok) return `Workspace cleanup failed: ${error || "unknown error"}`;
+
+          const parsed = JSON.parse(output);
+          if (!parsed.ok) return `Workspace cleanup failed: ${parsed.error || "helper returned error"}`;
+
+          if (!dry_run) {
+            invalidateWorkspace(projectId);
+          }
+
+          const prefix = dry_run ? "**Dry run** — would " : "";
+          const parts: string[] = [];
+          if (parsed.archivedRuns?.length > 0) {
+            parts.push(`${prefix}archive ${parsed.archivedRuns.length} run dirs: ${parsed.archivedRuns.join(", ")}`);
+          }
+          if (parsed.deletedArchives?.length > 0) {
+            parts.push(`${prefix}delete ${parsed.deletedArchives.length} old archives: ${parsed.deletedArchives.join(", ")}`);
+          }
+          if (parsed.orphansCleaned > 0) {
+            parts.push(`${prefix}remove ${parsed.orphansCleaned} orphaned files from root`);
+          }
+          if (parts.length === 0) {
+            return "Workspace is already clean — nothing to do.";
+          }
+
+          const saved = parsed.bytesFreed > 0 ? ` (${Math.round(parsed.bytesFreed / 1024 / 1024)}MB freed)` : "";
+          return parts.join("\n") + (dry_run ? "" : saved);
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          return `Workspace cleanup failed: ${msg}`;
+        }
+      },
+    }),
+
     read_remote_file: tool({
       description: "Read a specific file from the remote experiment directory. Use after get_workspace shows files you need to inspect (e.g., results.json, stderr.log, stdout.log). Cannot run commands — only reads file content.",
       inputSchema: z.object({
