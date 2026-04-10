@@ -36,7 +36,7 @@ import time
 import hashlib
 from pathlib import Path
 
-HELPER_VERSION = "7"
+HELPER_VERSION = "8"
 ARCANA_DIR = ".arcana"
 STATUS_FILE = "status.json"
 REQS_HASH_FILE = "reqs_hash"
@@ -348,13 +348,17 @@ def get_venv_python(workdir):
 # ── Commands ──────────────────────────────────────────────────────
 
 def cmd_run(workdir, command, run_name=None):
-    """Launch experiment in background with monitoring."""
+    """Launch experiment in background with monitoring.
+
+    run_name is accepted but IGNORED for execution — scripts always run from
+    workdir root. It's only stored in status.json for the executor to know
+    which job this was.
+    """
     workdir = os.path.abspath(workdir)
     if not os.path.isdir(workdir):
         json_err(f"Workdir does not exist: {workdir}")
 
     # Auto-kill any running experiment in this workdir before starting a new one
-    # Process management is infrastructure — handled automatically, not by the agent
     status = read_status(workdir)
     if status and status.get("status") == "running":
         old_pid = status.get("pid")
@@ -365,12 +369,10 @@ def cmd_run(workdir, command, run_name=None):
                     os.killpg(old_pgid, signal.SIGTERM)
                 else:
                     os.kill(old_pid, signal.SIGTERM)
-                # Give it a moment to die
                 for _ in range(10):
                     if not is_pid_alive(old_pid):
                         break
                     time.sleep(0.5)
-                # Force kill if still alive
                 if is_pid_alive(old_pid):
                     try:
                         if old_pgid:
@@ -384,12 +386,6 @@ def cmd_run(workdir, command, run_name=None):
             status["status"] = "cancelled"
             status["completed_at"] = time.strftime("%Y-%m-%dT%H:%M:%S")
             write_status(workdir, status)
-
-    # Create run directory if --run was specified
-    run_dir = None
-    if run_name:
-        run_dir = os.path.join(workdir, run_name)
-        os.makedirs(run_dir, exist_ok=True)
 
     # Check for pre-existing environment (user-configured venv/conda)
     conda_env = os.environ.get("ARCANA_CONDA", "")
@@ -411,17 +407,13 @@ def cmd_run(workdir, command, run_name=None):
                 "error": msg,
                 "started_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
                 "completed_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
-                "run_name": run_name,
             })
             json_err(f"Environment setup failed: {msg}")
 
-    # Build the actual command to run
-    # Always run from workdir root (where scripts live). Outputs go to run_dir.
+    # Build the actual command to run — always from workdir root
     shell_parts = [f"cd {workdir}"]
 
-    # Pre-existing env takes priority
     if has_existing_env:
-        # Support: /path/to/bin/activate, /path/to/bin/python, conda env name
         if conda_env.endswith("/activate"):
             shell_parts.append(f"source {conda_env}")
         elif conda_env.endswith("/python") or conda_env.endswith("/python3"):
@@ -433,30 +425,21 @@ def cmd_run(workdir, command, run_name=None):
                 f"conda activate {conda_env} 2>/dev/null || source activate {conda_env} 2>/dev/null || source {conda_env} 2>/dev/null || true"
             )
     else:
-        # No pre-existing env — use .venv if it was created by setup_venv
         venv_activate = os.path.join(workdir, ".venv", "bin", "activate")
         if os.path.exists(venv_activate):
             shell_parts.append(f"source {venv_activate}")
 
-    # Custom setup command from env var
     setup_cmd = os.environ.get("ARCANA_SETUP")
     if setup_cmd:
         shell_parts.append(setup_cmd)
 
-    # Set ARCANA_OUTPUT_DIR so scripts can find the output path if needed
-    if run_dir:
-        shell_parts.append(f"export ARCANA_OUTPUT_DIR='{run_dir}'")
-
-    # Wrap command to capture its exit code — the monitor can't use waitpid
-    # because the experiment is a sibling, not a child process.
     exit_code_file = os.path.join(workdir, ARCANA_DIR, "exit_code")
     shell_parts.append(f'({command}); __ec=$?; echo $__ec > {exit_code_file}; exit $__ec')
     full_cmd = " && ".join(shell_parts)
 
-    # Launch as background process — stdout/stderr go to run dir if specified, cwd is always workdir root
-    log_dir = run_dir or workdir
-    stdout_path = os.path.join(log_dir, "stdout.log")
-    stderr_path = os.path.join(log_dir, "stderr.log")
+    # stdout/stderr always in workdir root
+    stdout_path = os.path.join(workdir, "stdout.log")
+    stderr_path = os.path.join(workdir, "stderr.log")
 
     stdout_f = open(stdout_path, "w")
     stderr_f = open(stderr_path, "w")
@@ -466,14 +449,13 @@ def cmd_run(workdir, command, run_name=None):
         stdout=stdout_f,
         stderr=stderr_f,
         cwd=workdir,
-        start_new_session=True,  # new process group
+        start_new_session=True,
         close_fds=True,
     )
 
     pid = proc.pid
     pgid = os.getpgid(pid)
 
-    # Write initial status
     write_status(workdir, {
         "pid": pid,
         "pgid": pgid,
@@ -545,11 +527,8 @@ def cmd_monitor(workdir, pid, pgid):
                 snapshots = snapshots[-MAX_SNAPSHOTS:]
 
             status["resource_snapshots"] = snapshots
-            # Read log paths — from run dir if set, else workdir root
-            run_name = status.get("run_name")
-            log_base = os.path.join(workdir, run_name) if run_name else workdir
-            status["stdout_tail"] = tail_file(os.path.join(log_base, "stdout.log"), 50)
-            status["stderr_tail"] = tail_file(os.path.join(log_base, "stderr.log"), 20)
+            status["stdout_tail"] = tail_file(os.path.join(workdir, "stdout.log"), 50)
+            status["stderr_tail"] = tail_file(os.path.join(workdir, "stderr.log"), 20)
             write_status(workdir, status)
         except Exception as e:
             # Don't let snapshot/IO errors crash the monitor — keep watching the process
@@ -646,8 +625,6 @@ def cmd_monitor(workdir, pid, pgid):
         elif exit_code == 137:
             diagnosis = "SIGKILL — Process was killed externally (likely OOM killer or resource limit)."
 
-    run_name = status.get("run_name")
-    log_base = os.path.join(workdir, run_name) if run_name else workdir
     status.update({
         "status": final_status,
         "exit_code": exit_code,
@@ -656,8 +633,8 @@ def cmd_monitor(workdir, pid, pgid):
         "oom_detail": oom_detail,
         "diagnosis": diagnosis,
         "resource_snapshots": snapshots[-MAX_SNAPSHOTS:],
-        "stdout_tail": tail_file(os.path.join(log_base, "stdout.log"), 100),
-        "stderr_tail": tail_file(os.path.join(log_base, "stderr.log"), 50),
+        "stdout_tail": tail_file(os.path.join(workdir, "stdout.log"), 100),
+        "stderr_tail": tail_file(os.path.join(workdir, "stderr.log"), 50),
     })
     write_status(workdir, status)
 
@@ -726,10 +703,8 @@ def cmd_status(workdir):
             write_status(workdir, status)
 
     # Always refresh log tails
-    run_name = status.get("run_name") if status else None
-    log_base = os.path.join(workdir, run_name) if run_name else workdir
-    status["stdout_tail"] = tail_file(os.path.join(log_base, "stdout.log"), 100)
-    status["stderr_tail"] = tail_file(os.path.join(log_base, "stderr.log"), 50)
+    status["stdout_tail"] = tail_file(os.path.join(workdir, "stdout.log"), 100)
+    status["stderr_tail"] = tail_file(os.path.join(workdir, "stderr.log"), 50)
     status["ok"] = True
 
     json_out(status)
@@ -740,12 +715,10 @@ def cmd_logs(workdir, lines=200, stderr_lines=50):
     workdir = os.path.abspath(workdir)
     # Check if there's an active run with a run dir
     status = read_status(workdir)
-    run_name = status.get("run_name") if status else None
-    log_base = os.path.join(workdir, run_name) if run_name else workdir
     json_out({
         "ok": True,
-        "stdout": tail_file(os.path.join(log_base, "stdout.log"), lines),
-        "stderr": tail_file(os.path.join(log_base, "stderr.log"), stderr_lines),
+        "stdout": tail_file(os.path.join(workdir, "stdout.log"), lines),
+        "stderr": tail_file(os.path.join(workdir, "stderr.log"), stderr_lines),
     })
 
 
