@@ -1208,7 +1208,7 @@ def cmd_restore(workdir, run_name):
 
 PYRIGHT_MARKER = "pyright_installed"
 PYRIGHT_INSTALL_TIMEOUT = 120  # 2 min for initial install
-PYRIGHT_RUN_TIMEOUT = 30       # 30s for analysis
+PYRIGHT_RUN_TIMEOUT = 90       # 90s — first run indexes the entire venv
 
 
 def ensure_pyright(workdir):
