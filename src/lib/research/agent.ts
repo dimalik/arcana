@@ -2076,6 +2076,14 @@ function createTools(
     if (REDIRECT_COMMAND_PATTERNS.test(cmd)) {
       return "Use read_file instead of sed/grep/cat/head/tail to read files. Use list_files to see what's in the directory.";
     }
+    if (/\bssh\s/.test(cmd)) {
+      return "BLOCKED — Do not run SSH commands directly. Use the built-in tools instead:\n" +
+        "- check_job: check experiment status and logs\n" +
+        "- get_workspace: see all files, results, and packages on the remote host\n" +
+        "- read_remote_file: read a specific file from the remote directory\n" +
+        "- monitor_experiment: check training metrics from a running experiment\n" +
+        "Remote infrastructure is managed automatically — you never need raw SSH access.";
+    }
     return null;
   }
 
