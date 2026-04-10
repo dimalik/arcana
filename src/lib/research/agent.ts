@@ -15,7 +15,7 @@ import { prisma } from "@/lib/prisma";
 import { searchAllSources, isFigureOrSupplementDoi } from "@/lib/import/semantic-scholar";
 import { findAndDownloadPdf } from "@/lib/import/pdf-finder";
 import { processingQueue } from "@/lib/processing/queue";
-import { submitRemoteJob, probeGpus, quickRemoteCommand } from "./remote-executor";
+import { submitRemoteJob, probeGpus, quickRemoteCommand, analyzeScript, formatDiagnostics } from "./remote-executor";
 import { routeScript } from "./resource-router";
 import { classifyTaskCategory } from "./task-classifier";
 import { processQuery, scoreWeighted, scoreText, filterByRelevance } from "./search-utils";
@@ -2055,6 +2055,9 @@ function createTools(
 
   // Track active background job IDs for this session
   const activeJobIds = new Set<string>();
+  // Track pyright analysis attempts per script name (prevents infinite fix loops)
+  const analysisAttempts = new Map<string, number>();
+  const MAX_ANALYSIS_ATTEMPTS = 3;
   const consecutiveSearches = searchCounter || { value: 0 };
   // Failure tracking is DB-backed (survives restarts) — see execute_remote gate
   // Experiment counter for sequential naming (shared with caller via ref object)
@@ -3446,6 +3449,61 @@ function createTools(
             }
           } catch (preflightErr) {
             console.warn("[agent] preflight validation error:", preflightErr);
+          }
+
+          // ── Pyright static analysis: catch semantic errors before GPU submission ──
+          if (!isPoc && !isBenchmarkProject) {
+            try {
+              const scriptMatch2 = sanitized.match(/python3?\s+(\S+\.py)/);
+              const scriptFileName = scriptMatch2 ? scriptMatch2[1] : null;
+
+              if (scriptFileName) {
+                const attempts = analysisAttempts.get(scriptFileName) || 0;
+
+                if (attempts < MAX_ANALYSIS_ATTEMPTS) {
+                  emit({ type: "tool_progress", toolName: "run_experiment", content: "Running static analysis..." });
+
+                  const { sshExecutor, hostToConfig: toConfig } = await import("./remote-executor");
+                  const hostConfig = toConfig(host as Parameters<typeof toConfig>[0]);
+                  let remoteDir: string;
+                  try {
+                    remoteDir = await sshExecutor.syncUp(workDir, hostConfig);
+                  } catch {
+                    remoteDir = "";
+                  }
+
+                  if (remoteDir) {
+                    const diagnostics = await analyzeScript(hostConfig, remoteDir, scriptFileName);
+
+                    if (diagnostics && diagnostics.errorCount > 0) {
+                      analysisAttempts.set(scriptFileName, attempts + 1);
+                      emit({ type: "tool_output", toolName: "run_experiment", content: `\n⛔ STATIC ANALYSIS: ${diagnostics.errorCount} error(s) found` });
+                      return `BLOCKED — ${formatDiagnostics(scriptFileName, diagnostics, attempts + 1, MAX_ANALYSIS_ATTEMPTS)}\n\nThe experiment was NOT submitted. Fix the script with write_file and call run_experiment again.`;
+                    }
+
+                    if (diagnostics && diagnostics.warningCount > 0) {
+                      const warnLines = diagnostics.errors
+                        .filter(d => d.severity === "warning")
+                        .map(d => `  Line ${d.line}: ${d.message}`)
+                        .join("\n");
+                      emit({ type: "tool_output", toolName: "run_experiment", content: `\n⚠ Static analysis warnings:\n${warnLines}` });
+                    }
+
+                    if (diagnostics?.unavailable) {
+                      console.log(`[agent] pyright unavailable on ${host!.alias}: ${diagnostics.reason}`);
+                    }
+                    if (diagnostics?.timeout) {
+                      console.warn(`[agent] pyright timed out on ${host!.alias}`);
+                    }
+                  }
+                } else {
+                  emit({ type: "tool_output", toolName: "run_experiment", content: `⚠ Proceeding despite pyright errors — ${MAX_ANALYSIS_ATTEMPTS} fix attempts exhausted (may be false positives)` });
+                }
+              }
+            } catch (analysisErr) {
+              // Never block on analysis failure
+              console.warn("[agent] pyright analysis error:", analysisErr);
+            }
           }
 
           // ── DB-backed failure tracking ──
