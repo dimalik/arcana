@@ -95,6 +95,9 @@ export async function validateExperiment(
   // ── Statistical rigor checks ────────────────────────────────────
   checkStatisticalRigor(lines, code, violations);
 
+  // ── Infrastructure management detection ──────────────────────
+  checkPathManagement(lines, violations);
+
   // ── Script substance quality gate ─────────────────────────────
   checkScriptSubstance(lines, code, violations);
 
@@ -516,6 +519,56 @@ function countMeaningfulLines(lines: string[]): number {
     count++;
   }
   return count;
+}
+
+/** Reject scripts that try to manage their own execution infrastructure. */
+function checkPathManagement(
+  lines: string[],
+  violations: PreflightViolation[],
+) {
+  const infraPatterns: { pattern: RegExp; message: string; fix: string }[] = [
+    {
+      pattern: /shutil\.copy.*(__file__|\.py)/,
+      message: "Script copies itself to another location. The infrastructure handles file layout.",
+      fix: "Remove shutil.copy of the script. Your script runs in the workspace root — just save outputs to relative paths.",
+    },
+    {
+      pattern: /os\.makedirs.*run_|os\.mkdir.*run_/,
+      message: "Script creates run_* directories. The infrastructure manages run directories automatically.",
+      fix: "Remove os.makedirs for run directories. Save outputs to relative paths (e.g., 'results.json') — they go to the right place.",
+    },
+    {
+      pattern: /ARCANA_OUTPUT_DIR|\.arcana/,
+      message: "Script references internal infrastructure paths (ARCANA_OUTPUT_DIR or .arcana/).",
+      fix: "Remove references to ARCANA_OUTPUT_DIR and .arcana/. Save outputs to relative paths in the current directory.",
+    },
+    {
+      pattern: /os\.chdir|os\.getcwd.*run_/,
+      message: "Script changes or inspects the working directory for run management.",
+      fix: "Remove os.chdir calls. The script runs in the workspace root — write outputs to relative paths.",
+    },
+    {
+      pattern: /subprocess.*nvidia-smi|subprocess.*ps\s+aux|subprocess.*gpu/i,
+      message: "Script runs infrastructure inspection commands (nvidia-smi, ps). Use built-in tools for this.",
+      fix: "Remove subprocess calls for GPU/process inspection. Use check_job and get_workspace tools instead.",
+    },
+  ];
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (line.startsWith("#")) continue;
+    for (const { pattern, message, fix } of infraPatterns) {
+      if (pattern.test(line)) {
+        violations.push({
+          severity: "error",
+          code: "INFRA_MANAGEMENT",
+          message,
+          line: i + 1,
+          fix,
+        });
+      }
+    }
+  }
 }
 
 /** Quality gate: reject trivial, diagnostic-only, or content-free scripts. */
