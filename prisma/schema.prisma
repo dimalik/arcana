@@ -632,6 +632,7 @@ model RemoteHost {
   envVars          String?                 // JSON: { "HF_TOKEN": "hf_...", "WANDB_API_KEY": "..." }
   cleanupPolicy    String   @default("archive")  // "archive" | "archive-with-checkpoints" | "delete" | "none"
   maxArchives      Int      @default(20)          // Max tarballs in .archive/ before oldest are pruned
+  pyrightInstalled  Boolean  @default(false)  // Cached: is pyright available in this host's env?
   isDefault   Boolean  @default(false)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -659,6 +660,7 @@ model RemoteJob {
   errorClass    String?                     // CODE_ERROR | RESEARCH_FAILURE | RESOURCE_ERROR | AUTO_FIXED
   runDir        String?                     // Run directory name (e.g., "run_055")
   archivedAt    DateTime?                   // When remote outputs were archived post-sync
+  diagnostics   String?                     // JSON: pyright diagnostics at submission time
   createdAt     DateTime  @default(now())
   startedAt     DateTime?
   completedAt   DateTime?
