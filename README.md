@@ -58,29 +58,9 @@ Arcana is a research platform that goes from paper management to novel results. 
 
 ## How It Works
 
-```
-                    +-----------+
-                    |  Arcana   |
-                    +-----+-----+
-                          |
-            +-------------+-------------+
-            |             |             |
-       +----v----+  +-----v-----+  +----v----+
-       | Library |  |  Research  |  |Synthesis|
-       |         |  |   Agent   |  |         |
-       +---------+  +-----+-----+  +---------+
-                          |
-          +---------------+---------------+
-          |               |               |
-    +-----v------+  +-----v------+  +-----v------+
-    | Sub-agents |  | Phase Gates|  | Remote GPUs|
-    | scouts     |  | literature |  | SSH+rsync  |
-    | architect  |  | hypothesis |  | auto-fix   |
-    | reviewer   |  | experiment |  | pyright    |
-    | visualizer |  | analysis   |  | workspace  |
-    +------------+  | reflection |  | lifecycle  |
-                    +------------+  +------------+
-```
+<p align="center">
+  <img src="docs/screenshots/architecture.png" alt="Architecture" width="750">
+</p>
 
 The research agent follows a **strict scientific method**: read the literature, form hypotheses, run experiments, analyze results, reflect and iterate. Each phase transition is enforced by gates — the agent has to earn its way forward with evidence, not just decide it's ready.
 

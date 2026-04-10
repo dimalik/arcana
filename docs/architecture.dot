@@ -1,0 +1,105 @@
+digraph arcana {
+  rankdir=TB;
+  bgcolor="transparent";
+  pad=0.5;
+  nodesep=0.6;
+  ranksep=0.7;
+
+  // Global styles
+  node [
+    fontname="Helvetica Neue, Helvetica, Arial, sans-serif"
+    fontsize=13
+    style="filled,rounded"
+    shape=box
+    penwidth=1.2
+    color="#d4d4d8"
+    fillcolor="#fafafa"
+    fontcolor="#27272a"
+    margin="0.15,0.08"
+  ];
+  edge [
+    color="#a1a1aa"
+    penwidth=1.2
+    arrowsize=0.7
+  ];
+
+  // Top level
+  arcana [
+    label="Arcana"
+    fontsize=16
+    fontcolor="white"
+    fillcolor="#18181b"
+    color="#18181b"
+    margin="0.25,0.12"
+  ];
+
+  // Three pillars
+  subgraph cluster_pillars {
+    style=invis;
+    rank=same;
+
+    library [
+      label="Paper Library\nimport  | chat  | figures\ncitations  | synthesis"
+      fillcolor="#eff6ff"
+      color="#93c5fd"
+    ];
+
+    agent [
+      label="Research Agent\nliterature -> hypothesis\nexperiment -> analysis -> reflection"
+      fillcolor="#f0fdf4"
+      color="#86efac"
+    ];
+
+    knowledge [
+      label="Knowledge\nmind palace  | notebook\nresearch summaries"
+      fillcolor="#fefce8"
+      color="#fde047"
+    ];
+  }
+
+  arcana -> library;
+  arcana -> agent;
+  arcana -> knowledge;
+
+  // Agent subsystems
+  subgraph cluster_agent_sub {
+    style=invis;
+
+    subagents [
+      label="Sub-agents\nscouts  | synthesizer\narchitect  | reviewer\nprovocateur  | visualizer"
+      fillcolor="#f0fdf4"
+      color="#bbf7d0"
+    ];
+
+    gates [
+      label="Phase Gates\ncode-enforced\ntransitions"
+      fillcolor="#f0fdf4"
+      color="#bbf7d0"
+    ];
+
+    gpus [
+      label="Remote GPUs\nSSH + rsync\nauto-fix  | pyright\nworkspace lifecycle"
+      fillcolor="#f0fdf4"
+      color="#bbf7d0"
+    ];
+  }
+
+  agent -> subagents;
+  agent -> gates;
+  agent -> gpus;
+
+  // Feedback loops
+  library -> agent [style=dashed, label="papers feed\ninto research", fontsize=9, fontcolor="#71717a"];
+  knowledge -> agent [style=dashed, label="insights improve\nexperiments", fontsize=9, fontcolor="#71717a"];
+  agent -> knowledge [style=dashed, label="findings become\nknowledge", fontsize=9, fontcolor="#71717a"];
+
+  // LLM provider
+  llm [
+    label="Any LLM Provider\nOpenAI  | Anthropic  | proxy"
+    fillcolor="#faf5ff"
+    color="#d8b4fe"
+    fontsize=11
+  ];
+
+  arcana -> llm [style=dotted, dir=both, label="", constraint=false];
+}
