@@ -3219,6 +3219,72 @@ function createTools(
       },
     }),
 
+    check_script: tool({
+      description: "Run static analysis (pyright) on a Python script before submitting it. Checks for import errors, wrong API arguments, type mismatches, and missing attributes — against the actual packages installed on the remote host. Use after writing a script to catch bugs before burning GPU time.",
+      inputSchema: z.object({
+        script: z.string().describe("Script filename relative to workdir (e.g., 'exp_055.py')"),
+      }),
+      execute: async ({ script: scriptName }: { script: string }) => {
+        if (!scriptName.endsWith(".py")) return "Only Python scripts can be analyzed.";
+
+        const hostWhere = { isDefault: true as const };
+        let host = await prisma.remoteHost.findFirst({ where: hostWhere });
+        if (!host) host = await prisma.remoteHost.findFirst();
+        if (!host) return "No remote hosts configured.";
+
+        emit({ type: "tool_progress", toolName: "check_script", content: `Analyzing ${scriptName} on ${host.alias}...` });
+
+        try {
+          const { sshExecutor, hostToConfig: toConfig } = await import("./remote-executor");
+          const hostConfig = toConfig(host as Parameters<typeof toConfig>[0]);
+
+          let remoteDir: string;
+          try {
+            remoteDir = await sshExecutor.syncUp(workDir, hostConfig);
+          } catch (syncErr) {
+            return `Could not sync files to ${host.alias}: ${syncErr instanceof Error ? syncErr.message : syncErr}`;
+          }
+
+          const diagnostics = await analyzeScript(hostConfig, remoteDir, scriptName);
+
+          if (!diagnostics) {
+            return `Could not run analysis — SSH or helper error. The script can still be submitted.`;
+          }
+
+          if (diagnostics.unavailable) {
+            return `Pyright not available on ${host.alias}: ${diagnostics.reason}. The script can still be submitted — pyright will be installed on the next attempt.`;
+          }
+
+          if (diagnostics.timeout) {
+            return `Pyright timed out analyzing ${scriptName}. The script can still be submitted.`;
+          }
+
+          if (diagnostics.errorCount === 0 && diagnostics.warningCount === 0) {
+            return `No issues found in ${scriptName}. Ready to submit.${diagnostics.pyrightVersion ? ` (pyright ${diagnostics.pyrightVersion})` : ""}`;
+          }
+
+          const parts: string[] = [];
+          if (diagnostics.errorCount > 0) {
+            parts.push(`**${diagnostics.errorCount} error(s):**`);
+            for (const d of diagnostics.errors.filter(d => d.severity === "error")) {
+              parts.push(`  Line ${d.line}:${d.col} — ${d.message}${d.rule ? ` [${d.rule}]` : ""}`);
+            }
+          }
+          if (diagnostics.warningCount > 0) {
+            parts.push(`\n**${diagnostics.warningCount} warning(s):**`);
+            for (const d of diagnostics.errors.filter(d => d.severity === "warning")) {
+              parts.push(`  Line ${d.line}:${d.col} — ${d.message}${d.rule ? ` [${d.rule}]` : ""}`);
+            }
+          }
+
+          return parts.join("\n");
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          return `Analysis failed: ${msg}. The script can still be submitted.`;
+        }
+      },
+    }),
+
     read_remote_file: tool({
       description: "Read a specific file from the remote experiment directory. Use after get_workspace shows files you need to inspect (e.g., results.json, stderr.log, stdout.log). Cannot run commands — only reads file content.",
       inputSchema: z.object({
