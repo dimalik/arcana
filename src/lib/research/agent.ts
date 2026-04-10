@@ -3750,6 +3750,53 @@ function createTools(
           console.warn("[agent] preflight validation error:", preflightErr);
         }
 
+          // ── Pyright static analysis ──
+          if (!isPoc && !isBenchmarkProject) {
+            try {
+              const scriptMatch2 = sanitized.match(/python3?\s+(\S+\.py)/);
+              const scriptFileName = scriptMatch2 ? scriptMatch2[1] : null;
+
+              if (scriptFileName) {
+                const attempts = analysisAttempts.get(scriptFileName) || 0;
+
+                if (attempts < MAX_ANALYSIS_ATTEMPTS) {
+                  emit({ type: "tool_progress", toolName: "execute_remote", content: "Running static analysis..." });
+
+                  const { sshExecutor, hostToConfig: toConfig } = await import("./remote-executor");
+                  const hostConfig = toConfig(host as Parameters<typeof toConfig>[0]);
+                  let remoteDir: string;
+                  try {
+                    remoteDir = await sshExecutor.syncUp(workDir, hostConfig);
+                  } catch {
+                    remoteDir = "";
+                  }
+
+                  if (remoteDir) {
+                    const diagnostics = await analyzeScript(hostConfig, remoteDir, scriptFileName);
+
+                    if (diagnostics && diagnostics.errorCount > 0) {
+                      analysisAttempts.set(scriptFileName, attempts + 1);
+                      emit({ type: "tool_output", toolName: "execute_remote", content: `\n⛔ STATIC ANALYSIS: ${diagnostics.errorCount} error(s) found` });
+                      return `BLOCKED — ${formatDiagnostics(scriptFileName, diagnostics, attempts + 1, MAX_ANALYSIS_ATTEMPTS)}\n\nThe experiment was NOT submitted. Fix the script with write_file and try again.`;
+                    }
+
+                    if (diagnostics && diagnostics.warningCount > 0) {
+                      const warnLines = diagnostics.errors
+                        .filter(d => d.severity === "warning")
+                        .map(d => `  Line ${d.line}: ${d.message}`)
+                        .join("\n");
+                      emit({ type: "tool_output", toolName: "execute_remote", content: `\n⚠ Static analysis warnings:\n${warnLines}` });
+                    }
+                  }
+                } else {
+                  emit({ type: "tool_output", toolName: "execute_remote", content: `⚠ Proceeding despite pyright errors — ${MAX_ANALYSIS_ATTEMPTS} fix attempts exhausted` });
+                }
+              }
+            } catch (analysisErr) {
+              console.warn("[agent] pyright analysis error:", analysisErr);
+            }
+          }
+
         // ── Auto environment check: verify packages before submission ──
         // If host has a pre-existing env, check that required packages are importable
         // This replaces the need for the agent to manually call validate_environment
