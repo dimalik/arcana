@@ -22,6 +22,7 @@ Commands:
   archive <workdir> <run_name> [--include-checkpoints]  Archive a completed run
   prune <workdir> [--keep-recent N] [--max-archives N] [--dry-run]  Bulk cleanup
   restore <workdir> <run_name>   Restore an archived run
+  check <workdir> <script.py>     Run pyright static analysis on a script
   version                        Print helper version
 """
 
@@ -1205,6 +1206,167 @@ def cmd_restore(workdir, run_name):
     json_out({"ok": True, "restored": run_name, "path": run_name + "/"})
 
 
+PYRIGHT_MARKER = "pyright_installed"
+PYRIGHT_INSTALL_TIMEOUT = 120  # 2 min for initial install
+PYRIGHT_RUN_TIMEOUT = 30       # 30s for analysis
+
+
+def ensure_pyright(workdir):
+    """Ensure pyright is pip-installed in the venv. Returns (python_path, ok, reason)."""
+    venv_py = get_venv_python(workdir)
+    conda_env = os.environ.get("ARCANA_CONDA", "")
+
+    if conda_env.strip():
+        # Derive pip from conda python path
+        conda_bin = os.path.dirname(conda_env)
+        pip_path = os.path.join(conda_bin, "pip3")
+        if not os.path.exists(pip_path):
+            pip_path = os.path.join(conda_bin, "pip")
+    else:
+        pip_path = os.path.join(workdir, ".venv", "bin", "pip3")
+        if not os.path.exists(pip_path):
+            pip_path = os.path.join(workdir, ".venv", "bin", "pip")
+
+    # Check marker file
+    marker_path = os.path.join(workdir, ARCANA_DIR, PYRIGHT_MARKER)
+    if os.path.exists(marker_path):
+        return (venv_py, True, "cached")
+
+    # Try importing pyright
+    try:
+        result = subprocess.run(
+            [venv_py, "-c", "import pyright; print('ok')"],
+            capture_output=True, text=True, timeout=15,
+        )
+        if result.returncode == 0 and "ok" in result.stdout:
+            os.makedirs(os.path.join(workdir, ARCANA_DIR), exist_ok=True)
+            with open(marker_path, "w") as f:
+                f.write("1")
+            return (venv_py, True, "already installed")
+    except Exception:
+        pass
+
+    # Try installing pyright
+    try:
+        result = subprocess.run(
+            [pip_path, "install", "pyright", "-q"],
+            capture_output=True, text=True, timeout=PYRIGHT_INSTALL_TIMEOUT,
+        )
+        if result.returncode == 0:
+            os.makedirs(os.path.join(workdir, ARCANA_DIR), exist_ok=True)
+            with open(marker_path, "w") as f:
+                f.write("1")
+            return (venv_py, True, "installed")
+        else:
+            return (venv_py, False, f"pip install pyright failed: {result.stderr[:500]}")
+    except subprocess.TimeoutExpired:
+        return (venv_py, False, "pip install pyright timed out")
+    except Exception as e:
+        return (venv_py, False, f"pip install pyright error: {e}")
+
+
+def cmd_check(workdir, script_name):
+    """Run pyright static analysis on a script."""
+    workdir = os.path.abspath(workdir)
+    if not os.path.isdir(workdir):
+        json_err(f"Workdir does not exist: {workdir}")
+
+    script_path = os.path.join(workdir, script_name)
+    if not os.path.isfile(script_path):
+        json_err(f"Script not found: {script_path}")
+
+    venv_py, ok, reason = ensure_pyright(workdir)
+    if not ok:
+        json_out({
+            "ok": True,
+            "errors": [],
+            "errorCount": 0,
+            "warningCount": 0,
+            "unavailable": True,
+            "reason": reason,
+        })
+
+    # Run pyright
+    try:
+        result = subprocess.run(
+            [venv_py, "-m", "pyright", "--outputjson", "--level", "basic",
+             "--pythonpath", venv_py, script_path],
+            capture_output=True, text=True, timeout=PYRIGHT_RUN_TIMEOUT,
+            cwd=workdir,
+        )
+        # pyright returns non-zero on errors — that's expected, parse stdout anyway
+    except subprocess.TimeoutExpired:
+        json_out({
+            "ok": True,
+            "errors": [],
+            "errorCount": 0,
+            "warningCount": 0,
+            "timeout": True,
+        })
+    except Exception as e:
+        json_out({
+            "ok": True,
+            "errors": [],
+            "errorCount": 0,
+            "warningCount": 0,
+            "unavailable": True,
+            "reason": str(e),
+        })
+
+    # Parse JSON output
+    try:
+        data = json.loads(result.stdout)
+    except (json.JSONDecodeError, ValueError):
+        json_out({
+            "ok": True,
+            "errors": [],
+            "errorCount": 0,
+            "warningCount": 0,
+            "unavailable": True,
+            "reason": f"Failed to parse pyright output: {result.stdout[:500]}",
+        })
+
+    diagnostics = data.get("generalDiagnostics", [])
+    errors = []
+    error_count = 0
+    warning_count = 0
+
+    for diag in diagnostics:
+        severity = diag.get("severity", "")
+        if severity not in ("error", "warning"):
+            continue
+
+        if severity == "error":
+            error_count += 1
+        else:
+            warning_count += 1
+
+        rng = diag.get("range", {})
+        start = rng.get("start", {})
+        end = rng.get("end", {})
+
+        errors.append({
+            "file": diag.get("file", script_name),
+            "severity": severity,
+            "message": diag.get("message", ""),
+            "rule": diag.get("rule", ""),
+            "line": start.get("line", 0) + 1,       # 0-indexed to 1-indexed
+            "column": start.get("character", 0) + 1,
+            "endLine": end.get("line", 0) + 1,
+            "endColumn": end.get("character", 0) + 1,
+        })
+
+    pyright_version = data.get("version", "")
+
+    json_out({
+        "ok": True,
+        "errors": errors,
+        "errorCount": error_count,
+        "warningCount": warning_count,
+        "pyrightVersion": pyright_version,
+    })
+
+
 def cmd_version():
     """Print version."""
     json_out({"ok": True, "version": HELPER_VERSION})
@@ -1293,6 +1455,10 @@ def main():
             if len(sys.argv) < 4:
                 json_err("Usage: restore <workdir> <run_name>")
             cmd_restore(sys.argv[2], sys.argv[3])
+        elif cmd == "check":
+            if len(sys.argv) < 4:
+                json_err("Usage: check <workdir> <script.py>")
+            cmd_check(sys.argv[2], sys.argv[3])
         elif cmd == "_monitor":
             # Internal: _monitor <workdir> <pid> <pgid>
             if len(sys.argv) < 5:
