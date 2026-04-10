@@ -43,10 +43,19 @@ async function ensureHelper(host: HostConfig): Promise<void> {
   const target = sshTarget(host);
 
   await sshExec(host, "mkdir -p ~/.arcana");
-  await execAsync(
-    `rsync -az -e "${sshCmd}" "${helperPath}" "${target}:~/.arcana/helper.py"`,
-    { timeout: 30_000 },
-  );
+  try {
+    await execAsync(
+      `rsync -az -e "${sshCmd}" "${helperPath}" "${target}:~/.arcana/helper.py"`,
+      { timeout: 30_000 },
+    );
+  } catch (rsyncErr) {
+    // rsync missing locally or on remote — fall back to scp
+    const scpArgs = sshArgs(host).map(a => `"${a}"`).join(" ");
+    await execAsync(
+      `scp ${scpArgs} "${helperPath}" "${target}:~/.arcana/helper.py"`,
+      { timeout: 30_000 },
+    );
+  }
   await sshExec(host, "chmod +x ~/.arcana/helper.py");
   helperInstalledHosts.set(hostKey, true);
 }
@@ -322,9 +331,9 @@ export const sshExecutor: ExecutorBackend = {
       await execAsync(rsyncCmd, { timeout: 120_000 });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      // If rsync not available locally, try scp fallback
-      if (msg.includes("rsync: command not found") || msg.includes("rsync: not found")) {
-        console.warn("[remote-executor] rsync not available, falling back to scp");
+      // rsync missing locally or on remote — fall back to scp
+      if (msg.includes("rsync: command not found") || msg.includes("rsync: not found") || msg.includes("rsync: No such file") || (msg.includes("rsync") && msg.includes("code 127"))) {
+        console.warn("[remote-executor] rsync not available (local or remote), falling back to scp");
         await execAsync(
           `scp -r ${sshArgs(host).map(a => `"${a}"`).join(" ")} "${src}"* "${target}:${remoteDir}/"`,
           { timeout: 120_000 },

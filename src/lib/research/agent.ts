@@ -722,7 +722,7 @@ async function runAgent(
     const phase = project.currentPhase || "literature";
     const hostInfo = remoteHosts.length > 0
       ? `Remote hosts: ${remoteHosts.map(h => `${h.alias}${h.gpuType ? ` (${h.gpuType})` : ""}`).join(", ")}`
-      : "No remote hosts configured — use execute_command for local runs.";
+      : "No remote hosts configured — run_experiment handles local execution automatically.";
     systemPrompt = `[CONDENSED] You are an autonomous research agent investigating: "${project.title}".
 
 ## How You Work
@@ -859,7 +859,7 @@ Check RESEARCH_LOG.md for the detailed research narrative.
   let totalExperimentsRun = 0;
   let totalPaperConsultations = 0;
   const LIT_TOOLS = new Set(["search_papers", "read_paper", "search_library", "query_insights"]);
-  const EXPERIMENT_TOOLS = new Set(["execute_command", "execute_remote", "run_experiment"]);
+  const EXPERIMENT_TOOLS = new Set(["execute_remote", "run_experiment"]);
   let iterationNudged = false;
   const iterationStepsAtStart = stepSortOrder; // total steps already in this iteration
 
@@ -893,7 +893,7 @@ Check RESEARCH_LOG.md for the detailed research narrative.
       // Experiment
       "write_file", "run_experiment", "execute_remote", "check_job", "wait_for_jobs",
       // File management
-      "read_file", "list_files", "get_workspace", "read_remote_file",
+      "read_file", "list_files", "get_workspace",
       // Sub-agents
       "dispatch_scouts", "dispatch_synthesizer", "dispatch_architect",
       "dispatch_reviewer", "collect_results",
@@ -1011,9 +1011,9 @@ Check RESEARCH_LOG.md for the detailed research narrative.
           stepBudget.design++;
         } else if (["execute_remote", "run_experiment", "validate_environment"].includes(tc.toolName)) {
           stepBudget.experiment++;
-        } else if (["check_job", "monitor_experiment", "read_file", "get_workspace", "read_remote_file"].includes(tc.toolName)) {
+        } else if (["check_job", "monitor_experiment", "read_file", "get_workspace"].includes(tc.toolName)) {
           stepBudget.analysis++;
-        } else if (tc.toolName === "execute_command") {
+        } else if (false) { // execute_command removed
           stepBudget.infraDebug++;
         }
       }
@@ -1344,8 +1344,7 @@ ${prefSection}
 - \`check_job\` → check status of a background job (quick, non-blocking). Call periodically to monitor progress.
 - \`wait_for_jobs\` → block until specific jobs complete (use when you need results before proceeding, e.g., to compare outputs).
 - \`get_workspace\` → PREFERRED: structured view of all files, results, packages, job status (cached, fast)
-- \`read_remote_file\` → read a specific file from the remote experiment directory (e.g., results.json, stderr.log, output/metrics.csv) when get_workspace doesn't show its full contents
-- \`execute_command\` → local shell tasks (data prep, lightweight compute). For Python experiment scripts, prefer \`run_experiment\`.
+- \`read_file\` → read any file from the workspace (checks local first, then remote automatically). Supports subdirectories like \`run_055/results.json\`.
 - \`execute_remote\` → DEPRECATED, use \`run_experiment\` instead.
 
 ### Parallel Workflow (YOU MUST DO THIS — NOT OPTIONAL)
@@ -1385,7 +1384,7 @@ After 2+ experiments complete, dispatch the visualizer to create publication-qua
 **NEVER write monitoring, status-checking, cleanup, or GPU-checking scripts.** Use the built-in tools:
 - \`check_job\`: experiment status and logs
 - \`get_workspace\`: file listings and result contents
-- \`read_remote_file\`: read specific files from remote
+- \`read_file\`: read any file (local or remote)
 - \`monitor_experiment\`: live training metrics
 Writing a Python script to do \`nvidia-smi\` or \`ps aux\` or \`cat logs\` is NEVER the right approach.
 
@@ -1396,7 +1395,7 @@ Writing a Python script to do \`nvidia-smi\` or \`ps aux\` or \`cat logs\` is NE
 4. \`collect_results\` (architect proposals) → implement cheapest validation experiment
 5. Run experiment → analyze results yourself → \`dispatch_architect\` with synthesis + results → iterate
 
-${!resourcePreferences || resourcePreferences.length === 0 ? "**Default: use run_experiment for all Python experiment scripts** — it auto-routes to local or remote based on resource rules. Use execute_command only for non-experiment shell tasks.\n" : ""}### Environment Setup (AUTOMATIC — but validate first!)
+${!resourcePreferences || resourcePreferences.length === 0 ? "**Default: use run_experiment for all Python scripts** — it auto-routes to local or remote based on resource rules.\n" : ""}### Environment Setup (AUTOMATIC — but validate first!)
 The remote execution system **automatically handles Python environments**:
 - Creates a \`.venv\` if one doesn't exist and \`requirements.txt\` is present
 - Installs/updates packages when \`requirements.txt\` changes (tracked via hash)
@@ -1418,7 +1417,7 @@ The remote execution system **automatically handles Python environments**:
 - If a package fails to install, check the host's Python version and CUDA version listed above for compatibility.
 - **ASK THE USER for help** when you cannot resolve a dependency issue after 2 attempts. They can install system packages, update CUDA, or configure conda.`
     : `\n## Execution
-${resourceSetting === "local" ? `**The user chose LOCAL-ONLY execution.** Do NOT write code that assumes GPU access or remote servers. Design experiments that run on CPU (or MPS on macOS). Use smaller models, smaller datasets, and CPU-friendly approaches. If a task genuinely requires a GPU, explain this to the user and suggest they change the resource setting.` : `No remote servers configured.`} Use execute_command to run experiments locally.
+${resourceSetting === "local" ? `**The user chose LOCAL-ONLY execution.** Do NOT write code that assumes GPU access or remote servers. Design experiments that run on CPU (or MPS on macOS). Use smaller models, smaller datasets, and CPU-friendly approaches. If a task genuinely requires a GPU, explain this to the user and suggest they change the resource setting.` : `No remote servers configured.`} Use run_experiment to run experiments locally.
 
 ### Environment Setup (Local)
 On the FIRST local run, create a venv and install deps:
@@ -1621,7 +1620,7 @@ Your mechanism design document should include:
 
 ### Phase 2: Experiment
 
-**DO NOT run ls, find, cat, or nvidia-smi to understand the workspace.** Use \`get_workspace\` instead — it returns everything in one call. Use \`read_remote_file\` when you need the full contents of a specific file (e.g., a result JSON or log).
+**DO NOT run ls, find, cat, or nvidia-smi to understand the workspace.** Use \`get_workspace\` instead — it returns everything in one call. Use \`read_file\` when you need the full contents of a specific file (e.g., a result JSON or log) — it checks local first, then remote automatically.
 
 **╔══════════════════════════════════════════════════════════════════╗**
 **║  PROOF-OF-CONCEPT FIRST — ALWAYS                               ║**
@@ -1821,7 +1820,7 @@ Think of iterations like chapters — each should have a coherent narrative. Sta
 - **NEVER generate synthetic toy data when a real dataset exists.** If a paper evaluates on GLUE, use GLUE. If on SQuAD, use SQuAD. Generating 50 random samples to "simulate" a dataset invalidates the entire experiment. Use \`datasets\` library, \`torchvision.datasets\`, or direct download URLs from the papers.
 - **Use \`run_experiment\` for all Python experiment scripts.** It auto-routes to local or remote based on resource rules. You never need to decide where to run. For remote execution, the wrapper handles venv creation, package installation, and activation automatically. Just write a \`requirements.txt\` and provide the script name.
 - **run_experiment (remote path) handles EVERYTHING automatically and returns immediately.** The remote wrapper: (1) cds into the experiment directory, (2) creates .venv if needed, (3) installs requirements.txt if changed, (4) activates .venv, (5) runs your command, (6) captures exit code. So just provide the script name, e.g. \`run_experiment(script="experiment.py")\`. After submitting, **keep working** — don't just call check_job in a loop. Do something useful (read papers, write code) and check back later.
-- **NEVER use execute_remote or run_experiment for checking files, reading logs, or listing results.** Use read_remote_file or get_workspace for that.
+- **NEVER use execute_remote or run_experiment for checking files, reading logs, or listing results.** Use read_file or get_workspace for that.
 - **ALWAYS use flush=True in print() and save results incrementally.** Remote jobs buffer stdout — without flushing you won't see progress. Without incremental saves, a crash after training means zero results.
 - **Save lessons with save_lesson whenever you fix a non-obvious bug or discover a practical trick.** Future you (and other projects) will benefit. Don't save obvious things — save things that cost you time to figure out.
 - Use log_finding liberally: record hypotheses, findings, decisions, and breakthroughs. This is your lab notebook.
@@ -1963,9 +1962,9 @@ function thinkingHint(toolCalls?: { toolName: string; input: unknown }[]): strin
       return "Processing paper content and extracting key insights...";
     case "write_file":
       return "Reviewing written code and planning next action...";
-    case "execute_command":
+    case "execute_command": // legacy — tool removed but keep case for old steps
       return "Analyzing command output...";
-    case "read_remote_file":
+    case "read_remote_file": // legacy — merged into read_file
       return "Reading remote file...";
     case "run_experiment":
       return "Experiment routed — processing...";
@@ -2063,29 +2062,7 @@ function createTools(
   // Experiment counter for sequential naming (shared with caller via ref object)
   const experimentCount = expCounter || { value: 0 };
 
-  const BLOCKED_COMMAND_PATTERNS = /\b(pip3?\s+install|pip3?\s+uninstall|conda\s+(install|create|env)|apt(-get)?\s+install|sudo\s)/i;
-  const REDIRECT_COMMAND_PATTERNS = /\b(sed\s+-[nie]|grep\s+-[nrc]|wc\s+-l|head\s+-|tail\s+-|cat\s+\S+\.py)\b/;
-
-  function isBlockedInfraCommand(cmd: string): string | null {
-    if (BLOCKED_COMMAND_PATTERNS.test(cmd)) {
-      return "Package management commands are not allowed. To add dependencies:\n" +
-        "1. Add them to requirements.txt using write_file\n" +
-        "2. The system installs them automatically when you run execute_remote\n" +
-        "3. If a package fails to install, ask the user for help — don't try to pip install manually.";
-    }
-    if (REDIRECT_COMMAND_PATTERNS.test(cmd)) {
-      return "Use read_file instead of sed/grep/cat/head/tail to read files. Use list_files to see what's in the directory.";
-    }
-    if (/\bssh\s/.test(cmd)) {
-      return "BLOCKED — Do not run SSH commands directly. Use the built-in tools instead:\n" +
-        "- check_job: check experiment status and logs\n" +
-        "- get_workspace: see all files, results, and packages on the remote host\n" +
-        "- read_remote_file: read a specific file from the remote directory\n" +
-        "- monitor_experiment: check training metrics from a running experiment\n" +
-        "Remote infrastructure is managed automatically — you never need raw SSH access.";
-    }
-    return null;
-  }
+  // No shell access — execute_command removed. All operations go through typed tools.
 
   let committedApproachInner: string | null = null;
 
@@ -2935,7 +2912,7 @@ function createTools(
               `- Package installation: add to requirements.txt (helper installs automatically)\n` +
               `- GPU/CUDA checks: shown in host profile and get_workspace\n` +
               `- Import verification: handled by the auto-environment check before submission\n` +
-              `- Repository cloning: use execute_command for one-off setup, not a script\n\n` +
+              `- Repository cloning: write a Python script that does it, don't try to use git directly\n\n` +
               `Write actual experiments instead: poc_NNN_<what_you_test>.py`;
           }
         }
@@ -3004,22 +2981,59 @@ function createTools(
     }),
 
     read_file: tool({
-      description: "Read a file from the experiment directory.",
+      description: "Read a file from the workspace. Checks the local experiment directory first; if not found and a remote host is configured, reads from the remote workspace. Supports subdirectories (e.g., 'run_055/results.json', 'results/metrics.csv'). Use tail_lines to read the end of long log files.",
       inputSchema: z.object({
-        filename: z.string().describe("Filename to read"),
+        filepath: z.string().describe("Path relative to experiment directory (e.g., 'exp_055.py', 'run_055/results.json', 'stderr.log')"),
+        tail_lines: z.number().optional().describe("Only return the last N lines (useful for long logs). Default: entire file."),
       }),
-      execute: async ({ filename }: { filename: string }) => {
-        const safeName = path.basename(filename);
-        const filePath = path.join(workDir, safeName);
+      execute: async ({ filepath, tail_lines }: { filepath: string; tail_lines?: number }) => {
+        // Prevent path traversal
+        const safePath = filepath.replace(/\.\.\//g, "").replace(/^\//, "");
+        if (!safePath || safePath.includes("..")) return "Invalid path.";
+
+        // Try local first
+        const localPath = path.join(workDir, safePath);
         try {
-          const content = await readFile(filePath, "utf-8");
+          const content = await readFile(localPath, "utf-8");
+          if (tail_lines) {
+            const lines = content.split("\n");
+            return lines.slice(-Math.min(tail_lines, 500)).join("\n");
+          }
           if (content.length > 10000) {
             return content.slice(0, 8000) + "\n\n[...truncated...]\n\n" + content.slice(-2000);
           }
           return content;
         } catch {
-          return `File "${safeName}" not found.`;
+          // Not found locally — try remote
         }
+
+        // Try remote
+        const hostWhere = { isDefault: true as const };
+        let host = await prisma.remoteHost.findFirst({ where: hostWhere });
+        if (!host) host = await prisma.remoteHost.findFirst();
+        if (!host) return `File "${safePath}" not found locally. No remote hosts configured.`;
+
+        const slug = workDir.split("/").filter(Boolean).pop() || "experiment";
+        const remoteDir = `${host.workDir}/${slug}`;
+        const fullPath = `${remoteDir}/${safePath}`;
+
+        const cmd = tail_lines
+          ? `tail -${Math.min(tail_lines, 500)} ${fullPath} 2>/dev/null`
+          : `head -2000 ${fullPath} 2>/dev/null`;
+
+        const result = await quickRemoteCommand(host.id, cmd);
+        if (!result.ok) return `File "${safePath}" not found locally or on ${host.alias}.`;
+
+        emit({ type: "tool_output", toolName: "read_file", content: `── ${safePath} (from ${host.alias}) ──` });
+        const lines = result.output.split("\n");
+        for (const line of lines.slice(0, 200)) {
+          emit({ type: "tool_output", toolName: "read_file", content: line });
+        }
+        if (lines.length > 200) {
+          emit({ type: "tool_output", toolName: "read_file", content: `... (${lines.length - 200} more lines, use tail_lines to see end)` });
+        }
+
+        return result.output.slice(-5000) || "File is empty.";
       },
     }),
 
@@ -3046,106 +3060,8 @@ function createTools(
       },
     }),
 
-    execute_command: tool({
-      description: "Run a shell command in the experiment directory. Use for: pip install, python scripts, checking outputs, etc. For long-running experiments, prefer execute_remote.",
-      inputSchema: z.object({
-        command: z.string().describe("Shell command to run"),
-        timeout_seconds: z.number().default(300).optional().describe("Max execution time in seconds (default 300)"),
-      }),
-      execute: async ({ command, timeout_seconds }: { command: string; timeout_seconds?: number }) => {
-        const blocked = isBlockedInfraCommand(command);
-        if (blocked) return blocked;
-
-        emit({ type: "tool_progress", toolName: "execute_command", content: `$ ${command.slice(0, 100)}${command.length > 100 ? "..." : ""}` });
-        const timeoutSec = timeout_seconds || 300;
-        const isPythonRun = /python\s/.test(command);
-        const logFile = path.join(workDir, `.run-${Date.now()}.log`);
-
-        return new Promise<string>((resolve) => {
-          const proc = spawn("bash", ["-c", command], {
-            cwd: workDir,
-            timeout: timeoutSec * 1000,
-            env: { ...process.env, PYTHONUNBUFFERED: "1" },
-          });
-
-          let stdout = "";
-          let stderr = "";
-          let lineCount = 0;
-
-          const emitLine = (line: string, stream: "stdout" | "stderr") => {
-            lineCount++;
-            emit({
-              type: "tool_output",
-              toolName: "execute_command",
-              content: line,
-            });
-            // Also write to logfile
-            appendFile(logFile, `[${stream}] ${line}\n`).catch(() => {});
-          };
-
-          let stdoutBuf = "";
-          proc.stdout?.on("data", (chunk: Buffer) => {
-            const text = chunk.toString();
-            stdout += text;
-            stdoutBuf += text;
-            const lines = stdoutBuf.split("\n");
-            stdoutBuf = lines.pop() || "";
-            for (const line of lines) {
-              emitLine(line, "stdout");
-            }
-          });
-
-          let stderrBuf = "";
-          proc.stderr?.on("data", (chunk: Buffer) => {
-            const text = chunk.toString();
-            stderr += text;
-            stderrBuf += text;
-            const lines = stderrBuf.split("\n");
-            stderrBuf = lines.pop() || "";
-            for (const line of lines) {
-              emitLine(line, "stderr");
-            }
-          });
-
-          proc.on("close", async (code) => {
-            // Flush remaining buffered text
-            if (stdoutBuf) emitLine(stdoutBuf, "stdout");
-            if (stderrBuf) emitLine(stderrBuf, "stderr");
-
-            const succeeded = code === 0;
-            if (isPythonRun) {
-              await recordStep(
-                "run_experiment",
-                `Local: ${command.slice(0, 80)}`,
-                succeeded ? "COMPLETED" : "FAILED",
-                { stdout: stdout.slice(-2000), stderr: stderr.slice(-500), exitCode: code, logFile },
-                "experiment",
-              );
-              if (succeeded) {
-                const taskCat = classifyTaskCategory(command);
-                recordResourceChoice(userId, taskCat, "local", command.slice(0, 80), projectId).catch(() => {});
-              }
-            }
-
-            if (succeeded) {
-              let result = "";
-              if (stdout) result += `stdout:\n${stdout.slice(-5000)}\n`;
-              if (stderr) result += `stderr:\n${stderr.slice(-2000)}\n`;
-              resolve(result || "Command completed with no output.");
-            } else {
-              resolve(`COMMAND FAILED (exit ${code}). YOU MUST read the error, fix the code, and re-run before proceeding.\n\nstdout:\n${stdout.slice(-3000)}\n\nstderr:\n${stderr.slice(-2000)}`);
-            }
-          });
-
-          proc.on("error", async (err) => {
-            if (isPythonRun) {
-              await recordStep("run_experiment", `Local: ${command.slice(0, 80)}`, "FAILED", { error: err.message });
-            }
-            resolve(`Command error: ${err.message}`);
-          });
-        });
-      },
-    }),
+    // execute_command removed — no shell access. Use run_experiment for Python scripts,
+    // read_file/write_file/list_files for file operations, get_workspace for inspection.
 
     get_workspace: tool({
       description: "Get a complete, structured view of the remote experiment workspace: all files with sizes and timestamps, result file contents, installed packages, and job status. This is MUCH faster than reading files individually. Use this FIRST when you need to understand the current state of the workspace.",
@@ -3293,49 +3209,10 @@ function createTools(
       },
     }),
 
-    read_remote_file: tool({
-      description: "Read a specific file from the remote experiment directory. Use after get_workspace shows files you need to inspect (e.g., results.json, stderr.log, stdout.log). Cannot run commands — only reads file content.",
-      inputSchema: z.object({
-        filepath: z.string().describe("Path relative to experiment directory (e.g., 'results.json', 'stderr.log', 'output/metrics.csv')"),
-        tail_lines: z.number().optional().describe("Only return the last N lines (useful for long logs). Default: entire file."),
-        host_alias: z.string().optional().describe("Remote host alias. Omit for default."),
-      }),
-      execute: async ({ filepath, tail_lines, host_alias }: { filepath: string; tail_lines?: number; host_alias?: string }) => {
-        // Prevent path traversal
-        const safePath = filepath.replace(/\.\.\//g, "").replace(/^\//, "");
-        if (!safePath || safePath.includes("..")) return "Invalid path.";
-
-        const hostWhere = host_alias ? { alias: host_alias } : { isDefault: true };
-        let host = await prisma.remoteHost.findFirst({ where: hostWhere });
-        if (!host) host = await prisma.remoteHost.findFirst();
-        if (!host) return "No remote hosts configured.";
-
-        const slug = workDir.split("/").filter(Boolean).pop() || "experiment";
-        const remoteDir = `${host.workDir}/${slug}`;
-        const fullPath = `${remoteDir}/${safePath}`;
-
-        const cmd = tail_lines
-          ? `tail -${Math.min(tail_lines, 500)} ${fullPath} 2>/dev/null`
-          : `head -2000 ${fullPath} 2>/dev/null`;
-
-        const result = await quickRemoteCommand(host.id, cmd);
-        if (!result.ok) return `File not found or unreadable: ${safePath}`;
-
-        emit({ type: "tool_output", toolName: "read_remote_file", content: `── ${safePath} ──` });
-        const lines = result.output.split("\n");
-        for (const line of lines.slice(0, 200)) {
-          emit({ type: "tool_output", toolName: "read_remote_file", content: line });
-        }
-        if (lines.length > 200) {
-          emit({ type: "tool_output", toolName: "read_remote_file", content: `... (${lines.length - 200} more lines, use tail_lines to see end)` });
-        }
-
-        return result.output.slice(-5000) || "File is empty.";
-      },
-    }),
+    // read_remote_file removed — merged into read_file (checks local first, then remote)
 
     run_experiment: tool({
-      description: "Run an experiment script. The system automatically determines WHERE to run it (local or remote GPU) based on resource rules — you never need to choose. Just provide the script name and optional args. For exp_* and poc_* scripts, it routes to remote GPU servers. For analysis_* scripts, it runs locally. Use this instead of execute_remote or execute_command for running Python experiment scripts.",
+      description: "Run a Python script. The system automatically determines WHERE to run it (local or remote GPU) based on resource rules — you never need to choose. Just provide the script name and optional args. For exp_* and poc_* scripts, it routes to remote GPU servers. For analysis_* scripts, it runs locally. This is the ONLY way to execute code.",
       inputSchema: z.object({
         script: z.string().describe("Script filename to run (e.g., 'exp_003_lora.py')"),
         args: z.string().optional().describe("Command-line arguments (e.g., '--seed 42 --epochs 10')"),
@@ -3716,7 +3593,7 @@ function createTools(
         if (!host) {
           host = await prisma.remoteHost.findFirst();
         }
-        if (!host) return "No remote hosts configured. Use execute_command to run locally, or ask the user to configure a remote host.";
+        if (!host) return "No remote hosts configured. Ask the user to configure a remote host in Settings.";
 
         // Sanitize command — the Arcana helper handles cd, venv activation,
         // conda, and setup. Strip all that so the command is just the actual work.
@@ -3760,7 +3637,7 @@ function createTools(
 
         // ── GATE: execute_remote is ONLY for running Python experiment scripts ──
         // Block arbitrary shell commands, oneliners, kill, echo, cat, ls, etc.
-        // The agent must use read_remote_file/get_workspace for inspection and write_file for scripts.
+        // The agent must use read_file/get_workspace for inspection and write_file for scripts.
         const validExperimentCmd = /^python3?\s+[\w][\w\-]*\.py(?:\s+.*)?$/.test(sanitized);
         if (!validExperimentCmd) {
           // Check specific bad patterns and give targeted feedback
@@ -3768,7 +3645,7 @@ function createTools(
             return "BLOCKED — execute_remote is only for running Python experiment scripts (e.g. 'python3 experiment.py'). Process management is handled automatically.";
           }
           if (/^(echo|cat|ls|find|grep|head|tail|wc|du|df|ps|nvidia-smi|stat|file|which|whoami|pwd|env|printenv)\b/.test(sanitized)) {
-            return "BLOCKED — execute_remote is only for running Python experiment scripts. Use read_remote_file or get_workspace for inspecting the remote filesystem.";
+            return "BLOCKED — execute_remote is only for running Python experiment scripts. Use read_file or get_workspace for inspecting the filesystem.";
           }
           if (/^python3?\s+-c\s/.test(sanitized)) {
             return "BLOCKED — execute_remote does not accept inline Python (-c). Write your code to a .py file with write_file first, then run it with 'python3 <filename>.py'.";
