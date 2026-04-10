@@ -3245,7 +3245,7 @@ function createTools(
             return `Could not sync files to ${host.alias}: ${syncErr instanceof Error ? syncErr.message : syncErr}`;
           }
 
-          const diagnostics = await analyzeScript(hostConfig, remoteDir, scriptName);
+          const diagnostics = await analyzeScript(hostConfig, remoteDir, scriptName, host.id);
 
           if (!diagnostics) {
             return `Could not run analysis — SSH or helper error. The script can still be submitted.`;
@@ -3518,6 +3518,7 @@ function createTools(
           }
 
           // ── Pyright static analysis: catch semantic errors before GPU submission ──
+          let lastDiagnostics: string | undefined;
           if (!isPoc && !isBenchmarkProject) {
             try {
               const scriptMatch2 = sanitized.match(/python3?\s+(\S+\.py)/);
@@ -3539,7 +3540,7 @@ function createTools(
                   }
 
                   if (remoteDir) {
-                    const diagnostics = await analyzeScript(hostConfig, remoteDir, scriptFileName);
+                    const diagnostics = await analyzeScript(hostConfig, remoteDir, scriptFileName, host.id);
 
                     if (diagnostics && diagnostics.errorCount > 0) {
                       analysisAttempts.set(scriptFileName, attempts + 1);
@@ -3560,6 +3561,10 @@ function createTools(
                     }
                     if (diagnostics?.timeout) {
                       console.warn(`[agent] pyright timed out on ${host!.alias}`);
+                    }
+
+                    if (diagnostics) {
+                      lastDiagnostics = JSON.stringify(diagnostics);
                     }
                   }
                 } else {
@@ -3621,6 +3626,7 @@ function createTools(
               projectId,
               scriptHash,
               hypothesisId: resolvedHypothesisId,
+              diagnostics: lastDiagnostics,
             });
             jobId = result.jobId;
           } catch (submitErr) {
@@ -3838,7 +3844,7 @@ function createTools(
                   }
 
                   if (remoteDir) {
-                    const diagnostics = await analyzeScript(hostConfig, remoteDir, scriptFileName);
+                    const diagnostics = await analyzeScript(hostConfig, remoteDir, scriptFileName, host.id);
 
                     if (diagnostics && diagnostics.errorCount > 0) {
                       analysisAttempts.set(scriptFileName, attempts + 1);

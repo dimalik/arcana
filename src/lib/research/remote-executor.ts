@@ -457,6 +457,7 @@ export async function submitRemoteJob(params: {
   projectId?: string;
   scriptHash?: string;
   hypothesisId?: string;
+  diagnostics?: string;
 }): Promise<{ jobId: string }> {
   const host = await prisma.remoteHost.findUnique({ where: { id: params.hostId } });
   if (!host) throw new Error("Remote host not found");
@@ -478,6 +479,7 @@ export async function submitRemoteJob(params: {
       command: params.command,
       scriptHash: params.scriptHash || null,
       hypothesisId: params.hypothesisId || null,
+      diagnostics: params.diagnostics || null,
       runDir: runName,
       status: "SYNCING",
     },
@@ -1054,12 +1056,13 @@ export async function analyzeScript(
   host: HostConfig,
   remoteDir: string,
   scriptName: string,
+  hostId?: string,
 ): Promise<ScriptDiagnostics | null> {
   try {
     const raw = await invokeHelper(host, `check ${remoteDir} ${scriptName}`);
     const result = parseHelperResponse<ScriptDiagnostics & { ok: boolean }>(raw);
 
-    return {
+    const diagnosticsResult: ScriptDiagnostics = {
       errors: result.errors || [],
       errorCount: result.errorCount || 0,
       warningCount: result.warningCount || 0,
@@ -1068,6 +1071,16 @@ export async function analyzeScript(
       timeout: result.timeout,
       reason: result.reason,
     };
+
+    // Cache pyrightInstalled on the host record if this is a successful analysis
+    if (hostId && !diagnosticsResult.unavailable && !diagnosticsResult.timeout) {
+      prisma.remoteHost.update({
+        where: { id: hostId },
+        data: { pyrightInstalled: true },
+      }).catch(() => {}); // Best-effort, don't block
+    }
+
+    return diagnosticsResult;
   } catch (err) {
     console.warn(`[remote-executor] analyzeScript failed:`, err instanceof Error ? err.message : err);
     return null;
