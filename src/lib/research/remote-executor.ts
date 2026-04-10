@@ -109,6 +109,28 @@ export interface HelperStatus {
   error?: string;
 }
 
+/** Single diagnostic from pyright analysis. */
+export interface ScriptDiagnostic {
+  line: number;
+  col: number;
+  endLine?: number;
+  endCol?: number;
+  severity: "error" | "warning";
+  message: string;
+  rule: string;
+}
+
+/** Result of pyright analysis on a script. */
+export interface ScriptDiagnostics {
+  errors: ScriptDiagnostic[];
+  errorCount: number;
+  warningCount: number;
+  pyrightVersion?: string;
+  unavailable?: boolean;
+  timeout?: boolean;
+  reason?: string;
+}
+
 /** Get structured status from the helper. */
 export async function getHelperStatus(host: HostConfig, remoteDir: string): Promise<HelperStatus> {
   const raw = await invokeHelper(host, `status ${remoteDir}`);
@@ -149,7 +171,7 @@ export interface HostConfig {
 }
 
 /** Build HostConfig from a Prisma RemoteHost record */
-function hostToConfig(host: { host: string; port: number; user: string; keyPath: string | null; workDir: string; conda: string | null; setupCmd: string | null; envVars: string | null }): HostConfig {
+export function hostToConfig(host: { host: string; port: number; user: string; keyPath: string | null; workDir: string; conda: string | null; setupCmd: string | null; envVars: string | null }): HostConfig {
   let envVars: Record<string, string> | null = null;
   if (host.envVars) { try { envVars = JSON.parse(host.envVars); } catch { /* ignore */ } }
   return {
@@ -1020,6 +1042,68 @@ async function archiveRun(
   } catch (err) {
     console.warn(`[remote-executor] archiveRun failed for ${runName}:`, err instanceof Error ? err.message : err);
   }
+}
+
+// ── Script analysis ─────────────────────────────────────────────
+
+/**
+ * Run pyright static analysis on a script via the remote helper.
+ * Returns structured diagnostics, or null on any failure (non-blocking).
+ */
+export async function analyzeScript(
+  host: HostConfig,
+  remoteDir: string,
+  scriptName: string,
+): Promise<ScriptDiagnostics | null> {
+  try {
+    const raw = await invokeHelper(host, `check ${remoteDir} ${scriptName}`);
+    const result = parseHelperResponse<ScriptDiagnostics & { ok: boolean }>(raw);
+
+    return {
+      errors: result.errors || [],
+      errorCount: result.errorCount || 0,
+      warningCount: result.warningCount || 0,
+      pyrightVersion: result.pyrightVersion,
+      unavailable: result.unavailable,
+      timeout: result.timeout,
+      reason: result.reason,
+    };
+  } catch (err) {
+    console.warn(`[remote-executor] analyzeScript failed:`, err instanceof Error ? err.message : err);
+    return null;
+  }
+}
+
+/**
+ * Format pyright diagnostics into agent-readable text.
+ */
+export function formatDiagnostics(
+  scriptName: string,
+  diagnostics: ScriptDiagnostics,
+  attempt: number,
+  maxAttempts: number,
+): string {
+  const lines: string[] = [];
+  lines.push(`Static analysis found ${diagnostics.errorCount} error(s) in ${scriptName}:\n`);
+
+  for (const d of diagnostics.errors) {
+    if (d.severity === "error") {
+      lines.push(`  Line ${d.line}:${d.col} — ${d.message}${d.rule ? ` [${d.rule}]` : ""}`);
+    }
+  }
+
+  if (diagnostics.warningCount > 0) {
+    lines.push(`\n${diagnostics.warningCount} warning(s):`);
+    for (const d of diagnostics.errors) {
+      if (d.severity === "warning") {
+        lines.push(`  Line ${d.line}:${d.col} — ${d.message}${d.rule ? ` [${d.rule}]` : ""}`);
+      }
+    }
+  }
+
+  lines.push(`\nFix these issues in the script and resubmit. (Attempt ${attempt}/${maxAttempts} — after ${maxAttempts} failed attempts, the script will be submitted anyway.)`);
+
+  return lines.join("\n");
 }
 
 // ── Utility ───────────────────────────────────────────────────────
