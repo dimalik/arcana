@@ -5,7 +5,8 @@
 </p>
 
 <p align="center">
-  Import papers. Formulate hypotheses. Run experiments on GPUs. Iterate autonomously.
+  Import papers. Formulate hypotheses. Run experiments on GPUs. Iterate autonomously.<br>
+  <em>The research assistant you wish your PhD advisor had been.</em>
 </p>
 
 <p align="center">
@@ -23,7 +24,7 @@
 
 ---
 
-Arcana connects the full arc of research — from reading papers to running experiments to writing up findings. An autonomous agent searches literature, spots gaps, writes experiment code, executes it on your GPU cluster, analyzes results, and loops back with better hypotheses. You steer; it does the legwork.
+Arcana closes the loop that every researcher leaves open — the gap between "I read an interesting paper" and "I have novel results." An autonomous agent searches literature, spots gaps, writes experiment code, ships it to your GPUs, analyzes results, and comes back with better hypotheses. You set the direction; it handles the 3am experiment reruns.
 
 <p align="center">
   <img src="docs/screenshots/research-dashboard.png" alt="Research Dashboard" width="800">
@@ -31,19 +32,19 @@ Arcana connects the full arc of research — from reading papers to running expe
 
 ## Key Features
 
-- **[Phase-gated research agent](docs/research-agent.md)** — literature, hypothesis, experiment, analysis, reflection. Code-enforced gates prevent skipping steps.
-- **[Remote GPU execution](docs/remote-execution.md)** — SSH + rsync to your machines. Auto environment setup, OOM detection, adaptive polling, workspace lifecycle management.
-- **[Multi-agent parallelism](docs/research-agent.md#sub-agents)** — scouts, synthesizer, architect, adversarial reviewer, provocateur, and visualizer working concurrently.
-- **[Auto-fix layer](docs/research-agent.md#auto-fix)** — classifies failures as code bugs, research failures, or infrastructure issues. Patches code errors and resubmits automatically.
-- **[Static analysis](docs/remote-execution.md#pyright)** — runs pyright on the remote host before submission. Catches wrong imports, API mismatches, and type errors before burning GPU time.
-- **[Structured experiment tracking](docs/research-agent.md#experiment-tracking)** — approach trees, canonical metrics, baselines, verdicts, and auto-generated research summaries.
-- **[Multi-source paper import](docs/getting-started.md#importing-papers)** — arXiv, DOI, OpenReview, ACL Anthology, URL, PDF upload. Metadata from OpenAlex, Semantic Scholar, CrossRef.
-- **[Paper conversations](docs/getting-started.md#paper-chat)** — ask questions grounded in actual content, compare methods across papers, extract code from methods sections.
-- **[Research chat with vision](docs/research-agent.md#chat)** — query findings, methods, and figures with server-side retrieval and multimodal image analysis.
-- **[Research dashboard](docs/research-agent.md#dashboard)** — narrative timeline, metric charts, approach trees, file browser, figures gallery, and integrated chat.
-- **[Mind Palace](docs/getting-started.md#mind-palace)** — distill papers into topic-organized insights with spaced repetition. Feeds back into active research.
+- **[Phase-gated research agent](docs/research-agent.md)** — literature, hypothesis, experiment, analysis, reflection. Code-enforced gates keep the agent honest — no skipping to experiments without reading papers first.
+- **[Remote GPU execution](docs/remote-execution.md)** — SSH + rsync to your machines. Works with whatever you have — lab servers, Lambda, university clusters. Auto environment setup, OOM detection, and workspace cleanup so experiments don't pile up.
+- **[Multi-agent parallelism](docs/research-agent.md#sub-agents)** — literature scouts, synthesizer, architect, adversarial reviewer, provocateur, and visualizer all working concurrently. The lead agent coordinates; sub-agents bring fresh perspective.
+- **[Auto-fix layer](docs/research-agent.md#auto-fix)** — experiment failed because of a typo? Wrong API call? The auto-fix layer patches code bugs and resubmits before you even notice. Real research failures are recorded as-is.
+- **[Static analysis](docs/remote-execution.md#pyright)** — pyright runs on the remote host before submission, catching wrong imports, API mismatches, and type errors before burning GPU time.
+- **[Structured experiment tracking](docs/research-agent.md#experiment-tracking)** — approach trees, canonical metrics, baselines, verdicts, and auto-generated paper-style research summaries.
+- **[Multi-source paper import](docs/getting-started.md#importing-papers)** — arXiv, DOI, OpenReview, ACL Anthology, URL, or just drop a PDF. Metadata auto-fetched from OpenAlex, Semantic Scholar, CrossRef.
+- **[Paper conversations](docs/getting-started.md#paper-chat)** — ask questions grounded in the actual paper content. Compare methods across papers. Extract code from methods sections.
+- **[Research chat with vision](docs/research-agent.md#chat)** — "What does this attention heatmap show?" Ask about your figures and the model actually looks at them.
+- **[Research dashboard](docs/research-agent.md#dashboard)** — narrative timeline, metric charts, approach trees, file browser, figures gallery, and integrated chat. Everything in one view.
+- **[Mind Palace](docs/getting-started.md#mind-palace)** — distill papers into insights organized by topic with spaced repetition. Your accumulated knowledge feeds back into active research.
 - **[Literature synthesis](docs/getting-started.md#synthesis)** — structured reviews with methodology comparison, gap analysis, and PDF/LaTeX export.
-- **[Any LLM provider](docs/llm-configuration.md)** — OpenAI, Anthropic, or any OpenAI-compatible proxy (OpenRouter, LiteLLM, Azure, custom gateways). Responses API supported for Codex models.
+- **[Any LLM provider](docs/llm-configuration.md)** — OpenAI, Anthropic, or any compatible proxy (OpenRouter, LiteLLM, Azure, custom gateways). Bring your own models.
 
 ## How It Works
 
@@ -71,9 +72,9 @@ Arcana connects the full arc of research — from reading papers to running expe
                     +------------+  +------------+
 ```
 
-The research agent follows a **strict scientific method**: search literature, formulate hypotheses, run experiments, analyze results, reflect and iterate. Each phase transition is enforced by gates — the agent proves it has enough evidence before moving forward.
+The research agent follows a **strict scientific method**: read the literature, form hypotheses, run experiments, analyze results, reflect and iterate. Each phase transition is enforced by gates — the agent has to earn its way forward with evidence, not just decide it's ready.
 
-The agent runs as a **background process** decoupled from the browser. Navigate away, close the tab — it keeps going. A persistent research log lets you steer direction at any time.
+The agent runs as a **background process** decoupled from the browser. Close the tab, go to sleep, come back to new results in the morning. A persistent research log lets you steer direction at any time — "focus on the attention mechanism" or "try a different baseline."
 
 ## Quick Start
 
@@ -93,11 +94,11 @@ See the [Getting Started guide](docs/getting-started.md) for detailed setup incl
 
 ## Learn More
 
-**Why phase gates?** Research agents without structure loop endlessly or skip to conclusions. Arcana's gates ensure the agent has read enough papers before hypothesizing, has hypotheses before experimenting, and has analyzed results before reflecting. It's the difference between a junior researcher running random experiments and a senior one following a methodology.
+**Why phase gates?** Without structure, research agents loop endlessly or jump to conclusions. Arcana's gates are the difference between a junior researcher running random experiments and a senior one who reads before they code. The agent earns each phase transition with evidence.
 
-**Why remote execution?** ML experiments need GPUs. Rather than requiring cloud orchestrators or managed platforms, Arcana works with whatever machines you have — lab servers, Lambda instances, university clusters. SSH in, rsync files, run the script, sync results back.
+**Why remote execution?** ML experiments need GPUs. Arcana doesn't require Kubernetes or managed platforms — just SSH access to whatever machines you have. Your lab server, a Lambda instance, a university cluster. It handles the rest.
 
-**Why sub-agents?** A single agent context gets polluted after 50+ tool calls. Specialized sub-agents (literature scouts, adversarial reviewer, architect) each get fresh context tuned for their role. The lead agent coordinates; sub-agents execute.
+**Why sub-agents?** After 50+ tool calls, a single agent loses the plot. Specialized sub-agents — scouts for parallel literature search, an architect for novel approaches, an adversarial reviewer to poke holes — each get fresh context tuned for their role. Better results, less drift.
 
 ## Contributing
 
