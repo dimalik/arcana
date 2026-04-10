@@ -15,7 +15,7 @@ const execAsync = promisify(exec);
 
 // ── Helper management ────────────────────────────────────────────
 
-const HELPER_VERSION = "7";
+const HELPER_VERSION = "8";
 const helperInstalledHosts = new Map<string, boolean>();
 
 /**
@@ -163,7 +163,7 @@ export interface ExecutorBackend {
   /** Get tail of stdout/stderr */
   getLogs(remoteDir: string, host: HostConfig): Promise<{ stdout: string; stderr: string }>;
   /** Sync results back from remote to local */
-  syncDown(remoteDir: string, localDir: string, host: HostConfig, runName?: string): Promise<void>;
+  syncDown(remoteDir: string, localDir: string, host: HostConfig): Promise<void>;
   /** Kill a running job */
   kill(pid: number, host: HostConfig): Promise<void>;
 }
@@ -358,8 +358,8 @@ export const sshExecutor: ExecutorBackend = {
     // Shell-escape the command for safe transport through SSH → remote shell → helper.
     // Single-quote the entire command, escaping internal single quotes.
     const escaped = cleanCmd.replace(/'/g, "'\\''");
-    const runFlag = runName ? `--run ${runName} ` : "";
-    const raw = await invokeHelper(host, `run ${remoteDir} ${runFlag}-- '${escaped}'`);
+    // run_name is passed for tracking only — it does NOT affect execution (no --run flag, no cwd change)
+    const raw = await invokeHelper(host, `run ${remoteDir} -- '${escaped}'`);
     const result = parseHelperResponse<{ ok: boolean; pid: number; pgid: number }>(raw);
     return result.pid;
   },
@@ -389,32 +389,12 @@ export const sshExecutor: ExecutorBackend = {
     }
   },
 
-  async syncDown(remoteDir: string, localDir: string, host: HostConfig, runName?: string): Promise<void> {
+  async syncDown(remoteDir: string, localDir: string, host: HostConfig): Promise<void> {
     const sshCmd = `ssh ${sshArgs(host).join(" ")}`;
     const target = sshTarget(host);
     const SYNC_TIMEOUT = 600_000; // 10 min — large model outputs can take a while
 
-    if (runName) {
-      // Targeted sync: grab the entire run directory
-      const localRunDir = path.join(localDir, runName);
-      const fs = await import("fs");
-      fs.mkdirSync(localRunDir, { recursive: true });
-
-      await execAsync(
-        `rsync -azP -e "${sshCmd}" "${target}:${remoteDir}/${runName}/" "${localRunDir}/"`,
-        { timeout: SYNC_TIMEOUT },
-      ).catch((err) => {
-        const msg = err instanceof Error ? err.message : String(err);
-        if (msg.includes("code 23") || msg.includes("code 24") || msg.includes("some files vanished")) {
-          console.warn("[remote-executor] syncDown had non-fatal errors, continuing");
-        } else {
-          console.warn(`[remote-executor] syncDown from ${runName}/ failed: ${msg.slice(0, 200)}`);
-        }
-      });
-      return;
-    }
-
-    // Legacy: no run name — sync from root (existing behavior)
+    // Sync results/ directory back if it exists
     await execAsync(
       `rsync -azP -e "${sshCmd}" "${target}:${remoteDir}/results/" "${localDir}/results/"`,
       { timeout: SYNC_TIMEOUT },
@@ -618,7 +598,7 @@ async function runAndPoll(
     // 4. Sync results back — ALWAYS, even on failure (to recover partial results)
     if (localDir) {
       try {
-        await backend.syncDown(remoteDir, localDir, config, runName);
+        await backend.syncDown(remoteDir, localDir, config);
       } catch (syncErr) {
         console.warn(`[remote-executor] syncDown failed for job ${jobId}:`, syncErr);
       }
