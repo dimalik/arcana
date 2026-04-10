@@ -108,6 +108,13 @@ export async function POST(req: NextRequest) {
         headers,
       });
       model = anthropic(modelId);
+    } else if (sdkProvider === "openai-responses") {
+      const proxy = createOpenAI({
+        baseURL: resolvedUrl.replace(/\/responses$/, ""),
+        apiKey: "not-needed",
+        headers,
+      });
+      model = proxy.responses(modelId);
     } else {
       const proxy = createOpenAI({
         baseURL: resolvedUrl.replace(/\/chat\/completions$/, ""),
