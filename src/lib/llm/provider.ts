@@ -61,6 +61,15 @@ export async function getModel(provider: LLMProvider, modelId: string, proxyConf
       return anthropic(modelId);
     }
 
+    if (sdkProvider === "openai-responses") {
+      const openai = createOpenAI({
+        baseURL: baseUrl.replace(/\/responses$/, ""),
+        apiKey: proxyConfig?.apiKey || "not-needed",
+        headers,
+      });
+      return openai.responses(modelId);
+    }
+
     // Google models also route through OpenAI-compatible SDK
     // (most proxies expose Gemini via OpenAI-compatible endpoints)
     const openai = createOpenAI({

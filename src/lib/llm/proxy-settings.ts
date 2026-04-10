@@ -8,10 +8,10 @@ export type ProxyVendor = "openrouter" | "litellm" | "azure" | "custom" | "gatew
  * within the gateway, with optional target URL headers.
  */
 export interface ProviderRoute {
-  provider: "openai" | "anthropic" | "google";
+  provider: "openai" | "anthropic" | "google" | "openai-responses";
   path: string;         // e.g., "openai/v1", "anthropic/v1", "google_ai_studio/v1"
   targetUrl?: string;   // e.g., "https://api.anthropic.com" — sent as X-LLM-Proxy-Target-URL
-  models: string[];     // e.g., ["gpt-5.2", "gpt-4o"]
+  models: string[];     // e.g., ["gpt-5.2", "gpt-4o", "gpt-5.3-codex"]
 }
 
 export interface ProxyConfig {
@@ -90,8 +90,23 @@ const PROXY_KEYS = [
 export function resolveEndpointForModel(config: ProxyConfig, modelId: string): {
   baseUrl: string;
   extraHeaders: Record<string, string>;
-  sdkProvider: "openai" | "anthropic" | "google";
+  sdkProvider: "openai" | "anthropic" | "google" | "openai-responses";
 } {
+  // Check if there's an explicit route for this model (handles openai-responses routes)
+  if (config.vendor === "gateway" && config.routes.length > 0) {
+    const explicitRoute = config.routes.find(r => r.models.some(m => modelId === m || modelId.startsWith(m)));
+    if (explicitRoute) {
+      const gateway = config.baseUrl.replace(/\/+$/, "");
+      const routePath = explicitRoute.path.replace(/^\/+/, "");
+      const baseUrl = `${gateway}/${routePath}`;
+      const extraHeaders: Record<string, string> = {};
+      if (explicitRoute.targetUrl) {
+        extraHeaders["X-LLM-Proxy-Target-URL"] = explicitRoute.targetUrl;
+      }
+      return { baseUrl, extraHeaders, sdkProvider: explicitRoute.provider };
+    }
+  }
+
   const sdkProvider = detectSdkProvider(modelId);
 
   // Gateway mode: look up the route

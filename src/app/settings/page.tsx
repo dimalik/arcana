@@ -756,11 +756,17 @@ function LLMSection() {
                     <div key={i} className="rounded-md border border-border/40 p-3 space-y-2">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2">
-                          <Input value={route.provider} onChange={(e) => {
+                          <select value={route.provider} onChange={(e) => {
                             const updated = [...proxyRoutes];
                             updated[i] = { ...updated[i], provider: e.target.value };
                             setProxyRoutes(updated);
-                          }} placeholder="openai" className="font-mono text-xs w-28 h-7" />
+                          }} className="font-mono text-xs w-36 h-7 rounded-md border border-input bg-background px-2">
+                            <option value="">Select...</option>
+                            <option value="openai">openai</option>
+                            <option value="anthropic">anthropic</option>
+                            <option value="google">google</option>
+                            <option value="openai-responses">openai-responses</option>
+                          </select>
                           <span className="text-[10px] text-muted-foreground">provider</span>
                         </div>
                         <div className="flex items-center gap-1">
