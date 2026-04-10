@@ -1294,7 +1294,6 @@ def cmd_check(workdir, script_name):
             capture_output=True, text=True, timeout=PYRIGHT_RUN_TIMEOUT,
             cwd=workdir,
         )
-        # pyright returns non-zero on errors — that's expected, parse stdout anyway
     except subprocess.TimeoutExpired:
         json_out({
             "ok": True,
@@ -1303,6 +1302,7 @@ def cmd_check(workdir, script_name):
             "warningCount": 0,
             "timeout": True,
         })
+        return
     except Exception as e:
         json_out({
             "ok": True,
@@ -1312,19 +1312,33 @@ def cmd_check(workdir, script_name):
             "unavailable": True,
             "reason": str(e),
         })
+        return
 
-    # Parse JSON output
-    try:
-        data = json.loads(result.stdout)
-    except (json.JSONDecodeError, ValueError):
+    # pyright outputs JSON to stdout, but python -m pyright may mix in
+    # startup messages. Also check stderr — some versions write there.
+    raw = result.stdout.strip() or result.stderr.strip()
+
+    # Try to find JSON object in the output (skip non-JSON preamble lines)
+    data = None
+    if raw:
+        # Find the first { and parse from there
+        json_start = raw.find("{")
+        if json_start >= 0:
+            try:
+                data = json.loads(raw[json_start:])
+            except (json.JSONDecodeError, ValueError):
+                pass
+
+    if data is None:
         json_out({
             "ok": True,
             "errors": [],
             "errorCount": 0,
             "warningCount": 0,
             "unavailable": True,
-            "reason": f"Failed to parse pyright output: {result.stdout[:500]}",
+            "reason": f"Failed to parse pyright output (stdout={len(result.stdout)}b, stderr={len(result.stderr)}b): {raw[:300]}",
         })
+        return
 
     diagnostics = data.get("generalDiagnostics", [])
     errors = []
