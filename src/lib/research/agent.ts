@@ -1696,6 +1696,17 @@ Your mechanism design document should include:
 - **Before writing code, search the web for existing tools.** Use \`web_search\` to find libraries that already do what you need (e.g., \`trl\` for RLHF, \`peft\` for parameter-efficient fine-tuning, \`accelerate\` for distributed training). Read their documentation with \`fetch_webpage\`. Don't rewrite from scratch what a mature library already provides — use pip packages.
 - **USE REAL DATASETS.** When papers mention specific datasets (GLUE, SQuAD, MMLU, ImageNet, WMT, etc.), use those SAME datasets so your results are directly comparable. Download them via HuggingFace \`datasets\`, \`torchvision\`, or direct URLs. NEVER generate tiny synthetic toy data as a substitute for real benchmarks — the results would be scientifically meaningless.
 - If the real dataset is very large, use a well-known subset or split (e.g., validation set, first 1000 examples) and note this explicitly. A subset of real data is infinitely better than fake data.
+### Script Execution Model (READ THIS — DO NOT VIOLATE)
+
+Your scripts run in the **workspace root directory** where all your .py files and requirements.txt live. The infrastructure handles everything else:
+- **You write scripts.** The system syncs them, sets up the venv, and runs them.
+- **Save outputs to relative paths.** \`open("results.json", "w")\`, \`plt.savefig("fig_loss.png")\` — these go to the right place automatically.
+- **NEVER manage execution paths.** No \`shutil.copy\` of your own script, no \`os.makedirs\` for run directories, no path hacking, no \`sys.path\` manipulation to find your own files. The infrastructure handles file layout — your script must not touch it.
+- **NEVER reference \`run_*\` directories, \`ARCANA_OUTPUT_DIR\`, \`.arcana/\`, or workspace paths.** These are internal infrastructure. Your script doesn't know or care about them.
+- **NEVER write monitoring, status-checking, or GPU-checking code.** Use the built-in tools (\`check_job\`, \`get_workspace\`, \`read_file\`).
+
+A correct script looks like this: import libraries, load data, train model, save results to \`results.json\`, save figures to \`fig_*.png\`. That's it. No infrastructure code.
+
 - Write a complete, runnable experiment. Include baselines from the literature — you can't claim something is good without comparing it to known results.
 - Make experiments save results to a JSON or CSV file (e.g., results.json) so you can compare across runs.
 - **ALWAYS write robust experiment scripts** that save intermediate results. Follow this pattern:
