@@ -24,7 +24,7 @@
 
 ---
 
-Arcana closes the loop that every researcher leaves open — the gap between "I read an interesting paper" and "I have novel results." An autonomous agent searches literature, spots gaps, writes experiment code, ships it to your GPUs, analyzes results, and comes back with better hypotheses. You set the direction; it handles the 3am experiment reruns.
+Arcana is a research platform that goes from paper management to novel results. Build a library from any source, talk to your papers, synthesize findings across them, then hand off to an autonomous agent that designs experiments, runs them on your GPUs, and iterates on the results. You set the direction; it handles the 3am reruns.
 
 <p align="center">
   <img src="docs/screenshots/research-dashboard.png" alt="Research Dashboard" width="800">
@@ -32,19 +32,29 @@ Arcana closes the loop that every researcher leaves open — the gap between "I 
 
 ## Key Features
 
-- **[Phase-gated research agent](docs/research-agent.md)** — literature, hypothesis, experiment, analysis, reflection. Code-enforced gates keep the agent honest — no skipping to experiments without reading papers first.
-- **[Remote GPU execution](docs/remote-execution.md)** — SSH + rsync to your machines. Works with whatever you have — lab servers, Lambda, university clusters. Auto environment setup, OOM detection, and workspace cleanup so experiments don't pile up.
-- **[Multi-agent parallelism](docs/research-agent.md#sub-agents)** — literature scouts, synthesizer, architect, adversarial reviewer, provocateur, and visualizer all working concurrently. The lead agent coordinates; sub-agents bring fresh perspective.
-- **[Auto-fix layer](docs/research-agent.md#auto-fix)** — experiment failed because of a typo? Wrong API call? The auto-fix layer patches code bugs and resubmits before you even notice. Real research failures are recorded as-is.
-- **[Static analysis](docs/remote-execution.md#pyright)** — pyright runs on the remote host before submission, catching wrong imports, API mismatches, and type errors before burning GPU time.
-- **[Structured experiment tracking](docs/research-agent.md#experiment-tracking)** — approach trees, canonical metrics, baselines, verdicts, and auto-generated paper-style research summaries.
-- **[Multi-source paper import](docs/getting-started.md#importing-papers)** — arXiv, DOI, OpenReview, ACL Anthology, URL, or just drop a PDF. Metadata auto-fetched from OpenAlex, Semantic Scholar, CrossRef.
-- **[Paper conversations](docs/getting-started.md#paper-chat)** — ask questions grounded in the actual paper content. Compare methods across papers. Extract code from methods sections.
-- **[Research chat with vision](docs/research-agent.md#chat)** — "What does this attention heatmap show?" Ask about your figures and the model actually looks at them.
-- **[Research dashboard](docs/research-agent.md#dashboard)** — narrative timeline, metric charts, approach trees, file browser, figures gallery, and integrated chat. Everything in one view.
-- **[Mind Palace](docs/getting-started.md#mind-palace)** — distill papers into insights organized by topic with spaced repetition. Your accumulated knowledge feeds back into active research.
+### Paper Library
+
+- **[Import from anywhere](docs/getting-started.md#importing-papers)** — arXiv, DOI, OpenReview, ACL Anthology, URL, or just drop a PDF. Metadata auto-fetched from OpenAlex, Semantic Scholar, CrossRef.
+- **[Talk to your papers](docs/getting-started.md#paper-chat)** — ask questions grounded in the actual content. Compare methods across papers. Extract code from methods sections.
+- **[Citation graph exploration](docs/getting-started.md#citations)** — traverse citation networks, discover related work, smart deduplication against your library.
+- **[Figure extraction](docs/getting-started.md#figures)** — pull figures from arXiv HTML, publisher pages, or PDF pages with vision-based captioning.
 - **[Literature synthesis](docs/getting-started.md#synthesis)** — structured reviews with methodology comparison, gap analysis, and PDF/LaTeX export.
+- **[Mind Palace](docs/getting-started.md#mind-palace)** — distill papers into insights organized by topic with spaced repetition. Your accumulated knowledge feeds back into active research.
+
+### Autonomous Research
+
+- **[Phase-gated agent](docs/research-agent.md)** — literature, hypothesis, experiment, analysis, reflection. Code-enforced gates keep the agent honest — no skipping to experiments without reading papers first.
+- **[Remote GPU execution](docs/remote-execution.md)** — SSH + rsync to whatever you have. Lab servers, Lambda, university clusters. Auto environment setup, OOM detection, workspace lifecycle.
+- **[Multi-agent parallelism](docs/research-agent.md#sub-agents)** — scouts, synthesizer, architect, adversarial reviewer, provocateur, and visualizer working concurrently.
+- **[Auto-fix + static analysis](docs/research-agent.md#auto-fix)** — pyright catches errors before submission; auto-fix patches code bugs and resubmits after. Real failures are recorded as-is.
+- **[Experiment tracking](docs/research-agent.md#experiment-tracking)** — approach trees, canonical metrics, baselines, verdicts, and auto-generated paper-style summaries.
+- **[Research dashboard](docs/research-agent.md#dashboard)** — narrative timeline, metric charts, figures gallery, integrated chat. Everything in one view.
+
+### Platform
+
 - **[Any LLM provider](docs/llm-configuration.md)** — OpenAI, Anthropic, or any compatible proxy (OpenRouter, LiteLLM, Azure, custom gateways). Bring your own models.
+- **[Research chat with vision](docs/research-agent.md#chat)** — "What does this attention heatmap show?" Ask about your figures and the model actually looks at them.
+- **[Research notebook](docs/getting-started.md#notebook)** — collect highlights, explanations, chat excerpts, and notes across papers in a two-panel journal.
 
 ## How It Works
 
