@@ -416,9 +416,8 @@ def cmd_run(workdir, command, run_name=None):
             json_err(f"Environment setup failed: {msg}")
 
     # Build the actual command to run
-    # Working directory is the run dir if specified, otherwise workdir
-    cwd = run_dir or workdir
-    shell_parts = [f"cd {cwd}"]
+    # Always run from workdir root (where scripts live). Outputs go to run_dir.
+    shell_parts = [f"cd {workdir}"]
 
     # Pre-existing env takes priority
     if has_existing_env:
@@ -454,9 +453,10 @@ def cmd_run(workdir, command, run_name=None):
     shell_parts.append(f'({command}); __ec=$?; echo $__ec > {exit_code_file}; exit $__ec')
     full_cmd = " && ".join(shell_parts)
 
-    # Launch as background process — stdout/stderr go to run dir if specified
-    stdout_path = os.path.join(cwd, "stdout.log")
-    stderr_path = os.path.join(cwd, "stderr.log")
+    # Launch as background process — stdout/stderr go to run dir if specified, cwd is always workdir root
+    log_dir = run_dir or workdir
+    stdout_path = os.path.join(log_dir, "stdout.log")
+    stderr_path = os.path.join(log_dir, "stderr.log")
 
     stdout_f = open(stdout_path, "w")
     stderr_f = open(stderr_path, "w")
@@ -465,7 +465,7 @@ def cmd_run(workdir, command, run_name=None):
         ["bash", "-c", full_cmd],
         stdout=stdout_f,
         stderr=stderr_f,
-        cwd=cwd,
+        cwd=workdir,
         start_new_session=True,  # new process group
         close_fds=True,
     )
