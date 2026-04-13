@@ -775,6 +775,16 @@ export function startResearchAgent(
       });
 
       try {
+        // FSM: evaluate transitions at session start so the agent begins in the right state
+        if (sessionCount === 1) {
+          let startTransitions = 0;
+          while (startTransitions < 4) {
+            const t = await attemptAutoTransition(projectId).catch(() => null);
+            if (!t) break;
+            startTransitions++;
+            trackedEmit({ type: "text", content: `\n[FSM: ${t.from} -> ${t.to}]\n` });
+          }
+        }
         console.log(`[research-agent] Session ${sessionCount} starting for project ${projectId}`);
 
         // Race the agent against a timeout — prevents hung sessions from blocking forever
@@ -892,6 +902,18 @@ export function startResearchAgent(
       if (!project || project.status !== "ACTIVE") {
         console.log(`[research-agent] Project ${projectId} no longer ACTIVE (${project?.status}), stopping`);
         break;
+      }
+
+      // FSM: evaluate auto-transitions BETWEEN sessions, not during.
+      // This is the only place auto-transitions fire. The agent works uninterrupted
+      // within a session; the FSM advances the project state between sessions.
+      let transitionChainCount = 0;
+      while (transitionChainCount < 4) {
+        const transition = await attemptAutoTransition(projectId).catch(() => null);
+        if (!transition) break;
+        transitionChainCount++;
+        trackedEmit({ type: "text", content: `\n[FSM: ${transition.from} -> ${transition.to}]\n` });
+        console.log(`[research-agent] FSM transition: ${transition.from} -> ${transition.to} for project ${projectId}`);
       }
 
       trackedEmit({ type: "done", content: `Session ${sessionCount} complete. Auto-continuing...` });
@@ -1597,14 +1619,9 @@ Check RESEARCH_LOG.md for the detailed research narrative.
 
       emit({ type: "step_done", stepNumber: stepCount });
 
-      // FSM: attempt auto-transition after every step — any tool call could
-      // satisfy a guard (paper import, synthesis completion, result recording, etc.)
-      const transition = await attemptAutoTransition(projectId).catch(() => null);
-      if (transition) {
-        emit({ type: "text", content: `\n\n[System: Project advanced from ${transition.from} to ${transition.to}. Tools updated.]\n\n` });
-        // Refresh tool set for the new state
-        fsmFilteredTools = await getFilteredTools();
-      }
+      // FSM auto-transitions are evaluated at SESSION BOUNDARIES only (see runWithAutoContinue).
+      // Mid-session transitions caused rapid EXECUTION->ANALYSIS->DECISION->DESIGN->EXECUTION loops
+      // that prevented the agent from staying in a state long enough to do real work.
 
       // ── Behavioral validator: check agent actions against state expectations ──
       {
@@ -1842,11 +1859,7 @@ Check RESEARCH_LOG.md for the detailed research narrative.
             }).catch(() => {});
           }
           emit({ type: "step_done", stepNumber: stepCount });
-          const innerTransition = await attemptAutoTransition(projectId).catch(() => null);
-          if (innerTransition) {
-            emit({ type: "text", content: `\n\n[System: Project advanced from ${innerTransition.from} to ${innerTransition.to}. Tools updated.]\n\n` });
-            fsmFilteredTools = await getFilteredTools();
-          }
+          // FSM auto-transitions at session boundaries only (see runWithAutoContinue).
           emit({ type: "thinking", content: thinkingHint(innerToolCalls) });
         },
       });
