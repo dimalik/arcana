@@ -27,6 +27,8 @@ interface AttentionItem {
   suggestion?: string;
   createdAt: string;
   resolved: boolean;
+  requiresUserAction: boolean;
+  resolutionPolicy?: "manual" | "system" | "executor";
 }
 
 const CATEGORY_META: Record<
@@ -118,6 +120,8 @@ export function AttentionQueue({ projectId }: { projectId: string }) {
               suggestion: meta.suggestion as string | undefined,
               createdAt: l.createdAt,
               resolved: meta.resolved === true,
+              requiresUserAction: meta.requiresUserAction !== false,
+              resolutionPolicy: meta.resolutionPolicy as AttentionItem["resolutionPolicy"] | undefined,
             };
           }
         );
@@ -209,7 +213,7 @@ export function AttentionQueue({ projectId }: { projectId: string }) {
     );
   };
 
-  const pending = items.filter((i) => !i.resolved);
+  const pending = items.filter((i) => !i.resolved && i.requiresUserAction);
   if (pending.length === 0) return null;
 
   const renderActions = (item: AttentionItem) => {

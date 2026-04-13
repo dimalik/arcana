@@ -27,6 +27,8 @@ interface AttentionItem {
   suggestion?: string;
   createdAt: string;
   resolved: boolean;
+  requiresUserAction: boolean;
+  resolutionPolicy?: "manual" | "system" | "executor";
 }
 
 const CATEGORY_META: Record<
@@ -118,6 +120,8 @@ export function NotificationBell({ projectId, onOpenInChat }: { projectId: strin
               suggestion: meta.suggestion as string | undefined,
               createdAt: l.createdAt,
               resolved: meta.resolved === true,
+              requiresUserAction: meta.requiresUserAction !== false,
+              resolutionPolicy: meta.resolutionPolicy as AttentionItem["resolutionPolicy"] | undefined,
             };
           }
         );
@@ -143,7 +147,7 @@ export function NotificationBell({ projectId, onOpenInChat }: { projectId: strin
     return () => document.removeEventListener("mousedown", handler);
   }, [open]);
 
-  const pending = items.filter((i) => !i.resolved);
+  const pending = items.filter((i) => !i.resolved && i.requiresUserAction);
 
   // Core resolution function
   const resolveItem = async (itemId: string, noteContent: string) => {

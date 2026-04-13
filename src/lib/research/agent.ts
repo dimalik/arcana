@@ -1376,16 +1376,20 @@ Check RESEARCH_LOG.md for the detailed research narrative.
     })
   ) as typeof rawTools;
 
-  // FSM: filter tools to only those available in current state
-  const currentProjectForFsm = await prisma.researchProject.findUnique({
-    where: { id: projectId },
-    select: { currentPhase: true },
-  });
-  const projectFsmState = (currentProjectForFsm?.currentPhase || "DISCOVERY") as ProjectState;
-  const allowedToolNames = new Set(getToolsForState(projectFsmState));
-  const fsmFilteredTools = Object.fromEntries(
-    Object.entries(tools).filter(([name]) => allowedToolNames.has(name))
-  ) as typeof tools;
+  // FSM: dynamically filter tools based on current state.
+  // Re-evaluates on every call because auto-transitions can change state mid-session.
+  const getFilteredTools = async () => {
+    const proj = await prisma.researchProject.findUnique({
+      where: { id: projectId },
+      select: { currentPhase: true },
+    });
+    const state = (proj?.currentPhase || "DISCOVERY") as ProjectState;
+    const allowed = new Set(getToolsForState(state));
+    return Object.fromEntries(
+      Object.entries(tools).filter(([name]) => allowed.has(name))
+    ) as typeof tools;
+  };
+  let fsmFilteredTools = await getFilteredTools();
 
   // Deterministic test mode: replay a fixed tool-call fixture instead of live LLM generation.
   if (runtimeOptions?.mockLlmFixtureId) {
@@ -1597,7 +1601,9 @@ Check RESEARCH_LOG.md for the detailed research narrative.
       // satisfy a guard (paper import, synthesis completion, result recording, etc.)
       const transition = await attemptAutoTransition(projectId).catch(() => null);
       if (transition) {
-        emit({ type: "text", content: `\n\n[System: Project advanced from ${transition.from} to ${transition.to}]\n\n` });
+        emit({ type: "text", content: `\n\n[System: Project advanced from ${transition.from} to ${transition.to}. Tools updated.]\n\n` });
+        // Refresh tool set for the new state
+        fsmFilteredTools = await getFilteredTools();
       }
 
       // ── Behavioral validator: check agent actions against state expectations ──
@@ -1838,7 +1844,8 @@ Check RESEARCH_LOG.md for the detailed research narrative.
           emit({ type: "step_done", stepNumber: stepCount });
           const innerTransition = await attemptAutoTransition(projectId).catch(() => null);
           if (innerTransition) {
-            emit({ type: "text", content: `\n\n[System: Project advanced from ${innerTransition.from} to ${innerTransition.to}]\n\n` });
+            emit({ type: "text", content: `\n\n[System: Project advanced from ${innerTransition.from} to ${innerTransition.to}. Tools updated.]\n\n` });
+            fsmFilteredTools = await getFilteredTools();
           }
           emit({ type: "thinking", content: thinkingHint(innerToolCalls) });
         },
@@ -4600,69 +4607,8 @@ function createTools(
       },
     }),
 
-    check_script: tool({
-      description: "Run static analysis (pyright) on a Python script before submitting it. Checks for import errors, wrong API arguments, type mismatches, and missing attributes — against the actual packages installed on the remote host. Use after writing a script to catch bugs before burning GPU time.",
-      inputSchema: z.object({
-        script: z.string().describe("Script filename relative to workdir (e.g., 'exp_055.py')"),
-      }),
-      execute: async ({ script: scriptName }: { script: string }) => {
-        if (!scriptName.endsWith(".py")) return "Only Python scripts can be analyzed.";
-
-        const host = await getSelectedRemoteHost();
-        if (!host) return "No remote hosts configured.";
-
-        emit({ type: "tool_progress", toolName: "check_script", content: `Analyzing ${scriptName} on ${host.alias}...` });
-
-        try {
-          const { sshExecutor, hostToConfig: toConfig } = await import("./remote-executor");
-          const hostConfig = toConfig(host as Parameters<typeof toConfig>[0]);
-
-          let remoteDir: string;
-          try {
-            remoteDir = await sshExecutor.syncUp(workDir, hostConfig);
-          } catch (syncErr) {
-            return `Could not sync files to ${host.alias}: ${syncErr instanceof Error ? syncErr.message : syncErr}`;
-          }
-
-          const diagnostics = await analyzeScript(hostConfig, remoteDir, scriptName, host.id);
-
-          if (!diagnostics) {
-            return `Could not run analysis — SSH or helper error. The script can still be submitted.`;
-          }
-
-          if (diagnostics.unavailable) {
-            return `Pyright not available on ${host.alias}: ${diagnostics.reason}. The script can still be submitted — pyright will be installed on the next attempt.`;
-          }
-
-          if (diagnostics.timeout) {
-            return `Pyright timed out analyzing ${scriptName}. The script can still be submitted.`;
-          }
-
-          if (diagnostics.errorCount === 0 && diagnostics.warningCount === 0) {
-            return `No issues found in ${scriptName}. Ready to submit.${diagnostics.pyrightVersion ? ` (pyright ${diagnostics.pyrightVersion})` : ""}`;
-          }
-
-          const parts: string[] = [];
-          if (diagnostics.errorCount > 0) {
-            parts.push(`**${diagnostics.errorCount} error(s):**`);
-            for (const d of diagnostics.errors.filter(d => d.severity === "error")) {
-              parts.push(`  Line ${d.line}:${d.col} — ${d.message}${d.rule ? ` [${d.rule}]` : ""}`);
-            }
-          }
-          if (diagnostics.warningCount > 0) {
-            parts.push(`\n**${diagnostics.warningCount} warning(s):**`);
-            for (const d of diagnostics.errors.filter(d => d.severity === "warning")) {
-              parts.push(`  Line ${d.line}:${d.col} — ${d.message}${d.rule ? ` [${d.rule}]` : ""}`);
-            }
-          }
-
-          return parts.join("\n");
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err);
-          return `Analysis failed: ${msg}. The script can still be submitted.`;
-        }
-      },
-    }),
+    // check_script (pyright) removed — blocks valid code due to unresolvable
+    // remote-only imports. Errors surface at runtime on the GPU host.
 
     // read_remote_file removed — merged into read_file (checks local first, then remote)
 
@@ -4856,72 +4802,10 @@ function createTools(
             console.warn("[agent] preflight validation error:", preflightErr);
           }
 
-          // ── Pyright static analysis: catch semantic errors before GPU submission ──
-          let lastDiagnostics: string | undefined;
-          if (!isBenchmarkProject) {
-            try {
-              const scriptMatch2 = sanitized.match(/python3?\s+(\S+\.py)/);
-              const scriptFileName = scriptMatch2 ? scriptMatch2[1] : null;
-
-              if (scriptFileName) {
-                const attempt = (analysisAttempts.get(scriptFileName) || 0) + 1;
-                emit({ type: "tool_progress", toolName: "run_experiment", content: "Running static analysis..." });
-
-                const { sshExecutor, hostToConfig: toConfig } = await import("./remote-executor");
-                const hostConfig = toConfig(host as Parameters<typeof toConfig>[0]);
-                let remoteDir: string;
-                try {
-                  remoteDir = await sshExecutor.syncUp(workDir, hostConfig);
-                } catch {
-                  remoteDir = "";
-                }
-
-                if (!remoteDir) {
-                  if (requiresStrictSemanticAnalysis) {
-                    return `BLOCKED — semantic static analysis could not start on ${host.alias}. The workspace could not be synced for validation, so this script will not be submitted to a remote GPU blindly. Resolve the remote sync problem first.`;
-                  }
-                } else {
-                  const diagnostics = await analyzeScript(hostConfig, remoteDir, scriptFileName, host.id);
-
-                  if (!diagnostics || diagnostics.unavailable || diagnostics.timeout) {
-                    const reason = diagnostics?.reason || (diagnostics?.timeout ? "analysis timed out" : "analysis failed to return diagnostics");
-                    if (requiresStrictSemanticAnalysis) {
-                      return `BLOCKED — semantic static analysis was not available for ${scriptFileName} on ${host.alias}${reason ? `: ${reason}` : ""}. Remote GPU submission is blocked until semantic validation succeeds.`;
-                    }
-                    if (diagnostics?.unavailable) {
-                      console.log(`[agent] pyright unavailable on ${host!.alias}: ${diagnostics.reason}`);
-                    }
-                    if (diagnostics?.timeout) {
-                      console.warn(`[agent] pyright timed out on ${host!.alias}`);
-                    }
-                  } else {
-                    if (diagnostics.errorCount > 0) {
-                      analysisAttempts.set(scriptFileName, attempt);
-                      emit({ type: "tool_output", toolName: "run_experiment", content: `\n⛔ STATIC ANALYSIS: ${diagnostics.errorCount} error(s) found` });
-                      return `BLOCKED — ${formatDiagnostics(scriptFileName, diagnostics, attempt)}\n\nThe experiment was NOT submitted. Fix the script with write_file and call run_experiment again.`;
-                    }
-
-                    if (diagnostics.warningCount > 0) {
-                      const warnLines = diagnostics.errors
-                        .filter(d => d.severity === "warning")
-                        .map(d => `  Line ${d.line}: ${d.message}`)
-                        .join("\n");
-                      emit({ type: "tool_output", toolName: "run_experiment", content: `\n⚠ Static analysis warnings:\n${warnLines}` });
-                    }
-
-                    lastDiagnostics = JSON.stringify(diagnostics);
-                    analysisAttempts.delete(scriptFileName);
-                  }
-                }
-              }
-            } catch (analysisErr) {
-              console.warn("[agent] pyright analysis error:", analysisErr);
-              if (requiresStrictSemanticAnalysis) {
-                const reason = analysisErr instanceof Error ? analysisErr.message : String(analysisErr);
-                return `BLOCKED — semantic static analysis failed before submission: ${reason}. Remote GPU submission is blocked until validation succeeds.`;
-              }
-            }
-          }
+          // Static analysis (pyright) removed — it blocks valid code because it can't
+          // resolve imports against the remote host's Python environment. Scripts that
+          // import torch/transformers/etc. are flagged as errors even though the packages
+          // are installed on the GPU host. Errors surface naturally at runtime.
 
           // ── Submit remote job ──
           emit({ type: "tool_output", toolName: "run_experiment", content: `$ [${host.alias}] ${sanitized}` });
@@ -4941,7 +4825,7 @@ function createTools(
               claimEligibility: contract.claimEligibility,
               promotionPolicy: contract.promotionPolicy,
               evidenceClass: contract.evidenceClass,
-              diagnostics: lastDiagnostics,
+              diagnostics: undefined,
               mock: mockExecutor,
             });
             jobId = result.jobId;
@@ -5111,64 +4995,7 @@ function createTools(
           console.warn("[agent] preflight validation error:", preflightErr);
         }
 
-          // ── Pyright static analysis ──
-          if (!isBenchmarkProject) {
-            try {
-              const scriptMatch2 = sanitized.match(/python3?\s+(\S+\.py)/);
-              const scriptFileName = scriptMatch2 ? scriptMatch2[1] : null;
-
-              if (scriptFileName) {
-                const attempt = (analysisAttempts.get(scriptFileName) || 0) + 1;
-                emit({ type: "tool_progress", toolName: "execute_remote", content: "Running static analysis..." });
-
-                const { sshExecutor, hostToConfig: toConfig } = await import("./remote-executor");
-                const hostConfig = toConfig(host as Parameters<typeof toConfig>[0]);
-                let remoteDir: string;
-                try {
-                  remoteDir = await sshExecutor.syncUp(workDir, hostConfig);
-                } catch {
-                  remoteDir = "";
-                }
-
-                if (!remoteDir) {
-                  if (requiresStrictSemanticAnalysis) {
-                    return `BLOCKED — semantic static analysis could not start on ${host.alias}. The workspace could not be synced for validation, so this script will not be submitted to a remote GPU blindly.`;
-                  }
-                } else {
-                  const diagnostics = await analyzeScript(hostConfig, remoteDir, scriptFileName, host.id);
-
-                  if (!diagnostics || diagnostics.unavailable || diagnostics.timeout) {
-                    const reason = diagnostics?.reason || (diagnostics?.timeout ? "analysis timed out" : "analysis failed to return diagnostics");
-                    if (requiresStrictSemanticAnalysis) {
-                      return `BLOCKED — semantic static analysis was not available for ${scriptFileName} on ${host.alias}${reason ? `: ${reason}` : ""}. Remote GPU submission is blocked until semantic validation succeeds.`;
-                    }
-                  } else {
-                    if (diagnostics.errorCount > 0) {
-                      analysisAttempts.set(scriptFileName, attempt);
-                      emit({ type: "tool_output", toolName: "execute_remote", content: `\n⛔ STATIC ANALYSIS: ${diagnostics.errorCount} error(s) found` });
-                      return `BLOCKED — ${formatDiagnostics(scriptFileName, diagnostics, attempt)}\n\nThe experiment was NOT submitted. Fix the script with write_file and try again.`;
-                    }
-
-                    if (diagnostics.warningCount > 0) {
-                      const warnLines = diagnostics.errors
-                        .filter(d => d.severity === "warning")
-                        .map(d => `  Line ${d.line}: ${d.message}`)
-                        .join("\n");
-                      emit({ type: "tool_output", toolName: "execute_remote", content: `\n⚠ Static analysis warnings:\n${warnLines}` });
-                    }
-
-                    analysisAttempts.delete(scriptFileName);
-                  }
-                }
-              }
-            } catch (analysisErr) {
-              console.warn("[agent] pyright analysis error:", analysisErr);
-              if (requiresStrictSemanticAnalysis) {
-                const reason = analysisErr instanceof Error ? analysisErr.message : String(analysisErr);
-                return `BLOCKED — semantic static analysis failed before submission: ${reason}. Remote GPU submission is blocked until validation succeeds.`;
-              }
-            }
-          }
+        // Static analysis (pyright) removed — see run_experiment comment.
 
         // Auto-kill is handled by the helper itself (kills stale process before starting new one)
         // No pre-kill needed here — the helper's cmd_run auto-kills if something is running

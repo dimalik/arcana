@@ -12,18 +12,99 @@
 
 import { streamText, stepCountIs, tool } from "ai";
 import { z } from "zod";
-import { getModel } from "@/lib/llm/provider";
+import { getToolLoopModel } from "@/lib/llm/provider";
 import { getModelForTier } from "@/lib/llm/auto-process";
 import { setLlmContext } from "@/lib/llm/provider";
 import { prisma } from "@/lib/prisma";
 import { searchAllSources } from "@/lib/import/semantic-scholar";
+import { searchDuckDuckGo } from "@/lib/import/web-search";
 import { processQuery, scoreText, filterByRelevance, stemTerms, scoreWeighted } from "./search-utils";
+import { formatSkillCards, querySkillCards } from "./insight-skills";
 import { exec } from "child_process";
 import { promisify } from "util";
-import { readFile, writeFile, readdir, stat } from "fs/promises";
-import path from "path";
 
 const execAsync = promisify(exec);
+
+type StructuredClaimReview = {
+  claimId?: string;
+  claimStatement?: string;
+  status: "SUPPORTED" | "CONTESTED" | "REPRODUCED" | "RETRACTED";
+  confidence?: "PRELIMINARY" | "MODERATE" | "STRONG";
+  notes?: string;
+};
+
+function normalizeClaimReview(payload: unknown): StructuredClaimReview | null {
+  if (!payload || typeof payload !== "object") return null;
+  const record = payload as Record<string, unknown>;
+  const status = typeof record.status === "string" ? record.status.toUpperCase() : "";
+  if (!["SUPPORTED", "CONTESTED", "REPRODUCED", "RETRACTED"].includes(status)) return null;
+  const confidence = typeof record.confidence === "string" ? record.confidence.toUpperCase() : undefined;
+  return {
+    claimId: typeof record.claimId === "string" ? record.claimId : undefined,
+    claimStatement: typeof record.claimStatement === "string" ? record.claimStatement : undefined,
+    status: status as StructuredClaimReview["status"],
+    confidence: confidence && ["PRELIMINARY", "MODERATE", "STRONG"].includes(confidence)
+      ? confidence as StructuredClaimReview["confidence"]
+      : undefined,
+    notes: typeof record.notes === "string" ? record.notes : undefined,
+  };
+}
+
+function extractStructuredClaimReviews(text: string): StructuredClaimReview[] {
+  const matches = Array.from(text.matchAll(/```json\s*([\s\S]*?)```/g)).reverse();
+  for (const match of matches) {
+    try {
+      const parsed = JSON.parse(match[1]);
+      if (!parsed || typeof parsed !== "object") continue;
+      const claimReviews = (parsed as { claimReviews?: unknown[] }).claimReviews;
+      if (!Array.isArray(claimReviews)) continue;
+      const normalized = claimReviews
+        .map(normalizeClaimReview)
+        .filter((review): review is StructuredClaimReview => review !== null);
+      if (normalized.length > 0) return normalized;
+    } catch {
+      continue;
+    }
+  }
+  return [];
+}
+
+function trimTrailingSeparators(value: string) {
+  return value.replace(/[\\/]+$/, "") || value;
+}
+
+function resolveWorkdirPath(workDir: string, relativePath: string) {
+  const normalized = relativePath.replace(/\\/g, "/").trim();
+  if (!normalized || normalized === ".") return trimTrailingSeparators(workDir);
+  if (normalized.startsWith("/") || normalized.includes("\0")) return null;
+
+  const parts = normalized.split("/").filter((part) => part.length > 0 && part !== ".");
+  if (parts.some((part) => part === "..")) return null;
+
+  return `${trimTrailingSeparators(workDir)}/${parts.join("/")}`;
+}
+
+function reviewJsonInstructions() {
+  return `
+## Structured Claim Reviews JSON
+End your response with a fenced \`json\` block of this exact shape:
+
+\`\`\`json
+{
+  "claimReviews": [
+    {
+      "claimId": "optional-claim-id",
+      "claimStatement": "optional fallback statement",
+      "status": "SUPPORTED | CONTESTED | REPRODUCED | RETRACTED",
+      "confidence": "PRELIMINARY | MODERATE | STRONG",
+      "notes": "one concise justification"
+    }
+  ]
+}
+\`\`\`
+
+Use every reviewed claim exactly once in the JSON block.`;
+}
 
 // ── Scout system prompt ─────────────────────────────────────────
 
@@ -239,6 +320,25 @@ function libraryTools(userId: string) {
       },
     }),
 
+    query_skills: tool({
+      description: "Retrieve reusable skill cards distilled from library insights. Returns trigger/mechanism/risk structure instead of raw notes.",
+      inputSchema: z.object({
+        query: z.string(),
+        mode: z.enum(["exploit", "balanced", "explore"]).default("balanced").optional(),
+      }),
+      execute: async ({ query, mode }: { query: string; mode?: "exploit" | "balanced" | "explore" }) => {
+        const { cards } = await querySkillCards({
+          userId,
+          query,
+          mode: mode || "balanced",
+          maxResults: 6,
+          trackUsage: false,
+        });
+        if (cards.length === 0) return `No skill cards match "${query}".`;
+        return formatSkillCards(cards);
+      },
+    }),
+
     query_insights: tool({
       description: "Search the Mind Palace for insights and techniques.",
       inputSchema: z.object({
@@ -279,7 +379,6 @@ function libraryTools(userId: string) {
 // ── Provocateur tools (library + web search) ─────────────────────
 
 function provocateurTools(userId: string) {
-  const { searchDuckDuckGo } = require("@/lib/import/web-search") as typeof import("@/lib/import/web-search");
   return {
     ...libraryTools(userId),
     web_search: tool({
@@ -296,6 +395,13 @@ function provocateurTools(userId: string) {
   };
 }
 
+function reproducerTools(userId: string, workDir?: string) {
+  return {
+    ...libraryTools(userId),
+    ...(workDir ? workdirTools(workDir) : {}),
+  };
+}
+
 // ── Reviewer system prompt ───────────────────────────────────────
 
 function reviewerSystemPrompt(focus: string): string {
@@ -307,7 +413,7 @@ Review the following research content with focus on: "${focus}"
 ## Instructions
 1. Read the submitted content carefully
 2. Use \`read_paper\` and \`search_library\` to verify claims against the existing literature
-3. Use \`query_insights\` to check if known techniques or findings contradict the claims
+3. Use \`query_insights\` and \`query_skills\` to check if known techniques or findings contradict the claims
 4. Produce a structured, adversarial review
 
 ## Review Structure
@@ -318,7 +424,37 @@ Review the following research content with focus on: "${focus}"
 5. **Alternative Explanations**: What else could explain these results?
 6. **Verdict**: Overall assessment and the 3 highest-priority fixes
 
-Be harsh but fair. Vague praise is useless. Specific criticism saves months of wasted work.`;
+Be harsh but fair. Vague praise is useless. Specific criticism saves months of wasted work.
+${reviewJsonInstructions()}`;
+}
+
+// ── Reproducer system prompt ─────────────────────────────────────
+
+function reproducerSystemPrompt(focus: string, hasWorkspaceAccess: boolean): string {
+  return `You are a reproduction auditor. Your job is to verify whether specific research claims actually hold up against the recorded runs, files, and evidence available in this project.
+
+## Focus
+${focus}
+
+## Instructions
+1. Read the claim context carefully.
+2. Use \`read_paper\`, \`search_library\`, \`query_insights\`, and \`query_skills\` when literature context matters.
+3. ${hasWorkspaceAccess ? "Use `list_files`, `read_file`, and `run_command` to inspect result files, scripts, and generated artifacts in the workspace." : "If no workspace files are available, stay evidence-bounded to the supplied context and library."}
+4. Distinguish between:
+   - actually reproduced
+   - merely plausible
+   - contradicted by the recorded evidence
+5. Be conservative. If the evidence is incomplete, say so explicitly.
+
+## Output Format
+1. **Audit Scope**: What claim(s) you checked
+2. **What You Verified**: Files, runs, or papers examined
+3. **Findings**: What the evidence supports or fails to support
+4. **Gaps**: What would still need to be rerun or checked
+5. **Verdict**: Your bottom-line judgment
+
+Only mark a claim \`REPRODUCED\` if the available evidence genuinely verifies it.
+${reviewJsonInstructions()}`;
 }
 
 // (Reviewer uses libraryTools — defined above)
@@ -391,10 +527,13 @@ function workdirTools(workDir: string) {
         filepath: z.string().describe("Relative path within the experiment directory"),
       }),
       execute: async ({ filepath }: { filepath: string }) => {
-        const fullPath = path.resolve(workDir, filepath);
-        if (!fullPath.startsWith(workDir)) return "Error: path escapes experiment directory.";
+        const fs = await import("fs/promises");
+        const fullPath = resolveWorkdirPath(workDir, filepath);
+        if (!fullPath) return "Error: path escapes experiment directory.";
         try {
-          const content = await readFile(fullPath, "utf-8");
+          const handle = await fs.open(fullPath, "r");
+          const content = await handle.readFile("utf-8");
+          await handle.close();
           if (content.length > 10000) {
             return `${content.slice(0, 5000)}\n\n... [truncated ${content.length - 10000} chars] ...\n\n${content.slice(-5000)}`;
           }
@@ -412,9 +551,10 @@ function workdirTools(workDir: string) {
         content: z.string().describe("File content"),
       }),
       execute: async ({ filepath, content }: { filepath: string; content: string }) => {
-        const fullPath = path.resolve(workDir, filepath);
-        if (!fullPath.startsWith(workDir)) return "Error: path escapes experiment directory.";
-        await writeFile(fullPath, content, "utf-8");
+        const fs = await import("fs/promises");
+        const fullPath = resolveWorkdirPath(workDir, filepath);
+        if (!fullPath) return "Error: path escapes experiment directory.";
+        await fs.writeFile(fullPath, content, "utf-8");
         return `Wrote ${content.length} bytes to ${filepath}`;
       },
     }),
@@ -425,14 +565,15 @@ function workdirTools(workDir: string) {
         dir: z.string().default(".").optional().describe("Relative directory path (default: root)"),
       }),
       execute: async ({ dir }: { dir?: string }) => {
-        const fullPath = path.resolve(workDir, dir || ".");
-        if (!fullPath.startsWith(workDir)) return "Error: path escapes experiment directory.";
+        const fs = await import("fs/promises");
+        const fullPath = resolveWorkdirPath(workDir, dir || ".");
+        if (!fullPath) return "Error: path escapes experiment directory.";
         try {
-          const entries = await readdir(fullPath);
+          const entries = await fs.readdir(fullPath);
           const details = await Promise.all(
             entries.slice(0, 50).map(async (name) => {
               try {
-                const s = await stat(path.join(fullPath, name));
+                const s = await fs.stat(`${trimTrailingSeparators(fullPath)}/${name}`);
                 return `${s.isDirectory() ? "d" : "-"} ${name}${s.isDirectory() ? "/" : ""} (${s.size}B)`;
               } catch {
                 return `? ${name}`;
@@ -463,7 +604,7 @@ ${papersSection}
 
 ## Instructions
 1. Read each paper thoroughly using \`read_paper\`
-2. Use \`query_insights\` to find related techniques and known results
+2. Use \`query_insights\` and \`query_skills\` to find related techniques and known results
 3. Use \`search_library\` if you need to find additional related work
 4. Produce a structured cross-paper analysis
 
@@ -544,7 +685,7 @@ ${goal}
 ## Instructions
 1. Read the synthesis and diagnostic reports provided to you
 2. Use \`read_paper\` to look up specific implementation details when needed
-3. Use \`query_insights\` to find related techniques
+3. Use \`query_insights\` and \`query_skills\` to find related techniques
 4. Propose 2-3 novel approaches
 
 ## CRITICAL CONSTRAINTS
@@ -636,7 +777,31 @@ const ROLE_CONFIG: Record<string, RoleConfig> = {
     maxSteps: 10,
     getTools: (input) => libraryTools(input.userId || "system"),
     getSystemPrompt: (input) => reviewerSystemPrompt(input.focus || "general"),
-    getUserMessage: (input, goal) => input.content || goal,
+    getUserMessage: (input, goal) => {
+      const parts = [input.content || goal];
+      if (Array.isArray(input.claims) && input.claims.length > 0) {
+        parts.push(`\n## Claims Under Review\n${input.claims.map((claim: { id: string; statement: string; status: string; summary?: string | null }) =>
+          `- ID: ${claim.id}\n  Statement: ${claim.statement}\n  Current status: ${claim.status}${claim.summary ? `\n  Summary: ${claim.summary}` : ""}`
+        ).join("\n")}`);
+      }
+      return parts.join("\n");
+    },
+  },
+  reproducer: {
+    tier: "reasoning",
+    maxSteps: 12,
+    getTools: (input) => reproducerTools(input.userId || "system", input.workDir),
+    getSystemPrompt: (input) => reproducerSystemPrompt(input.focus || "replication", Boolean(input.workDir)),
+    getUserMessage: (input, goal) => {
+      const parts = [input.content || goal];
+      if (Array.isArray(input.claims) && input.claims.length > 0) {
+        parts.push(`\n## Claims To Audit\n${input.claims.map((claim: { id: string; statement: string; status: string; summary?: string | null }) =>
+          `- ID: ${claim.id}\n  Statement: ${claim.statement}\n  Current status: ${claim.status}${claim.summary ? `\n  Summary: ${claim.summary}` : ""}`
+        ).join("\n")}`);
+      }
+      if (input.workDir) parts.push(`\n## Workspace\n${input.workDir}`);
+      return parts.join("\n");
+    },
   },
   // experimenter: Disabled — the main agent handles experiments directly via execute_command/execute_remote.
   // Revisit if we need truly independent background experiment runners.
@@ -780,7 +945,7 @@ export async function runSubAgent(taskId: string): Promise<void> {
 
     // Select model tier
     const { provider, modelId, proxyConfig } = await getModelForTier(config.tier);
-    const model = await getModel(provider, modelId, proxyConfig);
+    const model = await getToolLoopModel(provider, modelId, proxyConfig);
     setLlmContext(`sub-agent-${task.role}`, "system", { projectId: task.projectId, taskId });
 
     // Build tools, prompt, and user message from role config
@@ -825,10 +990,15 @@ export async function runSubAgent(taskId: string): Promise<void> {
     }
 
     // Save output
+    const claimReviews = task.role === "reviewer" || task.role === "reproducer"
+      ? extractStructuredClaimReviews(text)
+      : [];
+
     const output = {
       summary: text,
       stepsUsed,
       tokenUsage: { inputTokens: totalInputTokens, outputTokens: totalOutputTokens },
+      claimReviews,
     };
 
     const totalTokens = totalInputTokens + totalOutputTokens;

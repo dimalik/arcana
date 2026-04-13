@@ -12,24 +12,14 @@ import type { ProjectState } from "./types";
  * knowledge management, and help facilities that are always relevant.
  */
 /**
- * Tools available in ALL states. Strictly observational and
- * knowledge-management tools. write_file is NOT cross-cutting —
- * it's state-gated to prevent the agent from writing experiment
- * scripts when it should be defining metrics.
+ * Tools available in ALL states. Only truly universal operations.
+ * Everything else is state-specific to keep the agent focused.
  */
 export const CROSS_CUTTING_TOOLS = [
   "read_file",
   "list_files",
   "get_workspace",
-  "read_paper",
   "request_help",
-  "save_lesson",
-  "query_insights",
-  "query_skills",
-  "search_library",
-  "log_finding",
-  "view_approach_tree",
-  "view_figures",
 ] as const;
 
 /**
@@ -40,13 +30,23 @@ export const STATE_TOOLS: Record<ProjectState, readonly string[]> = {
   DISCOVERY: [
     "search_papers",
     "remove_paper",
+    "read_paper",
     "dispatch_scouts",
     "dispatch_synthesizer",
     "collect_results",
+    "search_library",
+    "query_insights",
+    "query_skills",
+    "log_finding",
     "web_search",
     "fetch_webpage",
+    "view_approach_tree",
   ],
   HYPOTHESIS: [
+    "read_paper",
+    "search_library",
+    "query_insights",
+    "log_finding",
     "register_approach",
     "commit_to_approach",
     "abandon_approach",
@@ -55,25 +55,24 @@ export const STATE_TOOLS: Record<ProjectState, readonly string[]> = {
     "search_papers",
     "web_search",
     "fetch_webpage",
+    "view_approach_tree",
   ],
   DESIGN: [
-    // DESIGN is locked down: define metrics, refine protocol, that's it.
-    // No write_file, no scripts, no web search. Complete the checklist and move on.
+    // Locked down: define metrics, refine protocol, that's it.
     "define_metrics",
     "define_evaluation_protocol",
     "show_evaluation_protocol",
     "register_approach",
+    "view_approach_tree",
     "validate_environment",
     "diagnose_remote_host",
   ],
   EXECUTION: [
+    // Focused: write code, run it, monitor it. No literature browsing.
     "write_file",
     "delete_file",
-    "check_script",
     "write_shared_utility",
     "clean_workspace",
-    "web_search",
-    "fetch_webpage",
     "run_experiment",
     "execute_remote",
     "run_experiment_sweep",
@@ -86,11 +85,19 @@ export const STATE_TOOLS: Record<ProjectState, readonly string[]> = {
     "show_evaluation_protocol",
     "extract_results",
     "collect_results",
+    "save_lesson",
+    "view_figures",
   ],
   ANALYSIS: [
     "write_file",
     "delete_file",
-    "check_script",
+    "read_paper",
+    "search_library",
+    "query_insights",
+    "log_finding",
+    "save_lesson",
+    "view_figures",
+    "view_approach_tree",
     "record_result",
     "query_results",
     "record_claim",
@@ -115,9 +122,14 @@ export const STATE_TOOLS: Record<ProjectState, readonly string[]> = {
     "show_claim_ledger",
     "record_claim",
     "update_hypothesis",
+    "view_approach_tree",
     "complete_iteration",
   ],
-  COMPLETE: [],
+  COMPLETE: [
+    "view_figures",
+    "query_results",
+    "show_claim_ledger",
+  ],
 } as const;
 
 /**

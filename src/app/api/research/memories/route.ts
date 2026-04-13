@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireUserId } from "@/lib/paper-auth";
+import { transitionClaimMemory } from "@/lib/research/claim-ledger";
 
 /**
  * GET /api/research/memories — List all process memories for the current user
@@ -43,12 +44,12 @@ export async function POST(request: NextRequest) {
 
 /**
  * PATCH /api/research/memories — Update a memory
- * Body: { id, lesson?, category?, context? }
+ * Body: { id, lesson?, category?, context?, status? }
  */
 export async function PATCH(request: NextRequest) {
   const userId = await requireUserId();
   const body = await request.json();
-  const { id, lesson, category, context } = body;
+  const { id, lesson, category, context, status } = body;
 
   if (!id) {
     return NextResponse.json({ error: "id is required" }, { status: 400 });
@@ -59,6 +60,25 @@ export async function PATCH(request: NextRequest) {
   });
   if (!memory) {
     return NextResponse.json({ error: "Memory not found" }, { status: 404 });
+  }
+
+  if (status !== undefined) {
+    try {
+      const updated = memory.sourceClaimId
+        ? await transitionClaimMemory({
+            memoryId: id,
+            userId,
+            status,
+          })
+        : await prisma.agentMemory.update({
+            where: { id },
+            data: { status },
+          });
+      return NextResponse.json(updated);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to update memory status";
+      return NextResponse.json({ error: message }, { status: 400 });
+    }
   }
 
   const data: Record<string, unknown> = {};

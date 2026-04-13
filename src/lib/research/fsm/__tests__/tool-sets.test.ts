@@ -48,15 +48,14 @@ describe("tool-sets", () => {
   describe("COMPLETE state", () => {
     it("has only cross-cutting tools", () => {
       const tools = getToolsForState("COMPLETE");
-      expect(tools).toHaveLength(CROSS_CUTTING_TOOLS.length);
       expect(tools).not.toContain("run_experiment");
       expect(tools).not.toContain("search_papers");
       expect(tools).not.toContain("define_metrics");
       expect(tools).not.toContain("record_result");
-    });
-
-    it("STATE_TOOLS for COMPLETE is empty", () => {
-      expect(STATE_TOOLS.COMPLETE).toHaveLength(0);
+      expect(tools).not.toContain("write_file");
+      // COMPLETE has read-only tools + cross-cutting
+      expect(tools).toContain("read_file");
+      expect(tools).toContain("view_figures");
     });
   });
 
@@ -64,7 +63,7 @@ describe("tool-sets", () => {
     it("returns true for cross-cutting tools in any state", () => {
       expect(isToolAvailable("read_file", "DISCOVERY")).toBe(true);
       expect(isToolAvailable("read_file", "COMPLETE")).toBe(true);
-      expect(isToolAvailable("write_file", "EXECUTION")).toBe(true);
+      expect(isToolAvailable("request_help", "DESIGN")).toBe(true);
     });
 
     it("returns true for state-specific tools in the correct state", () => {

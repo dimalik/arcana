@@ -121,15 +121,35 @@ export async function fetchGuardContext(
     }
 
     case "EXECUTION->ANALYSIS": {
-      const [doneRunCount, doneNonSmokeRunCount] = await Promise.all([
+      // Find when we last entered EXECUTION to only count NEW completed jobs
+      const lastExecutionEntry = await prisma.researchLogEntry.findFirst({
+        where: {
+          projectId,
+          type: "fsm_transition",
+          content: { contains: "-> EXECUTION" },
+        },
+        orderBy: { createdAt: "desc" },
+        select: { createdAt: true },
+      });
+      const sinceDate = lastExecutionEntry?.createdAt || new Date(0);
+
+      const [doneRunCount, doneNonSmokeRunCount, newDoneNonSmokeRunCount] = await Promise.all([
         prisma.remoteJob.count({
           where: { projectId, status: "COMPLETED" },
         }),
         prisma.remoteJob.count({
           where: { projectId, status: "COMPLETED", experimentPurpose: { not: "SMOKE" } },
         }),
+        prisma.remoteJob.count({
+          where: {
+            projectId,
+            status: "COMPLETED",
+            experimentPurpose: { not: "SMOKE" },
+            completedAt: { gt: sinceDate },
+          },
+        }),
       ]);
-      return { doneRunCount, doneNonSmokeRunCount } satisfies ExecutionToAnalysisContext;
+      return { doneRunCount, doneNonSmokeRunCount, newDoneNonSmokeRunCount } satisfies ExecutionToAnalysisContext;
     }
 
     case "ANALYSIS->DECISION": {

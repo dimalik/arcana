@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireUserId } from "@/lib/paper-auth";
 import { submitRemoteJob, cleanupStaleJobs } from "@/lib/research/remote-executor";
+import { recoverProjectRemoteResults } from "@/lib/research/result-import";
 
 // GET — List remote jobs, optionally filtered by projectId or stepId
 export async function GET(request: NextRequest) {
@@ -16,6 +17,13 @@ export async function GET(request: NextRequest) {
       await cleanupStaleJobs(projectId || undefined);
     } catch (err) {
       console.warn("[remote-jobs] stale cleanup error:", err);
+    }
+    if (projectId) {
+      try {
+        await recoverProjectRemoteResults(projectId);
+      } catch (err) {
+        console.warn("[remote-jobs] result recovery error:", err);
+      }
     }
 
     const where: Record<string, unknown> = {};

@@ -953,6 +953,7 @@ function LLMSection() {
 const ROLE_TIERS: { role: string; tier: "reasoning" | "standard" }[] = [
   { role: "Lead agent", tier: "reasoning" },
   { role: "Reviewer", tier: "reasoning" },
+  { role: "Reproducer", tier: "reasoning" },
   { role: "Synthesizer", tier: "reasoning" },
   { role: "Architect", tier: "reasoning" },
   { role: "Scout", tier: "standard" },

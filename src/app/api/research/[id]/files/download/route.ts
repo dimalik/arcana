@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireUserId } from "@/lib/paper-auth";
+import { isPathWithinRoot } from "@/lib/research/path-safety";
 import path from "path";
 import { stat, readFile } from "fs/promises";
 import { createReadStream } from "fs";
@@ -60,10 +61,8 @@ export async function GET(request: NextRequest, { params }: Params) {
   }
 
   const workDir = getWorkDir(project);
-  const fullPath = path.join(workDir, filePath);
-
-  // Prevent path traversal
-  if (!fullPath.startsWith(workDir)) {
+  const fullPath = path.normalize(path.join(workDir, filePath));
+  if (!isPathWithinRoot(workDir, fullPath)) {
     return NextResponse.json({ error: "Invalid path" }, { status: 400 });
   }
 

@@ -7,7 +7,15 @@
     "dev": "next dev --turbo",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "db:migrate": "prisma migrate dev",
+    "db:deploy": "prisma migrate deploy",
+    "check:experiment-integrity": "node scripts/check-experiment-integrity.js",
+    "trace": "node scripts/dump-agent-trace.js",
+    "project:activity": "node scripts/show-project-activity.js",
+    "acceptance:superpowers": "node scripts/run-superpowers-acceptance.js",
+    "acceptance:agent-mock": "node scripts/run-agent-mock-e2e.js",
+    "acceptance:credibility": "node scripts/run-credibility-acceptance.js"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.46",
@@ -73,6 +81,7 @@
     "playwright": "^1.59.1",
     "postcss": "^8",
     "tailwindcss": "^3.4.1",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^3.2.4"
   }
 }

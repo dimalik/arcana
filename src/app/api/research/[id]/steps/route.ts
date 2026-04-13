@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireUserId } from "@/lib/paper-auth";
+import { reserveNextResearchStepSortOrder } from "@/lib/research/step-order";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -24,16 +25,19 @@ export async function POST(request: NextRequest, { params }: Params) {
       return NextResponse.json({ error: "No active iteration" }, { status: 400 });
     }
 
-    const step = await prisma.researchStep.create({
-      data: {
-        iterationId: activeIteration.id,
-        type: body.type,
-        title: body.title,
-        description: body.description || null,
-        input: body.input ? JSON.stringify(body.input) : null,
-        status: body.status || "PROPOSED",
-        sortOrder: body.sortOrder || 0,
-      },
+    const step = await prisma.$transaction(async (tx) => {
+      const sortOrder = await reserveNextResearchStepSortOrder(tx, activeIteration.id);
+      return tx.researchStep.create({
+        data: {
+          iterationId: activeIteration.id,
+          type: body.type,
+          title: body.title,
+          description: body.description || null,
+          input: body.input ? JSON.stringify(body.input) : null,
+          status: body.status || "PROPOSED",
+          sortOrder,
+        },
+      });
     });
 
     return NextResponse.json(step, { status: 201 });

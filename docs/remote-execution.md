@@ -111,6 +111,18 @@ The `.run.sh` wrapper handles:
 - Command sanitization (strips redundant venv/pip commands the agent might add)
 - Exit code capture
 
+### Deterministic mock executor (acceptance testing)
+
+For CI/integration testing, submission can run in deterministic mock mode (no SSH, no rsync, no subprocess):
+
+- `submitRemoteJob(..., mock: { enabled: true, mode: "success" | "failure" })`
+- Creates a real `RemoteJob` row and transitions lifecycle state
+- Immediately marks it `COMPLETED` or `FAILED`
+- Emits `[mock-executor]` markers in stdout/stderr for assertion
+- Optionally writes `results.mock.json` into the local workspace
+
+This mode is intended for acceptance harnesses only and is wired from the agent API test runtime options.
+
 ### Non-blocking execution
 
 `execute_remote` returns immediately after submitting the job. The agent continues working while the experiment runs. It can:
@@ -120,6 +132,23 @@ The `.run.sh` wrapper handles:
 - Use `check_job` to poll a specific job's status
 - Use `wait_for_jobs` to block until multiple jobs complete
 - Use `monitor_experiment` to check live training metrics for anomalies
+
+### Workspace concurrency contract
+
+Arcana enforces **one active job per `host + workspace`** to prevent state corruption and hidden preemption:
+
+- The helper historically has single-run semantics per workspace (`run` can kill an older process in that same directory).
+- The executor now blocks conflicting submissions up front with a clear `Workspace busy ...` error.
+- For project-bound runs, blocked submissions are persisted in the lifecycle model as `ExperimentRun.state = BLOCKED` with blocking metadata.
+- Auto-fix resubmissions bypass the lock intentionally because they supersede the failed attempt in-place.
+
+This is a safety guarantee, not a performance optimization.
+
+For parallel sweeps:
+- Use multiple hosts, or
+- Use separate work directories per concurrent run on the same host.
+
+If a project has an evaluation protocol, experiment commands are also validated against its seed contract before submission.
 
 ### Adaptive polling
 

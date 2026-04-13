@@ -61,21 +61,21 @@ export function AnalysisPhase({ projectId, steps, hypotheses, onRefresh }: Analy
 
   const runningSteps = steps.filter((s) => s.status === "RUNNING");
 
-  // Extract structured findings from analyze_results steps
-  const findings: { id: string; content: string; type: string; hypothesisId?: string; status?: string; evidence?: string }[] = [];
+  // Extract notebook-style analysis notes from analyze_results steps
+  const notebookEntries: { id: string; content: string; type: string; hypothesisId?: string; status?: string; evidence?: string }[] = [];
   for (const step of steps) {
     if (step.status !== "COMPLETED") continue;
     const out = parseOutput(step.output);
     if (!out) continue;
 
     if (out.finding) {
-      findings.push({
+      notebookEntries.push({
         id: step.id,
         content: out.finding,
         type: out.type || "finding",
       });
     } else if (out.hypothesisId) {
-      findings.push({
+      notebookEntries.push({
         id: step.id,
         content: step.title,
         type: "hypothesis_update",
@@ -86,11 +86,11 @@ export function AnalysisPhase({ projectId, steps, hypotheses, onRefresh }: Analy
     }
   }
 
-  // Separate hypothesis updates from general findings, sorted by experiment number
-  const hypothesisUpdates = findings.filter((f) => f.type === "hypothesis_update");
-  const generalFindings = findings.filter((f) => f.type !== "hypothesis_update");
-  const breakthroughs = sortByExperimentNumber(generalFindings.filter((f) => f.type === "breakthrough"));
-  const otherFindings = sortByExperimentNumber(generalFindings.filter((f) => f.type !== "breakthrough"));
+  // Separate hypothesis updates from notebook observations, sorted by experiment number
+  const hypothesisUpdates = notebookEntries.filter((f) => f.type === "hypothesis_update");
+  const generalNotebookEntries = notebookEntries.filter((f) => f.type !== "hypothesis_update");
+  const breakthroughs = sortByExperimentNumber(generalNotebookEntries.filter((f) => f.type === "breakthrough"));
+  const notebookObservations = sortByExperimentNumber(generalNotebookEntries.filter((f) => f.type !== "breakthrough"));
 
   // Hypotheses with resolved evidence
   const resolvedHypotheses = hypotheses.filter((h) => h.status === "SUPPORTED" || h.status === "REFUTED");
@@ -163,12 +163,12 @@ export function AnalysisPhase({ projectId, steps, hypotheses, onRefresh }: Analy
         </div>
       )}
 
-      {/* General Findings */}
-      {otherFindings.length > 0 && (
+      {/* Notebook observations */}
+      {notebookObservations.length > 0 && (
         <div>
-          <h3 className="text-xs font-medium text-muted-foreground mb-2">Findings</h3>
+          <h3 className="text-xs font-medium text-muted-foreground mb-2">Notebook Observations</h3>
           <div className="space-y-1">
-            {otherFindings.map((f) => (
+            {notebookObservations.map((f) => (
               <div key={f.id} className="flex items-start gap-2 py-1">
                 <Lightbulb className="h-3 w-3 mt-1 text-muted-foreground shrink-0" />
                 <MarkdownRenderer content={f.content} className="text-[11px] text-foreground/80 leading-relaxed [&_p]:mb-1 [&_table]:text-[10px] flex-1 min-w-0" />
@@ -179,7 +179,7 @@ export function AnalysisPhase({ projectId, steps, hypotheses, onRefresh }: Analy
       )}
 
       {/* Empty state */}
-      {findings.length === 0 && resolvedHypotheses.length === 0 && activeHypotheses.length === 0 && runningSteps.length === 0 && (
+      {notebookEntries.length === 0 && resolvedHypotheses.length === 0 && activeHypotheses.length === 0 && runningSteps.length === 0 && (
         <div className="rounded-md border border-dashed border-border p-4 text-center">
           <p className="text-xs text-muted-foreground">
             Complete experiments first, then analyze results here.

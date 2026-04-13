@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { isPlanningNotebookEntry } from "./research-log-policy";
 
 export interface ProjectContext {
   title: string;
@@ -15,6 +16,67 @@ export interface ProjectContext {
   completedAnalyses: { title: string; analysis: string }[];
   recentLog: { type: string; content: string }[];
   previousIterations: { number: number; goal: string; reflection: string | null }[];
+}
+
+type ProjectBrief = {
+  question?: string;
+  topic?: string;
+  subQuestions?: string[];
+  domains?: string[];
+  keywords?: string[];
+};
+
+function parseProjectBrief(rawBrief: string | null, fallbackTitle: string): Required<ProjectBrief> {
+  const fallbackQuestion = rawBrief?.trim() || fallbackTitle;
+  if (!rawBrief) {
+    return {
+      question: fallbackQuestion,
+      topic: fallbackQuestion,
+      subQuestions: [],
+      domains: [],
+      keywords: [],
+    };
+  }
+
+  try {
+    const parsed = JSON.parse(rawBrief) as ProjectBrief | string | null;
+    if (typeof parsed === "string") {
+      const question = parsed.trim() || fallbackQuestion;
+      return {
+        question,
+        topic: question,
+        subQuestions: [],
+        domains: [],
+        keywords: [],
+      };
+    }
+    if (!parsed || typeof parsed !== "object") {
+      throw new Error("brief JSON must decode to an object");
+    }
+    const question = parsed.question?.trim() || parsed.topic?.trim() || fallbackQuestion;
+    return {
+      question,
+      topic: parsed.topic?.trim() || question,
+      subQuestions: Array.isArray(parsed.subQuestions)
+        ? parsed.subQuestions.filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+        : [],
+      domains: Array.isArray(parsed.domains)
+        ? parsed.domains.filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+        : [],
+      keywords: Array.isArray(parsed.keywords)
+        ? parsed.keywords.filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+        : [],
+    };
+  } catch (err) {
+    console.warn("[context-builder] Failed to parse project brief; falling back to raw text.", err);
+    return {
+      question: fallbackQuestion,
+      topic: fallbackQuestion,
+      subQuestions: [],
+      domains: [],
+      keywords: [],
+    };
+  }
 }
 
 /**
@@ -60,7 +122,7 @@ export async function buildProjectContext(projectId: string): Promise<ProjectCon
 
   if (!project) return null;
 
-  const brief = JSON.parse(project.brief);
+  const brief = parseProjectBrief(project.brief, project.title);
   const activeIteration = project.iterations.find((i) => i.status === "ACTIVE") || project.iterations[0];
   const papers = project.collection?.papers.map((cp) => cp.paper) || [];
 
@@ -85,10 +147,10 @@ export async function buildProjectContext(projectId: string): Promise<ProjectCon
   return {
     title: project.title,
     question: brief.question,
-    subQuestions: brief.subQuestions || [],
+    subQuestions: brief.subQuestions,
     methodology: project.methodology,
-    domains: brief.domains || [],
-    keywords: brief.keywords || [],
+    domains: brief.domains,
+    keywords: brief.keywords,
     currentPhase: project.currentPhase,
     iterationNumber: activeIteration?.number || 1,
     iterationGoal: activeIteration?.goal || "",
@@ -105,7 +167,7 @@ export async function buildProjectContext(projectId: string): Promise<ProjectCon
     recentLog: project.log.map((l) => ({
       type: l.type,
       content: l.content,
-    })),
+    })).filter((entry) => !(entry.type === "decision" && isPlanningNotebookEntry(entry.content))),
     previousIterations: project.iterations
       .filter((i) => i.status === "COMPLETED")
       .map((i) => ({

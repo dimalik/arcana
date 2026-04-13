@@ -48,5 +48,33 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npx prisma generate
-      - run: npx prisma db push
+      - run: npx prisma migrate deploy
       - run: npm run build
+
+  acceptance:
+    name: Acceptance
+    runs-on: ubuntu-latest
+    needs: [typecheck]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx prisma generate
+      - run: npx prisma migrate deploy
+      - run: npm run dev > /tmp/arcana-dev.log 2>&1 & echo $! > /tmp/arcana-dev.pid
+      - run: node scripts/wait-for-url.js --url http://127.0.0.1:3000 --timeout-ms 240000
+      - run: npm run acceptance:superpowers -- --base http://127.0.0.1:3000 --create-project
+      - run: npm run acceptance:credibility -- --base http://127.0.0.1:3000
+      - run: npm run acceptance:agent-mock -- --base http://127.0.0.1:3000
+      - if: always()
+        run: |
+          if [ -f /tmp/arcana-dev.log ]; then
+            echo "=== dev server log (tail) ==="
+            tail -200 /tmp/arcana-dev.log
+          fi
+          if [ -f /tmp/arcana-dev.pid ]; then
+            kill "$(cat /tmp/arcana-dev.pid)" || true
+          fi
