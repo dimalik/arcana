@@ -9,14 +9,50 @@
 import { exec } from "child_process";
 import { promisify } from "util";
 import path from "path";
+import { mkdir, readFile, writeFile } from "fs/promises";
 import { prisma } from "@/lib/prisma";
+import { isSyntheticTestHost } from "./remote-host-policy";
+import { extractRuntimeDependencies, type RuntimeDependency } from "./runtime-dependencies";
+import { resolveExperimentContract } from "./experiment-contracts";
+import {
+  acquireExecutorLease,
+  buildWorkspaceLeaseKey,
+  createAttemptRecord,
+  heartbeatAttemptExecutorLeases,
+  heartbeatExecutorLease,
+  createRunForSubmission,
+  finalizeAttempt,
+  linkRunToRemoteJob,
+  loadExecutorLease,
+  releaseAttemptExecutorLeases,
+  releaseExecutorLease,
+  reserveNextAttemptNumber,
+  setAttemptRunning,
+  syncLegacyRemoteJobProjection,
+  transitionRunState,
+  EXECUTOR_LEASE_TTL_MS,
+} from "./run-lifecycle";
+import { importExperimentResultFromRemoteJob } from "./result-import";
+import { createOrUpdateHelpRequest } from "./help-requests";
+import { launchSubAgentTask } from "./sub-agent-launcher";
 
 const execAsync = promisify(exec);
+const ACTIVE_REMOTE_JOB_STATUSES = ["SYNCING", "QUEUED", "RUNNING"] as const;
+const TERMINAL_HELPER_STATUSES = new Set<HelperStatus["status"]>(["completed", "failed", "oom_killed"]);
+const WORKSPACE_LOCK_STALE_HEARTBEAT_MS = EXECUTOR_LEASE_TTL_MS;
+const staleCleanupByProject = new Map<string, Promise<number>>();
+let staleCleanupAllProjects: Promise<number> | null = null;
 
 // ── Helper management ────────────────────────────────────────────
 
-const HELPER_VERSION = "8";
+const HELPER_VERSION = "14";
 const helperInstalledHosts = new Map<string, boolean>();
+
+export function getWorkspaceBaseName(localDir: string): string {
+  const normalized = localDir.replace(/\\/g, "/").replace(/\/+$/, "");
+  const segments = normalized.split("/").filter(Boolean);
+  return segments[segments.length - 1] || "experiment";
+}
 
 /**
  * Ensure the Arcana helper is installed on a remote host.
@@ -95,6 +131,52 @@ async function invokeHelper(host: HostConfig, args: string): Promise<string> {
   return sshExec(host, `${envPrefix}python3 ~/.arcana/helper.py ${args}`);
 }
 
+interface RuntimeProbeResult {
+  ok: boolean;
+  kind: string;
+  detail?: string;
+  elapsedMs?: number;
+  error?: string;
+}
+
+export interface RuntimeSmokeProbeResult extends RuntimeProbeResult {
+  torchVersion?: string;
+  cudaAvailable?: boolean;
+  gpuCount?: number;
+  torchImportError?: string;
+}
+
+function encodeRuntimeProbePayload(dependency: RuntimeDependency): string {
+  return Buffer.from(JSON.stringify(dependency), "utf-8").toString("base64url");
+}
+
+async function probeRuntimeDependency(host: HostConfig, remoteDir: string, dependency: RuntimeDependency): Promise<RuntimeProbeResult> {
+  const raw = await invokeHelper(host, `probe ${remoteDir} ${encodeRuntimeProbePayload(dependency)}`);
+  return parseHelperResponse<RuntimeProbeResult>(raw);
+}
+
+export async function probeRuntimeSmoke(hostId: string, localDir: string): Promise<RuntimeSmokeProbeResult> {
+  const host = await prisma.remoteHost.findUnique({ where: { id: hostId } });
+  if (!host) {
+    return { ok: false, kind: "runtime_smoke", error: "Host not found" };
+  }
+
+  const config = hostToConfig(host);
+  const remoteDir = `${host.workDir}/${getWorkspaceBaseName(localDir)}`;
+  const payload = Buffer.from(JSON.stringify({ kind: "runtime_smoke" }), "utf-8").toString("base64url");
+
+  try {
+    const raw = await invokeHelper(config, `probe ${remoteDir} ${payload}`);
+    return parseHelperResponse<RuntimeSmokeProbeResult>(raw);
+  } catch (err) {
+    return {
+      ok: false,
+      kind: "runtime_smoke",
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
 /** Status returned by the helper's status command. */
 export interface HelperStatus {
   ok: boolean;
@@ -140,6 +222,49 @@ export interface ScriptDiagnostics {
   reason?: string;
 }
 
+const BLOCKING_PYRIGHT_RULES = new Set([
+  "reportMissingImports",
+  "reportUndefinedVariable",
+  "reportUndefinedFunction",
+  "reportAttributeAccessIssue",
+  "reportCallIssue",
+]);
+
+function normalizePyrightDiagnostic(raw: Record<string, unknown>): ScriptDiagnostic {
+  const rule = typeof raw.rule === "string" ? raw.rule : "";
+  const reportedSeverity = raw.severity === "error" ? "error" : "warning";
+  const severity: "error" | "warning" =
+    reportedSeverity === "error" && BLOCKING_PYRIGHT_RULES.has(rule) ? "error" : "warning";
+
+  const line = typeof raw.line === "number" ? raw.line : 1;
+  const col =
+    typeof raw.col === "number"
+      ? raw.col
+      : typeof raw.column === "number"
+        ? raw.column
+        : 1;
+  const endLine =
+    typeof raw.endLine === "number"
+      ? raw.endLine
+      : undefined;
+  const endCol =
+    typeof raw.endCol === "number"
+      ? raw.endCol
+      : typeof raw.endColumn === "number"
+        ? raw.endColumn
+        : undefined;
+
+  return {
+    line,
+    col,
+    endLine,
+    endCol,
+    severity,
+    message: typeof raw.message === "string" ? raw.message : "",
+    rule,
+  };
+}
+
 /** Get structured status from the helper. */
 export async function getHelperStatus(host: HostConfig, remoteDir: string): Promise<HelperStatus> {
   const raw = await invokeHelper(host, `status ${remoteDir}`);
@@ -179,6 +304,12 @@ export interface HostConfig {
   envVars?: Record<string, string> | null;
 }
 
+export interface MockRemoteExecutionOptions {
+  enabled: boolean;
+  mode?: "success" | "failure";
+  writeResultFile?: boolean;
+}
+
 /** Build HostConfig from a Prisma RemoteHost record */
 export function hostToConfig(host: { host: string; port: number; user: string; keyPath: string | null; workDir: string; conda: string | null; setupCmd: string | null; envVars: string | null }): HostConfig {
   let envVars: Record<string, string> | null = null;
@@ -187,6 +318,489 @@ export function hostToConfig(host: { host: string; port: number; user: string; k
     host: host.host, port: host.port, user: host.user, keyPath: host.keyPath,
     workDir: host.workDir, conda: host.conda, setupCmd: host.setupCmd, envVars,
   };
+}
+
+async function findLatestAttempt(runId: string | null | undefined) {
+  if (!runId) return null;
+  return prisma.experimentAttempt.findFirst({
+    where: { runId },
+    orderBy: [{ attemptNumber: "desc" }, { createdAt: "desc" }],
+    select: {
+      id: true,
+      state: true,
+      heartbeatAt: true,
+      remoteDir: true,
+      localDir: true,
+      hostId: true,
+    },
+  });
+}
+
+async function loadRemoteJobWithHost(jobId: string) {
+  return prisma.remoteJob.findUnique({
+    where: { id: jobId },
+    include: { host: true },
+  });
+}
+
+type RemoteJobWithHost = NonNullable<Awaited<ReturnType<typeof loadRemoteJobWithHost>>>;
+
+interface WorkspaceLeaseBinding {
+  leaseKey: string;
+  leaseToken: string;
+  attemptId?: string | null;
+}
+
+async function heartbeatWorkspaceLease(binding: WorkspaceLeaseBinding | null | undefined) {
+  if (!binding) return;
+  if (binding.attemptId) {
+    await heartbeatAttemptExecutorLeases({ attemptId: binding.attemptId }).catch(() => {});
+    return;
+  }
+  await heartbeatExecutorLease({
+    leaseKey: binding.leaseKey,
+    leaseToken: binding.leaseToken,
+  }).catch(() => {});
+}
+
+async function releaseWorkspaceLease(
+  binding: WorkspaceLeaseBinding | null | undefined,
+  reason: string,
+  payload?: unknown,
+) {
+  if (!binding) return;
+  if (binding.attemptId) {
+    await releaseAttemptExecutorLeases({
+      attemptId: binding.attemptId,
+      reason,
+      payload,
+    }).catch(() => {});
+    return;
+  }
+  await releaseExecutorLease({
+    leaseKey: binding.leaseKey,
+    leaseToken: binding.leaseToken,
+    reason,
+    payload,
+  }).catch(() => {});
+}
+
+function attemptHeartbeatAgeMs(heartbeatAt: Date | null | undefined) {
+  if (!heartbeatAt) return Number.POSITIVE_INFINITY;
+  return Date.now() - heartbeatAt.getTime();
+}
+
+async function finalizeRemoteJobFromHelper(params: {
+  job: RemoteJobWithHost;
+  helperStatus: HelperStatus;
+  syncResults?: boolean;
+  reason: string;
+}) {
+  const { job, helperStatus, syncResults = true, reason } = params;
+  const config = hostToConfig(job.host);
+  const exitCode = helperStatus.exit_code ?? null;
+  const oomDetected = helperStatus.oom_detected ?? false;
+  const failed = oomDetected || (exitCode !== null && exitCode !== 0);
+
+  let finalStdout = helperStatus.stdout_tail || job.stdout || "";
+  let finalStderr = helperStatus.stderr_tail || job.stderr || "";
+  if (oomDetected && helperStatus.oom_detail) {
+    finalStderr = `${finalStderr}\n\n[OOM DETECTED] ${helperStatus.oom_detail}`.trim();
+  }
+  if (helperStatus.diagnosis) {
+    finalStderr = `[DIAGNOSIS] ${helperStatus.diagnosis}\n\n${finalStderr}`;
+  }
+
+  if (syncResults && job.localDir && job.remoteDir) {
+    try {
+      await sshExecutor.syncDown(job.remoteDir, job.localDir, config);
+    } catch (syncErr) {
+      console.warn(`[remote-executor] syncDown failed while reconciling ${job.id}:`, syncErr);
+    }
+  }
+
+  await prisma.remoteJob.update({
+    where: { id: job.id },
+    data: {
+      status: failed ? "FAILED" : "COMPLETED",
+      exitCode,
+      stdout: finalStdout,
+      stderr: finalStderr,
+      resultsSynced: true,
+      completedAt: new Date(),
+      startedAt: job.startedAt || new Date(),
+      ...(failed ? { errorClass: oomDetected ? "RESOURCE_ERROR" : job.errorClass || null } : {}),
+    },
+  });
+
+  const latestAttempt = await findLatestAttempt(job.runId);
+  if (latestAttempt && latestAttempt.state !== "TERMINAL") {
+    await finalizeAttempt({
+      attemptId: latestAttempt.id,
+      exitCode,
+      stdoutTail: finalStdout,
+      stderrTail: finalStderr,
+      errorClass: failed ? (oomDetected ? "RESOURCE_ERROR" : job.errorClass || null) : null,
+      errorReason: failed ? reason : null,
+    }).catch(() => {});
+  }
+
+  if (job.runId) {
+    await transitionRunState({
+      runId: job.runId,
+      toState: failed ? "FAILED" : "SUCCEEDED",
+      reason,
+      attemptId: latestAttempt?.id || null,
+      payload: { jobId: job.id, exitCode, reconciled: true },
+    }).catch(() => {});
+    await syncLegacyRemoteJobProjection({ runId: job.runId, remoteJobId: job.id }).catch(() => {});
+  }
+  if (latestAttempt?.id) {
+    await releaseAttemptExecutorLeases({
+      attemptId: latestAttempt.id,
+      reason,
+      payload: { jobId: job.id, finalized: true },
+    }).catch(() => {});
+  } else if (job.remoteDir) {
+    await releaseExecutorLease({
+      leaseKey: buildWorkspaceLeaseKey(job.hostId, job.remoteDir),
+      reason,
+      payload: { jobId: job.id, finalized: true },
+    }).catch(() => {});
+  }
+
+  if (!failed) {
+    await importExperimentResultFromRemoteJob(job.id).catch((err) => {
+      console.warn(`[remote-executor] result import failed for ${job.id}:`, err);
+    });
+  }
+
+  return prisma.remoteJob.findUnique({
+    where: { id: job.id },
+    include: { host: true },
+  });
+}
+
+async function markRemoteJobLostHeartbeat(params: {
+  job: RemoteJobWithHost;
+  reason: string;
+}) {
+  const { job, reason } = params;
+  await prisma.remoteJob.update({
+    where: { id: job.id },
+    data: {
+      status: "FAILED",
+      exitCode: job.exitCode ?? null,
+      stderr: `${job.stderr || ""}\n\n[RECONCILED] ${reason}`.trim(),
+      errorClass: "RESOURCE_ERROR",
+      resultsSynced: true,
+      completedAt: new Date(),
+    },
+  });
+
+  const latestAttempt = await findLatestAttempt(job.runId);
+  if (latestAttempt && latestAttempt.state !== "TERMINAL") {
+    await finalizeAttempt({
+      attemptId: latestAttempt.id,
+      exitCode: null,
+      stdoutTail: job.stdout || "",
+      stderrTail: `${job.stderr || ""}\n\n[RECONCILED] ${reason}`.trim(),
+      errorClass: "RESOURCE_ERROR",
+      errorReason: reason,
+    }).catch(() => {});
+  }
+  if (job.runId) {
+    await transitionRunState({
+      runId: job.runId,
+      toState: "FAILED",
+      reason,
+      attemptId: latestAttempt?.id || null,
+      payload: { jobId: job.id, reconciled: true, staleHeartbeat: true },
+    }).catch(() => {});
+    await syncLegacyRemoteJobProjection({ runId: job.runId, remoteJobId: job.id }).catch(() => {});
+  }
+  if (latestAttempt?.id) {
+    await releaseAttemptExecutorLeases({
+      attemptId: latestAttempt.id,
+      reason,
+      payload: { jobId: job.id, reconciled: true, staleHeartbeat: true },
+    }).catch(() => {});
+  } else if (job.remoteDir) {
+    await releaseExecutorLease({
+      leaseKey: buildWorkspaceLeaseKey(job.hostId, job.remoteDir),
+      reason,
+      payload: { jobId: job.id, reconciled: true, staleHeartbeat: true },
+    }).catch(() => {});
+  }
+
+  return prisma.remoteJob.findUnique({
+    where: { id: job.id },
+    include: { host: true },
+  });
+}
+
+export async function reconcileRemoteJobState(jobId: string) {
+  const job = await loadRemoteJobWithHost(jobId);
+  if (!job || !job.host) return job;
+
+  if (!ACTIVE_REMOTE_JOB_STATUSES.includes(job.status as (typeof ACTIVE_REMOTE_JOB_STATUSES)[number])) {
+    if (job.status === "COMPLETED") {
+      await importExperimentResultFromRemoteJob(job.id).catch(() => {});
+    }
+    return job;
+  }
+
+  if (!job.remoteDir) return job;
+
+  const config = hostToConfig(job.host);
+  try {
+    const helperStatus = await getHelperStatus(config, job.remoteDir);
+
+    await prisma.remoteJob.update({
+      where: { id: job.id },
+      data: {
+        stdout: helperStatus.stdout_tail || job.stdout,
+        stderr: helperStatus.stderr_tail || job.stderr,
+      },
+    }).catch(() => {});
+
+    if (helperStatus.status === "running" || helperStatus.status === "setup") {
+      const latestAttempt = await findLatestAttempt(job.runId);
+      if (latestAttempt && latestAttempt.state !== "TERMINAL") {
+        await prisma.experimentAttempt.update({
+          where: { id: latestAttempt.id },
+          data: {
+            heartbeatAt: new Date(),
+            stdoutTail: helperStatus.stdout_tail || undefined,
+            stderrTail: helperStatus.stderr_tail || undefined,
+          },
+        }).catch(() => {});
+        await heartbeatAttemptExecutorLeases({ attemptId: latestAttempt.id }).catch(() => {});
+      } else {
+        const lease = await loadExecutorLease(buildWorkspaceLeaseKey(job.hostId, job.remoteDir));
+        if (lease) {
+          await heartbeatExecutorLease({
+            leaseKey: lease.leaseKey,
+            leaseToken: lease.leaseToken,
+          }).catch(() => {});
+        }
+      }
+      return prisma.remoteJob.findUnique({
+        where: { id: job.id },
+        include: { host: true },
+      });
+    }
+
+    if (TERMINAL_HELPER_STATUSES.has(helperStatus.status)) {
+      return finalizeRemoteJobFromHelper({
+        job,
+        helperStatus,
+        syncResults: true,
+        reason: "Terminal state reconciled from remote helper",
+      });
+    }
+
+    const latestAttempt = await findLatestAttempt(job.runId);
+    const heartbeatAge = attemptHeartbeatAgeMs(latestAttempt?.heartbeatAt || job.startedAt || job.createdAt);
+    if (helperStatus.status === "unknown" && heartbeatAge >= WORKSPACE_LOCK_STALE_HEARTBEAT_MS) {
+      return markRemoteJobLostHeartbeat({
+        job,
+        reason: "Remote helper reported unknown status after the workspace heartbeat expired.",
+      });
+    }
+
+    return prisma.remoteJob.findUnique({
+      where: { id: job.id },
+      include: { host: true },
+    });
+  } catch (err) {
+    const latestAttempt = await findLatestAttempt(job.runId);
+    const heartbeatAge = attemptHeartbeatAgeMs(latestAttempt?.heartbeatAt || job.startedAt || job.createdAt);
+    if (heartbeatAge >= WORKSPACE_LOCK_STALE_HEARTBEAT_MS) {
+      return markRemoteJobLostHeartbeat({
+        job,
+        reason: "Workspace lock reconciliation released a stale job after lost heartbeat.",
+      });
+    }
+    return prisma.remoteJob.findUnique({
+      where: { id: job.id },
+      include: { host: true },
+    });
+  }
+}
+
+async function findBlockingWorkspaceJob(params: {
+  hostId: string;
+  projectedRemoteDir: string;
+  localDir: string;
+  leaseKey: string;
+  excludeAttemptId?: string;
+}) {
+  const activeLease = await loadExecutorLease(params.leaseKey);
+  if (activeLease) {
+    const now = new Date();
+    if (activeLease.leaseExpiresAt > now) {
+      const leaseJob = activeLease.runId
+        ? await prisma.remoteJob.findFirst({
+            where: { runId: activeLease.runId },
+            orderBy: { createdAt: "desc" },
+            include: { host: true },
+          })
+        : null;
+      if (leaseJob) {
+        const reconciled = await reconcileRemoteJobState(leaseJob.id);
+        if (reconciled && ACTIVE_REMOTE_JOB_STATUSES.includes(reconciled.status as (typeof ACTIVE_REMOTE_JOB_STATUSES)[number])) {
+          return reconciled;
+        }
+      }
+
+      if (activeLease.attemptId) {
+        const attempt = await prisma.experimentAttempt.findUnique({
+          where: { id: activeLease.attemptId },
+          select: {
+            id: true,
+            runId: true,
+            heartbeatAt: true,
+            startedAt: true,
+          },
+        });
+        if (attempt) {
+          const heartbeatAge = attemptHeartbeatAgeMs(attempt.heartbeatAt || attempt.startedAt);
+          if (heartbeatAge < WORKSPACE_LOCK_STALE_HEARTBEAT_MS) {
+            return {
+              id: attempt.id,
+              status: "RUNNING",
+              command: `lease:${activeLease.ownerId}`,
+            };
+          }
+
+          await finalizeAttempt({
+            attemptId: attempt.id,
+            exitCode: null,
+            errorClass: "RESOURCE_ERROR",
+            errorReason: "Expired workspace lease released stale attempt during admission reconciliation.",
+          }).catch(() => {});
+          if (attempt.runId) {
+            await transitionRunState({
+              runId: attempt.runId,
+              toState: "FAILED",
+              reason: "Expired workspace lease released stale attempt during admission reconciliation.",
+              attemptId: attempt.id,
+              payload: { reconciled: true, expiredLease: true },
+            }).catch(() => {});
+          }
+          await releaseAttemptExecutorLeases({
+            attemptId: attempt.id,
+            reason: "Expired workspace lease released during admission reconciliation.",
+            payload: { expiredLease: true },
+          }).catch(() => {});
+        }
+      } else {
+        return {
+          id: activeLease.id,
+          status: "RUNNING",
+          command: `lease:${activeLease.ownerId}`,
+        };
+      }
+    } else {
+      await releaseExecutorLease({
+        leaseKey: activeLease.leaseKey,
+        leaseToken: activeLease.leaseToken,
+        reason: "Expired workspace lease released during admission reconciliation.",
+        payload: { expiredLease: true },
+      }).catch(() => {});
+    }
+  }
+
+  const candidateAttempts = await prisma.experimentAttempt.findMany({
+    where: {
+      hostId: params.hostId,
+      state: { in: ["STARTING", "RUNNING"] },
+      ...(params.excludeAttemptId ? { NOT: { id: params.excludeAttemptId } } : {}),
+      OR: [
+        { remoteDir: params.projectedRemoteDir },
+        { localDir: params.localDir },
+      ],
+    },
+    orderBy: [{ attemptNumber: "desc" }, { createdAt: "desc" }],
+    select: {
+      id: true,
+      runId: true,
+      heartbeatAt: true,
+      startedAt: true,
+    },
+  });
+
+  for (const attempt of candidateAttempts) {
+    const candidate = await prisma.remoteJob.findFirst({
+      where: { runId: attempt.runId || undefined },
+      orderBy: { createdAt: "desc" },
+      include: { host: true },
+    });
+    if (candidate) {
+      const reconciled = await reconcileRemoteJobState(candidate.id);
+      if (!reconciled) continue;
+      if (ACTIVE_REMOTE_JOB_STATUSES.includes(reconciled.status as (typeof ACTIVE_REMOTE_JOB_STATUSES)[number])) {
+        return reconciled;
+      }
+      continue;
+    }
+
+    const heartbeatAge = attemptHeartbeatAgeMs(attempt.heartbeatAt || attempt.startedAt);
+    if (heartbeatAge >= WORKSPACE_LOCK_STALE_HEARTBEAT_MS) {
+      await finalizeAttempt({
+        attemptId: attempt.id,
+        exitCode: null,
+        errorClass: "RESOURCE_ERROR",
+        errorReason: "Workspace reconciliation released stale attempt without a linked remote job.",
+      }).catch(() => {});
+      if (attempt.runId) {
+        await transitionRunState({
+          runId: attempt.runId,
+          toState: "FAILED",
+          reason: "Workspace reconciliation released stale attempt without a linked remote job.",
+          attemptId: attempt.id,
+          payload: { reconciled: true, missingRemoteJob: true },
+        }).catch(() => {});
+      }
+      await releaseAttemptExecutorLeases({
+        attemptId: attempt.id,
+        reason: "Workspace reconciliation released stale attempt without a linked remote job.",
+        payload: { reconciled: true, missingRemoteJob: true },
+      }).catch(() => {});
+      continue;
+    }
+
+    return {
+      id: attempt.id,
+      status: "RUNNING",
+      command: "attempt_without_remote_job",
+    };
+  }
+
+  const candidates = await prisma.remoteJob.findMany({
+    where: {
+      hostId: params.hostId,
+      status: { in: [...ACTIVE_REMOTE_JOB_STATUSES] },
+      OR: [
+        { remoteDir: params.projectedRemoteDir },
+        { remoteDir: "", localDir: params.localDir },
+        { localDir: params.localDir },
+      ],
+    },
+    orderBy: { createdAt: "desc" },
+    include: { host: true },
+  });
+
+  for (const candidate of candidates) {
+    const reconciled = await reconcileRemoteJobState(candidate.id);
+    if (!reconciled) continue;
+    if (ACTIVE_REMOTE_JOB_STATUSES.includes(reconciled.status as (typeof ACTIVE_REMOTE_JOB_STATUSES)[number])) {
+      return reconciled;
+    }
+  }
+
+  return null;
 }
 
 /** Derive a run directory name from an experiment command.
@@ -240,11 +854,9 @@ async function sshExecOnce(host: HostConfig, cmd: string): Promise<string> {
       const errOut = (stderr || "").trim();
 
       if (err) {
-        if (out) {
-          resolve(out);
-          return;
-        }
-        const msg = errOut || err.message || "SSH command failed";
+        const msg = [errOut, out, err.message]
+          .find((value) => typeof value === "string" && value.trim().length > 0)
+          || "SSH command failed";
         reject(new Error(msg));
         return;
       }
@@ -358,8 +970,8 @@ export const sshExecutor: ExecutorBackend = {
     // Shell-escape the command for safe transport through SSH → remote shell → helper.
     // Single-quote the entire command, escaping internal single quotes.
     const escaped = cleanCmd.replace(/'/g, "'\\''");
-    // run_name is passed for tracking only — it does NOT affect execution (no --run flag, no cwd change)
-    const raw = await invokeHelper(host, `run ${remoteDir} -- '${escaped}'`);
+    const runArg = runName ? ` --run '${runName.replace(/'/g, "'\\''")}'` : "";
+    const raw = await invokeHelper(host, `run ${remoteDir}${runArg} -- '${escaped}'`);
     const result = parseHelperResponse<{ ok: boolean; pid: number; pgid: number }>(raw);
     return result.pid;
   },
@@ -446,33 +1058,338 @@ export async function submitRemoteJob(params: {
   projectId?: string;
   scriptHash?: string;
   hypothesisId?: string;
+  experimentPurpose?: string;
+  grounding?: string;
+  claimEligibility?: string;
+  promotionPolicy?: string;
+  evidenceClass?: string;
   diagnostics?: string;
-}): Promise<{ jobId: string }> {
+  idempotencyKey?: string;
+  ignoreActiveWorkspaceLock?: boolean;
+  mock?: MockRemoteExecutionOptions;
+}): Promise<{ jobId: string; runId?: string }> {
   const host = await prisma.remoteHost.findUnique({ where: { id: params.hostId } });
   if (!host) throw new Error("Remote host not found");
+  if (isSyntheticTestHost(host) && !params.mock?.enabled) {
+    throw new Error(
+      `Host ${host.alias} (${host.host}) is a synthetic test host and cannot be used for normal research execution.`,
+    );
+  }
 
   const config = hostToConfig(host);
 
   const backend = getBackend(host.backend);
 
   const runName = deriveRunName(params.command);
-
-  // Create job record
-  const job = await prisma.remoteJob.create({
-    data: {
-      hostId: host.id,
-      stepId: params.stepId || null,
-      projectId: params.projectId || null,
-      localDir: params.localDir,
-      remoteDir: "", // will be set after sync
-      command: params.command,
-      scriptHash: params.scriptHash || null,
+  const scriptMatch = params.command.match(/python3?\s+(\S+\.py)/);
+  const scriptName = scriptMatch ? path.basename(scriptMatch[1]) : null;
+  const scriptPath = scriptMatch ? scriptMatch[1] : null;
+  let scriptCode = "";
+  if (scriptPath) {
+    try {
+      scriptCode = await readFile(path.join(params.localDir, scriptPath), "utf-8");
+    } catch {
+      scriptCode = "";
+    }
+  }
+  const contract = resolveExperimentContract({
+    scriptName: scriptName || params.command,
+    command: params.command,
+    code: scriptCode,
+    experimentPurpose: params.experimentPurpose,
+    grounding: params.grounding,
+    claimEligibility: params.claimEligibility,
+    promotionPolicy: params.promotionPolicy,
+    evidenceClass: params.evidenceClass,
+  });
+  const runtimeDependencies = scriptPath
+    ? await extractRuntimeDependencies(params.localDir, scriptPath).catch(() => [] as RuntimeDependency[])
+    : [];
+  let lifecycleRunId: string | undefined;
+  let lifecycleAttemptId: string | undefined;
+  if (params.projectId) {
+    const run = await createRunForSubmission({
+      projectId: params.projectId,
       hypothesisId: params.hypothesisId || null,
-      diagnostics: params.diagnostics || null,
+      experimentPurpose: contract.experimentPurpose,
+      grounding: contract.grounding,
+      claimEligibility: contract.claimEligibility,
+      promotionPolicy: contract.promotionPolicy,
+      evidenceClass: contract.evidenceClass,
+      requestedHostId: host.id,
+      command: params.command,
+      scriptName,
+      scriptHash: params.scriptHash || null,
+      idempotencyKey: params.idempotencyKey || null,
+      metadata: { source: "submitRemoteJob", localDir: params.localDir, runDir: runName },
+    });
+    lifecycleRunId = run.runId;
+  }
+
+  const localBaseName = getWorkspaceBaseName(params.localDir);
+  const projectedRemoteDir = `${config.workDir}/${localBaseName}`;
+  const workspaceLeaseKey = buildWorkspaceLeaseKey(host.id, projectedRemoteDir);
+
+  if (lifecycleRunId) {
+    const attemptNumber = await reserveNextAttemptNumber(lifecycleRunId);
+    lifecycleAttemptId = await createAttemptRecord({
+      runId: lifecycleRunId,
+      attemptNumber,
+      hostId: host.id,
+      localDir: params.localDir,
+      remoteDir: projectedRemoteDir,
       runDir: runName,
-      status: "SYNCING",
+      helperVersion: HELPER_VERSION,
+    });
+  }
+
+  if (!params.ignoreActiveWorkspaceLock) {
+    const activeWorkspaceJob = await findBlockingWorkspaceJob({
+      hostId: host.id,
+      projectedRemoteDir,
+      localDir: params.localDir,
+      leaseKey: workspaceLeaseKey,
+      excludeAttemptId: lifecycleAttemptId,
+    });
+
+    if (activeWorkspaceJob) {
+      if (lifecycleAttemptId) {
+        await finalizeAttempt({
+          attemptId: lifecycleAttemptId,
+          exitCode: null,
+          errorReason: "Workspace lock: active run in same host/workdir",
+        }).catch(() => {});
+      }
+      if (lifecycleRunId) {
+        await transitionRunState({
+          runId: lifecycleRunId,
+          toState: "BLOCKED",
+          reason: "Workspace lock: active run in same host/workdir",
+          attemptId: lifecycleAttemptId,
+          payload: {
+            hostId: host.id,
+            hostAlias: host.alias,
+            remoteDir: projectedRemoteDir,
+            blockedByJobId: activeWorkspaceJob.id,
+            blockedByStatus: activeWorkspaceJob.status,
+            blockedByCommand: activeWorkspaceJob.command,
+          },
+        }).catch(() => {});
+      }
+
+      const blockedRunNote = lifecycleRunId ? ` (run ${lifecycleRunId.slice(0, 8)} blocked)` : "";
+      throw new Error(
+        `Workspace busy on ${host.alias}: active job ${activeWorkspaceJob.id.slice(0, 8)} ` +
+        `(${activeWorkspaceJob.status}). Wait for completion before submitting another run in the same workspace.${blockedRunNote}`,
+      );
+    }
+  }
+
+  const leaseOwnerId = lifecycleAttemptId ? `attempt:${lifecycleAttemptId}` : `workspace:${host.id}:${Date.now()}`;
+  const acquiredLease = await acquireExecutorLease({
+    leaseKey: workspaceLeaseKey,
+    owner: {
+      ownerId: leaseOwnerId,
+      scope: "workspace",
+      runId: lifecycleRunId || null,
+      attemptId: lifecycleAttemptId || null,
+      hostId: host.id,
+      projectId: params.projectId || null,
+      metadata: {
+        localDir: params.localDir,
+        remoteDir: projectedRemoteDir,
+        command: params.command,
+      },
     },
   });
+  if (!acquiredLease.acquired) {
+    if (lifecycleAttemptId) {
+      await finalizeAttempt({
+        attemptId: lifecycleAttemptId,
+        exitCode: null,
+        errorReason: "Workspace lease acquisition failed: another attempt owns the workspace.",
+      }).catch(() => {});
+    }
+    if (lifecycleRunId) {
+      await transitionRunState({
+        runId: lifecycleRunId,
+        toState: "BLOCKED",
+        reason: "Workspace lease acquisition failed",
+        attemptId: lifecycleAttemptId,
+        payload: {
+          leaseKey: workspaceLeaseKey,
+          blockingOwner: acquiredLease.blockingLease.ownerId,
+          leaseExpiresAt: acquiredLease.blockingLease.leaseExpiresAt,
+        },
+      }).catch(() => {});
+    }
+    throw new Error(
+      `Workspace busy on ${host.alias}: lease ${workspaceLeaseKey} is owned by ${acquiredLease.blockingLease.ownerId} until ${acquiredLease.blockingLease.leaseExpiresAt.toISOString()}.`,
+    );
+  }
+
+  const workspaceLease: WorkspaceLeaseBinding = {
+    leaseKey: workspaceLeaseKey,
+    leaseToken: acquiredLease.lease.leaseToken,
+    attemptId: lifecycleAttemptId || null,
+  };
+
+  let job;
+  try {
+    job = await prisma.remoteJob.create({
+      data: {
+        hostId: host.id,
+        stepId: params.stepId || null,
+        projectId: params.projectId || null,
+        runId: lifecycleRunId || null,
+        localDir: params.localDir,
+        remoteDir: projectedRemoteDir,
+        command: params.command,
+        scriptHash: params.scriptHash || null,
+        hypothesisId: params.hypothesisId || null,
+        experimentPurpose: contract.experimentPurpose,
+        grounding: contract.grounding,
+        claimEligibility: contract.claimEligibility,
+        promotionPolicy: contract.promotionPolicy,
+        evidenceClass: contract.evidenceClass,
+        diagnostics: params.diagnostics || null,
+        runDir: runName,
+        status: "SYNCING",
+      },
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Failed to create remote job record";
+    await releaseWorkspaceLease(workspaceLease, "Remote job creation failed and released workspace lease.", {
+      error: message,
+    });
+    if (lifecycleAttemptId) {
+      await finalizeAttempt({
+        attemptId: lifecycleAttemptId,
+        exitCode: null,
+        errorReason: message,
+      }).catch(() => {});
+    }
+    if (lifecycleRunId) {
+      await transitionRunState({
+        runId: lifecycleRunId,
+        toState: "FAILED",
+        reason: message,
+        attemptId: lifecycleAttemptId,
+      }).catch(() => {});
+    }
+    throw err;
+  }
+
+  if (lifecycleRunId) {
+    await linkRunToRemoteJob(lifecycleRunId, job.id);
+    await transitionRunState({
+      runId: lifecycleRunId,
+      toState: "STARTING",
+      reason: "Remote job created, syncing workspace",
+      attemptId: lifecycleAttemptId,
+    });
+    await syncLegacyRemoteJobProjection({ runId: lifecycleRunId, remoteJobId: job.id });
+  }
+
+  if (params.mock?.enabled) {
+    const mode = params.mock.mode === "failure" ? "failure" : "success";
+    const now = new Date();
+    const isSuccess = mode === "success";
+    const terminalStatus = isSuccess ? "COMPLETED" : "FAILED";
+    const exitCode = isSuccess ? 0 : 1;
+
+    const stdout = [
+      "[mock-executor] Deterministic execution mode enabled.",
+      `[mock-executor] host=${host.alias} run=${runName} command=${params.command}`,
+      `[mock-executor] status=${terminalStatus.toLowerCase()} exit=${exitCode}`,
+    ].join("\n");
+    const stderr = isSuccess
+      ? ""
+      : "[mock-executor] Simulated failure for deterministic test coverage.";
+
+    await prisma.remoteJob.update({
+      where: { id: job.id },
+      data: {
+        status: terminalStatus,
+        remotePid: 0,
+        startedAt: now,
+        completedAt: now,
+        exitCode,
+        stdout,
+        stderr,
+        resultsSynced: true,
+      },
+    });
+
+    if (lifecycleAttemptId) {
+      await setAttemptRunning({ attemptId: lifecycleAttemptId, remotePid: 0 }).catch(() => {});
+      await finalizeAttempt({
+        attemptId: lifecycleAttemptId,
+        exitCode,
+        stdoutTail: stdout,
+        stderrTail: stderr || undefined,
+        errorClass: isSuccess ? null : "RESEARCH_FAILURE",
+        errorReason: isSuccess ? null : "Mock executor simulated failure",
+      }).catch(() => {});
+    }
+
+    if (lifecycleRunId) {
+      await transitionRunState({
+        runId: lifecycleRunId,
+        toState: "RUNNING",
+        reason: "Mock executor started run",
+        attemptId: lifecycleAttemptId,
+      }).catch(() => {});
+      await transitionRunState({
+        runId: lifecycleRunId,
+        toState: isSuccess ? "SUCCEEDED" : "FAILED",
+        reason: isSuccess ? "Mock executor completed run" : "Mock executor failed run",
+        attemptId: lifecycleAttemptId,
+      }).catch(() => {});
+      await syncLegacyRemoteJobProjection({ runId: lifecycleRunId, remoteJobId: job.id }).catch(() => {});
+    }
+
+    if (isSuccess && params.mock.writeResultFile) {
+      const hash = Array.from(params.command).reduce((acc, ch) => (acc * 31 + ch.charCodeAt(0)) % 1000, 0);
+      const f1 = Number((0.65 + hash / 10000).toFixed(4));
+      const accuracy = Number((f1 + 0.08).toFixed(4));
+      const payload = {
+        version: 1,
+        mock: true,
+        command: params.command,
+        run: runName,
+        verdict: "better",
+        summary: `${runName} completed in deterministic mock mode.`,
+        condition: "mock",
+        metrics: { f1, accuracy },
+        raw_metrics: { f1, accuracy },
+        generatedAt: now.toISOString(),
+      };
+      try {
+        await mkdir(path.join(params.localDir, "results"), { recursive: true });
+        await writeFile(
+          path.join(params.localDir, "results", "arcana_result.json"),
+          JSON.stringify(payload, null, 2),
+          "utf-8",
+        );
+      } catch {
+        // Non-fatal: job record already captures outcome.
+      }
+    }
+
+    if (isSuccess) {
+      await importExperimentResultFromRemoteJob(job.id).catch((err) => {
+        console.warn(`[remote-executor] mock result import failed for ${job.id}:`, err);
+      });
+    }
+
+    await releaseWorkspaceLease(workspaceLease, "Mock executor released workspace lease.", {
+      jobId: job.id,
+      terminalStatus,
+    });
+
+    return { jobId: job.id, runId: lifecycleRunId };
+  }
 
   // Sync files synchronously so errors propagate to caller
   let remoteDir: string;
@@ -482,17 +1399,52 @@ export async function submitRemoteJob(params: {
       where: { id: job.id },
       data: { remoteDir, status: "RUNNING", startedAt: new Date() },
     });
+    if (lifecycleAttemptId) {
+      await prisma.experimentAttempt.update({
+        where: { id: lifecycleAttemptId },
+        data: { remoteDir, heartbeatAt: new Date() },
+      });
+    }
+    if (lifecycleRunId) {
+      await syncLegacyRemoteJobProjection({ runId: lifecycleRunId, remoteJobId: job.id });
+    }
+    await heartbeatWorkspaceLease(workspaceLease);
   } catch (err) {
     const message = err instanceof Error ? err.message : "Sync failed";
     await prisma.remoteJob.update({
       where: { id: job.id },
       data: { status: "FAILED", stderr: `Sync failed: ${message}`, completedAt: new Date() },
     });
+    if (lifecycleAttemptId) {
+      await finalizeAttempt({
+        attemptId: lifecycleAttemptId,
+        exitCode: null,
+        stderrTail: `Sync failed: ${message}`,
+        errorClass: "RESOURCE_ERROR",
+        errorReason: message,
+      }).catch(() => {});
+    }
+    if (lifecycleRunId) {
+      await transitionRunState({
+        runId: lifecycleRunId,
+        toState: "FAILED",
+        reason: `syncUp failed: ${message}`,
+        attemptId: lifecycleAttemptId,
+      }).catch(() => {});
+      await syncLegacyRemoteJobProjection({ runId: lifecycleRunId, remoteJobId: job.id }).catch(() => {});
+    }
+    await releaseWorkspaceLease(workspaceLease, "syncUp failed and released workspace lease.", {
+      jobId: job.id,
+      error: message,
+    });
     throw new Error(`File sync to ${host.alias} failed: ${message}`);
   }
 
-  // Write base requirements to remote if configured
-  if (host.baseRequirements) {
+  // Write base requirements to remote ONLY if no pre-configured environment exists.
+  // When conda/venv is configured on the host, the host env is authoritative —
+  // writing base_requirements.txt would trigger the helper's merge+pip logic,
+  // which can break the environment by attempting to build packages from source.
+  if (host.baseRequirements && !config.conda) {
     try {
       await sshExec(config,
         `mkdir -p ${remoteDir}/.arcana && cat > ${remoteDir}/.arcana/base_requirements.txt << 'ARCANA_EOF'\n${host.baseRequirements}\nARCANA_EOF`
@@ -502,12 +1454,50 @@ export async function submitRemoteJob(params: {
     }
   }
 
+  if (runtimeDependencies.length > 0) {
+    try {
+      const probeMessages: string[] = [];
+      for (const dependency of runtimeDependencies) {
+        const probe = await probeRuntimeDependency(config, remoteDir, dependency);
+        probeMessages.push(
+          `${dependency.kind}:${dependency.name}${probe.detail ? ` — ${probe.detail}` : ""}`,
+        );
+      }
+      await prisma.remoteJob.update({
+        where: { id: job.id },
+        data: {
+          diagnostics: [params.diagnostics, ...probeMessages].filter(Boolean).join("\n"),
+        },
+      }).catch(() => {});
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Runtime dependency probe failed";
+      const warning = `Runtime dependency probe warning: ${message}`;
+      await prisma.remoteJob.update({
+        where: { id: job.id },
+        data: {
+          diagnostics: [params.diagnostics, warning].filter(Boolean).join("\n"),
+        },
+      }).catch(() => {});
+      if (params.projectId) {
+        await createOrUpdateHelpRequest({
+          projectId: params.projectId,
+          category: "env_issue",
+          title: `Runtime dependency probe warning on ${host.alias}`,
+          detail: warning,
+          suggestion: "Use validate_environment or diagnose_remote_host if the experiment later fails for environment reasons.",
+          metadata: { hostAlias: host.alias, remoteJobId: job.id, runtimeProbe: true },
+        }).catch(() => {});
+      }
+      console.warn(`[remote-executor] ${warning}`);
+    }
+  }
+
   // Start the experiment + poll in the background
-  runAndPoll(job.id, config, backend, remoteDir, params.command, params.localDir, runName).catch((err) => {
+  runAndPoll(job.id, config, backend, remoteDir, params.command, params.localDir, runName, lifecycleRunId, lifecycleAttemptId, workspaceLease).catch((err) => {
     console.error(`[remote-executor] Job ${job.id} background error:`, err);
   });
 
-  return { jobId: job.id };
+  return { jobId: job.id, runId: lifecycleRunId };
 }
 
 async function runAndPoll(
@@ -518,6 +1508,9 @@ async function runAndPoll(
   command: string,
   localDir?: string,
   runName?: string,
+  runId?: string,
+  attemptId?: string,
+  workspaceLease?: WorkspaceLeaseBinding,
 ) {
   try {
     // 1. Start the command on the remote (via helper — handles venv, supervision, OOM detection)
@@ -526,6 +1519,18 @@ async function runAndPoll(
       where: { id: jobId },
       data: { remotePid: pid },
     });
+    if (attemptId) {
+      await setAttemptRunning({ attemptId, remotePid: pid }).catch(() => {});
+    }
+    if (runId) {
+      await transitionRunState({
+        runId,
+        toState: "RUNNING",
+        reason: "Remote process started",
+        attemptId,
+      }).catch(() => {});
+      await syncLegacyRemoteJobProjection({ runId, remoteJobId: jobId }).catch(() => {});
+    }
 
     // 2. Poll via helper status — SSH ControlMaster reuses connections
     // With connection multiplexing + retry, transient failures are handled automatically.
@@ -543,6 +1548,26 @@ async function runAndPoll(
       const current = await prisma.remoteJob.findUnique({ where: { id: jobId } });
       if (!current || current.status === "CANCELLED") {
         try { await killViaHelper(config, remoteDir); } catch { /* best effort */ }
+        if (attemptId) {
+          await finalizeAttempt({
+            attemptId,
+            exitCode: null,
+            errorClass: "RESOURCE_ERROR",
+            errorReason: "Cancelled while running",
+          }).catch(() => {});
+        }
+        if (runId) {
+          await transitionRunState({
+            runId,
+            toState: "CANCELLED",
+            reason: "Remote job was cancelled",
+            attemptId,
+          }).catch(() => {});
+          await syncLegacyRemoteJobProjection({ runId, remoteJobId: jobId }).catch(() => {});
+        }
+        await releaseWorkspaceLease(workspaceLease, "Remote job cancelled and released workspace lease.", {
+          jobId,
+        });
         return;
       }
 
@@ -556,6 +1581,17 @@ async function runAndPoll(
           where: { id: jobId },
           data: { stdout: status.stdout_tail, stderr: status.stderr_tail },
         });
+        if (attemptId) {
+          await prisma.experimentAttempt.update({
+            where: { id: attemptId },
+            data: {
+              heartbeatAt: new Date(),
+              stdoutTail: status.stdout_tail,
+              stderrTail: status.stderr_tail,
+            },
+          }).catch(() => {});
+          await heartbeatAttemptExecutorLeases({ attemptId }).catch(() => {});
+        }
 
         if (status.status !== "running" && status.status !== "setup") {
           done = true;
@@ -659,6 +1695,32 @@ async function runAndPoll(
             },
           });
 
+          if (attemptId) {
+            await finalizeAttempt({
+              attemptId,
+              exitCode,
+              stdoutTail: finalStdout,
+              stderrTail: finalStderr,
+              errorClass: "AUTO_FIXED",
+              errorReason: `${fixResult.reason}; resubmitted as ${fixResult.resubmitJobId}`,
+            }).catch(() => {});
+          }
+          if (runId) {
+            await transitionRunState({
+              runId,
+              toState: "CANCELLED",
+              reason: `Auto-fixed and superseded by run ${fixResult.resubmitJobId}`,
+              attemptId,
+              payload: { resubmitJobId: fixResult.resubmitJobId },
+            }).catch(() => {});
+            await syncLegacyRemoteJobProjection({ runId, remoteJobId: jobId }).catch(() => {});
+          }
+
+          await releaseWorkspaceLease(workspaceLease, "Remote job auto-fixed and superseded; released workspace lease before resubmit handoff.", {
+            jobId,
+            resubmitJobId: fixResult.resubmitJobId,
+          });
+
           if (localDir) {
             import("./workspace").then(({ invalidateWorkspace }) => {
               const job2 = prisma.remoteJob.findUnique({ where: { id: jobId }, select: { projectId: true } });
@@ -689,6 +1751,40 @@ async function runAndPoll(
       },
     });
 
+    if (attemptId) {
+      await finalizeAttempt({
+        attemptId,
+        exitCode,
+        stdoutTail: finalStdout,
+        stderrTail: indeterminate
+          ? `${finalStderr}\n\n[INDETERMINATE] Could not determine job outcome`
+          : finalStderr,
+        errorClass: classifiedErrorClass,
+        errorReason: failed || indeterminate ? "Experiment execution failed" : null,
+      }).catch(() => {});
+    }
+    if (runId) {
+      await transitionRunState({
+        runId,
+        toState: finalJobStatus === "COMPLETED" ? "SUCCEEDED" : "FAILED",
+        reason: finalJobStatus === "COMPLETED" ? "Run completed successfully" : "Run failed",
+        attemptId,
+        payload: { jobId, exitCode, classifiedErrorClass, indeterminate },
+      }).catch(() => {});
+      await syncLegacyRemoteJobProjection({ runId, remoteJobId: jobId }).catch(() => {});
+    }
+    await releaseWorkspaceLease(workspaceLease, "Remote job reached terminal state and released workspace lease.", {
+      jobId,
+      finalJobStatus,
+      exitCode,
+    });
+
+    if (finalJobStatus === "COMPLETED") {
+      await importExperimentResultFromRemoteJob(jobId).catch((err) => {
+        console.warn(`[remote-executor] result import failed for ${jobId}:`, err);
+      });
+    }
+
     // Archive the run on the remote host (best-effort, post-sync, only on success)
     if (runName && localDir && !failed && !indeterminate) {
       const hostRecord2 = await prisma.remoteHost.findFirst({
@@ -708,12 +1804,16 @@ async function runAndPoll(
         const title = diag.includes("OOM")
           ? "Experiment OOM — needs smaller model or quantization"
           : `Missing package on ${config.host}`;
-        prisma.researchLogEntry.create({
-          data: {
-            projectId: jobRecord.projectId,
-            type: "help_request",
-            content: diag,
-            metadata: JSON.stringify({ category, title, suggestion: diag.split("Suggestions:")[1]?.trim() || "", resolved: false }),
+        createOrUpdateHelpRequest({
+          projectId: jobRecord.projectId,
+          category,
+          title,
+          detail: diag,
+          suggestion: diag.split("Suggestions:")[1]?.trim() || "",
+          metadata: {
+            ...(jobId ? { jobId } : {}),
+            hostAlias: config.host,
+            remoteDir,
           },
         }).catch(() => {});
       }
@@ -799,19 +1899,14 @@ async function runAndPoll(
                 input: JSON.stringify({ workDir: localDir }),
               },
             });
-            // Dynamic import to avoid circular dependency
-            import("./sub-agent").then(({ runSubAgent }) => {
-              runSubAgent(vizTask.id)
-                .then(() => {
-                  // Caption new figures after visualizer completes
-                  if (localDir) {
-                    import("./figure-captioner").then(({ captionNewFigures }) => {
-                      captionNewFigures(job.projectId!, localDir).catch(() => {});
-                    }).catch(() => {});
-                  }
-                })
-                .catch((e) => console.error("[auto-viz] Visualizer sub-agent failed:", e));
-            }).catch(() => {});
+            void launchSubAgentTask(vizTask.id, "auto-viz")
+              .then(() => {
+                if (!localDir) return;
+                import("./figure-captioner").then(({ captionNewFigures }) => {
+                  captionNewFigures(job.projectId!, localDir).catch(() => {});
+                }).catch(() => {});
+              })
+              .catch((e) => console.error("[auto-viz] Visualizer sub-agent failed:", e));
 
             await prisma.researchLogEntry.create({
               data: {
@@ -837,6 +1932,29 @@ async function runAndPoll(
         stderr: message,
         completedAt: new Date(),
       },
+    });
+
+    if (attemptId) {
+      await finalizeAttempt({
+        attemptId,
+        exitCode: null,
+        stderrTail: message,
+        errorClass: "RESOURCE_ERROR",
+        errorReason: message,
+      }).catch(() => {});
+    }
+    if (runId) {
+      await transitionRunState({
+        runId,
+        toState: "FAILED",
+        reason: `runAndPoll exception: ${message}`,
+        attemptId,
+      }).catch(() => {});
+      await syncLegacyRemoteJobProjection({ runId, remoteJobId: jobId }).catch(() => {});
+    }
+    await releaseWorkspaceLease(workspaceLease, "runAndPoll exception released workspace lease.", {
+      jobId,
+      error: message,
     });
 
     const job = await prisma.remoteJob.findUnique({ where: { id: jobId } });
@@ -881,6 +1999,34 @@ async function runAndPoll(
  *  - Periodic cleanup if desired
  */
 export async function cleanupStaleJobs(projectId?: string): Promise<number> {
+  if (!projectId) {
+    if (staleCleanupAllProjects) return staleCleanupAllProjects;
+    staleCleanupAllProjects = (async () => {
+      if (staleCleanupByProject.size > 0) {
+        await Promise.allSettled(Array.from(staleCleanupByProject.values()));
+      }
+      return cleanupStaleJobsInternal();
+    })().finally(() => {
+      staleCleanupAllProjects = null;
+    });
+    return staleCleanupAllProjects;
+  }
+
+  if (staleCleanupAllProjects) {
+    return staleCleanupAllProjects;
+  }
+
+  const existing = staleCleanupByProject.get(projectId);
+  if (existing) return existing;
+
+  const promise = cleanupStaleJobsInternal(projectId).finally(() => {
+    staleCleanupByProject.delete(projectId);
+  });
+  staleCleanupByProject.set(projectId, promise);
+  return promise;
+}
+
+async function cleanupStaleJobsInternal(projectId?: string): Promise<number> {
   const MIN_AGE_MS = 5 * 60 * 1000; // Don't touch jobs younger than 5 minutes
   const now = new Date();
 
@@ -919,8 +2065,29 @@ export async function cleanupStaleJobs(projectId?: string): Promise<number> {
             console.warn(`[remote-executor] Job ${job.id} running for >72h, killing`);
             await killViaHelper(config, job.remoteDir).catch(() => {});
           } else {
+            const latestAttempt = job.runId
+              ? await prisma.experimentAttempt.findFirst({
+                  where: { runId: job.runId },
+                  orderBy: [{ attemptNumber: "desc" }, { createdAt: "desc" }],
+                  select: { id: true },
+                })
+              : null;
+            if (latestAttempt?.id) {
+              await heartbeatAttemptExecutorLeases({ attemptId: latestAttempt.id }).catch(() => {});
+            } else {
+              const lease = await loadExecutorLease(buildWorkspaceLeaseKey(job.hostId, job.remoteDir));
+              if (lease) {
+                await heartbeatExecutorLease({
+                  leaseKey: lease.leaseKey,
+                  leaseToken: lease.leaseToken,
+                }).catch(() => {});
+              }
+            }
             continue; // Still alive, let it run
           }
+        }
+        if (helperResult.status === "unknown") {
+          helperResult = null;
         }
       } catch {
         // Helper/SSH failed — fall back to time-based check
@@ -965,6 +2132,47 @@ export async function cleanupStaleJobs(projectId?: string): Promise<number> {
       },
     });
 
+    if (job.runId) {
+      const latestAttempt = await prisma.experimentAttempt.findFirst({
+        where: { runId: job.runId },
+        orderBy: [{ attemptNumber: "desc" }, { createdAt: "desc" }],
+        select: { id: true },
+      });
+
+      if (latestAttempt) {
+        await finalizeAttempt({
+          attemptId: latestAttempt.id,
+          exitCode: exitCodeFromRemote,
+          stdoutTail: finalStdout,
+          stderrTail: finalStderr,
+          errorClass: failed || indeterminate ? "RESOURCE_ERROR" : null,
+          errorReason: failed || indeterminate ? "Recovered by stale-job cleanup" : null,
+        }).catch(() => {});
+      }
+
+      await transitionRunState({
+        runId: job.runId,
+        toState: finalStatus === "COMPLETED" ? "SUCCEEDED" : "FAILED",
+        reason: "Recovered by stale-job cleanup",
+        attemptId: latestAttempt?.id || null,
+      }).catch(() => {});
+
+      await syncLegacyRemoteJobProjection({ runId: job.runId, remoteJobId: job.id }).catch(() => {});
+      if (latestAttempt?.id) {
+        await releaseAttemptExecutorLeases({
+          attemptId: latestAttempt.id,
+          reason: "Stale-job cleanup released workspace lease.",
+          payload: { jobId: job.id, finalStatus },
+        }).catch(() => {});
+      } else if (job.remoteDir) {
+        await releaseExecutorLease({
+          leaseKey: buildWorkspaceLeaseKey(job.hostId, job.remoteDir),
+          reason: "Stale-job cleanup released standalone workspace lease.",
+          payload: { jobId: job.id, finalStatus },
+        }).catch(() => {});
+      }
+    }
+
     // Sync results back if possible
     if (config && job.remoteDir && job.localDir) {
       try {
@@ -972,6 +2180,12 @@ export async function cleanupStaleJobs(projectId?: string): Promise<number> {
       } catch {
         // Non-critical
       }
+    }
+
+    if (finalStatus === "COMPLETED") {
+      await importExperimentResultFromRemoteJob(job.id).catch((err) => {
+        console.warn(`[remote-executor] result import failed during stale cleanup for ${job.id}:`, err);
+      });
     }
 
     // Update linked research step
@@ -1049,12 +2263,15 @@ export async function analyzeScript(
 ): Promise<ScriptDiagnostics | null> {
   try {
     const raw = await invokeHelper(host, `check ${remoteDir} ${scriptName}`);
-    const result = parseHelperResponse<ScriptDiagnostics & { ok: boolean }>(raw);
+    const result = parseHelperResponse<ScriptDiagnostics & { ok: boolean; errors?: Record<string, unknown>[] }>(raw);
+    const normalizedErrors = Array.isArray(result.errors) ? result.errors.map(normalizePyrightDiagnostic) : [];
+    const errorCount = normalizedErrors.filter(d => d.severity === "error").length;
+    const warningCount = normalizedErrors.filter(d => d.severity === "warning").length;
 
     const diagnosticsResult: ScriptDiagnostics = {
-      errors: result.errors || [],
-      errorCount: result.errorCount || 0,
-      warningCount: result.warningCount || 0,
+      errors: normalizedErrors,
+      errorCount,
+      warningCount,
       pyrightVersion: result.pyrightVersion,
       unavailable: result.unavailable,
       timeout: result.timeout,
@@ -1083,7 +2300,6 @@ export function formatDiagnostics(
   scriptName: string,
   diagnostics: ScriptDiagnostics,
   attempt: number,
-  maxAttempts: number,
 ): string {
   const lines: string[] = [];
   lines.push(`Static analysis found ${diagnostics.errorCount} error(s) in ${scriptName}:\n`);
@@ -1103,7 +2319,7 @@ export function formatDiagnostics(
     }
   }
 
-  lines.push(`\nFix these issues in the script and resubmit. (Attempt ${attempt}/${maxAttempts} — after ${maxAttempts} failed attempts, the script will be submitted anyway.)`);
+  lines.push(`\nFix these issues in the script and resubmit. (Attempt ${attempt}.)`);
 
   return lines.join("\n");
 }
@@ -1117,6 +2333,7 @@ export async function cancelRemoteJob(jobId: string): Promise<void> {
     include: { host: true },
   });
   if (!job) return;
+  if (job.status === "COMPLETED" || job.status === "FAILED" || job.status === "CANCELLED") return;
 
   const config = hostToConfig(job.host);
 
@@ -1137,8 +2354,46 @@ export async function cancelRemoteJob(jobId: string): Promise<void> {
 
   await prisma.remoteJob.update({
     where: { id: jobId },
-    data: { status: "CANCELLED", completedAt: new Date() },
+    data: {
+      status: "CANCELLED",
+      completedAt: new Date(),
+      stderr: `${job.stderr || ""}\n\n[CANCELLED] Cancelled by control plane.`.trim(),
+    },
   });
+
+  const latestAttempt = await findLatestAttempt(job.runId);
+  if (latestAttempt && latestAttempt.state !== "TERMINAL") {
+    await finalizeAttempt({
+      attemptId: latestAttempt.id,
+      exitCode: job.exitCode ?? null,
+      stdoutTail: job.stdout || "",
+      stderrTail: `${job.stderr || ""}\n\n[CANCELLED] Cancelled by control plane.`.trim(),
+      errorReason: "Remote job cancelled",
+    }).catch(() => {});
+  }
+  if (job.runId) {
+    await transitionRunState({
+      runId: job.runId,
+      toState: "CANCELLED",
+      reason: "Remote job cancelled",
+      attemptId: latestAttempt?.id || null,
+      payload: { jobId },
+    }).catch(() => {});
+    await syncLegacyRemoteJobProjection({ runId: job.runId, remoteJobId: job.id }).catch(() => {});
+  }
+  if (latestAttempt?.id) {
+    await releaseAttemptExecutorLeases({
+      attemptId: latestAttempt.id,
+      reason: "Remote job cancelled and released workspace lease.",
+      payload: { jobId, cancelled: true },
+    }).catch(() => {});
+  } else if (job.remoteDir) {
+    await releaseExecutorLease({
+      leaseKey: buildWorkspaceLeaseKey(job.hostId, job.remoteDir),
+      reason: "Remote job cancelled and released standalone workspace lease.",
+      payload: { jobId, cancelled: true },
+    }).catch(() => {});
+  }
 }
 
 export interface ConnectionTestResult {

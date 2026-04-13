@@ -17,6 +17,7 @@ Commands:
   logs <workdir> [--lines N]     Tail stdout/stderr
   kill <workdir>                  Kill experiment process group
   setup-env <workdir>            Setup venv + install requirements
+  probe <workdir> <payload_b64>  Run a runtime-readiness probe in the experiment environment
   info                           Host info (RAM, GPUs, disk)
   manifest <workdir>             Structured workspace manifest (files, results, packages)
   archive <workdir> <run_name> [--include-checkpoints]  Archive a completed run
@@ -34,9 +35,10 @@ import subprocess
 import sys
 import time
 import hashlib
+import base64
 from pathlib import Path
 
-HELPER_VERSION = "8"
+HELPER_VERSION = "14"
 ARCANA_DIR = ".arcana"
 STATUS_FILE = "status.json"
 REQS_HASH_FILE = "reqs_hash"
@@ -77,6 +79,36 @@ def tail_file(path, lines=50):
             return result
     except (FileNotFoundError, PermissionError):
         return ""
+
+
+def resolve_log_paths(workdir, status=None):
+    """Resolve stdout/stderr paths from status (with legacy fallback)."""
+    status = status or {}
+    stdout_path = status.get("stdout_path")
+    stderr_path = status.get("stderr_path")
+
+    if not stdout_path:
+        stdout_path = os.path.join(workdir, "stdout.log")
+    elif not os.path.isabs(stdout_path):
+        stdout_path = os.path.join(workdir, stdout_path)
+
+    if not stderr_path:
+        stderr_path = os.path.join(workdir, "stderr.log")
+    elif not os.path.isabs(stderr_path):
+        stderr_path = os.path.join(workdir, stderr_path)
+
+    return stdout_path, stderr_path
+
+
+def resolve_exit_code_path(workdir, status=None):
+    """Resolve exit_code path from status (with legacy fallback)."""
+    status = status or {}
+    exit_code_path = status.get("exit_code_path")
+    if not exit_code_path:
+        return os.path.join(workdir, ARCANA_DIR, "exit_code")
+    if not os.path.isabs(exit_code_path):
+        return os.path.join(workdir, exit_code_path)
+    return exit_code_path
 
 
 def read_status(workdir):
@@ -207,6 +239,12 @@ def setup_venv(workdir, log_callback=None):
     Setup virtual environment and install requirements if needed.
     Returns (success, message).
     """
+    # If a pre-configured environment exists (ARCANA_CONDA), skip venv entirely.
+    # The host environment is authoritative — do not create .venv or pip install.
+    conda_env = os.environ.get("ARCANA_CONDA", "").strip()
+    if conda_env:
+        return True, "Using pre-configured host environment (skipping venv/pip)"
+
     reqs_path = os.path.join(workdir, "requirements.txt")
     if not os.path.exists(reqs_path):
         return True, "No requirements.txt found, skipping venv setup"
@@ -335,14 +373,110 @@ def setup_venv(workdir, log_callback=None):
 
 
 def get_venv_python(workdir):
-    """Get path to venv python, or system python."""
+    """Get path to the experiment python — prefers configured env over workspace .venv."""
+    # 1. Pre-configured environment takes priority
+    conda_env = os.environ.get("ARCANA_CONDA", "").strip()
+    if conda_env:
+        if conda_env.endswith("/python") or conda_env.endswith("/python3"):
+            return conda_env
+        # conda_env might be a path to activate or an env name — resolve python
+        bin_dir = os.path.dirname(conda_env) if "/" in conda_env else ""
+        if bin_dir:
+            for name in ["python3", "python"]:
+                candidate = os.path.join(bin_dir, name)
+                if os.path.exists(candidate):
+                    return candidate
+    # 2. Workspace .venv
     venv_py = os.path.join(workdir, ".venv", "bin", "python3")
     if os.path.exists(venv_py):
         return venv_py
     venv_py2 = os.path.join(workdir, ".venv", "bin", "python")
     if os.path.exists(venv_py2):
         return venv_py2
+    # 3. System python
     return "python3"
+
+
+def build_runtime_shell_parts(workdir):
+    """Build shell setup steps for the configured runtime environment."""
+    shell_parts = [f"cd {workdir}"]
+    conda_env = os.environ.get("ARCANA_CONDA", "")
+    has_existing_env = bool(conda_env.strip())
+
+    if has_existing_env:
+        if conda_env.endswith("/activate"):
+            shell_parts.append(f"source {conda_env}")
+        elif conda_env.endswith("/python") or conda_env.endswith("/python3"):
+            bin_dir = os.path.dirname(conda_env)
+            activate = os.path.join(bin_dir, "activate")
+            shell_parts.append(f"source {activate} 2>/dev/null || export PATH={bin_dir}:$PATH")
+        else:
+            shell_parts.append(
+                f"conda activate {conda_env} 2>/dev/null || source activate {conda_env} 2>/dev/null || source {conda_env} 2>/dev/null || true"
+            )
+    else:
+        venv_activate = os.path.join(workdir, ".venv", "bin", "activate")
+        if os.path.exists(venv_activate):
+            shell_parts.append(f"source {venv_activate}")
+
+    setup_cmd = os.environ.get("ARCANA_SETUP")
+    if setup_cmd:
+        shell_parts.append(setup_cmd)
+
+    return shell_parts
+
+
+def ensure_runtime_env(workdir):
+    """Ensure the experiment runtime environment exists before probes/run."""
+    conda_env = os.environ.get("ARCANA_CONDA", "")
+    if conda_env.strip():
+        return True, "Using pre-configured environment"
+    return setup_venv(workdir)
+
+
+def run_python_probe(workdir, code, timeout=120):
+    """Run a Python snippet inside the experiment runtime environment."""
+    success, msg = ensure_runtime_env(workdir)
+    if not success:
+        return {"ok": False, "error": msg}
+
+    arcana_dir = os.path.join(workdir, ARCANA_DIR)
+    os.makedirs(arcana_dir, exist_ok=True)
+    probe_path = os.path.join(arcana_dir, "runtime_probe.py")
+    with open(probe_path, "w") as f:
+        f.write(code)
+
+    shell_parts = build_runtime_shell_parts(workdir)
+    shell_parts.append(f"python3 {probe_path}")
+    full_cmd = " && ".join(shell_parts)
+
+    try:
+        result = subprocess.run(
+            ["bash", "-lc", full_cmd],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            cwd=workdir,
+        )
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "error": f"Probe timed out after {timeout}s"}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+    if result.returncode != 0:
+        stderr = (result.stderr or "").strip()
+        stdout = (result.stdout or "").strip()
+        return {"ok": False, "error": stderr or stdout or f"Probe failed with exit {result.returncode}"}
+
+    raw = (result.stdout or "").strip()
+    for line in reversed(raw.splitlines()):
+        line = line.strip()
+        if line.startswith("{"):
+            try:
+                return json.loads(line)
+            except Exception:
+                continue
+    return {"ok": False, "error": f"Probe returned no JSON payload: {raw[:300]}"}
 
 
 # ── Commands ──────────────────────────────────────────────────────
@@ -350,13 +484,16 @@ def get_venv_python(workdir):
 def cmd_run(workdir, command, run_name=None):
     """Launch experiment in background with monitoring.
 
-    run_name is accepted but IGNORED for execution — scripts always run from
-    workdir root. It's only stored in status.json for the executor to know
-    which job this was.
+    Scripts run from workdir root, but logs can be isolated per run_name.
     """
     workdir = os.path.abspath(workdir)
     if not os.path.isdir(workdir):
         json_err(f"Workdir does not exist: {workdir}")
+
+    if run_name:
+        run_name = os.path.basename(str(run_name).strip())
+        if not run_name:
+            run_name = None
 
     # Auto-kill any running experiment in this workdir before starting a new one
     status = read_status(workdir)
@@ -387,59 +524,50 @@ def cmd_run(workdir, command, run_name=None):
             status["completed_at"] = time.strftime("%Y-%m-%dT%H:%M:%S")
             write_status(workdir, status)
 
-    # Check for pre-existing environment (user-configured venv/conda)
-    conda_env = os.environ.get("ARCANA_CONDA", "")
-    has_existing_env = bool(conda_env.strip())
-
     write_status(workdir, {
         "status": "setup",
         "started_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
         "run_name": run_name,
     })
 
-    # Only create/install venv if NO pre-existing environment is configured
-    msg = "Using pre-configured environment" if has_existing_env else ""
-    if not has_existing_env:
-        success, msg = setup_venv(workdir)
-        if not success:
-            write_status(workdir, {
-                "status": "failed",
-                "error": msg,
-                "started_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
-                "completed_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
-            })
-            json_err(f"Environment setup failed: {msg}")
+    success, msg = ensure_runtime_env(workdir)
+    if not success:
+        write_status(workdir, {
+            "status": "failed",
+            "error": msg,
+            "started_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+            "completed_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+        })
+        json_err(f"Environment setup failed: {msg}")
 
     # Build the actual command to run — always from workdir root
-    shell_parts = [f"cd {workdir}"]
+    shell_parts = build_runtime_shell_parts(workdir)
 
-    if has_existing_env:
-        if conda_env.endswith("/activate"):
-            shell_parts.append(f"source {conda_env}")
-        elif conda_env.endswith("/python") or conda_env.endswith("/python3"):
-            bin_dir = os.path.dirname(conda_env)
-            activate = os.path.join(bin_dir, "activate")
-            shell_parts.append(f"source {activate} 2>/dev/null || export PATH={bin_dir}:$PATH")
-        else:
-            shell_parts.append(
-                f"conda activate {conda_env} 2>/dev/null || source activate {conda_env} 2>/dev/null || source {conda_env} 2>/dev/null || true"
-            )
-    else:
-        venv_activate = os.path.join(workdir, ".venv", "bin", "activate")
-        if os.path.exists(venv_activate):
-            shell_parts.append(f"source {venv_activate}")
-
-    setup_cmd = os.environ.get("ARCANA_SETUP")
-    if setup_cmd:
-        shell_parts.append(setup_cmd)
+    run_log_dir = os.path.join(workdir, run_name) if run_name else workdir
+    os.makedirs(run_log_dir, exist_ok=True)
+    result_dir = os.path.join(workdir, "results")
+    os.makedirs(result_dir, exist_ok=True)
+    stdout_path = os.path.join(run_log_dir, "stdout.log")
+    stderr_path = os.path.join(run_log_dir, "stderr.log")
+    result_path = os.path.join(result_dir, "arcana_result.json")
 
     exit_code_file = os.path.join(workdir, ARCANA_DIR, "exit_code")
+    try:
+        os.remove(exit_code_file)
+    except FileNotFoundError:
+        pass
+    except Exception:
+        pass
+
+    shell_parts.append(f"export ARCANA_WORKDIR={workdir!r}")
+    shell_parts.append(f"export ARCANA_RUN_DIR={run_log_dir!r}")
+    shell_parts.append(f"export ARCANA_RESULTS_DIR={result_dir!r}")
+    shell_parts.append(f"export ARCANA_RESULT_PATH={result_path!r}")
+    if run_name:
+        shell_parts.append(f"export ARCANA_RUN_NAME={run_name!r}")
+
     shell_parts.append(f'({command}); __ec=$?; echo $__ec > {exit_code_file}; exit $__ec')
     full_cmd = " && ".join(shell_parts)
-
-    # stdout/stderr always in workdir root
-    stdout_path = os.path.join(workdir, "stdout.log")
-    stderr_path = os.path.join(workdir, "stderr.log")
 
     stdout_f = open(stdout_path, "w")
     stderr_f = open(stderr_path, "w")
@@ -467,6 +595,9 @@ def cmd_run(workdir, command, run_name=None):
         "oom_detail": "",
         "env_setup_msg": msg,
         "run_name": run_name,
+        "stdout_path": stdout_path,
+        "stderr_path": stderr_path,
+        "exit_code_path": exit_code_file,
         "resource_snapshots": [take_snapshot()],
         "stdout_tail": "",
         "stderr_tail": "",
@@ -526,9 +657,10 @@ def cmd_monitor(workdir, pid, pgid):
             if len(snapshots) > MAX_SNAPSHOTS:
                 snapshots = snapshots[-MAX_SNAPSHOTS:]
 
+            stdout_path, stderr_path = resolve_log_paths(workdir, status)
             status["resource_snapshots"] = snapshots
-            status["stdout_tail"] = tail_file(os.path.join(workdir, "stdout.log"), 50)
-            status["stderr_tail"] = tail_file(os.path.join(workdir, "stderr.log"), 20)
+            status["stdout_tail"] = tail_file(stdout_path, 50)
+            status["stderr_tail"] = tail_file(stderr_path, 20)
             write_status(workdir, status)
         except Exception as e:
             # Don't let snapshot/IO errors crash the monitor — keep watching the process
@@ -553,7 +685,10 @@ def cmd_monitor(workdir, pid, pgid):
     except ChildProcessError:
         # Not our child (experiment is a sibling process, not a child).
         # Read exit code from the file the experiment wrapper writes.
+        status_for_paths = read_status(workdir) or {}
+        primary_exit_code = resolve_exit_code_path(workdir, status_for_paths)
         for candidate in [
+            primary_exit_code,
             os.path.join(workdir, ARCANA_DIR, "exit_code"),
             os.path.join(workdir, ".exit_code"),  # legacy fallback
         ]:
@@ -578,7 +713,9 @@ def cmd_monitor(workdir, pid, pgid):
             oom_detail += f"\ndmesg: {dmesg_line}"
     elif exit_code is not None and exit_code != 0:
         # Check stderr for CUDA/GPU OOM
-        stderr_content = tail_file(os.path.join(workdir, "stderr.log"), 100)
+        status_for_paths = read_status(workdir) or {}
+        _, stderr_path = resolve_log_paths(workdir, status_for_paths)
+        stderr_content = tail_file(stderr_path, 100)
         cuda_oom_markers = ["CUDA out of memory", "OutOfMemoryError", "torch.cuda.OutOfMemoryError"]
         for marker in cuda_oom_markers:
             if marker in stderr_content:
@@ -598,6 +735,7 @@ def cmd_monitor(workdir, pid, pgid):
     status = read_status(workdir) or {}
     snapshots = status.get("resource_snapshots", [])
     snapshots.append(take_snapshot())
+    stdout_path, stderr_path = resolve_log_paths(workdir, status)
 
     # Structured failure diagnosis
     diagnosis = ""
@@ -633,8 +771,8 @@ def cmd_monitor(workdir, pid, pgid):
         "oom_detail": oom_detail,
         "diagnosis": diagnosis,
         "resource_snapshots": snapshots[-MAX_SNAPSHOTS:],
-        "stdout_tail": tail_file(os.path.join(workdir, "stdout.log"), 100),
-        "stderr_tail": tail_file(os.path.join(workdir, "stderr.log"), 50),
+        "stdout_tail": tail_file(stdout_path, 100),
+        "stderr_tail": tail_file(stderr_path, 50),
     })
     write_status(workdir, status)
 
@@ -651,12 +789,13 @@ def cmd_status(workdir):
             try:
                 with open(exit_code_path) as f:
                     code = int(f.read().strip())
+                stdout_path, stderr_path = resolve_log_paths(workdir, {})
                 status = {
                     "status": "completed" if code == 0 else ("oom_killed" if code == 137 else "failed"),
                     "exit_code": code,
                     "oom_detected": code == 137,
-                    "stdout_tail": tail_file(os.path.join(workdir, "stdout.log"), 100),
-                    "stderr_tail": tail_file(os.path.join(workdir, "stderr.log"), 50),
+                    "stdout_tail": tail_file(stdout_path, 100),
+                    "stderr_tail": tail_file(stderr_path, 50),
                 }
             except Exception:
                 pass
@@ -671,7 +810,9 @@ def cmd_status(workdir):
         if pid and not is_pid_alive(pid):
             # Process died but monitor didn't update — fix it now
             exit_code = None
+            primary_exit_code = resolve_exit_code_path(workdir, status)
             for candidate in [
+                primary_exit_code,
                 os.path.join(workdir, ARCANA_DIR, "exit_code"),
                 os.path.join(workdir, ".exit_code"),  # legacy fallback
             ]:
@@ -703,8 +844,9 @@ def cmd_status(workdir):
             write_status(workdir, status)
 
     # Always refresh log tails
-    status["stdout_tail"] = tail_file(os.path.join(workdir, "stdout.log"), 100)
-    status["stderr_tail"] = tail_file(os.path.join(workdir, "stderr.log"), 50)
+    stdout_path, stderr_path = resolve_log_paths(workdir, status)
+    status["stdout_tail"] = tail_file(stdout_path, 100)
+    status["stderr_tail"] = tail_file(stderr_path, 50)
     status["ok"] = True
 
     json_out(status)
@@ -713,12 +855,12 @@ def cmd_status(workdir):
 def cmd_logs(workdir, lines=200, stderr_lines=50):
     """Tail stdout/stderr."""
     workdir = os.path.abspath(workdir)
-    # Check if there's an active run with a run dir
     status = read_status(workdir)
+    stdout_path, stderr_path = resolve_log_paths(workdir, status or {})
     json_out({
         "ok": True,
-        "stdout": tail_file(os.path.join(workdir, "stdout.log"), lines),
-        "stderr": tail_file(os.path.join(workdir, "stderr.log"), stderr_lines),
+        "stdout": tail_file(stdout_path, lines),
+        "stderr": tail_file(stderr_path, stderr_lines),
     })
 
 
@@ -1182,6 +1324,31 @@ def cmd_restore(workdir, run_name):
 PYRIGHT_MARKER = "pyright_installed"
 PYRIGHT_INSTALL_TIMEOUT = 120  # 2 min for initial install
 PYRIGHT_RUN_TIMEOUT = 90       # 90s — first run indexes the entire venv
+PYRIGHT_CONFIG_FILE = "pyrightconfig.arcana.json"
+PYRIGHT_BASE_CONFIG = {
+    "typeCheckingMode": "basic",
+    "useLibraryCodeForTypes": True,
+    "reportMissingImports": "error",
+    "reportUndefinedVariable": "error",
+    "reportUndefinedFunction": "error",
+    "reportAttributeAccessIssue": "error",
+    "reportCallIssue": "error",
+    "reportArgumentType": "warning",
+    "reportGeneralTypeIssues": "warning",
+    "reportMissingModuleSource": "none",
+    "reportUnknownMemberType": "none",
+    "reportUnknownVariableType": "none",
+    "reportUnknownArgumentType": "none",
+    "reportUnknownLambdaType": "none",
+    "reportUnknownParameterType": "none",
+    "exclude": [
+        "**/.venv",
+        "**/__pycache__",
+        "**/run_*",
+        "**/.archive",
+        "**/.arcana",
+    ],
+}
 
 
 def ensure_pyright(workdir):
@@ -1238,6 +1405,21 @@ def ensure_pyright(workdir):
         return (venv_py, False, f"pip install pyright error: {e}")
 
 
+def write_pyright_config(workdir):
+    """Write the remote pyright config used for experiment script analysis."""
+    arcana_dir = os.path.join(workdir, ARCANA_DIR)
+    os.makedirs(arcana_dir, exist_ok=True)
+    config_path = os.path.join(arcana_dir, PYRIGHT_CONFIG_FILE)
+    tmp_path = config_path + ".tmp"
+    content = json.dumps(PYRIGHT_BASE_CONFIG, indent=2)
+    with open(tmp_path, "w") as f:
+        f.write(content)
+        f.flush()
+        os.fsync(f.fileno())
+    os.rename(tmp_path, config_path)
+    return config_path
+
+
 def cmd_check(workdir, script_name):
     """Run pyright static analysis on a script."""
     workdir = os.path.abspath(workdir)
@@ -1259,10 +1441,12 @@ def cmd_check(workdir, script_name):
             "reason": reason,
         })
 
+    config_path = write_pyright_config(workdir)
+
     # Run pyright
     try:
         result = subprocess.run(
-            [venv_py, "-m", "pyright", "--outputjson", "--level", "basic",
+            [venv_py, "-m", "pyright", "--outputjson", "--project", config_path, "--level", "warning",
              "--pythonpath", venv_py, script_path],
             capture_output=True, text=True, timeout=PYRIGHT_RUN_TIMEOUT,
             cwd=workdir,
@@ -1354,6 +1538,90 @@ def cmd_check(workdir, script_name):
     })
 
 
+def cmd_probe(workdir, payload_b64):
+    """Run a typed runtime-readiness probe in the experiment environment."""
+    workdir = os.path.abspath(workdir)
+    if not os.path.isdir(workdir):
+        json_err(f"Workdir does not exist: {workdir}")
+
+    try:
+        payload = json.loads(base64.urlsafe_b64decode(payload_b64 + "=" * (-len(payload_b64) % 4)).decode("utf-8"))
+    except Exception as e:
+        json_err(f"Invalid probe payload: {e}")
+
+    kind = payload.get("kind")
+    if kind == "huggingface_dataset":
+        dataset_name = payload.get("name")
+        config = payload.get("config")
+        split = payload.get("split") or "train"
+        if not dataset_name:
+            json_err("Dataset probe missing name")
+        code = f"""
+import json
+import time
+from datasets import load_dataset
+
+start = time.time()
+dataset_name = {json.dumps(dataset_name)}
+split_name = {json.dumps(split)}
+kwargs = {{"split": split_name, "streaming": True, "trust_remote_code": True}}
+args = [dataset_name]
+if {json.dumps(config)} is not None:
+    args.append({json.dumps(config)})
+ds = load_dataset(*args, **kwargs)
+first = next(iter(ds))
+detail = {{
+    "ok": True,
+    "kind": "huggingface_dataset",
+    "detail": dataset_name + ":" + split_name + " reachable (" + str(len(first.keys())) + " fields)",
+    "elapsedMs": int((time.time() - start) * 1000),
+}}
+print(json.dumps(detail))
+"""
+        result = run_python_probe(workdir, code, timeout=120)
+        if result.get("ok"):
+            json_out(result)
+        json_err(result.get("error") or "Dataset probe failed")
+    elif kind == "runtime_smoke":
+        code = """
+import json
+import time
+
+start = time.time()
+payload = {
+    "ok": True,
+    "kind": "runtime_smoke",
+    "detail": "Python runtime ready",
+    "elapsedMs": 0,
+}
+
+try:
+    import torch
+    cuda_available = bool(torch.cuda.is_available())
+    gpu_count = int(torch.cuda.device_count()) if cuda_available else 0
+    payload.update({
+        "torchVersion": getattr(torch, "__version__", "?"),
+        "cudaAvailable": cuda_available,
+        "gpuCount": gpu_count,
+        "detail": f"Python runtime ready; torch={getattr(torch, '__version__', '?')}, cuda={cuda_available}, gpus={gpu_count}",
+    })
+except Exception as exc:
+    payload.update({
+        "torchImportError": str(exc),
+        "detail": f"Python runtime ready; torch import failed: {exc}",
+    })
+
+payload["elapsedMs"] = int((time.time() - start) * 1000)
+print(json.dumps(payload))
+"""
+        result = run_python_probe(workdir, code, timeout=120)
+        if result.get("ok"):
+            json_out(result)
+        json_err(result.get("error") or "Runtime smoke probe failed")
+    else:
+        json_err(f"Unknown probe kind: {kind}")
+
+
 def cmd_version():
     """Print version."""
     json_out({"ok": True, "version": HELPER_VERSION})
@@ -1417,6 +1685,10 @@ def main():
             if len(sys.argv) < 3:
                 json_err("Usage: setup-env <workdir>")
             cmd_setup_env(sys.argv[2])
+        elif cmd == "probe":
+            if len(sys.argv) < 4:
+                json_err("Usage: probe <workdir> <payload_b64>")
+            cmd_probe(sys.argv[2], sys.argv[3])
         elif cmd == "manifest":
             if len(sys.argv) < 3:
                 json_err("Usage: manifest <workdir>")
