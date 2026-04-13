@@ -4,6 +4,7 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { MessageCircle, X, Send, Loader2, Sparkles, Copy, BookmarkPlus, Download, Check, RefreshCw, Plus, Trash2, ChevronLeft, History, ArrowUp } from "lucide-react";
 import { toast } from "sonner";
 import { MarkdownRenderer } from "@/components/ui/markdown-renderer";
+import { extractArtifacts, ArtifactCard } from "./chat-artifact";
 
 interface Message {
   id: string;
@@ -409,9 +410,21 @@ function ChatView({ projectId, thread, onUpdateMessages, initialInput, onInitial
               <UserBubble content={msg.content} onEdit={(text) => editAndResend(msg.id, text)} disabled={streaming} />
             ) : (
               <div>
-                <div className="text-xs leading-relaxed prose prose-xs dark:prose-invert max-w-none [&_h1]:text-sm [&_h2]:text-xs [&_h3]:text-xs [&_p]:text-xs [&_li]:text-xs [&_code]:text-[10px]">
-                  <MarkdownRenderer content={msg.content} />
-                </div>
+                {(() => {
+                  const { prose, artifacts } = extractArtifacts(msg.content);
+                  return (
+                    <>
+                      {artifacts.map((artifact, i) => (
+                        <ArtifactCard key={`${msg.id}-artifact-${i}`} artifact={artifact} projectId={projectId} />
+                      ))}
+                      {prose && (
+                        <div className="text-xs leading-relaxed prose prose-xs dark:prose-invert max-w-none [&_h1]:text-sm [&_h2]:text-xs [&_h3]:text-xs [&_p]:text-xs [&_li]:text-xs [&_code]:text-[10px]">
+                          <MarkdownRenderer content={prose} />
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
                 <MessageActions projectId={projectId} content={msg.content} onRegenerate={() => regenerate(msg.id)} />
               </div>
             )}
