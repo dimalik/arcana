@@ -14,6 +14,7 @@ import {
   ScrollText,
   Image,
   MessageCircle,
+  Search,
 } from "lucide-react";
 import Link from "next/link";
 import { ExperimentCard } from "./experiment-card";
@@ -773,6 +774,7 @@ export function ResearchDashboard({
 
   const [previewFile, setPreviewFile] = useState<{ name: string; path: string } | null>(null);
   const [lightboxImage, setLightboxImage] = useState<{ name: string; path: string; caption?: string } | null>(null);
+  const [fileSearch, setFileSearch] = useState("");
   const [selectedMetric, setSelectedMetric] = useState<string | null>(null);
   const [metricPickerOpen, setMetricPickerOpen] = useState(false);
   // File explorer data for Files tab
@@ -1311,8 +1313,20 @@ export function ResearchDashboard({
 
               {/* FILES TAB */}
               {rightTab === "files" && (
-                <div className="space-y-0.5 -mx-4">
-                  {fileTree.filter(f => !f.isDir).map(f => {
+                <div className="-mx-4">
+                  <div className="px-4 pb-2">
+                    <div className="relative">
+                      <Search className="absolute left-2.5 top-1/2 h-3 w-3 -translate-y-1/2 text-muted-foreground/40" />
+                      <input
+                        value={fileSearch}
+                        onChange={(e) => setFileSearch(e.target.value)}
+                        placeholder="Filter files..."
+                        className="h-8 w-full rounded-md border border-border/60 bg-background pl-8 pr-3 text-xs outline-none transition-colors placeholder:text-muted-foreground/40 focus:border-foreground/20"
+                      />
+                    </div>
+                  </div>
+                  <div className="space-y-0.5">
+                  {fileTree.filter(f => !f.isDir).filter(f => !fileSearch || f.name.toLowerCase().includes(fileSearch.toLowerCase())).map(f => {
                     const ext = f.name.split(".").pop()?.toLowerCase() || "";
                     const isImage = ["png", "jpg", "jpeg", "svg", "gif"].includes(ext);
                     const isCode = ["py", "js", "ts", "sh", "yaml", "yml", "toml", "cfg", "ini"].includes(ext);
@@ -1340,7 +1354,10 @@ export function ResearchDashboard({
                       </div>
                     );
                   })}
-                  {fileTree.length === 0 && <p className="text-sm text-muted-foreground/50 px-4">No files yet.</p>}
+                  {fileTree.filter(f => !f.isDir).filter(f => !fileSearch || f.name.toLowerCase().includes(fileSearch.toLowerCase())).length === 0 && (
+                    <p className="text-sm text-muted-foreground/50 px-4 py-4">{fileSearch ? "No files match" : "No files yet."}</p>
+                  )}
+                  </div>
                 </div>
               )}
 

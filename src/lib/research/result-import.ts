@@ -11,7 +11,7 @@ import {
 } from "./experiment-contracts";
 
 type ImportedVerdict = "better" | "worse" | "inconclusive" | "error";
-type ImportedSource = "manifest" | "stdout_summary" | "stdout_table";
+type ImportedSource = "manifest" | "stdout_summary" | "stdout_table" | "metric_lines";
 
 interface NormalizedImportedResult {
   source: ImportedSource;
@@ -298,6 +298,41 @@ function parseSummaryBlock(stdout: string, scriptName: string): NormalizedImport
       conditions: conditionMap,
       format: "summary_block",
     },
+  };
+}
+
+/**
+ * Parse "METRIC: key = value" lines from stdout.
+ * This is the format the agent's scripts actually produce.
+ */
+function parseMetricLines(stdout: string, scriptName: string): NormalizedImportedResult | null {
+  const metricPattern = /^METRIC:\s*(\S+)\s*=\s*([0-9eE.+-]+)/gm;
+  const metrics: Record<string, number> = {};
+  let match;
+  while ((match = metricPattern.exec(stdout)) !== null) {
+    const key = normalizeMetricKey(match[1]);
+    const value = Number(match[2]);
+    if (Number.isFinite(value)) {
+      metrics[key] = value;
+    }
+  }
+  if (Object.keys(metrics).length === 0) return null;
+
+  // Try to extract a summary line (=== DONE === or similar)
+  const lastLines = stdout.split("\n").slice(-20).join("\n");
+  const summary = lastLines.includes("DONE")
+    ? `${scriptName} completed with ${Object.keys(metrics).length} metrics.`
+    : `${scriptName} emitted ${Object.keys(metrics).length} METRIC lines.`;
+
+  return {
+    source: "metric_lines",
+    scriptName,
+    verdict: "inconclusive",
+    summary,
+    condition: null,
+    metrics,
+    rawMetrics: null,
+    metadata: { metricCount: Object.keys(metrics).length },
   };
 }
 
@@ -630,7 +665,8 @@ export async function importExperimentResultFromRemoteJob(jobId: string) {
   const manifestResult = await findResultManifest(job.localDir, scriptName);
   const stdoutResult = manifestResult
     ? null
-    : parseStructuredStdoutSummary(job.stdout || "", scriptName)
+    : parseMetricLines(job.stdout || "", scriptName)
+      || parseStructuredStdoutSummary(job.stdout || "", scriptName)
       || parseLegacyTableSummary(job.stdout || "", scriptName);
   const summaryBlockResult = manifestResult || stdoutResult
     ? null
