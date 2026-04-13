@@ -16,6 +16,8 @@ export function clearApiKeyCache() {
   _cachedAnthropicKey = undefined;
 }
 
+type LanguageModelUsage = "single-shot" | "tool-loop";
+
 async function getResolvedApiKey(provider: "openai" | "anthropic"): Promise<string | undefined> {
   if (provider === "openai") {
     if (_cachedOpenAIKey === undefined) {
@@ -31,7 +33,12 @@ async function getResolvedApiKey(provider: "openai" | "anthropic"): Promise<stri
   return _cachedAnthropicKey || undefined;
 }
 
-export async function getModel(provider: LLMProvider, modelId: string, proxyConfig?: ProxyConfig): Promise<LanguageModel> {
+async function getLanguageModelForUsage(
+  provider: LLMProvider,
+  modelId: string,
+  usage: LanguageModelUsage,
+  proxyConfig?: ProxyConfig,
+): Promise<LanguageModel> {
   if (provider === "proxy") {
     const headerName = proxyConfig?.headerName || process.env.LLM_PROXY_HEADER_NAME || "X-LLM-Proxy-Calling-Service";
     const headerValue = proxyConfig?.headerValue || process.env.LLM_PROXY_HEADER_VALUE;
@@ -61,36 +68,54 @@ export async function getModel(provider: LLMProvider, modelId: string, proxyConf
       return anthropic(modelId);
     }
 
-    if (sdkProvider === "openai-responses") {
-      const openai = createOpenAI({
-        baseURL: baseUrl.replace(/\/responses$/, ""),
-        apiKey: proxyConfig?.apiKey || "not-needed",
-        headers,
-      });
+    const openaiBaseUrl = baseUrl.replace(/\/responses$/, "").replace(/\/chat\/completions$/, "");
+    const openai = createOpenAI({
+      baseURL: openaiBaseUrl,
+      apiKey: proxyConfig?.apiKey || "not-needed",
+      headers,
+    });
+
+    if (sdkProvider === "openai-responses" && usage === "single-shot") {
       return openai.responses(modelId);
+    }
+
+    if (sdkProvider === "openai-responses" && usage === "tool-loop") {
+      return openai.chat(modelId as never);
     }
 
     // Google models also route through OpenAI-compatible SDK
     // (most proxies expose Gemini via OpenAI-compatible endpoints)
-    const openai = createOpenAI({
-      baseURL: baseUrl.replace(/\/chat\/completions$/, ""),
-      apiKey: proxyConfig?.apiKey || "not-needed",
-      headers,
-    });
-    return openai(modelId);
+    return openai.chat(modelId as never);
   }
 
   if (provider === "openai") {
     const apiKey = await getResolvedApiKey("openai");
     if (!apiKey) throw new Error("OpenAI API key not configured. Set it in Settings → LLM.");
     const openai = createOpenAI({ apiKey });
-    return openai(modelId);
-  } else {
-    const apiKey = await getResolvedApiKey("anthropic");
-    if (!apiKey) throw new Error("Anthropic API key not configured. Set it in Settings → LLM.");
-    const anthropic = createAnthropic({ apiKey });
-    return anthropic(modelId);
+    return openai.chat(modelId as never);
   }
+
+  const apiKey = await getResolvedApiKey("anthropic");
+  if (!apiKey) throw new Error("Anthropic API key not configured. Set it in Settings → LLM.");
+  const anthropic = createAnthropic({ apiKey });
+  return anthropic(modelId);
+}
+
+export async function getModel(provider: LLMProvider, modelId: string, proxyConfig?: ProxyConfig): Promise<LanguageModel> {
+  return getLanguageModelForUsage(provider, modelId, "single-shot", proxyConfig);
+}
+
+/**
+ * Tool-heavy agent loops should avoid the Responses API on OpenAI-compatible
+ * providers. In Zero Data Retention environments, multi-step tool calls can
+ * fail when follow-up requests reference transient response items.
+ */
+export async function getToolLoopModel(
+  provider: LLMProvider,
+  modelId: string,
+  proxyConfig?: ProxyConfig,
+): Promise<LanguageModel> {
+  return getLanguageModelForUsage(provider, modelId, "tool-loop", proxyConfig);
 }
 
 /**

@@ -230,6 +230,7 @@ export default function ResearchWorkspacePage({ params }: { params: { id: string
   };
 
   const [restarting, setRestarting] = useState(false);
+  const [sandboxing, setSandboxing] = useState(false);
 
   const handleRestart = async () => {
     if (!project) return;
@@ -265,6 +266,29 @@ export default function ResearchWorkspacePage({ params }: { params: { id: string
       toast.error("Failed to restart project");
     } finally {
       setRestarting(false);
+    }
+  };
+
+  const handleCreateSandbox = async () => {
+    if (!project) return;
+    setSandboxing(true);
+    try {
+      const res = await fetch(`/api/research/${id}/sandbox`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          phase: project.currentPhase,
+          copyWorkspace: true,
+        }),
+      });
+      if (!res.ok) throw new Error("Failed to create sandbox");
+      const sandbox = await res.json() as { id: string; workspaceCopied: boolean };
+      toast.success(sandbox.workspaceCopied ? "Sandbox created" : "Sandbox created without workspace copy");
+      router.push(`/research/${sandbox.id}`);
+    } catch {
+      toast.error("Failed to create sandbox");
+    } finally {
+      setSandboxing(false);
     }
   };
 
@@ -410,6 +434,13 @@ export default function ResearchWorkspacePage({ params }: { params: { id: string
                   <><Loader2 className="h-3 w-3 mr-1.5 animate-spin" /> Restarting...</>
                 ) : (
                   <><RotateCcw className="h-3 w-3 mr-1.5" /> Restart Agent</>
+                )}
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={handleCreateSandbox} disabled={sandboxing}>
+                {sandboxing ? (
+                  <><Loader2 className="h-3 w-3 mr-1.5 animate-spin" /> Creating Sandbox...</>
+                ) : (
+                  <><FolderArchive className="h-3 w-3 mr-1.5" /> Create Sandbox</>
                 )}
               </DropdownMenuItem>
               <DropdownMenuSeparator />

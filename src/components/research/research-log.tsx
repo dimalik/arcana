@@ -25,6 +25,8 @@ const TYPE_CONFIG: Record<string, { icon: typeof Lightbulb; color: string }> = {
   dead_end: { icon: XCircle, color: "text-red-400" },
   user_note: { icon: PenLine, color: "text-blue-400" },
   agent_suggestion: { icon: Bot, color: "text-purple-400" },
+  agent_reasoning: { icon: Bot, color: "text-purple-300" },
+  agent_tool_call: { icon: Bot, color: "text-purple-500" },
   question: { icon: HelpCircle, color: "text-cyan-400" },
   decision: { icon: CheckCircle, color: "text-emerald-400" },
   observation: { icon: Eye, color: "text-muted-foreground" },

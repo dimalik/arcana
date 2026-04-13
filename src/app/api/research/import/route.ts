@@ -142,6 +142,16 @@ export async function POST(request: NextRequest) {
     // 6. Import iterations and steps
     if (Array.isArray(iterations)) {
       for (const iter of iterations) {
+        const normalizedSteps = Array.isArray(iter.steps)
+          ? [...iter.steps]
+              .sort((a, b) => {
+                const aOrder = typeof a.sortOrder === "number" ? a.sortOrder : Number.MAX_SAFE_INTEGER;
+                const bOrder = typeof b.sortOrder === "number" ? b.sortOrder : Number.MAX_SAFE_INTEGER;
+                if (aOrder !== bOrder) return aOrder - bOrder;
+                return 0;
+              })
+              .map((step, index) => ({ ...step, sortOrder: index }))
+          : [];
         const createdIter = await prisma.researchIteration.create({
           data: {
             projectId: project.id,
@@ -150,10 +160,11 @@ export async function POST(request: NextRequest) {
             status: iter.status || "COMPLETED",
             reflection: iter.reflection,
             nextActions: iter.nextActions,
+            nextStepSortOrder: normalizedSteps.length,
           },
         });
-        if (Array.isArray(iter.steps)) {
-          for (const s of iter.steps) {
+        if (normalizedSteps.length > 0) {
+          for (const s of normalizedSteps) {
             await prisma.researchStep.create({
               data: {
                 iterationId: createdIter.id,
@@ -163,7 +174,7 @@ export async function POST(request: NextRequest) {
                 description: s.description,
                 input: s.input,
                 output: s.output,
-                sortOrder: s.sortOrder || 0,
+                sortOrder: s.sortOrder,
               },
             });
           }

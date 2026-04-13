@@ -3,6 +3,10 @@ import { prisma } from "@/lib/prisma";
 import { requireUserId } from "@/lib/paper-auth";
 import { readFile, readdir, stat } from "fs/promises";
 import path from "path";
+import { compileResearchSummary } from "@/lib/research/research-summary";
+import { getProjectLineage } from "@/lib/research/lineage-audit";
+import { ensureProjectMaintenance } from "@/lib/research/project-maintenance";
+import { getProjectTraceAudit } from "@/lib/research/trace-audit";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -18,6 +22,9 @@ export async function GET(request: NextRequest, { params }: Params) {
     const includeFullText = searchParams.get("fullText") === "true";
     const includeCode = searchParams.get("code") === "true";
     const includeArtifacts = searchParams.get("artifacts") === "true";
+    const includeTrace = searchParams.get("noTrace") !== "true";
+    const traceLimitParam = Number(searchParams.get("traceLimit") || "200");
+    const traceLimit = Number.isFinite(traceLimitParam) ? traceLimitParam : 200;
 
     const project = await prisma.researchProject.findFirst({
       where: { id, userId },
@@ -36,6 +43,15 @@ export async function GET(request: NextRequest, { params }: Params) {
           },
         },
         log: {
+          orderBy: { createdAt: "asc" },
+        },
+        claims: {
+          include: {
+            evidence: true,
+            assessments: {
+              orderBy: { createdAt: "desc" },
+            },
+          },
           orderBy: { createdAt: "asc" },
         },
         collection: {
@@ -69,20 +85,30 @@ export async function GET(request: NextRequest, { params }: Params) {
       return NextResponse.json({ error: "Project not found" }, { status: 404 });
     }
 
+    await ensureProjectMaintenance(id);
+
     // Load agent memories for this user (project-scoped + global)
-    const memories = await prisma.agentMemory.findMany({
-      where: {
-        userId,
-        OR: [{ projectId: id }, { projectId: null }],
-      },
-      select: {
-        category: true,
-        lesson: true,
-        context: true,
-        projectId: true,
-        usageCount: true,
-      },
-    });
+    const [memories, groundedSummary, lineage, traceAudit] = await Promise.all([
+      prisma.agentMemory.findMany({
+        where: {
+          userId,
+          OR: [{ projectId: id }, { projectId: null }],
+        },
+        select: {
+          category: true,
+          lesson: true,
+          context: true,
+          projectId: true,
+          usageCount: true,
+          sourceClaimId: true,
+          status: true,
+          confidence: true,
+        },
+      }),
+      includeResearch ? compileResearchSummary(id) : Promise.resolve(null),
+      includeResearch ? getProjectLineage(id) : Promise.resolve(null),
+      includeResearch && includeTrace ? getProjectTraceAudit({ projectId: id, limit: traceLimit }) : Promise.resolve(null),
+    ]);
 
     // Build export object
     const exportData: Record<string, unknown> = {
@@ -142,10 +168,53 @@ export async function GET(request: NextRequest, { params }: Params) {
           })),
         })),
         log: project.log.map((l) => ({
+          id: l.id,
           type: l.type,
           content: l.content,
           metadata: l.metadata,
           createdAt: l.createdAt,
+        })),
+        claims: project.claims.map((claim) => ({
+          id: claim.id,
+          statement: claim.statement,
+          summary: claim.summary,
+          type: claim.type,
+          status: claim.status,
+          confidence: claim.confidence,
+          createdBy: claim.createdBy,
+          createdFrom: claim.createdFrom,
+          notes: claim.notes,
+          hypothesisId: claim.hypothesisId,
+          resultId: claim.resultId,
+          taskId: claim.taskId,
+          createdAt: claim.createdAt,
+          updatedAt: claim.updatedAt,
+          assessments: claim.assessments.map((assessment) => ({
+            id: assessment.id,
+            actorRole: assessment.actorRole,
+            verdict: assessment.verdict,
+            confidence: assessment.confidence,
+            notes: assessment.notes,
+            metadata: assessment.metadata,
+            taskId: assessment.taskId,
+            createdAt: assessment.createdAt,
+          })),
+          evidence: claim.evidence.map((e) => ({
+            id: e.id,
+            kind: e.kind,
+            supports: e.supports,
+            strength: e.strength,
+            rationale: e.rationale,
+            excerpt: e.excerpt,
+            locator: e.locator,
+            paperId: e.paperId,
+            hypothesisId: e.hypothesisId,
+            resultId: e.resultId,
+            artifactId: e.artifactId,
+            logEntryId: e.logEntryId,
+            taskId: e.taskId,
+            remoteJobId: e.remoteJobId,
+          })),
         })),
         memories: memories.map((m) => ({
           category: m.category,
@@ -153,7 +222,28 @@ export async function GET(request: NextRequest, { params }: Params) {
           context: m.context,
           scope: m.projectId ? "project" : "global",
           usageCount: m.usageCount,
+          sourceClaimId: m.sourceClaimId,
+          status: m.status,
+          confidence: m.confidence,
         })),
+        summary: groundedSummary ? {
+          short: groundedSummary.short,
+          full: groundedSummary.full,
+          structured: groundedSummary.structured,
+        } : null,
+        lineage: lineage ? {
+          project: lineage.project,
+          overview: lineage.overview,
+          tracks: lineage.tracks,
+        } : null,
+        trace: includeTrace ? {
+          total: traceAudit?.total || 0,
+          returned: traceAudit?.returned || 0,
+          overview: traceAudit?.overview || null,
+          sessions: traceAudit?.sessions || [],
+          postmortems: traceAudit?.postmortems || [],
+          events: traceAudit?.events || [],
+        } : null,
       } : {}),
     };
 

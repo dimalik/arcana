@@ -45,6 +45,9 @@ export async function executeStep(projectId: string, stepId: string, userId: str
     case "generate_code":
       runCodeGen(projectId, stepId, userId, step.input).catch(handleBgError(projectId, stepId, "generate_code"));
       break;
+    case "claim_experiment_required":
+      runCodeGen(projectId, stepId, userId, step.input).catch(handleBgError(projectId, stepId, "claim_experiment_required"));
+      break;
     case "user_action":
       await prisma.researchStep.update({
         where: { id: stepId },
@@ -60,8 +63,14 @@ export async function executeStep(projectId: string, stepId: string, userId: str
 }
 
 function handleBgError(projectId: string, stepId: string, stepType: string) {
-  return (err: unknown) => {
+  return async (err: unknown) => {
     console.error(`[step-executor] ${stepType} background error for step ${stepId}:`, err);
+    const message = err instanceof Error ? err.message : String(err);
+    try {
+      await failStep(projectId, stepId, message, "dead_end");
+    } catch (persistErr) {
+      console.error(`[step-executor] failed to persist background error for step ${stepId}:`, persistErr);
+    }
   };
 }
 

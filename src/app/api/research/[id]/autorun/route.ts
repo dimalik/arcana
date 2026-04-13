@@ -5,6 +5,7 @@ import { suggestNextSteps } from "@/lib/research/orchestrator";
 import { executeStep } from "@/lib/research/step-executor";
 import { classifyTaskCategory } from "@/lib/research/task-classifier";
 import { getResourcePreference, CONFIDENCE_THRESHOLD } from "@/lib/research/resource-preferences";
+import { reserveResearchStepSortOrders } from "@/lib/research/step-order";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -44,17 +45,35 @@ export async function POST(_request: NextRequest, { params }: Params) {
       });
     }
 
+    const queuedExperimentObligation = await prisma.researchStep.findFirst({
+      where: {
+        iterationId: activeIteration.id,
+        type: "claim_experiment_required",
+        status: "PROPOSED",
+      },
+      orderBy: { sortOrder: "asc" },
+    });
+    if (queuedExperimentObligation) {
+      await prisma.researchStep.update({
+        where: { id: queuedExperimentObligation.id },
+        data: { status: "APPROVED" },
+      });
+      executeStep(id, queuedExperimentObligation.id, userId).catch((err) => {
+        console.error("[autorun] Failed to kick off coordinator experiment step:", err);
+      });
+      return NextResponse.json({
+        status: "started_existing",
+        steps: [queuedExperimentObligation],
+        executingStepId: queuedExperimentObligation.id,
+      });
+    }
+
     const suggestions = await suggestNextSteps(id);
     if (suggestions.length === 0) {
       return NextResponse.json({ status: "no_suggestions", steps: [] });
     }
 
-    // Create steps — APPROVED for automatable, PROPOSED for user_action
-    const createdSteps = [];
-    for (const s of suggestions) {
-      const isUserAction = s.type === "user_action";
-
-      // Auto-apply learned resource preference if confidence is high enough
+    const stepInputs = await Promise.all(suggestions.map(async (s) => {
       let input = s.input || {};
       try {
         const taskCat = classifyTaskCategory(s.title);
@@ -65,21 +84,28 @@ export async function POST(_request: NextRequest, { params }: Params) {
       } catch {
         // Non-critical
       }
-      const inputStr = Object.keys(input).length > 0 ? JSON.stringify(input) : null;
+      return Object.keys(input).length > 0 ? JSON.stringify(input) : null;
+    }));
 
-      const step = await prisma.researchStep.create({
-        data: {
-          iterationId: activeIteration.id,
-          type: s.type,
-          title: s.title,
-          description: s.description,
-          input: inputStr,
-          sortOrder: s.sortOrder,
-          status: isUserAction ? "PROPOSED" : "APPROVED",
-        },
-      });
-      createdSteps.push(step);
-    }
+    const createdSteps = await prisma.$transaction(async (tx) => {
+      const sortOrders = await reserveResearchStepSortOrders(tx, activeIteration.id, suggestions.length);
+      const created = [];
+      for (let index = 0; index < suggestions.length; index += 1) {
+        const s = suggestions[index];
+        created.push(await tx.researchStep.create({
+          data: {
+            iterationId: activeIteration.id,
+            type: s.type,
+            title: s.title,
+            description: s.description,
+            input: stepInputs[index],
+            sortOrder: sortOrders[index],
+            status: s.type === "user_action" ? "PROPOSED" : "APPROVED",
+          },
+        }));
+      }
+      return created;
+    });
 
     // Auto-execute the first APPROVED step (fire-and-forget)
     const firstApproved = createdSteps.find((s) => s.status === "APPROVED");

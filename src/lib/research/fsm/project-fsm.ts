@@ -30,6 +30,8 @@ export interface DesignToExecutionContext {
 export interface ExecutionToAnalysisContext {
   doneRunCount: number;
   doneNonSmokeRunCount: number;
+  /** Jobs completed since the last time we entered EXECUTION (prevents instant re-transition) */
+  newDoneNonSmokeRunCount: number;
 }
 
 export interface AnalysisToDecisionContext {
@@ -69,7 +71,7 @@ export const AUTO_TRANSITIONS: Record<string, boolean> = {
   "HYPOTHESIS->DESIGN": true,
   "DESIGN->EXECUTION": true,
   "EXECUTION->ANALYSIS": true,
-  "ANALYSIS->DECISION": false,
+  "ANALYSIS->DECISION": true,
   "DECISION->COMPLETE": true,
   "DECISION->DESIGN": true,
   "DECISION->HYPOTHESIS": false,
@@ -173,10 +175,10 @@ function evaluateExecutionToAnalysis(
 ): GuardResult {
   const checks: GuardResult["checks"] = {
     real_experiment_done: {
-      passed: ctx.doneNonSmokeRunCount > 0,
-      detail: ctx.doneNonSmokeRunCount > 0
-        ? `${ctx.doneNonSmokeRunCount} real experiments completed`
-        : `Only smoke tests completed (${ctx.doneRunCount} total) — need a non-SMOKE experiment`,
+      passed: ctx.newDoneNonSmokeRunCount > 0,
+      detail: ctx.newDoneNonSmokeRunCount > 0
+        ? `${ctx.newDoneNonSmokeRunCount} new experiments completed this iteration`
+        : `No new non-SMOKE experiments since entering EXECUTION (${ctx.doneRunCount} total historical)`,
     },
   };
 

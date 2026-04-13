@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireUserId } from "@/lib/paper-auth";
 import { executeStep } from "@/lib/research/step-executor";
+import { reserveResearchStepSortOrders } from "@/lib/research/step-order";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -92,18 +93,23 @@ export async function POST(_request: NextRequest, { params }: Params) {
       sortOrder: order++,
     });
 
-    // Create first step as APPROVED (executed immediately), rest as PROPOSED (user reviews + continues)
-    const createdSteps = [];
-    for (let i = 0; i < steps.length; i++) {
-      const step = await prisma.researchStep.create({
-        data: {
-          iterationId: activeIteration.id,
-          ...steps[i],
-          status: i === 0 ? "APPROVED" : "PROPOSED",
-        },
-      });
-      createdSteps.push(step);
-    }
+    const createdSteps = await prisma.$transaction(async (tx) => {
+      const sortOrders = await reserveResearchStepSortOrders(tx, activeIteration.id, steps.length);
+      const created = [];
+      for (let i = 0; i < steps.length; i++) {
+        created.push(await tx.researchStep.create({
+          data: {
+            iterationId: activeIteration.id,
+            type: steps[i].type,
+            title: steps[i].title,
+            description: steps[i].description,
+            sortOrder: sortOrders[i],
+            status: i === 0 ? "APPROVED" : "PROPOSED",
+          },
+        }));
+      }
+      return created;
+    });
 
     // Update project phase to literature
     await prisma.researchProject.update({

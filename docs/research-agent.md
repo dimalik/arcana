@@ -46,7 +46,7 @@ Write Python code following the naming taxonomy, validate environments, submit t
 
 Record structured results with canonical metrics, reflect on failures, run adversarial reviews, update hypotheses with evidence.
 
-**Gate to reflection**: 1+ hypothesis updated with evidence.
+**Gate to reflection**: 1+ hypothesis updated with evidence, 1+ `SUPPORTED` or `REPRODUCED` claim, at least one supporting evidence row attached to that claim, and at least one reviewer or reproducer check recorded against the claim ledger.
 
 ### Phase 5: Reflection
 
@@ -64,6 +64,8 @@ The agent calls `advance_phase` to move between phases. Each call checks the rel
 | `advance_phase` | Move to the next research phase (checks gate conditions) |
 | `register_approach` | Create or update a branch in the approach tree |
 | `define_metrics` | Set canonical metrics for the project (name, direction, description) |
+| `define_evaluation_protocol` | Define datasets, seed set, min runs, and acceptance criteria |
+| `show_evaluation_protocol` | Show active evaluation protocol contract |
 | `record_result` | Record an experiment result with canonical metrics, raw metrics, and verdict |
 | `reflect_on_failure` | Record a structured failure reflection before retrying |
 | `query_results` | Query experiment results with filters |
@@ -76,6 +78,8 @@ The agent calls `advance_phase` to move between phases. Each call checks the rel
 | `read_paper` | Read a paper's full text, summary, and insights |
 | `search_library` | Search existing papers in the user's library |
 | `query_insights` | Search Mind Palace for relevant techniques |
+| `query_skills` | Retrieve reusable skill cards (trigger, mechanism, risk) from distilled insights |
+| `design_creative_portfolio` | Generate a novel-but-testable idea portfolio using skills + anti-patterns |
 | `discover_papers` | Run citation graph exploration from seed papers |
 
 ### Web & Reading
@@ -110,6 +114,11 @@ The agent calls `advance_phase` to move between phases. Each call checks the rel
 | Tool | Description |
 |------|-------------|
 | `log_finding` | Record a finding (hypothesis, observation, breakthrough, etc.) |
+| `record_claim` | Add a claim to the project claim ledger |
+| `attach_claim_evidence` | Link papers, results, logs, tasks, or remote jobs to a claim |
+| `review_claim` | Mark a claim as supported, contested, reproduced, or retracted |
+| `promote_claim_to_memory` | Promote a verified claim into durable agent memory |
+| `show_claim_ledger` | Show the current ledger with evidence and status |
 | `update_hypothesis` | Update hypothesis status with evidence |
 | `complete_iteration` | End current iteration, set next goal |
 | `save_lesson` | Save a practical lesson to process memory |
@@ -135,12 +144,13 @@ The agent coordinates three levels of parallelism:
 
 ### Sub-agents (AgentTask)
 
-Six specialized sub-agent roles:
+Seven specialized sub-agent roles:
 
 - **Scouts** — search 2-4 different angles of a research question simultaneously. Limited tool set (search, read, library search) with a 15-step budget.
 - **Synthesizer** (Opus) — reads all papers together, finds contradictions, complementary techniques, and unexplored combinations. Required before forming hypotheses.
 - **Architect** (Opus) — proposes 2-3 novel approaches with risk ratings and validation experiments. Required before experimenting. Always recommends the cheapest validation first.
 - **Reviewer** — deep background adversarial review of methodology and results. Required before advancing to analysis.
+- **Reproducer** — verifies the strongest claim against the recorded run, artifacts, and protocol before it is treated as durable knowledge.
 - **Provocateur** — creative lateral thinker that deliberately breaks from the current trajectory. Suggests approaches the team would never consider on their own.
 - **Visualizer** — generates analysis and visualization scripts from experiment results. Runs after experiments produce data.
 
@@ -175,6 +185,20 @@ Each project defines canonical metrics via `define_metrics`:
 
 When the agent calls `record_result`, it provides both canonical metrics (mapped to the schema) and raw metrics (experiment-specific detail). The metric chart in the dashboard plots canonical metrics across experiments. When the schema changes, `metric-recompute.ts` uses an LLM to re-map all existing results to the new canonical names.
 
+## Evaluation protocol
+
+Use `define_evaluation_protocol` to lock experiment rigor before full execution:
+
+- primary metric for decision making
+- evaluation datasets/splits
+- allowed seed set
+- minimum run count
+- statistical test/confidence method
+- acceptance criteria and required baselines
+
+`run_experiment`, `execute_remote`, and `run_experiment_sweep` validate seed usage against the active protocol.  
+`record_result` validates that the protocol primary metric is present.
+
 ## Auto-fix layer
 
 When an experiment fails (`src/lib/research/auto-fix.ts`), the error is classified before the agent sees it:
@@ -189,6 +213,11 @@ The fix generation enforces a sanity check: the patched script must be 0.5x-2.0x
 
 `run_experiment_sweep` takes a base script and a list of variants (different args, env vars, or configs). It submits each variant to a different remote host in round-robin fashion, all non-blocking. The agent can then compare results across variants.
 
+Sweep safety contract:
+- Arcana allows only one active run per `host + workspace` to avoid hidden process replacement.
+- If a sweep schedules two variants onto the same host workspace concurrently, later submissions are blocked instead of silently interfering.
+- To maximize sweep parallelism, provide multiple hosts or separate work directories.
+
 ## Process memory
 
 The agent learns from trial and error. When it discovers a practical lesson (package version issue, code pattern, environment quirk), it saves it with `save_lesson`. These lessons are loaded into the system prompt of future sessions via `AgentMemory` records, organized by category:
@@ -199,6 +228,22 @@ The agent learns from trial and error. When it discovers a practical lesson (pac
 - `debugging` — error diagnosis shortcuts
 - `dataset` — preprocessing requirements
 - `performance` — optimization tricks
+
+Research knowledge is stricter than operational memory. Findings, breakthroughs, and hypothesis assessments now enter the claim ledger first; only verified claims should be promoted into approved memory.
+
+## Claim ledger
+
+Arcana tracks research conclusions as structured `ResearchClaim` records instead of letting them live only in free-form agent prose. Each claim carries:
+
+- a status: `DRAFT`, `SUPPORTED`, `CONTESTED`, `REPRODUCED`, or `RETRACTED`
+- a confidence level: `PRELIMINARY`, `MODERATE`, or `STRONG`
+- linked evidence rows (`ClaimEvidence`) pointing to papers, experiment results, artifacts, log entries, agent tasks, or remote jobs
+
+This ledger is what powers credibility-first summaries:
+
+- only `SUPPORTED` and `REPRODUCED` claims become key findings
+- `CONTESTED` claims are surfaced as limitations or open questions
+- durable memories and distilled insights should reference a source claim rather than raw chat text
 
 ## Research state and summary
 
@@ -218,6 +263,27 @@ The agent adapts for GPT and other non-Claude models:
 1. **Condensed system prompt** — the full ~18K token prompt is replaced with a phase-specific condensed version covering essential rules, current phase, and available tools.
 2. **Reduced tool set** — only essential tools for the current phase are exposed (avoiding confusion from 40+ tools).
 3. **Directive loop** — an outer loop sends phase-specific directives after each tool round (up to 15 rounds), compensating for GPT models stopping after each tool call rather than continuing autonomously.
+
+## Deterministic test modes
+
+The agent API supports deterministic acceptance testing without UI interaction.
+
+Request body options on `POST /api/research/:id/agent`:
+
+- `disable_auto_continue: true` — run a single session only (no chained 80-step auto-continue sessions)
+- `mock_llm_fixture: "<fixture-id>"` — replay a fixed tool-call fixture instead of live LLM generation
+- `mock_executor: { enabled: true, mode: "success" | "failure", write_result_file?: boolean }` — short-circuit remote submission into deterministic `RemoteJob` records
+
+Current fixture IDs are defined in `src/lib/research/agent-test-fixtures.ts`.
+
+Safety contract:
+- Test runtime options are rejected in production (`NODE_ENV=production`).
+- Tool phase gates and protocol checks still execute normally in fixture mode.
+- Mock executor affects submission/remote execution only; planning, gating, and database contracts remain live.
+
+CLI harnesses:
+- `npm run acceptance:superpowers` — protocol/seed/metric/skills acceptance route
+- `npm run acceptance:agent-mock` — end-to-end agent fixture run (SSE + DB assertions)
 
 ## Steering the agent
 

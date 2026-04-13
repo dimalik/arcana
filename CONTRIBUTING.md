@@ -8,7 +8,7 @@ Thanks for your interest in contributing! Arcana is an open-source research plat
 git clone https://github.com/dimalik/arcana.git
 cd arcana
 npm install
-npx prisma db push
+npx prisma migrate dev
 npm run dev
 ```
 
@@ -33,9 +33,39 @@ Open [http://localhost:3000](http://localhost:3000). The onboarding wizard will 
 
 ```bash
 npm run dev          # Start dev server with Turbopack
+npm run db:migrate   # Create/apply development migrations
+npm run db:deploy    # Apply checked-in migrations without creating a new one
 npx prisma studio    # Browse the database
 npx tsc --noEmit     # Type-check without building
+npm run check:experiment-integrity  # Validate run lifecycle invariants in prisma/dev.db
+npm run acceptance:superpowers -- --project <project-id>  # Run non-UI acceptance checks for superpowers contracts
+npm run acceptance:credibility -- --project <project-id>  # Run claim-ledger and promotion acceptance checks
 ```
+
+**Existing local DBs**
+
+If your local `prisma/dev.db` was previously brought forward with `npx prisma db push`, adopt the catch-up migration before using `prisma migrate deploy`:
+
+```bash
+npx prisma migrate resolve --applied 20260410223000_research_platform_catchup
+```
+
+If you already tried to apply it and hit `P3018`, first mark the failed attempt as rolled back, then mark it applied:
+
+```bash
+npx prisma migrate resolve --rolled-back 20260410223000_research_platform_catchup
+npx prisma migrate resolve --applied 20260410223000_research_platform_catchup
+```
+
+## Behavior Changes (Agent / Execution)
+
+If you change agent or experiment execution behavior, include all of the following in the same PR:
+
+1. Spec + plan docs under `docs/superpowers/specs` and `docs/superpowers/plans`.
+2. User-facing doc updates (`docs/research-agent.md`, `docs/remote-execution.md`, or API docs as needed).
+3. Evidence from `npm run check:experiment-integrity`.
+
+Reference governance doc: `docs/superpowers/specs/2026-04-10-behavior-change-governance.md`.
 
 ## Submitting Changes
 

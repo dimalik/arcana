@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireUserId } from "@/lib/paper-auth";
+import { parseHelpRequestMetadata, refreshProjectHelpRequests } from "@/lib/research/help-requests";
+import { cleanupStaleJobs } from "@/lib/research/remote-executor";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -64,6 +66,16 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     let existingMeta: Record<string, unknown> = {};
     try { existingMeta = JSON.parse(existing.metadata || "{}"); } catch { /* */ }
 
+    if (existing.type === "help_request" && metadata.resolved === true) {
+      const helpMeta = parseHelpRequestMetadata(existing.metadata);
+      if (helpMeta.resolutionPolicy === "system" || helpMeta.resolutionPolicy === "executor" || helpMeta.requiresUserAction === false) {
+        return NextResponse.json(
+          { error: "This issue is resolved by the system, not by manual acknowledgement." },
+          { status: 409 },
+        );
+      }
+    }
+
     const merged = { ...existingMeta, ...metadata };
 
     const updated = await prisma.researchLogEntry.update({
@@ -93,6 +105,19 @@ export async function GET(request: NextRequest, { params }: Params) {
     });
     if (!project) {
       return NextResponse.json({ error: "Project not found" }, { status: 404 });
+    }
+
+    if (type === "help_request") {
+      try {
+        await cleanupStaleJobs(id);
+      } catch (err) {
+        console.warn("[api/research/log] stale cleanup error:", err);
+      }
+      try {
+        await refreshProjectHelpRequests(id);
+      } catch (err) {
+        console.warn("[api/research/log] help request refresh error:", err);
+      }
     }
 
     const where: Record<string, unknown> = { projectId: id };

@@ -15,11 +15,19 @@ git clone https://github.com/dimalik/paper_finder.git
 cd paper_finder
 npm install
 cp .env.example .env    # Edit with your API keys
-npx prisma db push      # Initialize the database
+npx prisma migrate dev  # Create prisma/dev.db and apply migrations
 npm run dev             # Start the development server
 ```
 
 Open [http://localhost:3000](http://localhost:3000) in your browser.
+
+If you already had a local `prisma/dev.db` that was advanced with `npx prisma db push` before the `20260410223000_research_platform_catchup` migration landed, do not run `prisma migrate deploy` against it first. Either:
+
+```bash
+npx prisma migrate resolve --applied 20260410223000_research_platform_catchup
+```
+
+or delete `prisma/dev.db` and rerun `npx prisma migrate dev` if you do not need the local data.
 
 ## Onboarding
 

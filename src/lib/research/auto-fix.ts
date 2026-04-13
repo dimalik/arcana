@@ -32,6 +32,39 @@ interface AutoFixResult {
 
 const MAX_FIX_ATTEMPTS = 2;
 
+function classifyErrorHeuristically(
+  errorContext: string,
+  exitCode: number | null,
+): ClassificationResult | null {
+  const lower = errorContext.toLowerCase();
+  const hasTraceback = /traceback \(most recent call last\):/i.test(errorContext);
+  const hasPythonException = /\b(nameerror|typeerror|valueerror|runtimeerror|attributeerror|keyerror|indexerror|zerodivisionerror|syntaxerror|modulenotfounderror|importerror)\b/i.test(errorContext);
+  const hasOomSignal = /cuda out of memory|outofmemoryerror|oom killed|oom_killed|exit 137|sigkill/i.test(lower) || exitCode === 137;
+
+  if (hasOomSignal) {
+    return {
+      errorClass: "CODE_ERROR",
+      reason: "OOM detected",
+      fixDescription: "Reduce memory usage (smaller batch size, gradient checkpointing, or mixed precision).",
+    };
+  }
+
+  // Avoid dangerous auto-edits when the output contains warnings only and no traceback.
+  const hasOnlyKnownWarnings =
+    !hasTraceback &&
+    !hasPythonException &&
+    /(generation flags are not valid and may be ignored|torch_dtype is deprecated|load report|unexpected:\s*can be ignored|loss_type=none)/i.test(lower);
+
+  if (hasOnlyKnownWarnings) {
+    return {
+      errorClass: "RESEARCH_FAILURE",
+      reason: "No actionable traceback detected (warning-only stderr). Skipping auto-fix to avoid unnecessary code rewrites.",
+    };
+  }
+
+  return null;
+}
+
 /**
  * Classify an experiment error and attempt auto-fix if it's a code error.
  * Returns whether the error was fixed (and a new job submitted) or should be
@@ -47,7 +80,18 @@ export async function classifyAndFix(
 ): Promise<AutoFixResult> {
   const job = await prisma.remoteJob.findUnique({
     where: { id: jobId },
-    select: { fixAttempts: true, hostId: true, projectId: true, scriptHash: true, hypothesisId: true },
+    select: {
+      fixAttempts: true,
+      hostId: true,
+      projectId: true,
+      scriptHash: true,
+      hypothesisId: true,
+      experimentPurpose: true,
+      grounding: true,
+      claimEligibility: true,
+      promotionPolicy: true,
+      evidenceClass: true,
+    },
   });
   if (!job) return { fixed: false, errorClass: "RESEARCH_FAILURE", reason: "Job not found" };
 
@@ -71,12 +115,24 @@ export async function classifyAndFix(
 
   // Build error context (truncated for LLM)
   const errorContext = [
-    stderr ? `STDERR (last 2000 chars):\n${stderr.slice(-2000)}` : "",
-    stdout ? `STDOUT (last 1000 chars):\n${stdout.slice(-1000)}` : "",
+    stderr ? `STDERR (last 6000 chars):\n${stderr.slice(-6000)}` : "",
+    stdout ? `STDOUT (last 3000 chars):\n${stdout.slice(-3000)}` : "",
   ].filter(Boolean).join("\n\n");
 
+  // Fast path for high-confidence patterns.
+  const heuristic = classifyErrorHeuristically(errorContext, exitCode);
+  if (heuristic) {
+    if (heuristic.errorClass === "CODE_ERROR") {
+      // Continue to fix generation path below.
+    } else {
+      return { fixed: false, errorClass: heuristic.errorClass, reason: heuristic.reason };
+    }
+  }
+
   // Step 1: Classify the error
-  const classification = await classifyError(errorContext, scriptContent, exitCode);
+  const classification = heuristic && heuristic.errorClass === "CODE_ERROR"
+    ? heuristic
+    : await classifyError(errorContext, scriptContent, exitCode);
 
   if (classification.errorClass === "RESOURCE_ERROR") {
     return { fixed: false, errorClass: "RESOURCE_ERROR", reason: classification.reason };
@@ -117,6 +173,12 @@ export async function classifyAndFix(
       projectId: job.projectId || undefined,
       scriptHash: job.scriptHash || undefined,
       hypothesisId: job.hypothesisId || undefined,
+      experimentPurpose: job.experimentPurpose || undefined,
+      grounding: job.grounding || undefined,
+      claimEligibility: job.claimEligibility || undefined,
+      promotionPolicy: job.promotionPolicy || undefined,
+      evidenceClass: job.evidenceClass || undefined,
+      ignoreActiveWorkspaceLock: true,
     });
 
     // Mark the new job with the fix attempt count

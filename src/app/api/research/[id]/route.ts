@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireUserId } from "@/lib/paper-auth";
-import { cleanupStaleJobs } from "@/lib/research/remote-executor";
+import { getBlockingClaimCoordinatorQueue, summarizeBlockingClaimCoordinatorQueue } from "@/lib/research/claim-coordinator";
+import { ensureProjectMaintenance } from "@/lib/research/project-maintenance";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -11,9 +12,8 @@ export async function GET(_request: NextRequest, { params }: Params) {
     const userId = await requireUserId();
     const { id } = await params;
 
-    // Auto-cleanup stale remote jobs for this project (non-blocking)
-    cleanupStaleJobs(id).catch((err) =>
-      console.warn("[research/[id]] stale cleanup error:", err)
+    await ensureProjectMaintenance(id).catch((err) =>
+      console.warn("[research/[id]] project maintenance error:", err)
     );
 
     const project = await prisma.researchProject.findFirst({
@@ -43,7 +43,7 @@ export async function GET(_request: NextRequest, { params }: Params) {
           orderBy: { createdAt: "asc" },
         },
         log: {
-          where: { type: { not: "agent_suggestion" } },
+          where: { type: { notIn: ["agent_suggestion", "agent_reasoning", "agent_tool_call"] } },
           orderBy: { createdAt: "desc" },
           take: 100,
         },
@@ -75,6 +75,10 @@ export async function GET(_request: NextRequest, { params }: Params) {
 
     // Compute phase gate status (must match checkPhaseGate in agent.ts)
     const gates: Record<string, { met: boolean; progress: string }> = {};
+    const blockingCoordinatorQueue = await getBlockingClaimCoordinatorQueue(id);
+    const analysisBlockingQueue = blockingCoordinatorQueue.filter((item) =>
+      item.type === "claim_review_required" || item.type === "claim_needs_evidence"
+    );
     const paperCount = project.collection?.papers?.length || 0;
     const scoutCount = await prisma.agentTask.count({ where: { projectId: id, role: "scout" } });
     const synthCount = await prisma.agentTask.count({ where: { projectId: id, role: "synthesizer", status: "COMPLETED" } });
@@ -96,12 +100,39 @@ export async function GET(_request: NextRequest, { params }: Params) {
     const reviewCount = await prisma.agentTask.count({ where: { projectId: id, role: "reviewer", status: "COMPLETED" } });
     const critiqueCount = await prisma.researchStep.count({ where: { iteration: { projectId: id }, type: "critique", status: "COMPLETED" } });
     gates["analysis"] = {
-      met: completedJobs > 0 && (reviewCount > 0 || critiqueCount > 0),
-      progress: `${completedJobs} experiments, ${reviewCount + critiqueCount} reviews`,
+      met: completedJobs > 0 && (reviewCount > 0 || critiqueCount > 0) && analysisBlockingQueue.length === 0,
+      progress: analysisBlockingQueue.length > 0
+        ? `${completedJobs} experiments, ${reviewCount + critiqueCount} reviews, queue: ${summarizeBlockingClaimCoordinatorQueue(analysisBlockingQueue)}`
+        : `${completedJobs} experiments, ${reviewCount + critiqueCount} reviews`,
     };
 
     const evidenceHyps = project.hypotheses?.filter((h: { evidence: string | null }) => h.evidence)?.length || 0;
-    gates["reflection"] = { met: evidenceHyps > 0, progress: `${evidenceHyps} hypotheses with evidence` };
+    const supportedClaims = await prisma.researchClaim.count({
+      where: { projectId: id, status: { in: ["SUPPORTED", "REPRODUCED"] } },
+    });
+    const evidencedClaims = await prisma.researchClaim.count({
+      where: {
+        projectId: id,
+        status: { in: ["SUPPORTED", "REPRODUCED"] },
+        evidence: { some: {} },
+      },
+    });
+    const reviewedClaims = await prisma.researchClaim.count({
+      where: {
+        projectId: id,
+        status: { in: ["SUPPORTED", "REPRODUCED", "CONTESTED"] },
+        OR: [
+          { task: { role: { in: ["reviewer", "reproducer"] }, status: "COMPLETED" } },
+          { createdBy: { in: ["reviewer", "reproducer"] } },
+        ],
+      },
+    });
+    gates["reflection"] = {
+      met: evidenceHyps > 0 && supportedClaims > 0 && evidencedClaims > 0 && reviewedClaims > 0 && blockingCoordinatorQueue.length === 0,
+      progress: blockingCoordinatorQueue.length > 0
+        ? `${evidenceHyps} hypotheses with evidence, ${supportedClaims} supported claims, ${reviewedClaims} reviewed, queue: ${summarizeBlockingClaimCoordinatorQueue(blockingCoordinatorQueue)}`
+        : `${evidenceHyps} hypotheses with evidence, ${supportedClaims} supported claims, ${reviewedClaims} reviewed`,
+    };
 
     // Check if this is a benchmark project (separate query — log take:50 may not include oldest entries)
     const benchmarkLogs = await prisma.researchLogEntry.findMany({
@@ -137,21 +168,20 @@ export async function GET(_request: NextRequest, { params }: Params) {
     }
 
     // Read research summary if it exists
-    // Read research summary (JSON with short + full fields)
     let summaryShort: string | null = null;
     let summaryFull: string | null = null;
     if (project.outputFolder) {
       try {
         const { readFile: rf } = await import("fs/promises");
         const pathMod = await import("path");
-        // Try JSON format first (new)
-        const raw = await rf(pathMod.join(project.outputFolder, "RESEARCH_SUMMARY.md"), "utf-8");
+        let raw: string | null = null;
         try {
-          const parsed = JSON.parse(raw);
+          raw = await rf(pathMod.join(project.outputFolder, "RESEARCH_SUMMARY.json"), "utf-8");
+          const parsed = JSON.parse(raw) as { short?: string | null; full?: string | null };
           summaryShort = parsed.short || null;
           summaryFull = parsed.full || null;
         } catch {
-          // Old format: plain markdown
+          raw = await rf(pathMod.join(project.outputFolder, "RESEARCH_SUMMARY.md"), "utf-8");
           summaryFull = raw;
           const firstPara = raw.split(/\n\n/).find((p: string) => !p.startsWith("#") && p.trim().length > 20);
           summaryShort = firstPara?.replace(/^>\s*/, "").trim() || null;

@@ -9,6 +9,13 @@
 
 import { readFile } from "fs/promises";
 import path from "path";
+import {
+  allowsSyntheticProxyExecution,
+  isSyntheticProxyBenchmark,
+  resolveExperimentContract,
+  type ExperimentGrounding,
+  type ExperimentPurpose,
+} from "./experiment-contracts";
 
 export interface PreflightViolation {
   severity: "error" | "warning";
@@ -24,6 +31,14 @@ export interface PreflightResult {
   summary: string;
 }
 
+type ScriptValidationProfile = {
+  kind: "poc" | "experiment" | "analysis" | "python";
+  enforceResearchScaleChecks: boolean;
+};
+
+const STRICT_SEMANTIC_IMPORT_PATTERN = /\b(?:from|import)\s+(torch|transformers|trl|accelerate|deepspeed|peft|bitsandbytes|datasets|sentence_transformers|sklearn)\b/i;
+const STRICT_SEMANTIC_USAGE_PATTERN = /\b(torch\.cuda|CUDA_VISIBLE_DEVICES|AutoModel|AutoTokenizer|Trainer\s*\(|GRPOTrainer\s*\(|DPOTrainer\s*\(|PPOTrainer\s*\(|SFTTrainer\s*\(|device_map\s*=|deepspeed|accelerate)\b/i;
+
 /**
  * Validate an experiment script before submission.
  * @param workDir - The experiment directory (synced to remote)
@@ -34,6 +49,10 @@ export async function validateExperiment(
   workDir: string,
   command: string,
   gpuCount: number,
+  contractOverride?: {
+    experimentPurpose?: ExperimentPurpose | null;
+    grounding?: ExperimentGrounding | null;
+  },
 ): Promise<PreflightResult> {
   // Extract script filename from command
   const scriptMatch = command.match(/python3?\s+(\S+\.py)/);
@@ -53,6 +72,14 @@ export async function validateExperiment(
 
   const lines = code.split("\n");
   const violations: PreflightViolation[] = [];
+  const profile = getScriptValidationProfile(scriptName);
+  const contract = resolveExperimentContract({
+    scriptName,
+    command,
+    code,
+    experimentPurpose: contractOverride?.experimentPurpose,
+    grounding: contractOverride?.grounding,
+  });
 
   // ── Python syntax check — catches SyntaxError before burning GPU time ──
   try {
@@ -76,30 +103,38 @@ export async function validateExperiment(
   // ── Resolve top-level constants to their numeric values ────────
   const constants = resolveConstants(lines);
 
-  // ── Dataset trimming checks ─────────────────────────────────────
-  checkDatasetTrimming(lines, constants, violations);
+  // ── Semantic/API safety checks (always enforced) ────────────────
+  checkSemanticApiContracts(lines, code, gpuCount, violations);
 
-  // ── Multi-GPU checks ────────────────────────────────────────────
-  if (gpuCount > 1) {
-    checkMultiGpu(lines, code, gpuCount, violations);
-  }
-
-  // ── Batch size checks ───────────────────────────────────────────
-  checkBatchSizes(lines, constants, gpuCount, violations);
-
-  // ── Manual GPU pinning checks ─────────────────────────────────
-  if (gpuCount > 1) {
-    checkManualGpuPinning(lines, code, gpuCount, violations);
-  }
-
-  // ── Statistical rigor checks ────────────────────────────────────
-  checkStatisticalRigor(lines, code, violations);
-
-  // ── Infrastructure management detection ──────────────────────
+  // ── Infrastructure management detection (always enforced) ───────
   checkPathManagement(lines, violations);
 
-  // ── Script substance quality gate ─────────────────────────────
-  checkScriptSubstance(lines, code, violations);
+  if (profile.enforceResearchScaleChecks) {
+    // ── Dataset trimming checks ───────────────────────────────────
+    checkDatasetTrimming(lines, constants, violations);
+
+    // ── Multi-GPU checks ──────────────────────────────────────────
+    if (gpuCount > 1) {
+      checkMultiGpu(lines, code, gpuCount, violations);
+    }
+
+    // ── Batch size checks ─────────────────────────────────────────
+    checkBatchSizes(lines, constants, gpuCount, violations);
+
+    // ── Manual GPU pinning checks ───────────────────────────────
+    if (gpuCount > 1) {
+      checkManualGpuPinning(lines, code, gpuCount, violations);
+    }
+
+    // ── Statistical rigor checks ──────────────────────────────────
+    checkStatisticalRigor(lines, code, violations);
+
+    // ── Script substance quality gate ─────────────────────────────
+    checkScriptSubstance(lines, code, violations);
+
+    // ── Synthetic proxy benchmark detection ──────────────────────
+    checkSyntheticProxyBenchmarks(lines, code, violations, contract);
+  }
 
   const errors = violations.filter((v) => v.severity === "error");
   const warnings = violations.filter((v) => v.severity === "warning");
@@ -129,6 +164,60 @@ export async function validateExperiment(
     violations,
     summary: parts.join("\n"),
   };
+}
+
+/**
+ * Reject experiment scripts that fabricate both sides of the benchmark in code
+ * and score them with hand-written detector heuristics. Those are useful for
+ * toy debugging, but they are not acceptable as main experiment evidence
+ * unless the project explicitly opts into synthetic-benchmark methodology.
+ */
+function checkSyntheticProxyBenchmarks(
+  lines: string[],
+  code: string,
+  violations: PreflightViolation[],
+  contract: {
+    experimentPurpose: ExperimentPurpose;
+    grounding: ExperimentGrounding;
+    source: "tool_input" | "script_directive" | "inferred";
+  },
+) {
+  const hasExplicitSyntheticOptIn = /ARCANA_ALLOW_SYNTHETIC_BENCHMARK\s*=\s*True/.test(code)
+    || /#\s*ARCANA:\s*allow-synthetic-benchmark/i.test(code);
+
+  if (hasExplicitSyntheticOptIn || allowsSyntheticProxyExecution(contract)) return;
+
+  if (isSyntheticProxyBenchmark(code)) {
+    const firstLine = lines.findIndex((line) =>
+      /\bdef\s+(?:make_human|human_text|make_raw_ai|raw_ai_text|primary_detector_score|holdout_detector_score)\s*\(/i.test(line),
+    );
+    violations.push({
+      severity: "error",
+      code: "SYNTHETIC_PROXY_BENCHMARK",
+      message: "Script appears to fabricate both the benchmark texts and the detector scoring logic in-process. This is a synthetic proxy benchmark, not a real experiment.",
+      line: firstLine >= 0 ? firstLine + 1 : 1,
+      fix: "Use an external benchmark/data source and an externally grounded detector or model pipeline. If this is intentionally synthetic/proxy work, declare it explicitly with '# ARCANA: purpose=synthetic_proxy grounding=synthetic' (or ARCANA_ALLOW_SYNTHETIC_BENCHMARK=True) so it stays exploratory instead of entering the main experiment track.",
+    });
+  }
+}
+
+function getScriptValidationProfile(scriptName: string): ScriptValidationProfile {
+  const normalized = scriptName.replace(/\\/g, "/").split("/").pop() ?? scriptName;
+  if (/^poc_\d+_/i.test(normalized)) {
+    return { kind: "poc", enforceResearchScaleChecks: false };
+  }
+  if (/^exp_\d+_/i.test(normalized)) {
+    return { kind: "experiment", enforceResearchScaleChecks: true };
+  }
+  if (/^analysis_\d+_/i.test(normalized)) {
+    return { kind: "analysis", enforceResearchScaleChecks: true };
+  }
+  return { kind: "python", enforceResearchScaleChecks: true };
+}
+
+export function requiresBlockingSemanticAnalysis(scriptName: string, code: string): boolean {
+  if (!scriptName.endsWith(".py")) return false;
+  return STRICT_SEMANTIC_IMPORT_PATTERN.test(code) || STRICT_SEMANTIC_USAGE_PATTERN.test(code);
 }
 
 // ── Constant Resolution ──────────────────────────────────────────
@@ -170,6 +259,7 @@ function checkDatasetTrimming(lines: string[], constants: Map<string, { value: n
   const dataVarPattern = /\b(train|data|dataset|texts|examples|samples|corpus|sft|dpo|grpo|rl_data)\w*\s*(?:=.*)?(\[:\d+\])/i;
   const smallSlicePattern = /\[:(\d+)\]/g;
   const paramPattern = /\b(n_train|max_train|max_samples|num_train|train_size|max_examples|n_examples|n_test|n_eval|n_calib|num_test|num_eval|test_size|eval_size|num_calib|max_eval|max_test)\s*[=:]\s*(\d+)/i;
+  const argparseDefaultPattern = /add_argument\(\s*["']--(n_train|max_train|max_samples|num_train|train_size|max_examples|n_examples|n_test|n_eval|n_calib|num_test|num_eval|test_size|eval_size|num_calib|max_eval|max_test)["'][^)]*?\bdefault\s*=\s*(\d+)/i;
   const headSamplePattern = /\.(head|sample)\((\d+)\)/;
 
   for (let i = 0; i < lines.length; i++) {
@@ -212,6 +302,24 @@ function checkDatasetTrimming(lines: string[], constants: Map<string, { value: n
           fix: isEval
             ? `Increase to at least 500+ for evaluation. Small eval sets produce unreliable metrics.`
             : `Remove the hard cap or increase to the full dataset size. Use streaming/lazy loading if memory is a concern.`,
+        });
+      }
+    }
+
+    const argparseMatch = argparseDefaultPattern.exec(line);
+    if (argparseMatch) {
+      const paramName = argparseMatch[1];
+      const n = parseInt(argparseMatch[2]);
+      if (n < 1000) {
+        const isEval = /test|eval|calib|val/i.test(paramName);
+        violations.push({
+          severity: "error",
+          code: isEval ? "SMALL_EVAL_SIZE" : "SMALL_TRAIN_SIZE",
+          message: `${isEval ? "Evaluation" : "Training"} CLI default '${paramName}' is ${n}. This bakes an undersized run into the experiment script.`,
+          line: lineNum,
+          fix: isEval
+            ? `Raise the default ${paramName} to at least 500+ for evaluation, or remove the cap entirely.`
+            : `Raise the default ${paramName} to the full dataset scale (1000+ minimum), or remove the cap entirely.`,
         });
       }
     }
@@ -302,6 +410,131 @@ function checkDatasetTrimming(lines: string[], constants: Map<string, { value: n
           });
         }
       }
+    }
+  }
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function lineNumberAtOffset(code: string, offset: number): number {
+  return code.slice(0, offset).split("\n").length;
+}
+
+function findAutoDeviceMapModels(code: string): Array<{ name: string; line: number }> {
+  const models = new Map<string, number>();
+  const pattern = /([A-Za-z_]\w*)\s*=\s*[A-Za-z0-9_\.]+\.from_pretrained\(([\s\S]{0,1200}?)\)/g;
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(code)) !== null) {
+    const [, name, args] = match;
+    if (!/device_map\s*=\s*["']auto["']/i.test(args)) continue;
+    if (!models.has(name)) {
+      models.set(name, lineNumberAtOffset(code, match.index));
+    }
+  }
+  return Array.from(models.entries()).map(([name, line]) => ({ name, line }));
+}
+
+function findSingleCudaAliases(lines: string[]): Set<string> {
+  const aliases = new Set<string>();
+  const aliasPattern = /^\s*([A-Za-z_]\w*)\s*=\s*["']cuda:\d+["']\s*(?:#.*)?$/;
+  for (const line of lines) {
+    const match = aliasPattern.exec(line);
+    if (match) aliases.add(match[1]);
+  }
+  return aliases;
+}
+
+function checkSemanticApiContracts(
+  lines: string[],
+  code: string,
+  gpuCount: number,
+  violations: PreflightViolation[],
+) {
+  const apiRules: Array<{
+    code: string;
+    pattern: RegExp;
+    message: string;
+    fix: string;
+  }> = [
+    {
+      code: "INVALID_TORCH_CUDA_PROPERTY",
+      pattern: /\b(?:torch\.)?cuda\.get_device_properties\([^)]*\)\.total_mem\b/,
+      message: "PyTorch CUDA device properties expose 'total_memory', not 'total_mem'.",
+      fix: "Replace '.total_mem' with '.total_memory' before submitting the script.",
+    },
+  ];
+  const autoDeviceMapModels = findAutoDeviceMapModels(code);
+  const singleCudaAliases = findSingleCudaAliases(lines);
+
+  for (let i = 0; i < lines.length; i++) {
+    const rawLine = lines[i];
+    const line = rawLine.trim();
+    if (!line || line.startsWith("#")) continue;
+
+    for (const rule of apiRules) {
+      if (rule.pattern.test(line)) {
+        violations.push({
+          severity: "error",
+          code: rule.code,
+          message: rule.message,
+          line: i + 1,
+          fix: rule.fix,
+        });
+        break;
+      }
+    }
+
+    if (autoDeviceMapModels.length > 0) {
+      for (const model of autoDeviceMapModels) {
+        const escapedName = escapeRegExp(model.name);
+        if (
+          new RegExp(String.raw`\.to\(\s*${escapedName}\.device\s*\)`).test(line)
+          || new RegExp(String.raw`to\(\s*next\(\s*${escapedName}\.parameters\(\)\s*\)\.device\s*\)`).test(line)
+        ) {
+          violations.push({
+            severity: "error",
+            code: "SHARDED_MODEL_SINGLE_DEVICE_INPUTS",
+            message: `Model '${model.name}' uses device_map="auto", but this line moves tensors to a single device via ${model.name}.device.`,
+            line: i + 1,
+            fix: `Do not use .to(${model.name}.device) with device_map="auto". For sharded models, keep tokenizer outputs on CPU or move them to ${model.name}.get_input_embeddings().weight.device via a helper. If the model fits on one GPU, remove device_map="auto" and load it on a single device instead.`,
+          });
+          break;
+        }
+      }
+
+      if (
+        !violations.some((violation) => violation.line === i + 1 && violation.code === "SHARDED_MODEL_SINGLE_DEVICE_INPUTS")
+        && /(?:return_tensors\s*=\s*["']pt["']|input_ids|attention_mask|labels|encodings?|inputs?|batch)\b/i.test(line)
+      ) {
+        for (const alias of Array.from(singleCudaAliases)) {
+          if (new RegExp(String.raw`\.to\(\s*${escapeRegExp(alias)}\s*\)`).test(line)) {
+            violations.push({
+              severity: "error",
+              code: "SHARDED_MODEL_SINGLE_DEVICE_INPUTS",
+              message: `Script uses device_map="auto" but moves model inputs to single-device alias '${alias}'. That breaks sharded models across multiple GPUs.`,
+              line: i + 1,
+              fix: `Do not move tokenized inputs to ${alias} when any model is loaded with device_map="auto". Keep inputs on CPU or move them to the embedding/input device from model.get_input_embeddings().weight.device. If the model is small enough, drop device_map="auto" and run it on one GPU.`,
+            });
+            break;
+          }
+        }
+      }
+    }
+
+    if (
+      gpuCount > 1
+      && /os\.environ\[\s*["']CUDA_VISIBLE_DEVICES["']\s*\]\s*=/.test(line)
+      && !violations.some((violation) => violation.line === i + 1 && violation.code === "MANUAL_GPU_PINNING")
+    ) {
+      violations.push({
+        severity: "error",
+        code: "MANUAL_GPU_PINNING",
+        message: `Script hard-codes CUDA_VISIBLE_DEVICES while ${gpuCount} GPUs are available. Device visibility is an execution-policy concern, not experiment code.`,
+        line: i + 1,
+        fix: "Remove CUDA_VISIBLE_DEVICES assignments from the script and let the scheduler/runtime choose device placement.",
+      });
     }
   }
 }
@@ -536,6 +769,11 @@ function checkPathManagement(
       pattern: /os\.makedirs.*run_|os\.mkdir.*run_/,
       message: "Script creates run_* directories. The infrastructure manages run directories automatically.",
       fix: "Remove os.makedirs for run directories. Save outputs to relative paths (e.g., 'results.json') — they go to the right place.",
+    },
+    {
+      pattern: /Path\(\s*f?["']run_|(?:output|results?)_dir\s*=\s*Path\(\s*f?["']run_/i,
+      message: "Script hard-codes a run_* output directory. The infrastructure already chooses the run directory.",
+      fix: "Use relative output paths inside the current working directory (for example 'results.json' or Path('results') / 'metrics.json'). Do not embed run_* directories in the script.",
     },
     {
       pattern: /ARCANA_OUTPUT_DIR|\.arcana/,

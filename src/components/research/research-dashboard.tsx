@@ -8,7 +8,6 @@ import {
   Lightbulb,
   ArrowRight,
   XCircle,
-  Shield,
   BarChart3,
   BookOpen,
   FolderOpen,
@@ -21,7 +20,10 @@ import { ExperimentCard } from "./experiment-card";
 import { FilePreview } from "./file-preview";
 import { ResearchChat } from "./research-chat";
 import { MetricChart } from "./metric-chart";
+import { ClaimLedgerPanel } from "./claim-ledger-panel";
+import { LineageAuditPanel } from "./lineage-audit-panel";
 import { MarkdownRenderer } from "@/components/ui/markdown-renderer";
+import { shouldHideResearchLogFromTimeline } from "@/lib/research/research-log-policy";
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -134,15 +136,22 @@ interface TimelineEntry {
     | "experiment"
     | "decision"
     | "dead_end"
-    | "observation"
-    | "review";
+    | "observation";
   date: string;
   content?: string;
   result?: ExperimentResult;
   job?: ExperimentJob;
 }
 
-type FilterKey = "all" | "findings" | "experiments" | "decisions" | "reviews";
+type FilterKey = "all" | "notebook" | "experiments" | "claims" | "lineage";
+
+const FILTER_LABELS: Record<FilterKey, string> = {
+  all: "All",
+  notebook: "Notebook",
+  experiments: "Experiments",
+  claims: "Claims",
+  lineage: "Lineage",
+};
 
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                            */
@@ -534,19 +543,6 @@ function ObservationCard({ content, date }: { content: string; date: string }) {
   );
 }
 
-function ReviewCard({ content, date }: { content: string; date: string }) {
-  return (
-    <div className="rounded-lg border-l-[3px] border-l-amber-500 border border-border/40 p-4">
-      <div className="flex items-center gap-2 mb-2">
-        <Shield className="h-3.5 w-3.5 text-amber-500" />
-        <span className="text-xs font-medium text-amber-600">Adversarial Review</span>
-        <span className="text-[11px] text-muted-foreground/40 ml-auto">{timeAgo(date)}</span>
-      </div>
-      <ExpandableMarkdown content={content} maxHeight={120} />
-    </div>
-  );
-}
-
 /* ------------------------------------------------------------------ */
 /*  Research Tree                                                      */
 /* ------------------------------------------------------------------ */
@@ -721,6 +717,7 @@ export function ResearchDashboard({
   project,
   papers,
   iteration,
+  onRefresh,
   logEntries,
   summaryShort,
   summaryFull,
@@ -841,25 +838,16 @@ export function ResearchDashboard({
 
     // Add log entries (filter out agent_suggestion and tool call logs)
     for (const entry of logEntries || []) {
-      // Skip agent_suggestion entries (tool call logs)
-      if (entry.type === "agent_suggestion") continue;
-      // Skip entries that start with "[" (JSON tool call logs)
-      if (entry.content.startsWith("[")) continue;
+      if (shouldHideResearchLogFromTimeline(entry)) continue;
 
       // Determine timeline type
       let type: TimelineEntry["type"];
-      const contentLower = entry.content.toLowerCase();
       if (entry.type === "breakthrough") {
         type = "breakthrough";
       } else if (entry.type === "decision") {
         type = "decision";
       } else if (entry.type === "dead_end") {
         type = "dead_end";
-      } else if (
-        contentLower.includes("adversarial review") ||
-        contentLower.includes("review") && entry.type === "observation" && entry.content.length > 200
-      ) {
-        type = "review";
       } else if (entry.type === "observation") {
         // Only show observations with meaningful content
         if (entry.content.length <= 50) continue;
@@ -902,19 +890,13 @@ export function ResearchDashboard({
   // Filter timeline
   const filteredTimeline = useMemo(() => {
     if (filter === "all") return timeline;
-    if (filter === "findings") {
+    if (filter === "notebook") {
       return timeline.filter(
-        (e) => e.type === "breakthrough" || e.type === "observation"
+        (e) => e.type !== "experiment"
       );
     }
     if (filter === "experiments") {
       return timeline.filter((e) => e.type === "experiment");
-    }
-    if (filter === "decisions") {
-      return timeline.filter((e) => e.type === "decision");
-    }
-    if (filter === "reviews") {
-      return timeline.filter((e) => e.type === "review");
     }
     return timeline;
   }, [timeline, filter]);
@@ -974,10 +956,10 @@ export function ResearchDashboard({
 
   const FILTERS: FilterKey[] = [
     "all",
-    "findings",
+    "notebook",
     "experiments",
-    "decisions",
-    "reviews",
+    "claims",
+    "lineage",
   ];
 
   return (
@@ -1017,12 +999,23 @@ export function ResearchDashboard({
                   : "bg-muted text-muted-foreground hover:bg-muted/80"
               }`}
             >
-              {f.charAt(0).toUpperCase() + f.slice(1)}
+              {FILTER_LABELS[f]}
             </button>
           ))}
         </div>
 
+        {/* Claims panel (left-side) */}
+        {filter === "claims" && (
+          <ClaimLedgerPanel projectId={project.id} onRefresh={onRefresh} />
+        )}
+
+        {/* Lineage panel (left-side) */}
+        {filter === "lineage" && (
+          <LineageAuditPanel projectId={project.id} />
+        )}
+
         {/* Timeline entries */}
+        {filter !== "claims" && filter !== "lineage" && (
         <div className="space-y-2">
           {filteredTimeline.map((entry) => {
             switch (entry.type) {
@@ -1088,14 +1081,6 @@ export function ResearchDashboard({
                     date={entry.date}
                   />
                 );
-              case "review":
-                return (
-                  <ReviewCard
-                    key={entry.id}
-                    content={entry.content || ""}
-                    date={entry.date}
-                  />
-                );
               default:
                 return null;
             }
@@ -1107,7 +1092,7 @@ export function ResearchDashboard({
               <p className="text-sm text-muted-foreground">
                 {filter === "all"
                   ? "No activity yet"
-                  : `No ${filter} to show`}
+                  : `No ${FILTER_LABELS[filter].toLowerCase()} entries to show`}
               </p>
               <p className="mt-1 text-xs text-muted-foreground/50">
                 Research activity will appear here as the agent works
@@ -1115,6 +1100,7 @@ export function ResearchDashboard({
             </div>
           )}
         </div>
+        )}
       </div>
       </ScrollFadePanel>
 

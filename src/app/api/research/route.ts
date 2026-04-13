@@ -7,7 +7,7 @@ export async function POST(request: NextRequest) {
   try {
     const userId = await requireUserId();
     const body = await request.json();
-    const { title, question, subQuestions, domains, keywords, methodology, seedPaperIds, constraints, resources } = body as {
+    const { title, question, subQuestions, domains, keywords, methodology, seedPaperIds, constraints, resources, kind } = body as {
       title: string;
       question: string;
       subQuestions?: string[];
@@ -17,10 +17,14 @@ export async function POST(request: NextRequest) {
       seedPaperIds?: string[];
       constraints?: string;
       resources?: "all" | "local" | string[]; // "all" = auto, "local" = no remote, string[] = specific host IDs
+      kind?: string;
     };
 
     if (!title?.trim() || !question?.trim()) {
       return NextResponse.json({ error: "Title and question are required" }, { status: 400 });
+    }
+    if (kind !== undefined && kind !== "RESEARCH" && kind !== "SYSTEM" && kind !== "SANDBOX") {
+      return NextResponse.json({ error: "Invalid project kind" }, { status: 400 });
     }
 
     const brief = JSON.stringify({
@@ -55,6 +59,7 @@ export async function POST(request: NextRequest) {
     const project = await prisma.researchProject.create({
       data: {
         userId,
+        kind: kind === "SYSTEM" ? "SYSTEM" : kind === "SANDBOX" ? "SANDBOX" : "RESEARCH",
         title: title.trim(),
         brief,
         methodology: methodology || null,
@@ -94,15 +99,26 @@ export async function GET(request: NextRequest) {
     const userId = await requireUserId();
     const { searchParams } = new URL(request.url);
     const status = searchParams.get("status"); // "ACTIVE" | "COMPLETED" | null (all)
+    const kind = searchParams.get("kind");
+    const includeSystem = searchParams.get("includeSystem") === "true";
+    const includeSandbox = searchParams.get("includeSandbox") === "true";
 
     const where: Record<string, unknown> = { userId };
     if (status) where.status = status;
+    if (kind === "SYSTEM" || kind === "RESEARCH" || kind === "SANDBOX") {
+      where.kind = kind;
+    } else if (!includeSystem) {
+      where.kind = includeSandbox
+        ? { in: ["RESEARCH", "SANDBOX"] }
+        : { in: ["RESEARCH", "SANDBOX"] };
+    }
 
     const projects = await prisma.researchProject.findMany({
       where,
       orderBy: { updatedAt: "desc" },
       select: {
         id: true,
+        kind: true,
         title: true,
         status: true,
         methodology: true,
