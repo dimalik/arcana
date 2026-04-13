@@ -11,34 +11,34 @@ datasource db {
 // ── Auth & Observability ─────────────────────────────────────────
 
 model User {
-  id           String   @id @default(uuid())
-  email        String   @unique
+  id           String  @id @default(uuid())
+  email        String  @unique
   passwordHash String?
   name         String?
-  role         String   @default("member") // "admin" | "member"
+  role         String  @default("member") // "admin" | "member"
   avatarUrl    String?
 
   // Research profile (set during onboarding, editable in profile)
-  researchRole    String?  // "phd_student" | "postdoc" | "professor" | "industry_researcher" | "engineer" | "student" | "other"
-  affiliation     String?
-  domains         String?  // JSON array of research domains e.g. ["nlp", "computer-vision"]
-  expertiseLevel  String?  // "beginner" | "intermediate" | "expert"
-  reviewFocus     String?  // JSON array e.g. ["methodology", "novelty", "applications", "reproducibility"]
-  scholarUrl      String?  // Google Scholar profile URL for seeding
+  researchRole   String? // "phd_student" | "postdoc" | "professor" | "industry_researcher" | "engineer" | "student" | "other"
+  affiliation    String?
+  domains        String? // JSON array of research domains e.g. ["nlp", "computer-vision"]
+  expertiseLevel String? // "beginner" | "intermediate" | "expert"
+  reviewFocus    String? // JSON array e.g. ["methodology", "novelty", "applications", "reproducibility"]
+  scholarUrl     String? // Google Scholar profile URL for seeding
 
   onboardingCompleted Boolean @default(false)
 
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  sessions         UserSession[]
-  llmUsageLogs     LlmUsageLog[]
-  appEvents        AppEvent[]
-  papers           Paper[]
-  researchProjects   ResearchProject[]
-  discoverySessions  DiscoverySession[]
-  agentCapabilities  AgentCapability[]
-  agentMemories      AgentMemory[]
+  sessions          UserSession[]
+  llmUsageLogs      LlmUsageLog[]
+  appEvents         AppEvent[]
+  papers            Paper[]
+  researchProjects  ResearchProject[]
+  discoverySessions DiscoverySession[]
+  agentCapabilities AgentCapability[]
+  agentMemories     AgentMemory[]
 }
 
 model UserSession {
@@ -55,20 +55,20 @@ model UserSession {
 }
 
 model LlmUsageLog {
-  id              String   @id @default(uuid())
-  userId          String?
-  provider        String   // "openai" | "anthropic" | "proxy"
-  modelId         String
-  operation       String   // "summarize" | "extract" | "chat" | "synthesis" | etc.
-  inputTokens     Int      @default(0)
-  outputTokens    Int      @default(0)
-  totalTokens     Int      @default(0)
-  estimatedCostUsd Float   @default(0)
-  durationMs      Int      @default(0)
-  success         Boolean  @default(true)
-  error           String?
-  metadata        String?  // JSON: paperId, sessionId, extra context
-  createdAt       DateTime @default(now())
+  id               String   @id @default(uuid())
+  userId           String?
+  provider         String // "openai" | "anthropic" | "proxy"
+  modelId          String
+  operation        String // "summarize" | "extract" | "chat" | "synthesis" | etc.
+  inputTokens      Int      @default(0)
+  outputTokens     Int      @default(0)
+  totalTokens      Int      @default(0)
+  estimatedCostUsd Float    @default(0)
+  durationMs       Int      @default(0)
+  success          Boolean  @default(true)
+  error            String?
+  metadata         String? // JSON: paperId, sessionId, extra context
+  createdAt        DateTime @default(now())
 
   user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
 
@@ -81,10 +81,10 @@ model LlmUsageLog {
 model AppEvent {
   id        String   @id @default(uuid())
   userId    String?
-  level     String   // "error" | "warn" | "info"
-  category  String   // "llm" | "api" | "import" | "synthesis" | "auth" | "system"
+  level     String // "error" | "warn" | "info"
+  category  String // "llm" | "api" | "import" | "synthesis" | "auth" | "system"
   message   String
-  metadata  String?  // JSON: stack trace, request path, paper ID, etc.
+  metadata  String? // JSON: stack trace, request path, paper ID, etc.
   createdAt DateTime @default(now())
 
   user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
@@ -98,52 +98,53 @@ model AppEvent {
 // ── Core Models ──────────────────────────────────────────────────
 
 model Paper {
-  id               String   @id @default(uuid())
-  userId           String?
-  title            String
-  abstract         String?
-  authors          String?  // JSON array as string
-  year             Int?
-  venue            String?
-  doi              String?
-  sourceType       String   @default("UPLOAD") // UPLOAD, ARXIV, URL
-  sourceUrl        String?
-  arxivId          String?
-  filePath         String?
-  fullText         String?
-  summary          String?
-  keyFindings      String?  // JSON array as string
-  categories       String?  // JSON array as string
+  id                  String    @id @default(uuid())
+  userId              String?
+  title               String
+  abstract            String?
+  authors             String? // JSON array as string
+  year                Int?
+  venue               String?
+  doi                 String?
+  sourceType          String    @default("UPLOAD") // UPLOAD, ARXIV, URL
+  sourceUrl           String?
+  arxivId             String?
+  filePath            String?
+  fullText            String?
+  summary             String?
+  keyFindings         String? // JSON array as string
+  categories          String? // JSON array as string
   processingStatus    String    @default("PENDING") // PENDING, EXTRACTING_TEXT, TEXT_EXTRACTED, COMPLETED, FAILED
-  processingStep      String?   // Current step: "extracting_text", "metadata", "summarize", "categorize", "linking", "references", "contexts"
+  processingStep      String? // Current step: "extracting_text", "metadata", "summarize", "categorize", "linking", "references", "contexts"
   processingStartedAt DateTime? // When current processing began — for stall detection
   citationCount       Int?
-  isLiked          Boolean  @default(false)
-  isResearchOnly   Boolean  @default(false)  // true = imported by research agent, hidden from main library
-  engagementScore  Float    @default(0)
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  isLiked             Boolean   @default(false)
+  isResearchOnly      Boolean   @default(false) // true = imported by research agent, hidden from main library
+  engagementScore     Float     @default(0)
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
 
-  owner           User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
-  tags            PaperTag[]
-  collections     CollectionPaper[]
-  chatMessages    ChatMessage[]
-  promptResults   PromptResult[]
-  concepts        Concept[]
-  sourceRelations PaperRelation[] @relation("SourceRelations")
-  targetRelations PaperRelation[] @relation("TargetRelations")
-  references       Reference[]
-  matchedBy        Reference[] @relation("MatchedReferences")
+  owner              User?               @relation(fields: [userId], references: [id], onDelete: SetNull)
+  tags               PaperTag[]
+  collections        CollectionPaper[]
+  chatMessages       ChatMessage[]
+  promptResults      PromptResult[]
+  concepts           Concept[]
+  sourceRelations    PaperRelation[]     @relation("SourceRelations")
+  targetRelations    PaperRelation[]     @relation("TargetRelations")
+  references         Reference[]
+  matchedBy          Reference[]         @relation("MatchedReferences")
   conversations      Conversation[]
   conversationPapers ConversationPaper[]
   notebookEntries    NotebookEntry[]
   discoverySeeds     DiscoverySeed[]
   discoveryImports   DiscoveryProposal[]
-  engagements      PaperEngagement[]
-  insights         Insight[]
-  agentSessions    AgentSession[]
-  synthesisPapers  SynthesisPaper[]
-  figures          PaperFigure[]
+  engagements        PaperEngagement[]
+  insights           Insight[]
+  agentSessions      AgentSession[]
+  synthesisPapers    SynthesisPaper[]
+  figures            PaperFigure[]
+  claimEvidence      ClaimEvidence[]
 }
 
 model AgentSession {
@@ -152,8 +153,8 @@ model AgentSession {
   templateId   String?
   customPrompt String?
   mode         String    @default("analyze")
-  status       String    @default("PENDING")  // PENDING | RUNNING | COMPLETED | FAILED | CANCELLED
-  events       String    @default("[]")        // JSON array of AgentEvent objects
+  status       String    @default("PENDING") // PENDING | RUNNING | COMPLETED | FAILED | CANCELLED
+  events       String    @default("[]") // JSON array of AgentEvent objects
   costUsd      Float?
   durationMs   Int?
   turns        Int?
@@ -177,13 +178,13 @@ model TagCluster {
 }
 
 model Tag {
-  id              String      @id @default(uuid())
-  name            String      @unique
-  color           String      @default("#6B7280")
-  isAutoGenerated Boolean     @default(false)
-  score           Float       @default(0)
+  id              String   @id @default(uuid())
+  name            String   @unique
+  color           String   @default("#6B7280")
+  isAutoGenerated Boolean  @default(false)
+  score           Float    @default(0)
   clusterId       String?
-  createdAt       DateTime    @default(now())
+  createdAt       DateTime @default(now())
 
   cluster TagCluster? @relation(fields: [clusterId], references: [id], onDelete: SetNull)
   papers  PaperTag[]
@@ -210,8 +211,8 @@ model Collection {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  parent          Collection?      @relation("CollectionTree", fields: [parentId], references: [id])
-  children        Collection[]     @relation("CollectionTree")
+  parent          Collection?       @relation("CollectionTree", fields: [parentId], references: [id])
+  children        Collection[]      @relation("CollectionTree")
   papers          CollectionPaper[]
   researchProject ResearchProject?
 }
@@ -230,7 +231,7 @@ model CollectionPaper {
 model ChatMessage {
   id             String   @id @default(uuid())
   paperId        String
-  role           String   // user, assistant, system
+  role           String // user, assistant, system
   content        String
   provider       String?
   model          String?
@@ -244,7 +245,7 @@ model ChatMessage {
 model PromptResult {
   id         String   @id @default(uuid())
   paperId    String
-  promptType String   // summarize, extract, categorize, code, custom
+  promptType String // summarize, extract, categorize, code, custom
   prompt     String
   result     String
   provider   String?
@@ -255,14 +256,14 @@ model PromptResult {
 }
 
 model Concept {
-  id          String    @id @default(uuid())
+  id          String   @id @default(uuid())
   paperId     String
   name        String
   explanation String
   parentId    String?
-  depth       Int       @default(0)
-  isExpanded  Boolean   @default(false)
-  createdAt   DateTime  @default(now())
+  depth       Int      @default(0)
+  isExpanded  Boolean  @default(false)
+  createdAt   DateTime @default(now())
 
   paper    Paper     @relation(fields: [paperId], references: [id], onDelete: Cascade)
   parent   Concept?  @relation("ConceptTree", fields: [parentId], references: [id])
@@ -289,7 +290,7 @@ model Reference {
   id                String   @id @default(uuid())
   paperId           String
   title             String
-  authors           String?   // JSON array as string
+  authors           String? // JSON array as string
   year              Int?
   venue             String?
   doi               String?
@@ -297,10 +298,10 @@ model Reference {
   referenceIndex    Int?
   matchedPaperId    String?
   matchConfidence   Float?
-  citationContext   String?   // LLM-extracted: why this paper is cited
-  semanticScholarId String?   // S2 paper ID for linking
-  arxivId           String?   // arXiv ID if discovered during enrichment
-  externalUrl       String?   // Best external URL (S2, DOI, arXiv)
+  citationContext   String? // LLM-extracted: why this paper is cited
+  semanticScholarId String? // S2 paper ID for linking
+  arxivId           String? // arXiv ID if discovered during enrichment
+  externalUrl       String? // Best external URL (S2, DOI, arXiv)
   createdAt         DateTime @default(now())
 
   paper        Paper  @relation(fields: [paperId], references: [id], onDelete: Cascade)
@@ -312,11 +313,11 @@ model Conversation {
   paperId      String
   title        String?
   selectedText String?
-  mode         String?  // "explain" | "chat"
+  mode         String? // "explain" | "chat"
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  paper            Paper              @relation(fields: [paperId], references: [id], onDelete: Cascade)
+  paper            Paper               @relation(fields: [paperId], references: [id], onDelete: Cascade)
   messages         ChatMessage[]
   additionalPapers ConversationPaper[]
   notebookEntries  NotebookEntry[]
@@ -334,16 +335,16 @@ model ConversationPaper {
 }
 
 model NotebookEntry {
-  id              String   @id @default(uuid())
-  paperId         String
-  type            String   // "selection" | "explanation" | "chat" | "note"
-  selectedText    String?
-  content         String?
-  annotation      String?
-  conversationId  String?
-  messageId       String?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id             String   @id @default(uuid())
+  paperId        String
+  type           String // "selection" | "explanation" | "chat" | "note"
+  selectedText   String?
+  content        String?
+  annotation     String?
+  conversationId String?
+  messageId      String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
   paper        Paper         @relation(fields: [paperId], references: [id], onDelete: Cascade)
   conversation Conversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
@@ -355,26 +356,26 @@ model Setting {
 }
 
 model DiscoverySession {
-  id          String   @id @default(uuid())
-  userId      String
-  title       String?
-  status      String   @default("RUNNING")  // RUNNING | COMPLETED | FAILED | CANCELLED
-  depth       Int      @default(1)
-  totalFound  Int      @default(0)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id         String   @id @default(uuid())
+  userId     String
+  title      String?
+  status     String   @default("RUNNING") // RUNNING | COMPLETED | FAILED | CANCELLED
+  depth      Int      @default(1)
+  totalFound Int      @default(0)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 
-  owner       User              @relation(fields: [userId], references: [id], onDelete: Cascade)
-  seedPapers  DiscoverySeed[]
-  proposals   DiscoveryProposal[]
+  owner      User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  seedPapers DiscoverySeed[]
+  proposals  DiscoveryProposal[]
 
   @@index([userId])
 }
 
 model DiscoverySeed {
-  id         String @id @default(uuid())
-  sessionId  String
-  paperId    String
+  id        String @id @default(uuid())
+  sessionId String
+  paperId   String
 
   session DiscoverySession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   paper   Paper            @relation(fields: [paperId], references: [id], onDelete: Cascade)
@@ -386,7 +387,7 @@ model DiscoveryProposal {
   id                String   @id @default(uuid())
   sessionId         String
   title             String
-  authors           String?  // JSON array
+  authors           String? // JSON array
   year              Int?
   venue             String?
   doi               String?
@@ -395,8 +396,8 @@ model DiscoveryProposal {
   citationCount     Int?
   openAccessPdfUrl  String?
   semanticScholarId String?
-  reason            String   // "cited_by:<seedPaperId>" or "cites:<seedPaperId>"
-  status            String   @default("PENDING")  // PENDING | IMPORTED | DISMISSED | ALREADY_IN_LIBRARY
+  reason            String // "cited_by:<seedPaperId>" or "cites:<seedPaperId>"
+  status            String   @default("PENDING") // PENDING | IMPORTED | DISMISSED | ALREADY_IN_LIBRARY
   importedPaperId   String?
   createdAt         DateTime @default(now())
 
@@ -407,7 +408,7 @@ model DiscoveryProposal {
 model PaperEngagement {
   id        String   @id @default(uuid())
   paperId   String
-  event     String   // view, pdf_open, annotate, chat, concept_explore, discovery_seed, import
+  event     String // view, pdf_open, annotate, chat, concept_explore, discovery_seed, import
   createdAt DateTime @default(now())
 
   paper Paper @relation(fields: [paperId], references: [id], onDelete: Cascade)
@@ -419,20 +420,20 @@ model PaperEngagement {
 model PaperFigure {
   id          String   @id @default(uuid())
   paperId     String
-  page        Int      // PDF page number (1-indexed)
+  page        Int // PDF page number (1-indexed)
   figureIndex Int      @default(0) // Index within the page (0, 1, 2...)
   type        String   @default("figure") // figure | table | diagram | equation
-  caption     String?  // Extracted caption from PDF text
-  description String?  // LLM-generated description/explanation
-  imagePath   String   // Path to extracted image file
+  caption     String? // Extracted caption from PDF text
+  description String? // LLM-generated description/explanation
+  imagePath   String // Path to extracted image file
   width       Int?
   height      Int?
   createdAt   DateTime @default(now())
 
   paper Paper @relation(fields: [paperId], references: [id], onDelete: Cascade)
 
-  @@index([paperId])
   @@unique([paperId, page, figureIndex])
+  @@index([paperId])
 }
 
 model MindPalaceRoom {
@@ -448,31 +449,34 @@ model MindPalaceRoom {
 }
 
 model Insight {
-  id              String    @id @default(uuid())
+  id              String         @id @default(uuid())
   roomId          String
   paperId         String
   learning        String
   significance    String
   applications    String?
   userNotes       String?
-  usageCount      Int       @default(0)  // Incremented when referenced by Research agent
-  easeFactor      Float     @default(2.5)
-  interval        Int       @default(0)
-  repetitions     Int       @default(0)
-  nextReviewAt    DateTime  @default(now())
+  usageCount      Int            @default(0) // Incremented when referenced by Research agent
+  easeFactor      Float          @default(2.5)
+  interval        Int            @default(0)
+  repetitions     Int            @default(0)
+  nextReviewAt    DateTime       @default(now())
   lastReviewedAt  DateTime?
-  isAutoGenerated Boolean   @default(false)
-  source          String    @default("manual") // manual | distill | research
-  projectId       String?   // Link to ResearchProject if source=research
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  isAutoGenerated Boolean        @default(false)
+  source          String         @default("manual") // manual | distill | research
+  projectId       String? // Link to ResearchProject if source=research
+  sourceClaimId   String?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
   room            MindPalaceRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
   paper           Paper          @relation(fields: [paperId], references: [id], onDelete: Cascade)
+  sourceClaim     ResearchClaim? @relation(fields: [sourceClaimId], references: [id], onDelete: SetNull)
 
   @@index([roomId])
   @@index([paperId])
   @@index([nextReviewAt])
   @@index([source])
+  @@index([sourceClaimId])
 }
 
 model SynthesisSession {
@@ -481,14 +485,14 @@ model SynthesisSession {
   description      String?
   query            String?
   mode             String    @default("auto")
-  depth            String    @default("balanced")  // "quick" | "balanced" | "deep"
+  depth            String    @default("balanced") // "quick" | "balanced" | "deep"
   status           String    @default("PENDING")
   phase            String?
   progress         Float     @default(0)
   paperCount       Int       @default(0)
   plan             String?
-  guidanceMessages String?   // JSON: [{role, content, timestamp}]
-  guidance         String?   // JSON: structured guidance extracted at proceed time
+  guidanceMessages String? // JSON: [{role, content, timestamp}]
+  guidance         String? // JSON: structured guidance extracted at proceed time
   output           String?
   vizData          String?
   error            String?
@@ -516,253 +520,464 @@ model SynthesisPaper {
 }
 
 model SynthesisSection {
-  id          String @id @default(uuid())
+  id          String  @id @default(uuid())
   sessionId   String
   sectionType String
   title       String
   content     String
-  sortOrder   Int    @default(0)
+  sortOrder   Int     @default(0)
   citations   String?
 
   session SynthesisSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
   @@index([sessionId])
 }
 
 // ── Research Projects ─────────────────────────────────────────────
 
 model ResearchProject {
-  id              String   @id @default(uuid())
-  userId          String
-  title           String
-  brief           String   // JSON: { question, subQuestions, methodology, domains, keywords }
-  status          String   @default("SETUP")    // SETUP | ACTIVE | PAUSED | COMPLETED | ARCHIVED
-  methodology     String?  // experimental | survey | design_science | analytical | exploratory
-  currentPhase    String   @default("literature") // literature | hypothesis | experiment | analysis | reflection
-  metricSchema    String?  // JSON: [{ name, direction, description }] — canonical metrics for this project
-  collectionId    String?  @unique
-  outputFolder    String?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id           String   @id @default(uuid())
+  userId       String
+  kind         String   @default("RESEARCH") // RESEARCH | SYSTEM
+  title        String
+  brief        String // JSON: { question, subQuestions, methodology, domains, keywords }
+  status       String   @default("SETUP") // SETUP | ACTIVE | PAUSED | COMPLETED | ARCHIVED
+  methodology  String? // experimental | survey | design_science | analytical | exploratory
+  currentPhase    String   @default("DISCOVERY")  // FSM state: DISCOVERY | HYPOTHESIS | DESIGN | EXECUTION | ANALYSIS | DECISION | COMPLETE
+  metricSchema String? // JSON: [{ name, direction, description }] — canonical metrics for this project
+  collectionId String?  @unique
+  outputFolder String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
-  owner           User              @relation(fields: [userId], references: [id], onDelete: Cascade)
-  collection      Collection?       @relation(fields: [collectionId], references: [id])
+  owner             User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  collection        Collection?          @relation(fields: [collectionId], references: [id])
   iterations        ResearchIteration[]
   hypotheses        ResearchHypothesis[]
   log               ResearchLogEntry[]
   agentTasks        AgentTask[]
   approaches        ApproachBranch[]
   experimentResults ExperimentResult[]
+  experimentRuns    ExperimentRun[]
+  executorLeases    ExecutorLease[]
   artifacts         Artifact[]
   resourceRules     ResourceRule[]
+  claims            ResearchClaim[]
+  agentTraceEvents  AgentTraceEvent[]
+  transitions       TransitionRecord[]
 
   @@index([userId])
+  @@index([userId, kind, updatedAt])
 }
 
 model ResearchIteration {
-  id            String    @id @default(uuid())
-  projectId     String
-  number        Int
-  goal          String
-  status        String    @default("ACTIVE")  // ACTIVE | COMPLETED | ABANDONED
-  reflection    String?
-  nextActions   String?   // JSON: suggested next steps
-  startedAt     DateTime  @default(now())
-  completedAt   DateTime?
+  id          String    @id @default(uuid())
+  projectId   String
+  number      Int
+  goal        String
+  status      String    @default("ACTIVE") // ACTIVE | COMPLETED | ABANDONED
+  reflection  String?
+  nextActions String? // JSON: suggested next steps
+  nextStepSortOrder Int @default(0)
+  startedAt   DateTime  @default(now())
+  completedAt DateTime?
 
-  project       ResearchProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  steps         ResearchStep[]
+  project ResearchProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  steps   ResearchStep[]
 
   @@index([projectId])
 }
 
 model ResearchStep {
-  id              String    @id @default(uuid())
-  iterationId     String
-  type            String    // discover_papers | synthesize | generate_code | analyze_results | critique | user_action
-  status          String    @default("PROPOSED") // PROPOSED | APPROVED | RUNNING | COMPLETED | FAILED | SKIPPED
-  title           String
-  description     String?
-  input           String?   // JSON: step-specific params
-  output          String?   // JSON: step-specific results
-  agentSessionId  String?
-  discoveryId     String?
-  synthesisId     String?
-  sortOrder       Int       @default(0)
-  createdAt       DateTime  @default(now())
-  completedAt     DateTime?
+  id             String    @id @default(uuid())
+  iterationId    String
+  type           String // discover_papers | synthesize | generate_code | analyze_results | critique | user_action
+  status         String    @default("PROPOSED") // PROPOSED | APPROVED | RUNNING | COMPLETED | FAILED | SKIPPED
+  title          String
+  description    String?
+  input          String? // JSON: step-specific params
+  output         String? // JSON: step-specific results
+  agentSessionId String?
+  discoveryId    String?
+  synthesisId    String?
+  sortOrder      Int       @default(0)
+  createdAt      DateTime  @default(now())
+  completedAt    DateTime?
 
-  iteration       ResearchIteration @relation(fields: [iterationId], references: [id], onDelete: Cascade)
+  iteration ResearchIteration @relation(fields: [iterationId], references: [id], onDelete: Cascade)
 
   @@index([iterationId])
+  @@unique([iterationId, sortOrder])
 }
 
 model ResearchHypothesis {
-  id          String   @id @default(uuid())
-  projectId   String
-  statement   String
-  rationale   String?
-  status      String   @default("PROPOSED") // PROPOSED | TESTING | SUPPORTED | REFUTED | REVISED
-  evidence    String?  // JSON: [{ type, ref, summary, supports }]
-  theme       String?  // Research theme grouping (e.g., "Position Effects", "Prior Knowledge")
-  parentId    String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id        String   @id @default(uuid())
+  projectId String
+  statement String
+  rationale String?
+  status    String   @default("PROPOSED") // PROPOSED | TESTING | SUPPORTED | REFUTED | REVISED
+  evidence  String? // JSON: [{ type, ref, summary, supports }]
+  theme     String? // Research theme grouping (e.g., "Position Effects", "Prior Knowledge")
+  parentId  String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  project     ResearchProject    @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  parent      ResearchHypothesis? @relation("HypothesisChain", fields: [parentId], references: [id])
-  children    ResearchHypothesis[] @relation("HypothesisChain")
+  project       ResearchProject      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  parent        ResearchHypothesis?  @relation("HypothesisChain", fields: [parentId], references: [id])
+  children      ResearchHypothesis[] @relation("HypothesisChain")
+  claims        ResearchClaim[]
+  claimEvidence ClaimEvidence[]
 
   @@index([projectId])
 }
 
 model RemoteHost {
-  id          String   @id @default(uuid())
-  alias       String   @unique              // friendly name: "lab-a100", "lambda-1"
-  backend     String   @default("ssh")      // "ssh" | "ray"
-  host        String                        // hostname or IP
-  port        Int      @default(22)
-  user        String
-  keyPath     String?                       // path to SSH private key (null = use agent)
-  workDir     String   @default("~/experiments") // remote base directory
-  gpuType     String?                       // "A100", "H100", "4090", etc.
-  conda       String?                       // conda env to activate
-  setupCmd    String?                       // extra setup commands (e.g. "module load cuda/12.1")
-  baseRequirements String?                 // base requirements.txt content (tested, known-good packages)
-  envNotes         String?                 // user notes about this host's quirks (shown to agent)
-  envVars          String?                 // JSON: { "HF_TOKEN": "hf_...", "WANDB_API_KEY": "..." }
-  cleanupPolicy    String   @default("archive")  // "archive" | "archive-with-checkpoints" | "delete" | "none"
-  maxArchives      Int      @default(20)          // Max tarballs in .archive/ before oldest are pruned
-  pyrightInstalled  Boolean  @default(false)  // Cached: is pyright available in this host's env?
-  isDefault   Boolean  @default(false)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id               String   @id @default(uuid())
+  alias            String   @unique // friendly name: "lab-a100", "lambda-1"
+  backend          String   @default("ssh") // "ssh" | "ray"
+  host             String // hostname or IP
+  port             Int      @default(22)
+  user             String
+  keyPath          String? // path to SSH private key (null = use agent)
+  workDir          String   @default("~/experiments") // remote base directory
+  gpuType          String? // "A100", "H100", "4090", etc.
+  conda            String? // conda env to activate
+  setupCmd         String? // extra setup commands (e.g. "module load cuda/12.1")
+  baseRequirements String? // base requirements.txt content (tested, known-good packages)
+  envNotes         String? // user notes about this host's quirks (shown to agent)
+  envVars          String? // JSON: { "HF_TOKEN": "hf_...", "WANDB_API_KEY": "..." }
+  cleanupPolicy    String   @default("archive") // "archive" | "archive-with-checkpoints" | "delete" | "none"
+  maxArchives      Int      @default(20) // Max tarballs in .archive/ before oldest are pruned
+  pyrightInstalled Boolean  @default(false) // Cached: is pyright available in this host's env?
+  isDefault        Boolean  @default(false)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
 
-  jobs        RemoteJob[]
+  jobs                    RemoteJob[]
+  experimentRunsRequested ExperimentRun[]     @relation("ExperimentRunRequestedHost")
+  experimentAttempts      ExperimentAttempt[] @relation("ExperimentAttemptHost")
+  executorLeases          ExecutorLease[]     @relation("ExecutorLeaseHost")
 }
 
 model RemoteJob {
   id            String    @id @default(uuid())
   hostId        String
-  stepId        String?                     // FK to ResearchStep (nullable for standalone runs)
-  projectId     String?                     // FK to ResearchProject
-  localDir      String                      // local path that was synced
-  remoteDir     String                      // path on remote host
-  command       String                      // the command being run remotely
-  remotePid     Int?                        // PID on remote for polling
+  stepId        String? // FK to ResearchStep (nullable for standalone runs)
+  projectId     String? // FK to ResearchProject
+  runId         String? // FK to ExperimentRun (lifecycle v2 compatibility link)
+  localDir      String // local path that was synced
+  remoteDir     String // path on remote host
+  command       String // the command being run remotely
+  remotePid     Int? // PID on remote for polling
   status        String    @default("SYNCING") // SYNCING | QUEUED | RUNNING | COMPLETED | FAILED | CANCELLED
   exitCode      Int?
-  stdout        String?                     // last N lines of stdout
-  stderr        String?                     // last N lines of stderr
+  stdout        String? // last N lines of stdout
+  stderr        String? // last N lines of stderr
   resultsSynced Boolean   @default(false)
-  scriptHash    String?                     // SHA-256 prefix of script content at submission
-  hypothesisId  String?                     // FK to ResearchHypothesis being tested
-  fixAttempts   Int       @default(0)       // Auto-fix attempts (code errors only, max 2)
-  errorClass    String?                     // CODE_ERROR | RESEARCH_FAILURE | RESOURCE_ERROR | AUTO_FIXED
-  runDir        String?                     // Run directory name (e.g., "run_055")
-  archivedAt    DateTime?                   // When remote outputs were archived post-sync
-  diagnostics   String?                     // JSON: pyright diagnostics at submission time
+  scriptHash    String? // SHA-256 prefix of script content at submission
+  hypothesisId  String? // FK to ResearchHypothesis being tested
+  experimentPurpose String? // SMOKE | SYNTHETIC_PROXY | CALIBRATION | BASELINE | MAIN_EVAL | TRAINING | ANALYSIS
+  grounding        String? // UNSPECIFIED | SYNTHETIC | LOCAL_ARTIFACT | EXTERNAL_DATASET | MODEL_INFERENCE | HUMAN_EVAL | MIXED
+  claimEligibility String? // NONE | EXPLORATORY | SUPPORTING | DECISIVE
+  promotionPolicy  String? // NO_CLAIMS | PROVISIONAL_CLAIMS | CLAIMS_ALLOWED | MEMORY_ELIGIBLE
+  evidenceClass    String? // NONE | SYNTHETIC_PROXY | EXPLORATORY | SUPPORTING | DECISIVE
+  fixAttempts   Int       @default(0) // Auto-fix attempts (code errors only, max 2)
+  errorClass    String? // CODE_ERROR | RESEARCH_FAILURE | RESOURCE_ERROR | AUTO_FIXED
+  failureClass  String? // INFRA | CODE | POLICY | VALIDATION | IMPORT
+  runDir        String? // Run directory name (e.g., "run_055")
+  archivedAt    DateTime? // When remote outputs were archived post-sync
+  diagnostics   String? // JSON: pyright diagnostics at submission time
   createdAt     DateTime  @default(now())
   startedAt     DateTime?
   completedAt   DateTime?
 
-  host          RemoteHost @relation(fields: [hostId], references: [id], onDelete: Cascade)
+  host          RemoteHost      @relation(fields: [hostId], references: [id], onDelete: Cascade)
+  run           ExperimentRun?  @relation(fields: [runId], references: [id], onDelete: SetNull)
+  claimEvidence ClaimEvidence[]
 
   @@index([hostId])
   @@index([stepId])
+  @@index([runId])
   @@index([status])
   @@index([projectId, status])
+}
+
+model ExperimentRun {
+  id                 String    @id @default(uuid())
+  projectId          String
+  hypothesisId       String?
+  experimentPurpose  String? // SMOKE | SYNTHETIC_PROXY | CALIBRATION | BASELINE | MAIN_EVAL | TRAINING | ANALYSIS
+  grounding          String? // UNSPECIFIED | SYNTHETIC | LOCAL_ARTIFACT | EXTERNAL_DATASET | MODEL_INFERENCE | HUMAN_EVAL | MIXED
+  claimEligibility   String? // NONE | EXPLORATORY | SUPPORTING | DECISIVE
+  promotionPolicy    String? // NO_CLAIMS | PROVISIONAL_CLAIMS | CLAIMS_ALLOWED | MEMORY_ELIGIBLE
+  evidenceClass      String? // NONE | SYNTHETIC_PROXY | EXPLORATORY | SUPPORTING | DECISIVE
+  requestedHostId    String?
+  command            String
+  scriptName         String?
+  scriptHash         String?
+  state              String    @default("QUEUED") // QUEUED | STARTING | RUNNING | SUCCEEDED | FAILED | CANCELLED | BLOCKED
+  priority           Int       @default(0)
+  maxAttempts        Int       @default(3)
+  maxAutoFixAttempts Int       @default(2)
+  attemptCount       Int       @default(0)
+  lastErrorClass     String?
+  lastErrorReason    String?
+  metadata           String? // JSON: routing policy, runtime hints, idempotency keys
+  queuedAt           DateTime  @default(now())
+  startedAt          DateTime?
+  completedAt        DateTime?
+  cancelRequestedAt  DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  project       ResearchProject     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  requestedHost RemoteHost?         @relation("ExperimentRunRequestedHost", fields: [requestedHostId], references: [id], onDelete: SetNull)
+  attempts      ExperimentAttempt[]
+  events        ExperimentEvent[]
+  leases        ExecutorLease[]
+  remoteJobs    RemoteJob[]
+
+  @@index([state])
+  @@index([projectId, state])
+  @@index([requestedHostId, state])
+  @@index([createdAt])
+  @@index([queuedAt])
+}
+
+model ExperimentAttempt {
+  id            String    @id @default(uuid())
+  runId         String
+  attemptNumber Int
+  hostId        String?
+  localDir      String?
+  remoteDir     String?
+  runDir        String?
+  helperVersion String?
+  remotePid     Int?
+  remotePgid    Int?
+  state         String    @default("STARTING") // STARTING | RUNNING | TERMINAL
+  exitCode      Int?
+  diagnostics   String? // JSON: static analysis and runtime diagnostics
+  stdoutTail    String?
+  stderrTail    String?
+  errorClass    String?
+  errorReason   String?
+  startedAt     DateTime  @default(now())
+  heartbeatAt   DateTime?
+  completedAt   DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  run    ExperimentRun     @relation(fields: [runId], references: [id], onDelete: Cascade)
+  host   RemoteHost?       @relation("ExperimentAttemptHost", fields: [hostId], references: [id], onDelete: SetNull)
+  events ExperimentEvent[]
+  leases ExecutorLease[]
+
+  @@unique([runId, attemptNumber])
+  @@index([state])
+  @@index([runId, state])
+  @@index([hostId, state])
+  @@index([createdAt])
+}
+
+model ExperimentEvent {
+  id        String   @id @default(uuid())
+  runId     String
+  attemptId String?
+  type      String // RUN_CREATED | ATTEMPT_STARTED | ATTEMPT_HEARTBEAT | ATTEMPT_EXITED | RUN_FINALIZED | ...
+  stateFrom String?
+  stateTo   String?
+  message   String?
+  payload   String? // JSON event payload
+  createdAt DateTime @default(now())
+
+  run     ExperimentRun      @relation(fields: [runId], references: [id], onDelete: Cascade)
+  attempt ExperimentAttempt? @relation(fields: [attemptId], references: [id], onDelete: SetNull)
+
+  @@index([runId, createdAt])
+  @@index([attemptId, createdAt])
+  @@index([type, createdAt])
+  @@index([createdAt])
+}
+
+model ExecutorLease {
+  id              String   @id @default(uuid())
+  leaseKey        String   @unique // e.g. "run:<id>", "host:<id>"
+  leaseToken      String // fencing token (UUID)
+  ownerId         String // coordinator identity
+  scope           String // run | attempt | host | project
+  runId           String?
+  attemptId       String?
+  hostId          String?
+  projectId       String?
+  leaseVersion    Int      @default(1)
+  leaseExpiresAt  DateTime
+  leaseAcquiredAt DateTime @default(now())
+  lastHeartbeatAt DateTime @default(now())
+  metadata        String? // JSON metadata
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  run     ExperimentRun?     @relation(fields: [runId], references: [id], onDelete: Cascade)
+  attempt ExperimentAttempt? @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  host    RemoteHost?        @relation("ExecutorLeaseHost", fields: [hostId], references: [id], onDelete: SetNull)
+  project ResearchProject?   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([leaseExpiresAt])
+  @@index([projectId, leaseExpiresAt])
+  @@index([hostId, leaseExpiresAt])
+  @@index([scope, leaseExpiresAt])
+  @@index([createdAt])
 }
 
 model AgentTask {
   id          String    @id @default(uuid())
   projectId   String
-  role        String    // "scout" | "reviewer" | "experimenter"
+  role        String // "scout" | "reviewer" | "experimenter"
   goal        String
   status      String    @default("PENDING") // PENDING | RUNNING | COMPLETED | FAILED
-  input       String?   // JSON context
-  output      String?   // JSON findings
+  input       String? // JSON context
+  output      String? // JSON findings
   error       String?
   tokenUsage  Int?
+  lastCollectedAt DateTime?
   createdAt   DateTime  @default(now())
   completedAt DateTime?
+  updatedAt   DateTime  @updatedAt
 
-  project     ResearchProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project          ResearchProject   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  claims           ResearchClaim[]
+  claimAssessments ClaimAssessment[]
+  claimEvidence    ClaimEvidence[]
 
   @@index([projectId])
   @@index([status])
 }
 
 model ResearchLogEntry {
-  id          String   @id @default(uuid())
-  projectId   String
-  type        String   // decision | observation | question | dead_end | breakthrough | agent_suggestion | user_note
-  content     String
-  metadata    String?  // JSON: linked paper IDs, hypothesis IDs, etc.
-  createdAt   DateTime @default(now())
+  id        String   @id @default(uuid())
+  projectId String
+  type      String // decision | observation | question | dead_end | breakthrough | agent_suggestion | user_note
+  content   String
+  metadata  String? // JSON: linked paper IDs, hypothesis IDs, etc.
+  createdAt DateTime @default(now())
 
-  project     ResearchProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project       ResearchProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  claimEvidence ClaimEvidence[]
 
   @@index([projectId])
   @@index([createdAt])
 }
 
+model TransitionRecord {
+  id          String   @id @default(cuid())
+  projectId   String
+  domain      String   // "project" | "run" | "hypothesis"
+  entityId    String   // projectId, runId, or hypothesisId
+  fromState   String
+  toState     String
+  trigger     String   // "auto" | "agent" | "user" | "system"
+  basis       String
+  guards      String?  // JSON of guard evaluation results
+  createdAt   DateTime @default(now())
+
+  project ResearchProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@index([projectId, domain, createdAt])
+  @@index([entityId])
+}
+
+model AgentTraceEvent {
+  id            String   @id @default(uuid())
+  projectId     String
+  runId         String
+  sessionNumber Int      @default(1)
+  sequence      Int
+  eventType     String // text | tool_call | tool_result | tool_progress | tool_output | step_done | thinking | error | done
+  stepNumber    Int?
+  toolName      String?
+  toolCallId    String?
+  content       String?
+  argsJson      String?
+  resultJson    String?
+  activityJson  String?
+  metadata      String?
+  createdAt     DateTime @default(now())
+
+  project ResearchProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([runId, sequence])
+  @@index([projectId, createdAt])
+  @@index([projectId, runId, sequence])
+  @@index([projectId, eventType, createdAt])
+}
+
 model ApproachBranch {
-  id          String    @id @default(uuid())
+  id          String   @id @default(uuid())
   projectId   String
   parentId    String?
   name        String
   description String?
-  status      String    @default("ACTIVE") // ACTIVE | EXHAUSTED | ABANDONED | PROMISING
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  status      String   @default("ACTIVE") // ACTIVE | EXHAUSTED | ABANDONED | PROMISING
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
-  project     ResearchProject  @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  parent      ApproachBranch?  @relation("BranchTree", fields: [parentId], references: [id])
-  children    ApproachBranch[] @relation("BranchTree")
-  results     ExperimentResult[]
+  project  ResearchProject    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  parent   ApproachBranch?    @relation("BranchTree", fields: [parentId], references: [id])
+  children ApproachBranch[]   @relation("BranchTree")
+  results  ExperimentResult[]
 
   @@index([projectId])
 }
 
 model ExperimentResult {
-  id           String    @id @default(uuid())
+  id           String   @id @default(uuid())
   projectId    String
-  jobId        String?   @unique    // links to RemoteJob.id
+  jobId        String?  @unique // links to RemoteJob.id
   hypothesisId String?
+  experimentPurpose String? // SMOKE | SYNTHETIC_PROXY | CALIBRATION | BASELINE | MAIN_EVAL | TRAINING | ANALYSIS
+  grounding        String? // UNSPECIFIED | SYNTHETIC | LOCAL_ARTIFACT | EXTERNAL_DATASET | MODEL_INFERENCE | HUMAN_EVAL | MIXED
+  claimEligibility String? // NONE | EXPLORATORY | SUPPORTING | DECISIVE
+  promotionPolicy  String? // NO_CLAIMS | PROVISIONAL_CLAIMS | CLAIMS_ALLOWED | MEMORY_ELIGIBLE
+  evidenceClass    String? // NONE | SYNTHETIC_PROXY | EXPLORATORY | SUPPORTING | DECISIVE
   branchId     String?
-  baselineId   String?              // links to another ExperimentResult for comparison
+  baselineId   String? // links to another ExperimentResult for comparison
   scriptName   String
-  parameters   String?              // JSON: hyperparameters
-  metrics      String?              // JSON: canonical metrics matching project schema { f1: 0.85, precision: 0.97 }
-  rawMetrics   String?              // JSON: original experiment-specific metrics (full detail)
-  condition    String?              // Experimental condition (e.g., "single agent, budget=60")
-  comparison   String?              // JSON: delta vs baseline on canonical metrics
-  verdict      String?              // better | worse | inconclusive | error
-  reflection   String?              // post-experiment analysis or failure reflection
-  createdAt    DateTime  @default(now())
+  parameters   String? // JSON: hyperparameters
+  metrics      String? // JSON: canonical metrics matching project schema { f1: 0.85, precision: 0.97 }
+  rawMetrics   String? // JSON: original experiment-specific metrics (full detail)
+  condition    String? // Experimental condition (e.g., "single agent, budget=60")
+  comparison   String? // JSON: delta vs baseline on canonical metrics
+  verdict      String? // better | worse | inconclusive | error
+  reflection   String? // post-experiment analysis or failure reflection
+  createdAt    DateTime @default(now())
 
-  project      ResearchProject  @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  branch       ApproachBranch?  @relation(fields: [branchId], references: [id])
-  artifacts    Artifact[]
+  project       ResearchProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  branch        ApproachBranch? @relation(fields: [branchId], references: [id])
+  artifacts     Artifact[]
+  claims        ResearchClaim[]
+  claimEvidence ClaimEvidence[]
 
   @@index([projectId])
   @@index([branchId])
 }
 
 model Artifact {
-  id           String   @id @default(uuid())
-  projectId    String
-  resultId     String?                      // FK to ExperimentResult that produced this
-  type         String                       // figure | model | results | code | log
-  filename     String                       // fig_08_rag_strategy.png, model_checkpoint/, results_008.json
-  path         String                       // relative path in workdir
-  caption      String?                      // human-readable description
-  keyTakeaway  String?                      // one-line insight (for figures)
-  size         Int?                         // file size in bytes
-  createdAt    DateTime @default(now())
+  id          String   @id @default(uuid())
+  projectId   String
+  resultId    String? // FK to ExperimentResult that produced this
+  type        String // figure | model | results | code | log
+  filename    String // fig_08_rag_strategy.png, model_checkpoint/, results_008.json
+  path        String // relative path in workdir
+  caption     String? // human-readable description
+  keyTakeaway String? // one-line insight (for figures)
+  size        Int? // file size in bytes
+  createdAt   DateTime @default(now())
 
-  project      ResearchProject   @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  result       ExperimentResult? @relation(fields: [resultId], references: [id])
+  project       ResearchProject   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  result        ExperimentResult? @relation(fields: [resultId], references: [id])
+  claimEvidence ClaimEvidence[]
 
   @@unique([projectId, filename])
   @@index([projectId])
@@ -770,18 +985,108 @@ model Artifact {
   @@index([type])
 }
 
-model ResourceRule {
-  id          String   @id @default(uuid())
-  projectId   String
-  pattern     String                       // glob-like: "analysis_*", "exp_*", "poc_001_*.py", "*"
-  runtime     String                       // "local" | "remote" | "remote:<alias>" (specific host)
-  needs       String?                      // JSON array: ["gpu", "openai_proxy", "large_memory"]
-  reason      String?                      // human-readable: "needs local LLM proxy"
-  priority    Int       @default(0)        // higher = wins over lower when multiple match
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+model ResearchClaim {
+  id           String   @id @default(uuid())
+  projectId    String
+  hypothesisId String?
+  resultId     String?
+  taskId       String?
+  statement    String
+  summary      String?
+  type         String // finding | comparison | hypothesis_assessment | methodological | risk | reproduction
+  status       String   @default("DRAFT") // DRAFT | SUPPORTED | CONTESTED | REPRODUCED | RETRACTED
+  confidence   String   @default("PRELIMINARY") // PRELIMINARY | MODERATE | STRONG
+  createdBy    String   @default("agent") // agent | reviewer | reproducer | user | system
+  createdFrom  String? // record_result | log_finding | update_hypothesis | review_claim | reproduce_claim
+  notes        String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
-  project     ResearchProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project     ResearchProject     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  hypothesis  ResearchHypothesis? @relation(fields: [hypothesisId], references: [id], onDelete: SetNull)
+  result      ExperimentResult?   @relation(fields: [resultId], references: [id], onDelete: SetNull)
+  task        AgentTask?          @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  evidence    ClaimEvidence[]
+  assessments ClaimAssessment[]
+  memories    AgentMemory[]
+  insights    Insight[]
+
+  @@index([projectId, status])
+  @@index([hypothesisId])
+  @@index([resultId])
+  @@index([taskId])
+  @@index([createdAt])
+}
+
+model ClaimAssessment {
+  id         String   @id @default(uuid())
+  claimId    String
+  taskId     String?
+  actorRole  String // reviewer | reproducer | user | system
+  verdict    String // SUPPORTED | CONTESTED | REPRODUCED | RETRACTED
+  confidence String? // PRELIMINARY | MODERATE | STRONG
+  notes      String?
+  metadata   String? // JSON metadata about the assessment source
+  createdAt  DateTime @default(now())
+
+  claim ResearchClaim @relation(fields: [claimId], references: [id], onDelete: Cascade)
+  task  AgentTask?    @relation(fields: [taskId], references: [id], onDelete: SetNull)
+
+  @@index([claimId, createdAt])
+  @@index([taskId])
+  @@index([actorRole, createdAt])
+  @@index([verdict, createdAt])
+}
+
+model ClaimEvidence {
+  id           String   @id @default(uuid())
+  claimId      String
+  kind         String // experiment_result | artifact | paper | hypothesis | log_entry | agent_task | remote_job
+  supports     Boolean  @default(true)
+  strength     String   @default("DIRECT") // DIRECT | INDIRECT | CONTEXT | REBUTTAL
+  rationale    String?
+  excerpt      String?
+  locator      String? // JSON or short locator string
+  paperId      String?
+  hypothesisId String?
+  resultId     String?
+  artifactId   String?
+  logEntryId   String?
+  taskId       String?
+  remoteJobId  String?
+  createdAt    DateTime @default(now())
+
+  claim      ResearchClaim       @relation(fields: [claimId], references: [id], onDelete: Cascade)
+  paper      Paper?              @relation(fields: [paperId], references: [id], onDelete: SetNull)
+  hypothesis ResearchHypothesis? @relation(fields: [hypothesisId], references: [id], onDelete: SetNull)
+  result     ExperimentResult?   @relation(fields: [resultId], references: [id], onDelete: SetNull)
+  artifact   Artifact?           @relation(fields: [artifactId], references: [id], onDelete: SetNull)
+  logEntry   ResearchLogEntry?   @relation(fields: [logEntryId], references: [id], onDelete: SetNull)
+  task       AgentTask?          @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  remoteJob  RemoteJob?          @relation(fields: [remoteJobId], references: [id], onDelete: SetNull)
+
+  @@index([claimId, supports])
+  @@index([paperId])
+  @@index([hypothesisId])
+  @@index([resultId])
+  @@index([artifactId])
+  @@index([logEntryId])
+  @@index([taskId])
+  @@index([remoteJobId])
+}
+
+model ResourceRule {
+  id        String   @id @default(uuid())
+  projectId String
+  pattern   String // glob-like: "analysis_*", "exp_*", "poc_001_*.py", "*"
+  runtime   String // "local" | "remote" | "remote:<alias>" (specific host)
+  needs     String? // JSON array: ["gpu", "openai_proxy", "large_memory"]
+  reason    String? // human-readable: "needs local LLM proxy"
+  priority  Int      @default(0) // higher = wins over lower when multiple match
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  project ResearchProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
   @@index([projectId])
 }
@@ -791,14 +1096,14 @@ model ResourceRule {
 model AgentCapability {
   id           String   @id @default(uuid())
   userId       String
-  name         String   // Short name, e.g. "Weights & Biases"
-  description  String   // What it is and when to use it
-  instructions String   // How to use it: commands, APIs, code snippets
+  name         String // Short name, e.g. "Weights & Biases"
+  description  String // What it is and when to use it
+  instructions String // How to use it: commands, APIs, code snippets
   enabled      Boolean  @default(true)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  owner        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  owner User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
 }
@@ -806,32 +1111,39 @@ model AgentCapability {
 // ── Agent Process Memory (practical learnings from trial & error) ──
 
 model AgentMemory {
-  id         String   @id @default(uuid())
-  userId     String
-  category   String   // package, environment, code_pattern, debugging, dataset, performance, general
-  lesson     String   // The actual learning (concise, actionable)
-  context    String?  // When/why this was learned (the error or situation)
-  projectId  String?  // Which project it was learned in (optional)
-  usageCount Int      @default(0)  // Incremented each time referenced in a session
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  id              String    @id @default(uuid())
+  userId          String
+  category        String // package, environment, code_pattern, debugging, dataset, performance, general
+  lesson          String // The actual learning (concise, actionable)
+  context         String? // When/why this was learned (the error or situation)
+  projectId       String? // Which project it was learned in (optional)
+  sourceClaimId   String?
+  status          String    @default("APPROVED") // CANDIDATE | APPROVED | STALE | REJECTED
+  confidence      Float?
+  lastValidatedAt DateTime?
+  usageCount      Int       @default(0) // Incremented each time referenced in a session
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
-  owner      User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  owner       User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sourceClaim ResearchClaim? @relation(fields: [sourceClaimId], references: [id], onDelete: SetNull)
 
   @@index([userId])
+  @@index([sourceClaimId])
+  @@index([userId, status])
 }
 
 // ── Batch Processing ───────────────────────────────────────────────
 
 model ProcessingBatch {
   id               String    @id @default(uuid())
-  anthropicBatchId String?   @unique  // Batch ID from Anthropic API
-  groupId          String               // Links phases of the same job
-  phase            Int                   // 1, 2, or 3
+  anthropicBatchId String?   @unique // Batch ID from Anthropic API
+  groupId          String // Links phases of the same job
+  phase            Int // 1, 2, or 3
   status           String    @default("BUILDING") // BUILDING, SUBMITTED, PROCESSING, COMPLETED, FAILED, CANCELED
   modelId          String
-  paperIds         String               // JSON array of paper IDs
-  stepTypes        String               // JSON array of step types in this phase
+  paperIds         String // JSON array of paper IDs
+  stepTypes        String // JSON array of step types in this phase
   requestCount     Int       @default(0)
   completedCount   Int       @default(0)
   failedCount      Int       @default(0)

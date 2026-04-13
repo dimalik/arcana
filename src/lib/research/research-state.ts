@@ -5,8 +5,13 @@
  */
 
 import { prisma } from "@/lib/prisma";
-import { writeFile } from "fs/promises";
+import { stat, writeFile } from "fs/promises";
 import path from "path";
+import { getEvaluationProtocol, summarizeEvaluationProtocol } from "./evaluation-protocol";
+import { CLAIM_COORDINATOR_STEP_TYPES } from "./claim-graph";
+import { getProjectStateReport } from "./fsm/transition-engine";
+
+const summaryGenerationInFlight = new Map<string, Promise<void>>();
 
 // ── Public API ────────────────────────────────────────────────────
 
@@ -25,6 +30,12 @@ export async function generateResearchState(
     include: {
       hypotheses: { orderBy: { updatedAt: "desc" } },
       iterations: { orderBy: { number: "desc" }, take: 1 },
+      claims: {
+        where: { status: { not: "RETRACTED" } },
+        include: { evidence: true },
+        orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
+        take: 12,
+      },
       experimentResults: {
         include: { branch: true },
         orderBy: { createdAt: "asc" },
@@ -54,10 +65,25 @@ export async function generateResearchState(
   // ── 3. Step count for current iteration ──────────────────────
   const currentIteration = project.iterations[0] ?? null;
   let stepCount = 0;
+  let coordinatorSteps: Array<{ status: string; title: string; type: string }> = [];
   if (currentIteration) {
-    stepCount = await prisma.researchStep.count({
-      where: { iterationId: currentIteration.id },
-    });
+    const [allSteps, queuedCoordinatorSteps] = await Promise.all([
+      prisma.researchStep.count({
+        where: { iterationId: currentIteration.id },
+      }),
+      prisma.researchStep.findMany({
+        where: {
+          iterationId: currentIteration.id,
+          type: { in: [...CLAIM_COORDINATOR_STEP_TYPES] },
+          status: { in: ["PROPOSED", "APPROVED", "RUNNING"] },
+        },
+        orderBy: [{ status: "desc" }, { sortOrder: "asc" }],
+        take: 8,
+        select: { status: true, title: true, type: true },
+      }),
+    ]);
+    stepCount = allSteps;
+    coordinatorSteps = queuedCoordinatorSteps;
   }
 
   // ── 4. Pending (running) jobs with details ───────────────────
@@ -72,13 +98,40 @@ export async function generateResearchState(
 
   // Header
   const iterNum = currentIteration?.number ?? 1;
-  const phase = project.currentPhase.toUpperCase();
   const expSummary = buildExperimentSummary(completedJobs, failedJobs, runningJobs);
+
+  const stateReport = await getProjectStateReport(projectId);
+  const guardSummary = Object.entries(stateReport.guardResults)
+    .map(([transition, result]) => {
+      const status = result.satisfied ? "READY" : "blocked";
+      const blockers = Object.entries(result.checks)
+        .filter(([, v]) => !v.passed)
+        .map(([k, v]) => `${k}: ${v.detail}`)
+        .join(", ");
+      return `- ${transition}: ${status}${blockers ? ` (${blockers})` : ""}`;
+    })
+    .join("\n");
 
   sections.push(
     `# Research State: ${project.title}`,
-    `**Phase:** ${phase} (Iteration ${iterNum}) | **Steps:** ${stepCount} | **Experiments:** ${expSummary}`,
+    `**State:** ${stateReport.state} (Iteration ${iterNum}) | **Steps:** ${stepCount} | **Experiments:** ${expSummary}`,
+    ``,
+    `**Next transitions:**`,
+    guardSummary,
   );
+
+  // Evaluation protocol (if defined)
+  try {
+    const protocol = await getEvaluationProtocol(projectId);
+    if (protocol) {
+      sections.push(
+        "## Evaluation Protocol",
+        summarizeEvaluationProtocol(protocol.protocol),
+      );
+    }
+  } catch {
+    // Non-fatal — skip if protocol read fails
+  }
 
   // Hypotheses table
   if (project.hypotheses.length > 0) {
@@ -92,6 +145,20 @@ export async function generateResearchState(
       `|--------|-----------|----------|`,
       ...rows,
     );
+  }
+
+  if (project.claims.length > 0) {
+    const claimLines = project.claims.map((claim) => {
+      const supportCount = claim.evidence.filter((e) => e.supports).length;
+      const rebuttalCount = claim.evidence.filter((e) => !e.supports).length;
+      return `- [${claim.status}/${claim.confidence}] ${claim.statement} (support=${supportCount}, rebuttal=${rebuttalCount})`;
+    });
+    sections.push(`## Claim Ledger`, ...claimLines);
+  }
+
+  if (coordinatorSteps.length > 0) {
+    const queueLines = coordinatorSteps.map((step) => `- [${step.status}] ${step.title}`);
+    sections.push(`## Credibility Queue`, ...queueLines);
   }
 
   // Key Insights (from Mind Palace) — top insights by usage for papers in this project
@@ -126,14 +193,14 @@ export async function generateResearchState(
   // Active Lessons (from process memory) — top lessons by usage for this project's user
   try {
     const lessons = await prisma.agentMemory.findMany({
-      where: { userId: project.userId },
+      where: { userId: project.userId, status: "APPROVED" },
       orderBy: { usageCount: "desc" },
       take: 5,
-      select: { category: true, lesson: true },
+      select: { category: true, lesson: true, sourceClaimId: true },
     });
     if (lessons.length > 0) {
       const lessonLines = lessons.map(
-        (l) => `- [${l.category}] ${l.lesson}`,
+        (l) => `- [${l.category}] ${l.lesson}${l.sourceClaimId ? ` (claim:${l.sourceClaimId.slice(0, 8)})` : ""}`,
       );
       sections.push(`## Active Lessons`, ...lessonLines);
     }
@@ -224,30 +291,63 @@ async function safeWriteFile(workDir: string, content: string): Promise<void> {
  * Only generates when there are 2+ experiment results to summarize.
  */
 export function triggerSummaryIfNeeded(projectId: string, workDir: string): void {
-  // Check experiment count before making an LLM call
-  prisma.experimentResult.count({ where: { projectId } }).then(count => {
+  void ensureSummaryGenerated(projectId, workDir).catch((err) => {
+    console.warn("[research-state] Summary generation failed:", err);
+  });
+}
+
+async function ensureSummaryGenerated(projectId: string, workDir: string): Promise<void> {
+  const existing = summaryGenerationInFlight.get(projectId);
+  if (existing) {
+    await existing;
+    return;
+  }
+
+  const generation = (async () => {
+    const count = await prisma.experimentResult.count({ where: { projectId } });
     if (count < 2) return;
-    // Check if summary exists and is recent (don't regenerate within 10 minutes)
-    import("fs/promises").then(({ stat, readFile: rf }) => {
-      const summaryPath = path.join(workDir, "RESEARCH_SUMMARY.md");
-      stat(summaryPath).then(s => {
-        const ageMs = Date.now() - s.mtimeMs;
-        if (ageMs < 600_000) return; // Less than 10 min old, skip
-        import("./research-summary").then(({ generateResearchSummary }) => {
-          generateResearchSummary(projectId, workDir).catch(e =>
-            console.warn("[research-state] Summary generation failed:", e)
-          );
-        });
-      }).catch(() => {
-        // File doesn't exist — generate it
-        import("./research-summary").then(({ generateResearchSummary }) => {
-          generateResearchSummary(projectId, workDir).catch(e =>
-            console.warn("[research-state] Summary generation failed:", e)
-          );
-        });
-      });
-    });
-  }).catch(() => {});
+    if (await summaryIsFresh(workDir)) return;
+
+    const { generateResearchSummary } = await import("./research-summary");
+    await generateResearchSummary(projectId, workDir);
+  })();
+
+  summaryGenerationInFlight.set(projectId, generation);
+  try {
+    await generation;
+  } finally {
+    if (summaryGenerationInFlight.get(projectId) === generation) {
+      summaryGenerationInFlight.delete(projectId);
+    }
+  }
+}
+
+async function summaryIsFresh(workDir: string): Promise<boolean> {
+  const candidatePaths = [
+    path.join(workDir, "RESEARCH_SUMMARY.json"),
+    path.join(workDir, "RESEARCH_SUMMARY.md"),
+  ];
+
+  const stats = await Promise.all(
+    candidatePaths.map(async (candidate) => {
+      try {
+        return await stat(candidate);
+      } catch {
+        return null;
+      }
+    }),
+  );
+
+  let freshestMtime: number | null = null;
+  for (const entry of stats) {
+    if (!entry) continue;
+    freshestMtime = freshestMtime === null
+      ? entry.mtimeMs
+      : Math.max(freshestMtime, entry.mtimeMs);
+  }
+
+  if (freshestMtime === null) return false;
+  return Date.now() - freshestMtime < 600_000;
 }
 
 /** Build a compact "5 completed, 2 failed, 1 running" string. */

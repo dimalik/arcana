@@ -4,6 +4,7 @@ import { generateLLMResponse, setLlmContext } from "@/lib/llm/provider";
 import { getDefaultModel } from "@/lib/llm/auto-process";
 import { classifyTaskCategory } from "./task-classifier";
 import { getResourcePreference, CONFIDENCE_THRESHOLD } from "./resource-preferences";
+import { reserveResearchStepSortOrders } from "./step-order";
 
 export interface StepSuggestion {
   type: string;
@@ -76,7 +77,7 @@ function getRuleBasedSuggestions(
   const completedTypes = new Set(existingSteps.filter((s) => s.status === "COMPLETED").map((s) => s.type));
 
   switch (phase) {
-    case "literature": {
+    case "DISCOVERY": {
       if (paperCount < 5) {
         suggestions.push({
           type: paperCount === 0 ? "search_papers" : "discover_papers",
@@ -103,7 +104,7 @@ function getRuleBasedSuggestions(
       }
       break;
     }
-    case "hypothesis": {
+    case "HYPOTHESIS": {
       if (hypotheses.length === 0) {
         suggestions.push({
           type: "critique",
@@ -123,7 +124,7 @@ function getRuleBasedSuggestions(
       }
       break;
     }
-    case "experiment": {
+    case "EXECUTION": {
       const testing = hypotheses.filter((h) => h.status === "TESTING");
       if (testing.length > 0 || hypotheses.some((h) => h.status === "PROPOSED")) {
         suggestions.push({
@@ -135,7 +136,7 @@ function getRuleBasedSuggestions(
       }
       break;
     }
-    case "analysis": {
+    case "ANALYSIS": {
       if (!completedTypes.has("analyze_results")) {
         suggestions.push({
           type: "analyze_results",
@@ -146,7 +147,7 @@ function getRuleBasedSuggestions(
       }
       break;
     }
-    case "reflection": {
+    case "DECISION": {
       suggestions.push({
         type: "critique",
         title: "Reflect on this iteration",
@@ -228,8 +229,7 @@ export async function createProposedSteps(
   suggestions: StepSuggestion[],
   userId?: string,
 ): Promise<void> {
-  for (const s of suggestions) {
-    // Auto-apply learned resource preference if confidence is high enough
+  const inputRows = await Promise.all(suggestions.map(async (s) => {
     let input = s.input || {};
     if (userId) {
       try {
@@ -242,18 +242,24 @@ export async function createProposedSteps(
         // Non-critical — proceed without preference
       }
     }
+    return Object.keys(input).length > 0 ? JSON.stringify(input) : null;
+  }));
 
-    const inputStr = Object.keys(input).length > 0 ? JSON.stringify(input) : null;
-    await prisma.researchStep.create({
-      data: {
-        iterationId,
-        type: s.type,
-        title: s.title,
-        description: s.description,
-        input: inputStr,
-        sortOrder: s.sortOrder,
-        status: "PROPOSED",
-      },
-    });
-  }
+  await prisma.$transaction(async (tx) => {
+    const sortOrders = await reserveResearchStepSortOrders(tx, iterationId, suggestions.length);
+    for (let index = 0; index < suggestions.length; index += 1) {
+      const s = suggestions[index];
+      await tx.researchStep.create({
+        data: {
+          iterationId,
+          type: s.type,
+          title: s.title,
+          description: s.description,
+          input: inputRows[index],
+          sortOrder: sortOrders[index],
+          status: "PROPOSED",
+        },
+      });
+    }
+  });
 }
