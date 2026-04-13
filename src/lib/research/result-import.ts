@@ -637,7 +637,32 @@ export async function importExperimentResultFromRemoteJob(jobId: string) {
     : parseSummaryBlock(job.stdout || "", scriptName);
   const imported = manifestResult || stdoutResult || summaryBlockResult;
   if (!imported) {
-    return { imported: false, reason: "no_structured_result" as const };
+    // No structured result found — create a placeholder so the convergence
+    // barrier doesn't deadlock the project. A completed job should never block
+    // future work. The agent can refine this in ANALYSIS with record_result.
+    const placeholder = await prisma.experimentResult.create({
+      data: {
+        projectId: job.projectId,
+        jobId,
+        hypothesisId: job.hypothesisId,
+        experimentPurpose: contract.experimentPurpose,
+        grounding: contract.grounding,
+        claimEligibility: contract.claimEligibility,
+        promotionPolicy: contract.promotionPolicy,
+        evidenceClass: contract.evidenceClass,
+        branchId: null,
+        baselineId: null,
+        scriptName,
+        parameters: JSON.stringify({ command: job.command, source: "placeholder" }),
+        metrics: "{}",
+        rawMetrics: null,
+        condition: null,
+        comparison: null,
+        verdict: "pending_analysis",
+        reflection: "Auto-import could not parse structured results from stdout. Use record_result or extract_results to fill in metrics.",
+      },
+    });
+    return { imported: true, resultId: placeholder.id, reason: "placeholder_created" as const };
   }
 
   const result = await prisma.experimentResult.create({
