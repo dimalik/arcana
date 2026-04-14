@@ -25,6 +25,7 @@ export interface DesignToExecutionContext {
   metricSchemaDefined: boolean;
   evaluationProtocolExists: boolean;
   activeHypothesisCount: number;
+  readyIntentCount: number;
 }
 
 export interface ExecutionToAnalysisContext {
@@ -32,6 +33,7 @@ export interface ExecutionToAnalysisContext {
   doneNonSmokeRunCount: number;
   /** Jobs completed since the last time we entered EXECUTION (prevents instant re-transition) */
   newDoneNonSmokeRunCount: number;
+  satisfiedIntentCount: number;
 }
 
 export interface AnalysisToDecisionContext {
@@ -162,6 +164,12 @@ function evaluateDesignToExecution(
           ? `${ctx.activeHypothesisCount} active hypotheses`
           : "No active hypotheses",
     },
+    ready_intents: {
+      passed: ctx.readyIntentCount > 0,
+      detail: ctx.readyIntentCount > 0
+        ? `${ctx.readyIntentCount} intents ready for execution`
+        : "No intents in READY state — create intents in DESIGN first",
+    },
   };
 
   return {
@@ -179,6 +187,12 @@ function evaluateExecutionToAnalysis(
       detail: ctx.newDoneNonSmokeRunCount > 0
         ? `${ctx.newDoneNonSmokeRunCount} new experiments completed this iteration`
         : `No new non-SMOKE experiments since entering EXECUTION (${ctx.doneRunCount} total historical)`,
+    },
+    satisfied_intent: {
+      passed: ctx.satisfiedIntentCount > 0,
+      detail: ctx.satisfiedIntentCount > 0
+        ? `${ctx.satisfiedIntentCount} intents satisfied with results`
+        : "No intents satisfied yet",
     },
   };
 

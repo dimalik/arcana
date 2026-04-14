@@ -103,6 +103,7 @@ describe("evaluateTransitionGuard", () => {
       metricSchemaDefined: true,
       evaluationProtocolExists: false,
       activeHypothesisCount: 1,
+      readyIntentCount: 1,
     };
     const result = await evaluateTransitionGuard(
       "proj-1",
@@ -120,6 +121,7 @@ describe("evaluateTransitionGuard", () => {
       metricSchemaDefined: true,
       evaluationProtocolExists: true,
       activeHypothesisCount: 2,
+      readyIntentCount: 1,
     };
     const result = await evaluateTransitionGuard(
       "proj-1",

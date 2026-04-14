@@ -20,6 +20,7 @@ export const CROSS_CUTTING_TOOLS = [
   "list_files",
   "get_workspace",
   "request_help",
+  "run_infrastructure",
 ] as const;
 
 /**
@@ -66,6 +67,7 @@ export const STATE_TOOLS: Record<ProjectState, readonly string[]> = {
     "view_approach_tree",
     "validate_environment",
     "diagnose_remote_host",
+    "create_intent",
   ],
   EXECUTION: [
     // Focused: write code, run it, monitor it. No literature browsing.

@@ -99,7 +99,7 @@ export async function fetchGuardContext(
     }
 
     case "DESIGN->EXECUTION": {
-      const [project, evalProtocol, activeHypothesisCount] = await Promise.all([
+      const [project, evalProtocol, activeHypothesisCount, readyIntentCount] = await Promise.all([
         prisma.researchProject.findUnique({
           where: { id: projectId },
           select: { metricSchema: true },
@@ -111,12 +111,16 @@ export async function fetchGuardContext(
             status: { in: ["ACTIVE", "TESTING", "PROPOSED"] },
           },
         }),
+        prisma.experimentIntent.count({
+          where: { projectId, status: "READY" },
+        }),
       ]);
 
       return {
         metricSchemaDefined: project?.metricSchema != null && project.metricSchema !== "",
         evaluationProtocolExists: evalProtocol != null,
         activeHypothesisCount,
+        readyIntentCount,
       } satisfies DesignToExecutionContext;
     }
 
@@ -133,7 +137,7 @@ export async function fetchGuardContext(
       });
       const sinceDate = lastExecutionEntry?.createdAt || new Date(0);
 
-      const [doneRunCount, doneNonSmokeRunCount, newDoneNonSmokeRunCount] = await Promise.all([
+      const [doneRunCount, doneNonSmokeRunCount, newDoneNonSmokeRunCount, satisfiedIntentCount] = await Promise.all([
         prisma.remoteJob.count({
           where: { projectId, status: "COMPLETED" },
         }),
@@ -148,8 +152,11 @@ export async function fetchGuardContext(
             completedAt: { gt: sinceDate },
           },
         }),
+        prisma.experimentIntent.count({
+          where: { projectId, status: "SATISFIED" },
+        }),
       ]);
-      return { doneRunCount, doneNonSmokeRunCount, newDoneNonSmokeRunCount } satisfies ExecutionToAnalysisContext;
+      return { doneRunCount, doneNonSmokeRunCount, newDoneNonSmokeRunCount, satisfiedIntentCount } satisfies ExecutionToAnalysisContext;
     }
 
     case "ANALYSIS->DECISION": {
