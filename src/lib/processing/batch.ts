@@ -107,6 +107,7 @@ async function getAnthropicBatchConfig(): Promise<{
     baseUrl: proxyConfig.anthropicBaseUrl,
     headers: {
       [proxyConfig.headerName]: proxyConfig.headerValue,
+      "X-LLM-Proxy-Target-URL": "https://api.anthropic.com",
       "anthropic-version": "2023-06-01",
       "Content-Type": "application/json",
     },
@@ -195,6 +196,16 @@ async function downloadBatchResults(anthropicBatchId: string): Promise<BatchResu
 
   // Response is JSONL (one JSON object per line)
   const text = await res.text();
+
+  // Save raw JSONL to disk as backup before processing into DB
+  try {
+    const fs = await import("fs/promises");
+    const path = await import("path");
+    const dir = path.join(process.cwd(), "prisma", "backups", "batch-results");
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(path.join(dir, `${anthropicBatchId}.jsonl`), text);
+  } catch {}
+
   return text.trim().split("\n").map(line => JSON.parse(line) as BatchResult);
 }
 
@@ -315,13 +326,9 @@ async function buildPhase1Requests(
       requests.push(buildExtractRequest(paper.id, truncated, modelId));
     }
 
-    // Summarize — only batch short papers; long ones need chunked map-reduce
+    // Summarize — use truncated text for all papers (batch discount is worth the truncation)
     if (!paper.summary) {
-      if (text.length <= MAX_PAPER_CHARS) {
-        requests.push(buildSummarizeRequest(paper.id, truncated, modelId, userContextPreamble));
-      } else {
-        skippedForChunking.push(paper.id);
-      }
+      requests.push(buildSummarizeRequest(paper.id, truncated, modelId, userContextPreamble));
     }
 
     // Extract references (only if we have full text)
@@ -863,22 +870,39 @@ export async function submitNextPhase(groupId: string, phase: number, paperIds: 
     return;
   }
 
-  console.log(`[batch] Submitting Phase ${phase} batch: ${requests.length} requests`);
-  const anthropicBatchId = await submitBatch(requests, config);
+  // Chunk large request sets to avoid proxy payload limits (502/413)
+  const MAX_REQUESTS_PER_BATCH = 300;
+  const chunks: BatchRequest[][] = [];
+  for (let i = 0; i < requests.length; i += MAX_REQUESTS_PER_BATCH) {
+    chunks.push(requests.slice(i, i + MAX_REQUESTS_PER_BATCH));
+  }
 
-  const stepTypes = Array.from(new Set(requests.map(r => r.custom_id.split("--")[1])));
-  await prisma.processingBatch.create({
-    data: {
-      groupId,
-      anthropicBatchId,
-      phase,
-      status: "SUBMITTED",
-      modelId,
-      paperIds: JSON.stringify(paperIds),
-      stepTypes: JSON.stringify(stepTypes),
-      requestCount: requests.length,
-    },
-  });
+  console.log(`[batch] Submitting Phase ${phase}: ${requests.length} requests in ${chunks.length} chunk(s)`);
+
+  for (let ci = 0; ci < chunks.length; ci++) {
+    const chunk = chunks[ci];
+    if (ci > 0) {
+      // Small delay between chunks to avoid rate limits
+      await new Promise(r => setTimeout(r, 5000));
+    }
+
+    const anthropicBatchId = await submitBatch(chunk, config);
+    const stepTypes = Array.from(new Set(chunk.map(r => r.custom_id.split("--")[1])));
+    await prisma.processingBatch.create({
+      data: {
+        groupId,
+        anthropicBatchId,
+        phase,
+        status: "SUBMITTED",
+        modelId,
+        paperIds: JSON.stringify(paperIds),
+        stepTypes: JSON.stringify(stepTypes),
+        requestCount: chunk.length,
+      },
+    });
+
+    console.log(`[batch] Phase ${phase} chunk ${ci + 1}/${chunks.length}: ${anthropicBatchId} (${chunk.length} requests)`);
+  }
 
   // Update paper step indicator
   await prisma.paper.updateMany({
