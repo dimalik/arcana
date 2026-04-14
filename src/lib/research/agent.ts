@@ -3124,8 +3124,10 @@ function createTools(
         name: z.string().describe("Short name, e.g. 'LoRA fine-tuning with r=16'"),
         description: z.string().optional().describe("Detailed description of the approach"),
         parent_id: z.string().optional().describe("Parent approach ID if this is a sub-approach/refinement"),
+        hypothesis_id: z.string().optional().describe("ID of the hypothesis this approach serves"),
+        role: z.enum(["primary", "control", "ablation", "comparison"]).default("primary").describe("Role of this approach relative to the hypothesis"),
       }),
-      execute: async ({ name, description, parent_id }: { name: string; description?: string; parent_id?: string }) => {
+      execute: async ({ name, description, parent_id, hypothesis_id, role }: { name: string; description?: string; parent_id?: string; hypothesis_id?: string; role?: string }) => {
         if (parent_id) {
           const parent = await prisma.approachBranch.findFirst({ where: { id: parent_id, projectId } });
           if (!parent) return `Parent approach "${parent_id}" not found.`;
@@ -3144,6 +3146,15 @@ function createTools(
         const branch = await prisma.approachBranch.create({
           data: { projectId, name, description, parentId: parent_id },
         });
+        if (hypothesis_id) {
+          await prisma.hypothesisApproachLink.create({
+            data: {
+              hypothesisId: hypothesis_id,
+              approachId: branch.id,
+              role: role || "primary",
+            },
+          }).catch(() => {}); // Non-fatal — link is advisory
+        }
         await prisma.researchLogEntry.create({
           data: { projectId, type: "decision", content: `Registered approach: ${name}` },
         });
