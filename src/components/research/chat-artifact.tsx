@@ -93,6 +93,106 @@ export function extractArtifacts(
   return { prose: prose.trim(), artifacts };
 }
 
+/** Segment types for streaming content */
+export type StreamSegment =
+  | { type: "prose"; content: string }
+  | { type: "artifact"; artifact: CodeArtifact }
+  | { type: "streaming_artifact"; language: string; code: string; lineCount: number };
+
+/**
+ * Parse streaming content into segments, detecting in-progress code blocks.
+ * Unlike extractArtifacts (for completed messages), this handles partial
+ * content where a code fence is open but not yet closed.
+ */
+export function parseStreamingSegments(
+  content: string,
+  minLines: number = 8,
+): StreamSegment[] {
+  const segments: StreamSegment[] = [];
+  // Split on code fences, keeping the delimiters
+  const parts = content.split(/(```\w*\s*\n)/);
+
+  let inCodeBlock = false;
+  let currentLang = "";
+  let codeAccum = "";
+
+  for (let i = 0; i < parts.length; i++) {
+    const part = parts[i];
+    const openMatch = part.match(/^```(\w*)\s*\n$/);
+
+    if (!inCodeBlock && openMatch) {
+      inCodeBlock = true;
+      currentLang = (openMatch[1] || "").toLowerCase();
+      codeAccum = "";
+      continue;
+    }
+
+    if (inCodeBlock) {
+      const closeIdx = part.indexOf("```");
+      if (closeIdx >= 0) {
+        // Block is closed
+        const code = (codeAccum + part.slice(0, closeIdx)).trimEnd();
+        const lineCount = code.split("\n").length;
+        inCodeBlock = false;
+
+        if (lineCount >= minLines) {
+          let filename: string | null = null;
+          const firstLine = code.split("\n")[0];
+          const commentFile = firstLine.match(/^(?:#|\/\/|%|--)\s*(\S+\.\w+)/);
+          if (commentFile) filename = commentFile[1];
+          if (!filename && currentLang) {
+            const ext = LANG_EXT[currentLang] || `.${currentLang}`;
+            filename = `artifact${ext}`;
+          }
+          segments.push({
+            type: "artifact",
+            artifact: { language: currentLang, code, filename, lineCount },
+          });
+        } else {
+          // Too small — render as inline code in prose
+          segments.push({
+            type: "prose",
+            content: "```" + currentLang + "\n" + code + "```",
+          });
+        }
+        // Remaining text after closing fence
+        const after = part.slice(closeIdx + 3);
+        if (after.trim()) {
+          segments.push({ type: "prose", content: after });
+        }
+      } else {
+        // Still accumulating — block not closed yet
+        codeAccum += part;
+      }
+    } else {
+      if (part.trim()) {
+        segments.push({ type: "prose", content: part });
+      }
+    }
+  }
+
+  // If we're still inside a code block, it's streaming
+  if (inCodeBlock && codeAccum) {
+    const lineCount = codeAccum.split("\n").length;
+    if (lineCount >= minLines) {
+      segments.push({
+        type: "streaming_artifact",
+        language: currentLang,
+        code: codeAccum,
+        lineCount,
+      });
+    } else {
+      // Not long enough yet — show as inline code
+      segments.push({
+        type: "prose",
+        content: "```" + currentLang + "\n" + codeAccum,
+      });
+    }
+  }
+
+  return segments;
+}
+
 /**
  * Renders a code artifact as a collapsible card with copy/download/save actions.
  */
@@ -233,6 +333,37 @@ export function ArtifactCard({
           Show all {artifact.lineCount} lines
         </button>
       )}
+    </div>
+  );
+}
+
+/**
+ * Renders an in-progress artifact being streamed — always expanded, shows cursor.
+ */
+export function StreamingArtifactCard({
+  language,
+  code,
+  lineCount,
+}: {
+  language: string;
+  code: string;
+  lineCount: number;
+}) {
+  const langLabel = LANG_LABEL[language] || language || "Plain text";
+
+  return (
+    <div className="my-2 rounded-lg border border-border/60 bg-muted/10 overflow-hidden">
+      <div className="flex items-center gap-2 px-3 py-2 bg-muted/20 border-b border-border/40">
+        <div className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+        <span className="text-xs font-mono text-foreground/60">Writing {langLabel}...</span>
+        <span className="ml-auto text-[10px] text-muted-foreground/40">{lineCount} lines</span>
+      </div>
+      <div className="overflow-x-auto max-h-[400px] overflow-y-auto">
+        <pre className="px-3 py-2 text-[11px] leading-relaxed font-mono text-foreground/80">
+          <code>{code}</code>
+          <span className="inline-block w-1.5 h-3 bg-foreground/60 animate-pulse ml-0.5" />
+        </pre>
+      </div>
     </div>
   );
 }
