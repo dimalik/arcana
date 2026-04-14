@@ -2,51 +2,7 @@
 
 import { useEffect, useState, useMemo, useRef } from "react";
 import { FileCode, Download, X, WrapText, Copy, Check } from "lucide-react";
-import hljs from "highlight.js/lib/core";
-
-// Register languages on demand — lightweight, no unused grammars
-import python from "highlight.js/lib/languages/python";
-import javascript from "highlight.js/lib/languages/javascript";
-import typescript from "highlight.js/lib/languages/typescript";
-import bash from "highlight.js/lib/languages/bash";
-import json from "highlight.js/lib/languages/json";
-import yaml from "highlight.js/lib/languages/yaml";
-import xml from "highlight.js/lib/languages/xml";
-import css from "highlight.js/lib/languages/css";
-import sql from "highlight.js/lib/languages/sql";
-import r from "highlight.js/lib/languages/r";
-import dockerfile from "highlight.js/lib/languages/dockerfile";
-import ini from "highlight.js/lib/languages/ini";
-import markdown from "highlight.js/lib/languages/markdown";
-import latex from "highlight.js/lib/languages/latex";
-import c from "highlight.js/lib/languages/c";
-import cpp from "highlight.js/lib/languages/cpp";
-import java from "highlight.js/lib/languages/java";
-import rust from "highlight.js/lib/languages/rust";
-import go from "highlight.js/lib/languages/go";
-import lua from "highlight.js/lib/languages/lua";
-
-hljs.registerLanguage("python", python);
-hljs.registerLanguage("javascript", javascript);
-hljs.registerLanguage("typescript", typescript);
-hljs.registerLanguage("bash", bash);
-hljs.registerLanguage("json", json);
-hljs.registerLanguage("yaml", yaml);
-hljs.registerLanguage("xml", xml);
-hljs.registerLanguage("html", xml);
-hljs.registerLanguage("css", css);
-hljs.registerLanguage("sql", sql);
-hljs.registerLanguage("r", r);
-hljs.registerLanguage("dockerfile", dockerfile);
-hljs.registerLanguage("ini", ini);
-hljs.registerLanguage("markdown", markdown);
-hljs.registerLanguage("latex", latex);
-hljs.registerLanguage("c", c);
-hljs.registerLanguage("cpp", cpp);
-hljs.registerLanguage("java", java);
-hljs.registerLanguage("rust", rust);
-hljs.registerLanguage("go", go);
-hljs.registerLanguage("lua", lua);
+import { hljs } from "@/lib/highlight";
 
 const EXT_TO_LANG: Record<string, string> = {
   py: "python",

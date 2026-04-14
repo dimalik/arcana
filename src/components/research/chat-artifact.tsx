@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Check, ChevronDown, ChevronRight, Copy, Download, Save } from "lucide-react";
 import { toast } from "sonner";
+import { highlightCode } from "@/lib/highlight";
 
 const LANG_EXT: Record<string, string> = {
   latex: ".tex",
@@ -317,10 +318,15 @@ export function ArtifactCard({
         </div>
       </div>
 
-      {/* Code preview / full */}
+      {/* Code preview / full — syntax highlighted */}
       <div className="overflow-x-auto">
-        <pre className="px-3 py-2 text-[11px] leading-relaxed font-mono text-foreground/80">
-          <code>{expanded ? artifact.code : preview}{!expanded && hasMore ? "\n..." : ""}</code>
+        <pre className="px-3 py-2 text-[11px] leading-relaxed font-mono hljs">
+          <code dangerouslySetInnerHTML={{
+            __html: highlightCode(
+              (expanded ? artifact.code : preview) + (!expanded && hasMore ? "\n..." : ""),
+              artifact.language,
+            ),
+          }} />
         </pre>
       </div>
 
@@ -359,8 +365,8 @@ export function StreamingArtifactCard({
         <span className="ml-auto text-[10px] text-muted-foreground/40">{lineCount} lines</span>
       </div>
       <div className="overflow-x-auto max-h-[400px] overflow-y-auto">
-        <pre className="px-3 py-2 text-[11px] leading-relaxed font-mono text-foreground/80">
-          <code>{code}</code>
+        <pre className="px-3 py-2 text-[11px] leading-relaxed font-mono hljs">
+          <code dangerouslySetInnerHTML={{ __html: highlightCode(code, language) }} />
           <span className="inline-block w-1.5 h-3 bg-foreground/60 animate-pulse ml-0.5" />
         </pre>
       </div>
