@@ -4,7 +4,7 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { MessageCircle, X, Send, Loader2, Sparkles, Copy, BookmarkPlus, Download, Check, RefreshCw, Plus, Trash2, ChevronLeft, History, ArrowUp } from "lucide-react";
 import { toast } from "sonner";
 import { MarkdownRenderer } from "@/components/ui/markdown-renderer";
-import { extractArtifacts, ArtifactCard } from "./chat-artifact";
+import { extractArtifacts, ArtifactCard, parseStreamingSegments, StreamingArtifactCard } from "./chat-artifact";
 
 interface Message {
   id: string;
@@ -431,12 +431,29 @@ function ChatView({ projectId, thread, onUpdateMessages, initialInput, onInitial
           </div>
         ))}
 
-        {streaming && streamingContent && (
-          <div className="text-xs leading-relaxed prose prose-xs dark:prose-invert max-w-none [&_h1]:text-sm [&_h2]:text-xs [&_h3]:text-xs [&_p]:text-xs [&_li]:text-xs [&_code]:text-[10px]">
-            <MarkdownRenderer content={streamingContent} />
-            <span className="inline-block w-1.5 h-3 bg-foreground/60 animate-pulse ml-0.5" />
-          </div>
-        )}
+        {streaming && streamingContent && (() => {
+          const segments = parseStreamingSegments(streamingContent);
+          return (
+            <div>
+              {segments.map((seg, i) => {
+                if (seg.type === "artifact") {
+                  return <ArtifactCard key={`stream-a-${i}`} artifact={seg.artifact} projectId={projectId} />;
+                }
+                if (seg.type === "streaming_artifact") {
+                  return <StreamingArtifactCard key={`stream-sa-${i}`} language={seg.language} code={seg.code} lineCount={seg.lineCount} />;
+                }
+                return (
+                  <div key={`stream-p-${i}`} className="text-xs leading-relaxed prose prose-xs dark:prose-invert max-w-none [&_h1]:text-sm [&_h2]:text-xs [&_h3]:text-xs [&_p]:text-xs [&_li]:text-xs [&_code]:text-[10px]">
+                    <MarkdownRenderer content={seg.content} />
+                    {i === segments.length - 1 && seg.type === "prose" && (
+                      <span className="inline-block w-1.5 h-3 bg-foreground/60 animate-pulse ml-0.5" />
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          );
+        })()}
 
         {streaming && !streamingContent && (
           <div className="flex items-center gap-2 text-muted-foreground/40">
