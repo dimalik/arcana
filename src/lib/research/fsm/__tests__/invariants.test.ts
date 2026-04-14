@@ -10,6 +10,11 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "fs";
 import path from "path";
+import {
+  PROJECT_LIFECYCLE_STATES,
+  HYPOTHESIS_LIFECYCLE_STATES,
+  RUN_LIFECYCLE_STATES,
+} from "../enums";
 
 const ROOT = path.resolve(__dirname, "../../../../..");
 const AGENT_PATH = path.join(ROOT, "src/lib/research/agent.ts");
@@ -45,5 +50,22 @@ describe("FSM invariant: tool-set completeness", () => {
       missing.forEach((t) => console.error(`  - ${t}`));
     }
     expect(missing).toEqual([]);
+  });
+});
+
+describe("FSM invariant: vocabulary consistency", () => {
+  it("project FSM states in types.ts match enums.ts", async () => {
+    const { PROJECT_STATES } = await import("../types");
+    expect([...PROJECT_STATES]).toEqual([...PROJECT_LIFECYCLE_STATES]);
+  });
+
+  it("run FSM states in types.ts match enums.ts", async () => {
+    const { RUN_STATES } = await import("../types");
+    expect([...RUN_STATES]).toEqual([...RUN_LIFECYCLE_STATES]);
+  });
+
+  it("hypothesis FSM states in types.ts match enums.ts", async () => {
+    const { HYPOTHESIS_STATES } = await import("../types");
+    expect([...HYPOTHESIS_STATES]).toEqual([...HYPOTHESIS_LIFECYCLE_STATES]);
   });
 });
