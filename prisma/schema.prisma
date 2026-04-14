@@ -564,7 +564,10 @@ model ResearchProject {
   resourceRules     ResourceRule[]
   claims            ResearchClaim[]
   agentTraceEvents  AgentTraceEvent[]
-  transitions       TransitionRecord[]
+  transitions         TransitionRecord[]
+  intents             ExperimentIntent[]
+  invariantViolations InvariantViolation[]
+  blockingReasons     BlockingReason[]
 
   @@index([userId])
   @@index([userId, kind, updatedAt])
@@ -627,6 +630,8 @@ model ResearchHypothesis {
   children      ResearchHypothesis[] @relation("HypothesisChain")
   claims        ResearchClaim[]
   claimEvidence ClaimEvidence[]
+  intents             ExperimentIntent[]
+  approachLinks       HypothesisApproachLink[]
 
   @@index([projectId])
 }
@@ -693,6 +698,7 @@ model RemoteJob {
 
   host          RemoteHost      @relation(fields: [hostId], references: [id], onDelete: Cascade)
   run           ExperimentRun?  @relation(fields: [runId], references: [id], onDelete: SetNull)
+  attempt       ExperimentAttempt?
   claimEvidence ClaimEvidence[]
 
   @@index([hostId])
@@ -706,6 +712,13 @@ model ExperimentRun {
   id                 String    @id @default(uuid())
   projectId          String
   hypothesisId       String?
+  intentId           String?            // null for infrastructure runs
+  kind               String   @default("research")
+  purpose            String?
+  overlay            String?
+  seed               Int?
+  condition          String?
+  runKey             String?
   experimentPurpose  String? // SMOKE | SYNTHETIC_PROXY | CALIBRATION | BASELINE | MAIN_EVAL | TRAINING | ANALYSIS
   grounding          String? // UNSPECIFIED | SYNTHETIC | LOCAL_ARTIFACT | EXTERNAL_DATASET | MODEL_INFERENCE | HUMAN_EVAL | MIXED
   claimEligibility   String? // NONE | EXPLORATORY | SUPPORTING | DECISIVE
@@ -732,6 +745,7 @@ model ExperimentRun {
 
   project       ResearchProject     @relation(fields: [projectId], references: [id], onDelete: Cascade)
   requestedHost RemoteHost?         @relation("ExperimentRunRequestedHost", fields: [requestedHostId], references: [id], onDelete: SetNull)
+  intent        ExperimentIntent?   @relation(fields: [intentId], references: [id])
   attempts      ExperimentAttempt[]
   events        ExperimentEvent[]
   leases        ExecutorLease[]
@@ -740,40 +754,50 @@ model ExperimentRun {
   @@index([state])
   @@index([projectId, state])
   @@index([requestedHostId, state])
+  @@index([intentId])
   @@index([createdAt])
   @@index([queuedAt])
+  @@unique([intentId, runKey])
 }
 
 model ExperimentAttempt {
-  id            String    @id @default(uuid())
-  runId         String
-  attemptNumber Int
-  hostId        String?
-  localDir      String?
-  remoteDir     String?
-  runDir        String?
-  helperVersion String?
-  remotePid     Int?
-  remotePgid    Int?
-  state         String    @default("STARTING") // STARTING | RUNNING | TERMINAL
-  exitCode      Int?
-  diagnostics   String? // JSON: static analysis and runtime diagnostics
-  stdoutTail    String?
-  stderrTail    String?
-  errorClass    String?
-  errorReason   String?
-  startedAt     DateTime  @default(now())
-  heartbeatAt   DateTime?
-  completedAt   DateTime?
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  id                String    @id @default(uuid())
+  runId             String
+  attemptNumber     Int
+  hostId            String?
+  hostAlias         String?
+  remoteJobId       String?   @unique
+  isAutoFixResubmit Boolean   @default(false)
+  localDir          String?
+  remoteDir         String?
+  runDir            String?
+  helperVersion     String?
+  remotePid         Int?
+  remotePgid        Int?
+  state             String    @default("STARTING") // STARTING | RUNNING | TERMINAL
+  exitCode          Int?
+  diagnostics       String? // JSON: static analysis and runtime diagnostics
+  stdoutTail        String?
+  stderrTail        String?
+  errorClass        String?
+  errorReason       String?
+  failureClass      String?
+  failureReason     String?
+  startedAt         DateTime  @default(now())
+  heartbeatAt       DateTime?
+  lastHeartbeatAt   DateTime?
+  completedAt       DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
 
-  run    ExperimentRun     @relation(fields: [runId], references: [id], onDelete: Cascade)
-  host   RemoteHost?       @relation("ExperimentAttemptHost", fields: [hostId], references: [id], onDelete: SetNull)
-  events ExperimentEvent[]
-  leases ExecutorLease[]
+  run       ExperimentRun     @relation(fields: [runId], references: [id], onDelete: Cascade)
+  host      RemoteHost?       @relation("ExperimentAttemptHost", fields: [hostId], references: [id], onDelete: SetNull)
+  remoteJob RemoteJob?        @relation(fields: [remoteJobId], references: [id])
+  events    ExperimentEvent[]
+  leases    ExecutorLease[]
 
   @@unique([runId, attemptNumber])
+  @@index([runId])
   @@index([state])
   @@index([runId, state])
   @@index([hostId, state])
@@ -870,22 +894,35 @@ model ResearchLogEntry {
 }
 
 model TransitionRecord {
-  id          String   @id @default(cuid())
-  projectId   String
-  domain      String   // "project" | "run" | "hypothesis"
-  entityId    String   // projectId, runId, or hypothesisId
-  fromState   String
-  toState     String
-  trigger     String   // "auto" | "agent" | "user" | "system"
-  basis       String
-  guards      String?  // JSON of guard evaluation results
-  createdAt   DateTime @default(now())
+  id                    String   @id @default(cuid())
+  projectId             String
+  domain                String
+  entityId              String
+  fromState             String
+  toState               String
+  trigger               String
 
-  project ResearchProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  causedByEvent         String?
+  causedByEntityType    String?
+  causedByEntityId      String?
+  agentSessionId        String?
+  traceRunId            String?
+
+  basis                 String
+  guardsEvaluated       String?
+
+  entityVersion         String?
+  guardContextHash      String?
+  guardContextSnapshot  String?
+
+  createdAt             DateTime @default(now())
+
+  project               ResearchProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
   @@index([projectId])
   @@index([projectId, domain, createdAt])
   @@index([entityId])
+  @@index([causedByEntityId])
 }
 
 model AgentTraceEvent {
@@ -925,8 +962,10 @@ model ApproachBranch {
 
   project  ResearchProject    @relation(fields: [projectId], references: [id], onDelete: Cascade)
   parent   ApproachBranch?    @relation("BranchTree", fields: [parentId], references: [id])
-  children ApproachBranch[]   @relation("BranchTree")
-  results  ExperimentResult[]
+  children        ApproachBranch[]   @relation("BranchTree")
+  results         ExperimentResult[]
+  intents         ExperimentIntent[]
+  hypothesisLinks HypothesisApproachLink[]
 
   @@index([projectId])
 }
@@ -1154,4 +1193,94 @@ model ProcessingBatch {
 
   @@index([groupId])
   @@index([status])
+}
+
+// ── FSM v2: Experiment Lifecycle ──────────────────────────────────
+
+model ExperimentIntent {
+  id                    String   @id @default(cuid())
+  projectId             String
+  hypothesisId          String
+  approachId            String
+  protocolId            String
+  scriptName            String
+  scriptHash            String
+  protocolHash          String
+  args                  String?
+  purpose               String             // BASELINE | MAIN_EVAL | TRAINING | ANALYSIS
+  grounding             String?
+  completionCriterion   String             // JSON: CompletionCriterion
+  status                String   @default("DRAFT")
+  supersedesIntentId    String?
+  createdFromTransitionId String?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  project               ResearchProject    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  hypothesis            ResearchHypothesis @relation(fields: [hypothesisId], references: [id])
+  approach              ApproachBranch     @relation(fields: [approachId], references: [id])
+  supersedes            ExperimentIntent?  @relation("IntentRevision", fields: [supersedesIntentId], references: [id])
+  supersededBy          ExperimentIntent[] @relation("IntentRevision")
+  runs                  ExperimentRun[]
+
+  @@index([projectId])
+  @@index([projectId, status])
+  @@index([hypothesisId])
+}
+
+model HypothesisApproachLink {
+  id            String   @id @default(cuid())
+  hypothesisId  String
+  approachId    String
+  role          String   // primary | control | ablation | comparison
+  rationale     String?
+  createdAt     DateTime @default(now())
+
+  hypothesis    ResearchHypothesis @relation(fields: [hypothesisId], references: [id], onDelete: Cascade)
+  approach      ApproachBranch     @relation(fields: [approachId], references: [id], onDelete: Cascade)
+
+  @@unique([hypothesisId, approachId])
+  @@index([hypothesisId])
+  @@index([approachId])
+}
+
+model InvariantViolation {
+  id                     String    @id @default(cuid())
+  projectId              String
+  invariantKey           String
+  class                  String    // HARD | SOFT | AUDIT
+  domain                 String    // project | intent | run | hypothesis | approach
+  entityId               String
+  message                String
+  context                String?   // JSON
+  status                 String    @default("OPEN")
+  escalationPolicy       String?
+  firstSeenAt            DateTime  @default(now())
+  lastSeenAt             DateTime  @default(now())
+  occurrenceCount        Int       @default(1)
+  resolvedAt             DateTime?
+  resolvedBy             String?
+  repairedByTransitionId String?
+
+  project                ResearchProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId, status])
+  @@index([invariantKey, entityId])
+  @@unique([projectId, invariantKey, entityId, status])
+}
+
+model BlockingReason {
+  id          String    @id @default(cuid())
+  projectId   String
+  domain      String    // "project" | "run"
+  entityId    String
+  reason      String
+  detail      String?
+  resolvedAt  DateTime?
+  createdAt   DateTime  @default(now())
+
+  project     ResearchProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId, domain, entityId])
+  @@index([entityId, resolvedAt])
 }

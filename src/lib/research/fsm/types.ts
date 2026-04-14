@@ -4,21 +4,27 @@
 // the research agent lifecycle system.
 // ---------------------------------------------------------------------------
 
-// ---- Project FSM ----------------------------------------------------------
+// Re-export frozen vocabularies from the canonical source
+export {
+  type ProjectLifecycleState as ProjectState,
+  type RunLifecycleState as RunState,
+  type HypothesisLifecycleState as HypothesisState,
+  type FailureClass,
+  type TransitionTrigger,
+  type TransitionDomain,
+  type CompletionCriterion,
+  PROJECT_LIFECYCLE_STATES as PROJECT_STATES,
+  RUN_LIFECYCLE_STATES as RUN_STATES,
+  RUN_TERMINAL_STATES,
+  HYPOTHESIS_LIFECYCLE_STATES as HYPOTHESIS_STATES,
+  HYPOTHESIS_TERMINAL_STATES,
+} from "./enums";
 
-export const PROJECT_STATES = [
-  "DISCOVERY",
-  "HYPOTHESIS",
-  "DESIGN",
-  "EXECUTION",
-  "ANALYSIS",
-  "DECISION",
-  "COMPLETE",
-] as const;
+// ---- Project FSM (transitions) --------------------------------------------
 
-export type ProjectState = (typeof PROJECT_STATES)[number];
+import type { ProjectLifecycleState } from "./enums";
 
-export const PROJECT_TRANSITIONS: Record<ProjectState, readonly ProjectState[]> = {
+export const PROJECT_TRANSITIONS: Record<ProjectLifecycleState, readonly ProjectLifecycleState[]> = {
   DISCOVERY: ["HYPOTHESIS"],
   HYPOTHESIS: ["DESIGN", "DISCOVERY"],
   DESIGN: ["EXECUTION", "HYPOTHESIS"],
@@ -27,50 +33,6 @@ export const PROJECT_TRANSITIONS: Record<ProjectState, readonly ProjectState[]> 
   DECISION: ["DESIGN", "HYPOTHESIS", "COMPLETE"],
   COMPLETE: [],
 } as const;
-
-// ---- Run FSM --------------------------------------------------------------
-
-export const RUN_STATES = [
-  "DRAFT",
-  "READY",
-  "QUEUED",
-  "RUNNING",
-  "IMPORTING",
-  "DONE",
-  "FAILED",
-  "CANCELLED",
-] as const;
-
-export type RunState = (typeof RUN_STATES)[number];
-
-export type FailureClass = "INFRA" | "CODE" | "POLICY" | "VALIDATION" | "IMPORT";
-
-export const RUN_TERMINAL_STATES: readonly RunState[] = [
-  "DONE",
-  "FAILED",
-  "CANCELLED",
-] as const;
-
-// ---- Hypothesis FSM -------------------------------------------------------
-
-export const HYPOTHESIS_STATES = [
-  "PROPOSED",
-  "ACTIVE",
-  "EVALUATING",
-  "SUPPORTED",
-  "CONTESTED",
-  "REVISED",
-  "RETIRED",
-] as const;
-
-export type HypothesisState = (typeof HYPOTHESIS_STATES)[number];
-
-export const HYPOTHESIS_TERMINAL_STATES: readonly HypothesisState[] = [
-  "SUPPORTED",
-  "CONTESTED",
-  "REVISED",
-  "RETIRED",
-] as const;
 
 // ---- Operational Overlays -------------------------------------------------
 
