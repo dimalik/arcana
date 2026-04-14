@@ -46,6 +46,8 @@ export interface DecisionToCompleteContext {
   activeOrEvaluatingHypothesisCount: number;
   openCoordinatorObligations: number;
   supportedOrRetiredCount: number;
+  groundedSummaryCompiled: boolean;
+  memoryPromotionsPending: number;
 }
 
 export interface DecisionToDesignContext {
@@ -253,6 +255,19 @@ function evaluateDecisionToComplete(
         ctx.supportedOrRetiredCount > 0
           ? `${ctx.supportedOrRetiredCount} hypotheses supported or retired`
           : "No hypotheses have been supported or retired",
+    },
+    grounded_summary: {
+      passed: ctx.groundedSummaryCompiled,
+      detail: ctx.groundedSummaryCompiled
+        ? "Grounded summary compiled"
+        : "No grounded summary compiled yet",
+    },
+    memory_promotions: {
+      passed: ctx.memoryPromotionsPending === 0,
+      detail:
+        ctx.memoryPromotionsPending === 0
+          ? "All memory candidates adjudicated"
+          : `${ctx.memoryPromotionsPending} memory candidates pending`,
     },
   };
 

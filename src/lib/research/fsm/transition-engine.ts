@@ -187,28 +187,52 @@ export async function fetchGuardContext(
     }
 
     case "DECISION->COMPLETE": {
-      const [activeOrEvaluatingHypothesisCount, supportedOrRetiredCount] =
-        await Promise.all([
-          // Hypotheses still in active/testing/proposed state
-          prisma.researchHypothesis.count({
+      const [
+        activeOrEvaluatingHypothesisCount,
+        supportedOrRetiredCount,
+        summaryExists,
+        pendingPromotions,
+      ] = await Promise.all([
+        // Hypotheses still in active/testing/proposed state
+        prisma.researchHypothesis.count({
+          where: {
+            projectId,
+            status: { in: ["ACTIVE", "TESTING", "PROPOSED"] },
+          },
+        }),
+        // Hypotheses that reached a final verdict
+        prisma.researchHypothesis.count({
+          where: {
+            projectId,
+            status: { in: ["SUPPORTED", "REFUTED"] },
+          },
+        }),
+        // Grounded summary log entry exists
+        prisma.researchLogEntry
+          .count({
             where: {
               projectId,
-              status: { in: ["ACTIVE", "TESTING", "PROPOSED"] },
+              type: "decision",
+              content: { startsWith: "RESEARCH_SUMMARY" },
             },
-          }),
-          // Hypotheses that reached a final verdict
-          prisma.researchHypothesis.count({
-            where: {
-              projectId,
-              status: { in: ["SUPPORTED", "REFUTED"] },
-            },
-          }),
-        ]);
+          })
+          .then((c) => c > 0),
+        // Supported claims with no memory promotions
+        prisma.researchClaim.count({
+          where: {
+            projectId,
+            status: "SUPPORTED",
+            memories: { none: {} },
+          },
+        }),
+      ]);
 
       return {
         activeOrEvaluatingHypothesisCount,
         openCoordinatorObligations: 0, // No coordinator obligation tracking yet
         supportedOrRetiredCount,
+        groundedSummaryCompiled: summaryExists,
+        memoryPromotionsPending: pendingPromotions,
       } satisfies DecisionToCompleteContext;
     }
 
