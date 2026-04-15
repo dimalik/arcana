@@ -1,6 +1,6 @@
 /**
  * Download figures from arXiv HTML views and publisher pages.
- * Stores them as PaperFigure records (page=0 indicates HTML source, not PDF).
+ * Stores them as PaperFigure records (sourceMethod="html_download").
  *
  * This is cheaper and higher quality than PDF-based figure extraction
  * since publisher/arXiv HTML pages serve figures as separate image files.
@@ -78,22 +78,25 @@ export async function downloadFiguresFromHtml(
 
       const imagePath = `uploads/figures/${paperId}/${filename}`;
 
-      // Upsert PaperFigure (page=0 means HTML source)
+      // Upsert PaperFigure (sourceMethod=html_download for HTML source)
       await prisma.paperFigure.upsert({
         where: {
-          paperId_page_figureIndex: { paperId, page: 0, figureIndex: i },
+          paperId_sourceMethod_figureLabel: { paperId, sourceMethod: "html_download", figureLabel: `html-fig-${i}` },
         },
         create: {
           paperId,
-          page: 0, // 0 = from HTML, not PDF (PDF pages are 1-indexed)
+          sourceMethod: "html_download",
+          sourceUrl: fig.url,
+          figureLabel: `html-fig-${i}`,
           figureIndex: i,
           type: fig.type,
-          caption: fig.caption || null,
+          captionText: fig.caption || null,
+          captionSource: fig.caption ? "html" : "none",
           imagePath,
         },
         update: {
           type: fig.type,
-          caption: fig.caption || null,
+          captionText: fig.caption || null,
           imagePath,
         },
       });
