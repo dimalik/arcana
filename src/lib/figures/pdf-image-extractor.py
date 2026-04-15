@@ -38,9 +38,21 @@ def extract_images(pdf_path, out_dir, min_width=200, min_height=200, min_bytes=1
             if w < min_width or h < min_height:
                 continue
 
+            # Get placement rect for full-page filtering AND Y position
+            y_ratio = 0.5  # default: middle of page
             if page_width > 0 and page_height > 0:
-                if w / page_width > 0.95 and h / page_height > 0.95:
-                    continue
+                try:
+                    rects = page.get_image_rects(xref)
+                    if rects:
+                        r = rects[0]
+                        rw = r.width / page_width
+                        rh = r.height / page_height
+                        if rw > 0.95 and rh > 0.95:
+                            continue
+                        # Y position: use center of placement rect
+                        y_ratio = ((r.y0 + r.y1) / 2) / page_height
+                except Exception:
+                    pass
 
             img_bytes = pix.tobytes("png")
             if len(img_bytes) < min_bytes:
@@ -65,6 +77,7 @@ def extract_images(pdf_path, out_dir, min_width=200, min_height=200, min_bytes=1
                 "assetHash": asset_hash,
                 "filename": filename,
                 "filepath": filepath,
+                "yRatio": round(y_ratio, 4),
             })
 
     doc.close()

@@ -328,9 +328,15 @@ export async function searchByTitle(
   title: string,
   year?: number | null
 ): Promise<S2Result | null> {
+  function isAcceptable(r: S2Result): boolean {
+    // Reject figure/supplement DOIs
+    if (isFigureOrSupplementDoi({ doi: r.doi, title: r.title })) return false;
+    return true;
+  }
+
   // 1. OpenAlex (fast, generous limits)
   const oaResult = await searchOpenAlex(title, year);
-  if (oaResult) {
+  if (oaResult && isAcceptable(oaResult)) {
     // OpenAlex doesn't provide abstracts — try S2 to fill it in
     if (!oaResult.abstract) {
       const s2Result = await searchS2(title, year);
@@ -343,11 +349,11 @@ export async function searchByTitle(
 
   // 2. Semantic Scholar (if API key configured)
   const s2Result = await searchS2(title, year);
-  if (s2Result) return s2Result;
+  if (s2Result && isAcceptable(s2Result)) return s2Result;
 
   // 3. CrossRef (fallback)
   const crResult = await searchCrossRef(title, year);
-  if (crResult) {
+  if (crResult && isAcceptable(crResult)) {
     // CrossRef doesn't provide abstracts — try S2 to fill it in
     if (!crResult.abstract) {
       const s2Fallback = await searchS2(title, year);
