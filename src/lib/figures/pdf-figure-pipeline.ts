@@ -187,7 +187,30 @@ json.dump(pages, sys.stdout)`,
         neighborBelowYRatio,
       });
 
-      if (crop.success && crop.filepath) {
+      if (crop.success && crop.filepath && crop.width && crop.height) {
+        // Crop quality gate: reject crops that are clearly bad
+        const aspect = crop.width / crop.height;
+        const isTooThin = crop.height < 80; // less than ~27pt at 300dpi
+        const isTooNarrow = crop.width < 200;
+        const isExtremeAspect = aspect > 20 || aspect < 0.1;
+
+        if (isTooThin || isTooNarrow || isExtremeAspect) {
+          // Reject: emit as gap placeholder instead
+          results.push({
+            figureLabel: caption.label,
+            captionText: caption.captionText,
+            captionSource: "pdf_ocr",
+            sourceMethod: "pdf_structural",
+            confidence: "low",
+            imagePath: null,
+            assetHash: null,
+            pdfPage: caption.page,
+            bbox: null,
+            type: caption.type,
+            width: null,
+            height: null,
+          });
+        } else {
         results.push({
           figureLabel: caption.label,
           captionText: caption.captionText,
@@ -204,6 +227,7 @@ json.dump(pages, sys.stdout)`,
           width: crop.width || null,
           height: crop.height || null,
         });
+        }
       } else {
         // Gap placeholder — caption found but no figure recovered
         results.push({
