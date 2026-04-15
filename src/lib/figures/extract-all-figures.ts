@@ -269,21 +269,42 @@ export async function extractAllFigures(
         };
 
         // Preview preservation: if the merge emits imagePath=null for a
-        // structured table, but the existing row already has a rendered
-        // preview (imageSourceMethod="html_table_render"), preserve it.
-        // This prevents reruns from regressing previously good previews.
+        // structured table, check if any existing row with the same
+        // normalized label has a rendered preview. If so, adopt that row
+        // (preserving its preview) instead of creating/updating a new one.
+        // Uses normalized labels so "Table 1" matches "Tab. 1".
         let updateFields = fields;
+        let adoptedRowId: string | null = null;
         if (!fig.imagePath && fig.gapReason === "structured_content_no_preview") {
-          const existing = await tx.paperFigure.findFirst({
-            where: { paperId, sourceMethod: fig.sourceMethod, figureLabel },
-            select: { imageSourceMethod: true },
-          });
-          if (existing?.imageSourceMethod === "html_table_render") {
-            const { imagePath: _, assetHash: _a, width: _w, height: _h,
-              imageSourceMethod: _ism, gapReason: _gr, ...safeFields } = fields;
-            updateFields = safeFields as typeof fields;
+          const norm = normalizeLabel(figureLabel);
+          if (norm) {
+            const renderedRows = await tx.paperFigure.findMany({
+              where: { paperId, sourceMethod: fig.sourceMethod, imageSourceMethod: "html_table_render" },
+              select: { id: true, figureLabel: true },
+            });
+            const match = renderedRows.find(r => normalizeLabel(r.figureLabel) === norm);
+            if (match) {
+              if (match.figureLabel === figureLabel) {
+                // Same exact label — just skip overwriting preview fields
+                const { imagePath: _, assetHash: _a, width: _w, height: _h,
+                  imageSourceMethod: _ism, gapReason: _gr, ...safeFields } = fields;
+                updateFields = safeFields as typeof fields;
+              } else {
+                // Label drifted — update the existing rendered row's label
+                // and skip overwriting its preview fields
+                const { imagePath: _, assetHash: _a, width: _w, height: _h,
+                  imageSourceMethod: _ism, gapReason: _gr, ...safeFields } = fields;
+                await tx.paperFigure.update({
+                  where: { id: match.id },
+                  data: { figureLabel, ...safeFields as typeof fields },
+                });
+                touchedIds.add(match.id);
+                adoptedRowId = match.id;
+              }
+            }
           }
         }
+        if (adoptedRowId) continue; // Row adopted via label-drift preview preservation
 
         // Label drift: same image exists under a different label.
         if (fig.assetHash) {
