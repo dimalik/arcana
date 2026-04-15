@@ -353,6 +353,21 @@ export async function extractAllFigures(
     console.log(summary);
   }
 
+  // ── Post-pass: render HTML table previews (best-effort, non-transactional) ──
+  try {
+    const { renderTablePreviews } = await import("./html-table-preview-renderer");
+    const previewResult = await renderTablePreviews(paperId);
+    if (previewResult.rendered > 0) {
+      console.log(`[extract-all] Rendered ${previewResult.rendered} table previews for ${paperId}`);
+      // Adjust report: rendered tables are no longer gaps
+      report.gapPlaceholders -= previewResult.rendered;
+      report.figuresWithImages += previewResult.rendered;
+    }
+  } catch (err) {
+    // Non-fatal: previews are enrichment, not core extraction
+    console.warn(`[extract-all] Table preview rendering skipped: ${(err as Error).message}`);
+  }
+
   return report;
 }
 
