@@ -58,6 +58,7 @@ function toMergeable(rec: {
   height?: number | null;
   tableHtml?: string;
   description?: string | null;
+  cropOutcome?: "success" | "rejected" | "failed" | null;
 }): MergeableFigure {
   return {
     figureLabel: rec.figureLabel ?? null,
@@ -74,6 +75,7 @@ function toMergeable(rec: {
     type: rec.type,
     width: rec.width ?? null,
     height: rec.height ?? null,
+    cropOutcome: rec.cropOutcome ?? null,
   };
 }
 
@@ -260,6 +262,8 @@ export async function extractAllFigures(
           height: fig.height,
           isPrimaryExtraction: fig.isPrimaryExtraction,
           description: fig.description || null,
+          gapReason: fig.gapReason || null, // Product-facing, set by merger only
+          // cropOutcome is transient — NOT persisted
         };
 
         // Label drift: same image exists under a different label.
