@@ -75,35 +75,39 @@ Key design decisions:
 
 ## Remaining Problems (prioritized)
 
-### P0: LaTeXML table capture
+### ~~P0: LaTeXML table capture~~ — DONE (tranche 1, `d8325b5`)
 
-arXiv HTML renders many tables as `<span class="ltx_tabular">` instead of `<table>`. The HTML parser only checks for `<table` inside `<figure>` blocks. Fix: also match `ltx_tabular` spans and extract their content.
+Fixed. Parser now detects `ltx_tabular` descendant spans inside `<figure>` blocks. Zero-Shot Tables 1-4 moved from `pdf_render_crop|low` to `arxiv_html|high`. STAGE gained 9 additional tables.
 
-**Impact:** Fixes the 4 bad tables in Zero-Shot Data Gen and likely many others. This is the single highest-value fix remaining.
+### P1: Wire acceptance runner into CI
 
-### P1: HTML table preview rendering
+The acceptance harness exists (`scripts/figure-acceptance.ts`) but runs manually. Wire it into CI so regressions fail fast. Low effort, high safety value.
+
+### P2: Expand fixture with ugly cases
+
+The current fixture is 5 curated arXiv papers. Add genuinely hard cases: PDF-only papers, publisher/PMC papers, papers with complex layouts. This is what turns the smoke harness into real confidence.
+
+### P3: HTML table preview rendering
 
 Tables with structured HTML content but no image have a gap in the UI. Fix: render the `<table>` HTML to a preview image using Playwright or a lightweight HTML-to-image renderer.
 
 **Impact:** Closes the UX gap for ~30% of tables that currently show "no preview."
 
-### P2: Playwright container rendering for composed figures
+### P4: Playwright container rendering for composed figures
 
 When arXiv nests a figure as multiple child elements, the parser downloads the wrong asset. Fix: use Playwright to screenshot the entire `<figure>` DOM container.
 
 **Impact:** Fixes the GRPO legend-strip problem and similar subfigure cases.
 
-### P3: Content-aware crop scoring for PDF-only papers
-
-For papers without arXiv HTML, render+crop is the only path and it's still bad. Fix: score candidate crop regions by visual density, reject crops that are mostly body text, try multiple crop directions.
-
-**Impact:** Matters for any paper that falls back to PDF — both PDF-only papers (no arXiv ID) and papers with broken or incomplete HTML coverage (e.g., GRPO's compilation-failure HTML that only covers 2 of 7+ figures). Lower priority than P0-P2 because the main volume win is recovering arXiv IDs, but this is the only path for improving quality on the fallback cases.
-
-### P4: Broken arXiv HTML detection
+### P5: Broken arXiv HTML detection
 
 GRPO's HTML has a compilation failure banner. The pipeline doesn't detect this and produces partial results. Fix: check for known failure markers in the HTML before trusting it.
 
 **Impact:** Prevents silent partial extraction for a small % of papers.
+
+### P6: Content-aware crop scoring for PDF fallback papers
+
+For papers that fall back to PDF — both PDF-only (no arXiv ID) and papers with broken/incomplete HTML coverage. Fix: score candidate crop regions by visual density, reject crops that are mostly body text, try multiple crop directions. Only pursue after primary-source coverage is maximized.
 
 ### P5: Batch arXiv ID recovery
 
