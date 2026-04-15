@@ -65,6 +65,14 @@ Key design decisions:
 
 ---
 
+## Known Corner Cases
+
+**Tables with embedded images that are actually figures**: When a paper uses a `<table>` caption for a multi-panel figure grid (e.g., ConfPO Tables 1, 4, 5), the PDF path matches an embedded image to the table caption by Y-proximity. The result is a "table" row with an image that's actually a figure grid, not a table preview. The structured HTML content (from arXiv) is the real table data; the image is a mismatched figure. This affects caption-to-image matching — the matcher doesn't distinguish figure images from table images on the same page.
+
+**LaTeX math in structured content**: Table 5 in ConfPO stores 264KB of raw LaTeXML math notation. The text extraction (`strip tags → text`) produces unreadable output like `\max\left(0,-\frac{1}{|y_{w}|}...`. A future cleanup step should render or strip math annotations.
+
+---
+
 ## Remaining Problems (prioritized)
 
 ### P0: LaTeXML table capture
