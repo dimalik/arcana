@@ -4097,7 +4097,7 @@ function createTools(
               take: 1,
             },
             figures: {
-              select: { type: true, caption: true, description: true, page: true },
+              select: { type: true, captionText: true, description: true, pdfPage: true, figureLabel: true },
               take: 10,
             },
           },
@@ -4194,7 +4194,7 @@ function createTools(
         // ── Figures & Tables ──
         if (paper.figures.length > 0) {
           const figLines = paper.figures.map((f) =>
-            `- [${f.type}, p.${f.page}] ${f.caption || ""}${f.description ? ` — ${f.description}` : ""}`
+            `- [${f.type}${f.pdfPage ? `, p.${f.pdfPage}` : ""}] ${f.figureLabel || ""}${f.captionText ? `: ${f.captionText}` : ""}${f.description ? ` — ${f.description}` : ""}`
           );
           parts.push(`\n## Figures & Tables\n${figLines.join("\n")}`);
         }
@@ -6928,7 +6928,7 @@ Be harsh but fair. Vague praise is useless. Specific criticism saves months of w
 
         const figures = await prisma.paperFigure.findMany({
           where: { paperId: paper.id },
-          orderBy: [{ page: "asc" }, { figureIndex: "asc" }],
+          orderBy: [{ pdfPage: "asc" }, { figureIndex: "asc" }],
         });
 
         if (figures.length === 0) {
@@ -6936,8 +6936,10 @@ Be harsh but fair. Vague praise is useless. Specific criticism saves months of w
         }
 
         const result = figures.map((f) => {
-          let entry = `[Page ${f.page}] ${f.type.toUpperCase()}`;
-          if (f.caption) entry += `: ${f.caption}`;
+          let entry = f.pdfPage ? `[Page ${f.pdfPage}]` : `[${f.sourceMethod}]`;
+          entry += ` ${f.type.toUpperCase()}`;
+          if (f.figureLabel) entry += ` ${f.figureLabel}`;
+          if (f.captionText) entry += `: ${f.captionText}`;
           entry += `\n${f.description || "No description"}`;
           return entry;
         }).join("\n\n---\n\n");

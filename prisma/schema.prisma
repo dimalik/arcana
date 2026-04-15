@@ -418,22 +418,37 @@ model PaperEngagement {
 }
 
 model PaperFigure {
-  id          String   @id @default(uuid())
-  paperId     String
-  page        Int // PDF page number (1-indexed)
-  figureIndex Int      @default(0) // Index within the page (0, 1, 2...)
-  type        String   @default("figure") // figure | table | diagram | equation
-  caption     String? // Extracted caption from PDF text
-  description String? // LLM-generated description/explanation
-  imagePath   String // Path to extracted image file
-  width       Int?
-  height      Int?
-  createdAt   DateTime @default(now())
+  id                  String   @id @default(uuid())
+  paperId             String
+  figureLabel         String?
+  captionText         String?
+  captionSource       String   @default("none")
+  description         String?
+  sourceMethod        String   @default("pdf_embedded")
+  sourceUrl           String?
+  sourceVersion       String?
+  confidence          String   @default("medium")
+  imagePath           String?
+  assetHash           String?
+  pdfPage             Int?
+  sourcePage          Int?
+  figureIndex         Int      @default(0)
+  bbox                String?
+  type                String   @default("figure")
+  parentFigureId      String?
+  isPrimaryExtraction Boolean  @default(true)
+  width               Int?
+  height              Int?
+  createdAt           DateTime @default(now())
 
-  paper Paper @relation(fields: [paperId], references: [id], onDelete: Cascade)
+  paper         Paper        @relation(fields: [paperId], references: [id], onDelete: Cascade)
+  parent        PaperFigure? @relation("SubFigures", fields: [parentFigureId], references: [id])
+  subfigures    PaperFigure[] @relation("SubFigures")
 
-  @@unique([paperId, page, figureIndex])
+  @@unique([paperId, sourceMethod, assetHash])
+  @@unique([paperId, sourceMethod, figureLabel])
   @@index([paperId])
+  @@index([assetHash])
 }
 
 model MindPalaceRoom {

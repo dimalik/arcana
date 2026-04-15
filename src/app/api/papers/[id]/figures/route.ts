@@ -15,7 +15,7 @@ export async function GET(
 
   const figures = await prisma.paperFigure.findMany({
     where: { paperId: id },
-    orderBy: [{ page: "asc" }, { figureIndex: "asc" }],
+    orderBy: [{ pdfPage: "asc" }, { figureIndex: "asc" }],
   });
 
   return NextResponse.json(figures);
