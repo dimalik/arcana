@@ -49,6 +49,8 @@ export interface MergeableFigure {
   cropOutcome?: "success" | "rejected" | "failed" | null;
   /** Product-facing: why canonical row has no image. Set by merger only. */
   gapReason?: string | null;
+  /** Provenance of imagePath. Null iff imagePath is null. Set by merger. */
+  imageSourceMethod?: string | null;
 }
 
 export interface MergedFigure extends MergeableFigure {
@@ -148,23 +150,43 @@ export function mergeFigureSources(
 
     // Best caption: from the highest-priority member that has one
     const bestCaptionMember = members.find(m => m.captionText);
+    const finalDescription = canonicalMember.description ?? members.find(m => m.description)?.description ?? null;
 
-    // For tables whose canonical is a structured-content row (no image),
-    // graft the best available image from alternates as a preview.
-    const bestImageMember = canonicalMember.imagePath
-      ? canonicalMember
-      : members.find(m => m.imagePath) || null;
+    // Image grafting — with safety rules for structured tables.
+    //
+    // For FIGURES: graft the best available image from any member.
+    // For STRUCTURED TABLES: do NOT graft pdf_embedded or pdf_render_crop
+    //   images. Those are often mismatched figure grids near the caption.
+    //   No preview is better than a wrong preview.
+    const isStructuredTable = isTable
+      && finalDescription != null
+      && finalDescription.length > 100;
+
+    let bestImageMember: AnnotatedFigure | null = null;
+    if (canonicalMember.imagePath) {
+      bestImageMember = canonicalMember;
+    } else if (!isStructuredTable) {
+      // Figures and non-structured tables: graft from any member
+      bestImageMember = members.find(m => m.imagePath) || null;
+    } else {
+      // Structured tables: only graft from trusted sources (not PDF)
+      const unsafeSources = new Set(["pdf_embedded", "pdf_render_crop", "pdf_structural"]);
+      bestImageMember = members.find(m => m.imagePath && !unsafeSources.has(m.sourceMethod)) || null;
+    }
 
     const finalImagePath = bestImageMember?.imagePath ?? null;
-    const finalDescription = canonicalMember.description ?? members.find(m => m.description)?.description ?? null;
+    const imageSourceMethod = finalImagePath
+      ? (bestImageMember === canonicalMember
+        ? canonicalMember.sourceMethod
+        : bestImageMember!.sourceMethod)
+      : null;
 
     // Assign gapReason: only when canonical has no image
     let gapReason: string | null = null;
     if (!finalImagePath) {
-      if (finalDescription && finalDescription.length > 100) {
+      if (isStructuredTable) {
         gapReason = "structured_content_no_preview";
       } else {
-        // Check cropOutcome from any member that attempted a crop
         const cropMember = members.find(m => m.cropOutcome === "failed" || m.cropOutcome === "rejected");
         if (cropMember?.cropOutcome === "failed") {
           gapReason = "crop_failed";
@@ -192,6 +214,7 @@ export function mergeFigureSources(
       captionSource: bestCaptionMember?.captionSource ?? canonicalMember.captionSource,
       description: finalDescription,
       gapReason,
+      imageSourceMethod,
       isPrimaryExtraction: true,
     });
 
@@ -214,6 +237,7 @@ export function mergeFigureSources(
         height: member.height,
         description: member.description,
         gapReason: null, // Alternates never get gapReason
+        imageSourceMethod: member.imagePath ? member.sourceMethod : null,
         isPrimaryExtraction: false,
       });
     }
