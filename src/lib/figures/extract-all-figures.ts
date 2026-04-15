@@ -19,6 +19,7 @@ import { downloadPmcFigures } from "./pmc-jats-extractor";
 import { downloadFiguresFromHtml } from "@/lib/import/figure-downloader";
 import { extractWithPublisherParser } from "./publisher-parsers";
 import { mergeFigureSources, type MergeableFigure } from "./source-merger";
+import { normalizeLabel } from "./label-utils";
 
 const BROWSER_HEADERS = {
   "User-Agent":
@@ -337,17 +338,19 @@ export async function extractAllFigures(
         where: { paperId },
         select: { id: true, imageSourceMethod: true, figureLabel: true },
       });
-      const mergedLabels = new Set(
-        merged.map(f => f.figureLabel || "").filter(Boolean).map(l => l.toLowerCase()),
+      const mergedNormalizedLabels = new Set(
+        merged.map(f => normalizeLabel(f.figureLabel)).filter(Boolean) as string[],
       );
       const staleIds = existingRows
         .filter(row => {
-          if (touchedIds.has(row.id)) return false; // touched this run
+          if (touchedIds.has(row.id)) return false;
           if (row.imageSourceMethod === "html_table_render" && row.figureLabel) {
             // Preserve if the current extraction still has this table
-            return !mergedLabels.has(row.figureLabel.toLowerCase());
+            // (using normalized labels so "Table 1" matches "Tab. 1")
+            const norm = normalizeLabel(row.figureLabel);
+            return !norm || !mergedNormalizedLabels.has(norm);
           }
-          return true; // demote everything else
+          return true;
         })
         .map(row => row.id);
       if (staleIds.length > 0) {
