@@ -12,7 +12,7 @@ export function normalizeLabel(label: string | null): string | null {
   if (!label) return null;
   return label
     .toLowerCase()
-    .replace(/^fig\.?\s*/i, "figure ")
+    .replace(/^fig\.?\s+/i, "figure ") // "Fig. 1" / "Fig 1" → "figure 1" (won't match "figure" — requires trailing space)
     .replace(/\s+/g, "_")
     .trim();
 }
