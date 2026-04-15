@@ -328,16 +328,27 @@ export async function extractAllFigures(
         touchedIds.add(row.id);
       }
 
-      // Demote all rows not touched by this run.
+      // Demote all rows not touched by this run, with one exception:
+      // rendered-preview rows (imageSourceMethod=html_table_render) are
+      // preserved IF the current extraction still has a matching label.
+      // This prevents label drift from destroying expensive previews,
+      // while still demoting genuinely stale rows (tables that disappeared).
       const existingRows = await tx.paperFigure.findMany({
         where: { paperId },
-        select: { id: true, imageSourceMethod: true },
+        select: { id: true, imageSourceMethod: true, figureLabel: true },
       });
-      // Don't demote rows with rendered table previews — they represent
-      // expensive Playwright work. Label drift can cause them to appear
-      // untouched, but demoting them loses the preview until re-rendered.
+      const mergedLabels = new Set(
+        merged.map(f => f.figureLabel || "").filter(Boolean).map(l => l.toLowerCase()),
+      );
       const staleIds = existingRows
-        .filter(row => !touchedIds.has(row.id) && row.imageSourceMethod !== "html_table_render")
+        .filter(row => {
+          if (touchedIds.has(row.id)) return false; // touched this run
+          if (row.imageSourceMethod === "html_table_render" && row.figureLabel) {
+            // Preserve if the current extraction still has this table
+            return !mergedLabels.has(row.figureLabel.toLowerCase());
+          }
+          return true; // demote everything else
+        })
         .map(row => row.id);
       if (staleIds.length > 0) {
         await tx.paperFigure.updateMany({
