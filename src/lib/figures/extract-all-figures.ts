@@ -331,10 +331,13 @@ export async function extractAllFigures(
       // Demote all rows not touched by this run.
       const existingRows = await tx.paperFigure.findMany({
         where: { paperId },
-        select: { id: true },
+        select: { id: true, imageSourceMethod: true },
       });
+      // Don't demote rows with rendered table previews — they represent
+      // expensive Playwright work. Label drift can cause them to appear
+      // untouched, but demoting them loses the preview until re-rendered.
       const staleIds = existingRows
-        .filter(row => !touchedIds.has(row.id))
+        .filter(row => !touchedIds.has(row.id) && row.imageSourceMethod !== "html_table_render")
         .map(row => row.id);
       if (staleIds.length > 0) {
         await tx.paperFigure.updateMany({
@@ -352,11 +355,38 @@ export async function extractAllFigures(
     console.error(`[extract-all] Persist transaction failed, rolled back:`, (err as Error).message);
   }
 
-  const canonical = merged.filter(f => f.isPrimaryExtraction);
-  report.totalFigures = canonical.length;
-  report.figuresWithImages = canonical.filter(f => f.imagePath).length;
-  report.gapPlaceholders = canonical.filter(f => !f.imagePath).length;
   report.persistErrors = persistErrors;
+
+  // ── Post-pass: render HTML table previews (best-effort, non-transactional) ──
+  if (persistErrors === 0) {
+    try {
+      const { renderTablePreviews } = await import("./html-table-preview-renderer");
+      const previewResult = await renderTablePreviews(paperId);
+      if (previewResult.rendered > 0) {
+        console.log(`[extract-all] Rendered ${previewResult.rendered} table previews for ${paperId}`);
+      }
+    } catch (err) {
+      console.warn(`[extract-all] Table preview rendering skipped: ${(err as Error).message}`);
+    }
+  }
+
+  // ── Compute report from actual DB state ──────────────────────────────
+  // Accounts for preserved previews from prior runs and newly rendered ones,
+  // not just what the merge output thought would happen.
+  if (persistErrors === 0) {
+    const dbCanonical = await prisma.paperFigure.findMany({
+      where: { paperId, isPrimaryExtraction: true },
+      select: { imagePath: true },
+    });
+    report.totalFigures = dbCanonical.length;
+    report.figuresWithImages = dbCanonical.filter(f => f.imagePath).length;
+    report.gapPlaceholders = dbCanonical.filter(f => !f.imagePath).length;
+  } else {
+    const canonical = merged.filter(f => f.isPrimaryExtraction);
+    report.totalFigures = canonical.length;
+    report.figuresWithImages = canonical.filter(f => f.imagePath).length;
+    report.gapPlaceholders = canonical.filter(f => !f.imagePath).length;
+  }
 
   const summary =
     `[extract-all] ${paper.title}: ${report.totalFigures} figures ` +
@@ -367,24 +397,6 @@ export async function extractAllFigures(
     console.warn(summary);
   } else {
     console.log(summary);
-  }
-
-  // ── Post-pass: render HTML table previews (best-effort, non-transactional) ──
-  // Only run if the transaction succeeded — a failed extraction must not
-  // mutate pre-existing rows by rendering on the old canonical set.
-  if (persistErrors === 0) {
-    try {
-      const { renderTablePreviews } = await import("./html-table-preview-renderer");
-      const previewResult = await renderTablePreviews(paperId);
-      if (previewResult.rendered > 0) {
-        console.log(`[extract-all] Rendered ${previewResult.rendered} table previews for ${paperId}`);
-        report.gapPlaceholders -= previewResult.rendered;
-        report.figuresWithImages += previewResult.rendered;
-      }
-    } catch (err) {
-      // Non-fatal: previews are enrichment, not core extraction
-      console.warn(`[extract-all] Table preview rendering skipped: ${(err as Error).message}`);
-    }
   }
 
   return report;
