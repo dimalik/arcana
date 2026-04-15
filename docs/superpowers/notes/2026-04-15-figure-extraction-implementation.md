@@ -147,11 +147,11 @@ Three issues identified during second review, all fixed:
 
 ## Explicit Caveats (this is a checkpoint, not "done")
 
-### Tables have structured content, but canonical selection is still image-biased
+### Tables: canonical selection is now structured-content-first (fixed)
 
-The merger picks the canonical row by finding the first member with an image. For tables, this means the PDF render_crop (which has an image) wins as canonical over the arXiv HTML row (which has structured `<table>` markup but no image). The structured HTML is grafted onto the canonical row via the `description` field, but downstream consumers see a crop image as the primary artifact with some extra HTML hanging off the side.
+The merger now picks the structured-content row as canonical for tables (member with `description` > 100 chars wins over member with image). The crop image is grafted as a preview. Tables show `arxiv_html | high` instead of `pdf_render_crop | low`.
 
-**The correct product contract for tables**: the canonical artifact should be the structured source row. The preview crop should be attached as enrichment or alternate. This requires table-aware canonical merge semantics — not just "first row with an image wins."
+Remaining gap: tables without an embedded PDF image have no preview at all (4 of 7 tables in ConfPO). This is acceptable — honest gaps beat bad crops — but the next fix is rendering the `<table>` HTML as a preview image.
 
 ### 70KB of `<table>` markup in `description` is technical debt
 
@@ -165,17 +165,21 @@ When arXiv nests a figure as multiple assets (image + legend + subpanels + SVG p
 
 ## Next Priorities (in order)
 
-1. **Table-aware canonical merge** — For `type: "table"`, prefer the structured-content source row as canonical even if it has no image. The crop image becomes the alternate.
-2. **DOM/container rendering** — Use Playwright to screenshot arXiv HTML `<figure>` containers instead of downloading child `<img>` elements. Fixes subfigure and legend-only extraction.
-3. **Automatic crop rejection** — Before a crop becomes canonical, reject it if: includes too much body text, touches page edges, OCR text density is figure-atypical, foreground occupies too little of the crop.
-4. **Column-aware PDF cropping** — Use caption bbox to determine left-column / right-column / full-width, then crop within that region only.
-5. **Proper table extraction** — pdfplumber/Camelot-style layout detection for PDF-only tables (no HTML available).
+1. **Render HTML tables to preview images** — Use Playwright or a lightweight HTML renderer to screenshot `<table>` elements from arXiv HTML. Closes the UX gap for the 4 tables that currently have structured content but no preview.
+2. **Playwright container rendering for composed figures** — Screenshot arXiv HTML `<figure>` containers instead of downloading child `<img>` elements. Fixes subfigure and legend-only extraction (the GRPO html-1.png legend-strip problem).
+3. **Content-aware crop scoring for PDF-only papers** — Now that HTML-covered items skip crops, this is a narrower fallback problem. Score candidate crop regions by visual density, OCR text density, overlap with neighboring captions. Reject crops that are mostly body text.
+
+### Completed in this tranche
+- ~~Table-aware canonical merge~~ — Done (structured-content row wins for tables)
+- ~~Column-aware PDF cropping~~ — Done (caption horizontal position → left/right/full-width)
+- ~~Automatic crop rejection (dimension/aspect)~~ — Done (rejects thin/narrow/extreme crops)
+- ~~Suppress PDF previews for HTML-covered figures~~ — Done (0 crop files when arXiv HTML covers all figures)
 
 ---
 
 ## Known Issues and Edge Cases
 
-1. **Two-column PDF layouts** — The crop renderer now uses PyMuPDF text-block layout analysis to find content regions, which is better than the old Y-position heuristic. But it is not column-aware: it treats the page as a single band, which still produces too-wide crops on two-column pages.
+1. **Two-column PDF layouts** — The crop renderer now uses PyMuPDF text-block layout analysis + column detection (caption horizontal position → left/right/full-width). Significant improvement over the old page-band approach, but column boundaries are heuristic (55%/45% thresholds) and can misfire on non-standard layouts.
 
 2. **Caption regex misses** — `caption-detector.ts` uses a single regex pattern. Misses captions with bold/italic markers, non-English languages, Roman numerals, or line-split captions.
 
