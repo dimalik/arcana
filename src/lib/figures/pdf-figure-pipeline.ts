@@ -21,6 +21,8 @@ export interface ExtractedFigure {
   type: "figure" | "table";
   width: number | null;
   height: number | null;
+  /** Transient: what happened at crop time. Consumed by merger for gapReason, not persisted. */
+  cropOutcome?: "success" | "rejected" | "failed" | null;
 }
 
 interface EmbeddedImage {
@@ -165,6 +167,7 @@ json.dump(pages, sys.stdout)`,
         type: caption.type,
         width: img.width,
         height: img.height,
+        cropOutcome: null,
       });
     } else {
       // No embedded image found — try render+crop for vector figures.
@@ -186,6 +189,7 @@ json.dump(pages, sys.stdout)`,
           type: caption.type,
           width: null,
           height: null,
+          cropOutcome: null, // Not a crop — covered by HTML
         });
         continue;
       }
@@ -218,7 +222,6 @@ json.dump(pages, sys.stdout)`,
         const isExtremeAspect = aspect > 20 || aspect < 0.1;
 
         if (isTooThin || isTooNarrow || isExtremeAspect) {
-          // Reject: emit as gap placeholder instead
           results.push({
             figureLabel: caption.label,
             captionText: caption.captionText,
@@ -232,27 +235,29 @@ json.dump(pages, sys.stdout)`,
             type: caption.type,
             width: null,
             height: null,
+            cropOutcome: "rejected",
           });
         } else {
-        results.push({
-          figureLabel: caption.label,
-          captionText: caption.captionText,
-          captionSource: "pdf_ocr",
-          sourceMethod: "pdf_render_crop",
-          confidence: "low",
-          imagePath: crop.filepath.startsWith(process.cwd())
-            ? crop.filepath.slice(process.cwd().length + 1)
-            : crop.filepath,
-          assetHash: crop.assetHash || null,
-          pdfPage: caption.page,
-          bbox: null,
-          type: caption.type,
-          width: crop.width || null,
-          height: crop.height || null,
-        });
+          results.push({
+            figureLabel: caption.label,
+            captionText: caption.captionText,
+            captionSource: "pdf_ocr",
+            sourceMethod: "pdf_render_crop",
+            confidence: "low",
+            imagePath: crop.filepath.startsWith(process.cwd())
+              ? crop.filepath.slice(process.cwd().length + 1)
+              : crop.filepath,
+            assetHash: crop.assetHash || null,
+            pdfPage: caption.page,
+            bbox: null,
+            type: caption.type,
+            width: crop.width || null,
+            height: crop.height || null,
+            cropOutcome: "success",
+          });
         }
       } else {
-        // Gap placeholder — caption found but no figure recovered
+        // Gap placeholder — caption found but render+crop failed
         results.push({
           figureLabel: caption.label,
           captionText: caption.captionText,
@@ -266,6 +271,7 @@ json.dump(pages, sys.stdout)`,
           type: caption.type,
           width: null,
           height: null,
+          cropOutcome: "failed",
         });
       }
     }
@@ -287,6 +293,7 @@ json.dump(pages, sys.stdout)`,
         type: "figure",
         width: img.width,
         height: img.height,
+        cropOutcome: null,
       });
     }
   }

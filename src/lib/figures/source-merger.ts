@@ -45,6 +45,10 @@ export interface MergeableFigure {
   height: number | null;
   /** For HTML tables: structured table markup. Stored in PaperFigure.description. */
   description?: string | null;
+  /** Transient: what happened at crop time. Consumed by merger, not persisted. */
+  cropOutcome?: "success" | "rejected" | "failed" | null;
+  /** Product-facing: why canonical row has no image. Set by merger only. */
+  gapReason?: string | null;
 }
 
 export interface MergedFigure extends MergeableFigure {
@@ -151,8 +155,28 @@ export function mergeFigureSources(
       ? canonicalMember
       : members.find(m => m.imagePath) || null;
 
+    const finalImagePath = bestImageMember?.imagePath ?? null;
+    const finalDescription = canonicalMember.description ?? members.find(m => m.description)?.description ?? null;
+
+    // Assign gapReason: only when canonical has no image
+    let gapReason: string | null = null;
+    if (!finalImagePath) {
+      if (finalDescription && finalDescription.length > 100) {
+        gapReason = "structured_content_no_preview";
+      } else {
+        // Check cropOutcome from any member that attempted a crop
+        const cropMember = members.find(m => m.cropOutcome === "failed" || m.cropOutcome === "rejected");
+        if (cropMember?.cropOutcome === "failed") {
+          gapReason = "crop_failed";
+        } else if (cropMember?.cropOutcome === "rejected") {
+          gapReason = "crop_rejected";
+        } else {
+          gapReason = "no_image_candidate";
+        }
+      }
+    }
+
     output.push({
-      // Identity + source from canonical member
       sourceMethod: canonicalMember.sourceMethod,
       figureLabel: canonicalMember.figureLabel,
       sourceUrl: canonicalMember.sourceUrl,
@@ -160,16 +184,14 @@ export function mergeFigureSources(
       bbox: canonicalMember.bbox,
       type: canonicalMember.type,
       pdfPage: canonicalMember.pdfPage ?? members.find(m => m.pdfPage != null)?.pdfPage ?? null,
-      // Image: from canonical if it has one, otherwise from best alternate
-      imagePath: bestImageMember?.imagePath ?? null,
+      imagePath: finalImagePath,
       assetHash: bestImageMember?.assetHash ?? null,
       width: bestImageMember?.width ?? null,
       height: bestImageMember?.height ?? null,
-      // Caption: from highest-priority member that has one
       captionText: bestCaptionMember?.captionText ?? null,
       captionSource: bestCaptionMember?.captionSource ?? canonicalMember.captionSource,
-      // Structured content: from canonical or best available
-      description: canonicalMember.description ?? members.find(m => m.description)?.description ?? null,
+      description: finalDescription,
+      gapReason,
       isPrimaryExtraction: true,
     });
 
@@ -191,6 +213,7 @@ export function mergeFigureSources(
         width: member.width,
         height: member.height,
         description: member.description,
+        gapReason: null, // Alternates never get gapReason
         isPrimaryExtraction: false,
       });
     }

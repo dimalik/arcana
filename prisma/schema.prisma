@@ -439,6 +439,7 @@ model PaperFigure {
   isPrimaryExtraction Boolean  @default(true)
   width               Int?
   height              Int?
+  gapReason           String?  // Product-facing: why canonical row has no image. Only set when isPrimaryExtraction=true AND imagePath is null.
   createdAt           DateTime @default(now())
 
   paper         Paper        @relation(fields: [paperId], references: [id], onDelete: Cascade)
