@@ -27,7 +27,7 @@ interface FixturePaper {
   expectedFigures: string[];
   expectedTables: string[];
   expectedSources?: Record<string, string>;
-  labelExpectations?: Record<string, { expectsImage?: boolean; expectedGapReason?: string }>;
+  labelExpectations?: Record<string, { expectsImage?: boolean; expectedGapReason?: string; expectedImageSourceMethod?: string }>;
 }
 
 interface PaperResult {
@@ -163,11 +163,10 @@ async function evaluatePaper(fp: FixturePaper, paperId: string, gapReasonExists:
         }
       }
 
-      if ((exp as Record<string, unknown>).expectedImageSourceMethod) {
-        const expectedImgSrc = (exp as Record<string, unknown>).expectedImageSourceMethod as string;
+      if (exp.expectedImageSourceMethod) {
         const actualImgSrc = (actual as Record<string, unknown>).imageSourceMethod as string | null;
-        if (actualImgSrc !== expectedImgSrc) {
-          labelViolations.push(`${norm}: expected imageSourceMethod=${expectedImgSrc}, got ${actualImgSrc || "null"}`);
+        if (actualImgSrc !== exp.expectedImageSourceMethod) {
+          labelViolations.push(`${norm}: expected imageSourceMethod=${exp.expectedImageSourceMethod}, got ${actualImgSrc || "null"}`);
         }
       }
 
@@ -258,7 +257,7 @@ async function main() {
   const doExtract = args.includes("--extract");
   const paperFilter = args.includes("--paper") ? args[args.indexOf("--paper") + 1] : null;
 
-  let papers = fixture.papers as FixturePaper[];
+  let papers = fixture.papers as unknown as FixturePaper[];
   if (paperFilter) {
     papers = papers.filter(p =>
       p.arxivId === paperFilter || p.doi === paperFilter || p.fileBasename === paperFilter,

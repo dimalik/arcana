@@ -267,6 +267,23 @@ export async function extractAllFigures(
           // cropOutcome is transient — NOT persisted
         };
 
+        // Preview preservation: if the merge emits imagePath=null for a
+        // structured table, but the existing row already has a rendered
+        // preview (imageSourceMethod="html_table_render"), preserve it.
+        // This prevents reruns from regressing previously good previews.
+        let updateFields = fields;
+        if (!fig.imagePath && fig.gapReason === "structured_content_no_preview") {
+          const existing = await tx.paperFigure.findFirst({
+            where: { paperId, sourceMethod: fig.sourceMethod, figureLabel },
+            select: { imageSourceMethod: true },
+          });
+          if (existing?.imageSourceMethod === "html_table_render") {
+            const { imagePath: _, assetHash: _a, width: _w, height: _h,
+              imageSourceMethod: _ism, gapReason: _gr, ...safeFields } = fields;
+            updateFields = safeFields as typeof fields;
+          }
+        }
+
         // Label drift: same image exists under a different label.
         if (fig.assetHash) {
           const byHash = await tx.paperFigure.findFirst({
@@ -274,7 +291,6 @@ export async function extractAllFigures(
             select: { id: true, figureLabel: true },
           });
           if (byHash && byHash.figureLabel !== figureLabel) {
-            // Delete any stale row blocking the target label.
             const blocker = await tx.paperFigure.findFirst({
               where: { paperId, sourceMethod: fig.sourceMethod, figureLabel },
               select: { id: true },
@@ -284,7 +300,7 @@ export async function extractAllFigures(
             }
             await tx.paperFigure.update({
               where: { id: byHash.id },
-              data: { figureLabel, ...fields },
+              data: { figureLabel, ...updateFields },
             });
             touchedIds.add(byHash.id);
             continue;
@@ -306,7 +322,7 @@ export async function extractAllFigures(
             figureLabel,
             ...fields,
           },
-          update: fields,
+          update: updateFields,
           select: { id: true },
         });
         touchedIds.add(row.id);
@@ -354,18 +370,21 @@ export async function extractAllFigures(
   }
 
   // ── Post-pass: render HTML table previews (best-effort, non-transactional) ──
-  try {
-    const { renderTablePreviews } = await import("./html-table-preview-renderer");
-    const previewResult = await renderTablePreviews(paperId);
-    if (previewResult.rendered > 0) {
-      console.log(`[extract-all] Rendered ${previewResult.rendered} table previews for ${paperId}`);
-      // Adjust report: rendered tables are no longer gaps
-      report.gapPlaceholders -= previewResult.rendered;
-      report.figuresWithImages += previewResult.rendered;
+  // Only run if the transaction succeeded — a failed extraction must not
+  // mutate pre-existing rows by rendering on the old canonical set.
+  if (persistErrors === 0) {
+    try {
+      const { renderTablePreviews } = await import("./html-table-preview-renderer");
+      const previewResult = await renderTablePreviews(paperId);
+      if (previewResult.rendered > 0) {
+        console.log(`[extract-all] Rendered ${previewResult.rendered} table previews for ${paperId}`);
+        report.gapPlaceholders -= previewResult.rendered;
+        report.figuresWithImages += previewResult.rendered;
+      }
+    } catch (err) {
+      // Non-fatal: previews are enrichment, not core extraction
+      console.warn(`[extract-all] Table preview rendering skipped: ${(err as Error).message}`);
     }
-  } catch (err) {
-    // Non-fatal: previews are enrichment, not core extraction
-    console.warn(`[extract-all] Table preview rendering skipped: ${(err as Error).message}`);
   }
 
   return report;
