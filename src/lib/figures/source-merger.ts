@@ -128,38 +128,58 @@ export function mergeFigureSources(
 
   // Build output. For each group:
   //   - Pick one raw member as canonical (isPrimaryExtraction=true).
-  //     Preference: member with image > highest priority overall.
+  //   - For FIGURES: prefer member with image > highest priority overall.
+  //   - For TABLES: prefer member with structured content (description) >
+  //     member with image > highest priority. This ensures the structured
+  //     HTML table row wins over a crop screenshot.
   //   - The canonical row keeps its OWN (sourceMethod, figureLabel) as DB key.
-  //     Only captionText/captionSource are enriched from other members.
-  //     figureLabel is NOT grafted — it stays as the canonical member's own label.
   //   - All other members are alternates (isPrimaryExtraction=false, raw fields).
   const output: MergedFigure[] = [];
 
   groups.forEach((group) => {
     const members = group.members; // sorted by priority (highest first)
+    const isTable = members.some(m => m.type === "table");
 
-    // Pick canonical: first member with an image, or first overall
-    const canonicalMember = members.find(m => m.imagePath) || members[0];
+    // Pick canonical based on type:
+    let canonicalMember: AnnotatedFigure;
+    if (isTable) {
+      // Tables: structured content wins, then image, then highest priority
+      canonicalMember =
+        members.find(m => m.description && m.description.length > 100) ||
+        members.find(m => m.imagePath) ||
+        members[0];
+    } else {
+      // Figures: image wins, then highest priority
+      canonicalMember = members.find(m => m.imagePath) || members[0];
+    }
 
     // Best caption: from the highest-priority member that has one
     const bestCaptionMember = members.find(m => m.captionText);
 
+    // For tables whose canonical is a structured-content row (no image),
+    // graft the best available image from alternates as a preview.
+    const bestImageMember = canonicalMember.imagePath
+      ? canonicalMember
+      : members.find(m => m.imagePath) || null;
+
     output.push({
-      // All fields from the canonical member itself — preserves its DB key
+      // Identity + source from canonical member
       sourceMethod: canonicalMember.sourceMethod,
       figureLabel: canonicalMember.figureLabel,
       sourceUrl: canonicalMember.sourceUrl,
-      imagePath: canonicalMember.imagePath,
-      assetHash: canonicalMember.assetHash,
-      width: canonicalMember.width,
-      height: canonicalMember.height,
       confidence: canonicalMember.confidence,
       bbox: canonicalMember.bbox,
       type: canonicalMember.type,
       pdfPage: canonicalMember.pdfPage ?? members.find(m => m.pdfPage != null)?.pdfPage ?? null,
-      // Enrich only caption (the one field another source might have better)
+      // Image: from canonical if it has one, otherwise from best alternate
+      imagePath: bestImageMember?.imagePath ?? null,
+      assetHash: bestImageMember?.assetHash ?? null,
+      width: bestImageMember?.width ?? null,
+      height: bestImageMember?.height ?? null,
+      // Caption: from highest-priority member that has one
       captionText: bestCaptionMember?.captionText ?? null,
       captionSource: bestCaptionMember?.captionSource ?? canonicalMember.captionSource,
+      // Structured content: from canonical or best available
       description: canonicalMember.description ?? members.find(m => m.description)?.description ?? null,
       isPrimaryExtraction: true,
     });

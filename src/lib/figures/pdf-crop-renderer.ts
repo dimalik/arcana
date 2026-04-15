@@ -187,6 +187,22 @@ if not caption_block:
 cap_y0, cap_y1 = caption_block[1], caption_block[3]
 cap_x0, cap_x1 = caption_block[0], caption_block[2]
 
+# Column detection: determine if caption is in left col, right col, or full-width
+# Heuristic: if caption right edge < 55% of page width → left column
+#            if caption left edge > 45% of page width → right column
+#            otherwise → full-width (spans both columns)
+mid_x = pw * 0.5
+cap_center_x = (cap_x0 + cap_x1) / 2
+if cap_x1 < pw * 0.55 and cap_center_x < mid_x:
+    col_left = 0.0
+    col_right = 0.52  # left column with small margin
+elif cap_x0 > pw * 0.45 and cap_center_x > mid_x:
+    col_left = 0.48  # right column with small margin
+    col_right = 1.0
+else:
+    col_left = 0.0
+    col_right = 1.0  # full-width
+
 # Sort blocks by vertical position
 sorted_blocks = sorted([b for b in blocks if b[6] == 0], key=lambda b: b[1])
 
@@ -213,20 +229,22 @@ if fig_type == "table":
         region_left = min(region_left, b[0])
         region_right = max(region_right, b[2])
 
-    # Add margin
+    # Add margin, constrain to detected column
     margin = 8 / ph
+    content_left = max(col_left, (region_left - 5) / pw)
+    content_right = min(col_right, (region_right + 5) / pw)
     result = {
         "top": max(0, region_top - margin),
         "bottom": min(1, region_bottom + margin),
-        "left": max(0, (region_left - 5) / pw),
-        "right": min(1, (region_right + 5) / pw),
+        "left": max(0, content_left),
+        "right": min(1, content_right),
     }
 else:
     # Figure caption is below: scan upward to find figure extent
     region_top = cap_y0 / ph
     region_bottom = cap_y1 / ph
-    region_left = 0.03
-    region_right = 0.97
+    region_left = col_left
+    region_right = col_right
 
     for b in reversed(sorted_blocks):
         if b[3] > cap_y0 - 2: continue  # skip blocks at/below caption
@@ -255,8 +273,8 @@ else:
     result = {
         "top": max(0, region_top - margin),
         "bottom": min(1, region_bottom + margin),
-        "left": 0.03,
-        "right": 0.97,
+        "left": max(0, region_left),
+        "right": min(1, region_right),
     }
 
 json.dump(result, sys.stdout)
