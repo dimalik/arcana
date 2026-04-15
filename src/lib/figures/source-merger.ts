@@ -15,6 +15,8 @@
  * preserving the raw extraction for audit/debug.
  */
 
+import { normalizeLabel } from "./label-utils";
+
 /** Source priority (lower number = higher priority) */
 const SOURCE_PRIORITY: Record<string, number> = {
   pmc_jats: 1,
@@ -47,19 +49,6 @@ export interface MergeableFigure {
 
 export interface MergedFigure extends MergeableFigure {
   isPrimaryExtraction: boolean;
-}
-
-/**
- * Normalize a figure label for matching.
- * "Figure 1" = "Fig. 1" = "Fig 1" → "figure_1"
- */
-function normalizeLabel(label: string | null): string | null {
-  if (!label) return null;
-  return label
-    .toLowerCase()
-    .replace(/^fig\.?\s*/i, "figure ")
-    .replace(/\s+/g, "_")
-    .trim();
 }
 
 export function getPriority(sourceMethod: string): number {

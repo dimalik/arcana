@@ -262,7 +262,7 @@ async function extractPublisherFigures(doi: string): Promise<HtmlExtractionResul
 
 const SKIP_PATTERNS = /logo|icon|banner|avatar|header|footer|social|tracking|pixel|badge|button|arrow|spinner|loading|captcha|widget/i;
 
-function extractFiguresFromHtml(html: string, baseUrl: string): FigureCandidate[] {
+export function extractFiguresFromHtml(html: string, baseUrl: string): FigureCandidate[] {
   const figures: FigureCandidate[] = [];
   const seenUrls = new Set<string>();
 
@@ -283,18 +283,27 @@ function extractFiguresFromHtml(html: string, baseUrl: string): FigureCandidate[
       : "";
     const figureLabel = parseFigureLabel(caption);
 
-    // Check for <table> inside the figure block (arXiv HTML tables)
-    const tableMatch = block.match(/<table[^>]*>([\s\S]*?)<\/table>/i);
-    if (tableMatch && !block.match(/<img[^>]+src=/i)) {
-      // This is a table figure — no image, store structured HTML
-      figures.push({
-        url: "", // No image URL
-        caption,
-        figureLabel,
-        type: "table",
-        tableHtml: tableMatch[0],
-      });
+    // Check for table content inside the figure block.
+    // arXiv HTML uses two patterns:
+    //   1. Standard <table> elements (most papers)
+    //   2. LaTeXML <span class="ltx_tabular ..."> nested spans (some papers)
+    const hasImg = /<img[^>]+src=/i.test(block);
+    const stdTableMatch = block.match(/<table[^>]*>[\s\S]*?<\/table>/i);
+
+    if (stdTableMatch && !hasImg) {
+      figures.push({ url: "", caption, figureLabel, type: "table", tableHtml: stdTableMatch[0] });
       continue;
+    }
+
+    // ltx_tabular: deeply nested spans, can't regex-match the closing tag.
+    // Pragmatic: strip figcaption and use remaining block as table content.
+    // May include LaTeXML scaffolding — acceptable for tranche 1.
+    if (!hasImg && /class="[^"]*ltx_tabular/.test(block)) {
+      const tableHtml = block.replace(/<figcaption[^>]*>[\s\S]*?<\/figcaption>/gi, "").trim();
+      if (tableHtml.length > 50) {
+        figures.push({ url: "", caption, figureLabel, type: "table", tableHtml });
+        continue;
+      }
     }
 
     // Extract img src
