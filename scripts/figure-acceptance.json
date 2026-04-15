@@ -1,0 +1,86 @@
+{
+  "version": 1,
+  "description": "Figure extraction acceptance fixture. Labels are from arXiv HTML ground truth. Source expectations are for the primary extraction path.",
+  "papers": [
+    {
+      "arxivId": "2506.08712",
+      "title": "ConfPO",
+      "category": "clean_arxiv_html",
+      "expectedFigures": ["Figure 1", "Figure 2", "Figure 3", "Figure 4", "Figure 5", "Figure 6", "Figure 7", "Figure 8", "Figure 9", "Figure 10", "Figure 11", "Figure 12"],
+      "expectedTables": ["Table 1", "Table 2", "Table 3", "Table 4", "Table 5", "Table 6", "Table 7"],
+      "expectedSources": {
+        "Figure 1": "arxiv_html",
+        "Figure 12": "arxiv_html",
+        "Table 1": "arxiv_html",
+        "Table 7": "arxiv_html"
+      },
+      "labelExpectations": {
+        "Table 2": { "expectsImage": false, "expectedGapReason": "structured_content_no_preview" },
+        "Table 3": { "expectsImage": false, "expectedGapReason": "structured_content_no_preview" },
+        "Figure 1": { "expectsImage": true }
+      }
+    },
+    {
+      "arxivId": "2602.05494",
+      "title": "GRPO",
+      "category": "broken_arxiv_html",
+      "notes": "arXiv HTML has compilation issues. Only Figure 1 + Tables 1-4 from HTML. Figures 2-4 fall through to PDF.",
+      "expectedFigures": ["Figure 1", "Figure 2", "Figure 3", "Figure 4"],
+      "expectedTables": ["Table 1", "Table 2", "Table 3", "Table 4"],
+      "expectedSources": {
+        "Figure 1": "arxiv_html",
+        "Table 1": "arxiv_html"
+      },
+      "labelExpectations": {
+        "Table 1": { "expectsImage": false, "expectedGapReason": "structured_content_no_preview" },
+        "Figure 1": { "expectsImage": true }
+      }
+    },
+    {
+      "arxivId": "2509.22134",
+      "title": "Speculative Decoding",
+      "category": "clean_arxiv_html",
+      "expectedFigures": ["Figure 1", "Figure 2"],
+      "expectedTables": ["Table 1", "Table 2", "Table 3", "Table 4", "Table 5", "Table 6", "Table 7"],
+      "expectedSources": {
+        "Figure 1": "arxiv_html",
+        "Table 1": "arxiv_html",
+        "Table 6": "arxiv_html"
+      },
+      "labelExpectations": {
+        "Figure 1": { "expectsImage": true },
+        "Table 1": { "expectsImage": false, "expectedGapReason": "structured_content_no_preview" }
+      }
+    },
+    {
+      "arxivId": "2509.25027",
+      "title": "STAGE",
+      "category": "clean_arxiv_html",
+      "notes": "Image generation paper. 22 figures from HTML + many embedded sample images from PDF.",
+      "expectedFigures": ["Figure 1", "Figure 2", "Figure 3", "Figure 4", "Figure 5", "Figure 6", "Figure 7", "Figure 8", "Figure 9", "Figure 10", "Figure 11", "Figure 12", "Figure 13", "Figure 14", "Figure 15", "Figure 16", "Figure 17", "Figure 18", "Figure 19", "Figure 20", "Figure 21", "Figure 22"],
+      "expectedTables": ["Table 1", "Table 2", "Table 3", "Table 4", "Table 5", "Table 6", "Table 7", "Table 8", "Table 9"],
+      "expectedSources": {
+        "Figure 1": "arxiv_html",
+        "Table 1": "arxiv_html"
+      }
+    },
+    {
+      "arxivId": "2510.21391",
+      "title": "Zero-Shot Data Gen",
+      "category": "ltx_tabular",
+      "notes": "Tables 1-4 use ltx_tabular markup. Tables 5-8 use standard <table>.",
+      "expectedFigures": ["Figure 1", "Figure 2", "Figure 3", "Figure 4", "Figure 5", "Figure 6"],
+      "expectedTables": ["Table 1", "Table 2", "Table 3", "Table 4", "Table 5", "Table 6", "Table 7", "Table 8"],
+      "expectedSources": {
+        "Figure 1": "arxiv_html",
+        "Table 1": "arxiv_html",
+        "Table 5": "arxiv_html"
+      },
+      "labelExpectations": {
+        "Table 1": { "expectsImage": false, "expectedGapReason": "structured_content_no_preview" },
+        "Table 5": { "expectsImage": false, "expectedGapReason": "structured_content_no_preview" },
+        "Figure 1": { "expectsImage": true }
+      }
+    }
+  ]
+}
