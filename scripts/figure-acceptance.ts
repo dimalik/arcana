@@ -163,6 +163,14 @@ async function evaluatePaper(fp: FixturePaper, paperId: string, gapReasonExists:
         }
       }
 
+      if ((exp as Record<string, unknown>).expectedImageSourceMethod) {
+        const expectedImgSrc = (exp as Record<string, unknown>).expectedImageSourceMethod as string;
+        const actualImgSrc = (actual as Record<string, unknown>).imageSourceMethod as string | null;
+        if (actualImgSrc !== expectedImgSrc) {
+          labelViolations.push(`${norm}: expected imageSourceMethod=${expectedImgSrc}, got ${actualImgSrc || "null"}`);
+        }
+      }
+
       if (exp.expectedGapReason && gapReasonExists) {
         const actualReason = (actual as Record<string, unknown>).gapReason as string | null;
         if (actualReason !== exp.expectedGapReason) {

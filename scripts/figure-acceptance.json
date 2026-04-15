@@ -15,9 +15,14 @@
         "Table 7": "arxiv_html"
       },
       "labelExpectations": {
+        "Figure 1": { "expectsImage": true },
+        "Table 1": { "expectsImage": false, "expectedGapReason": "structured_content_no_preview" },
         "Table 2": { "expectsImage": false, "expectedGapReason": "structured_content_no_preview" },
         "Table 3": { "expectsImage": false, "expectedGapReason": "structured_content_no_preview" },
-        "Figure 1": { "expectsImage": true }
+        "Table 4": { "expectsImage": false, "expectedGapReason": "structured_content_no_preview" },
+        "Table 5": { "expectsImage": false, "expectedGapReason": "structured_content_no_preview" },
+        "Table 6": { "expectsImage": false, "expectedGapReason": "structured_content_no_preview" },
+        "Table 7": { "expectsImage": false, "expectedGapReason": "structured_content_no_preview" }
       }
     },
     {
@@ -32,8 +37,11 @@
         "Table 1": "arxiv_html"
       },
       "labelExpectations": {
+        "Figure 1": { "expectsImage": true },
         "Table 1": { "expectsImage": false, "expectedGapReason": "structured_content_no_preview" },
-        "Figure 1": { "expectsImage": true }
+        "Table 2": { "expectsImage": false, "expectedGapReason": "structured_content_no_preview" },
+        "Table 3": { "expectsImage": false, "expectedGapReason": "structured_content_no_preview" },
+        "Table 4": { "expectsImage": false, "expectedGapReason": "structured_content_no_preview" }
       }
     },
     {
@@ -49,7 +57,13 @@
       },
       "labelExpectations": {
         "Figure 1": { "expectsImage": true },
-        "Table 1": { "expectsImage": false, "expectedGapReason": "structured_content_no_preview" }
+        "Table 1": { "expectsImage": false, "expectedGapReason": "structured_content_no_preview" },
+        "Table 2": { "expectsImage": false, "expectedGapReason": "structured_content_no_preview" },
+        "Table 3": { "expectsImage": false, "expectedGapReason": "structured_content_no_preview" },
+        "Table 4": { "expectsImage": false, "expectedGapReason": "structured_content_no_preview" },
+        "Table 5": { "expectsImage": false, "expectedGapReason": "structured_content_no_preview" },
+        "Table 6": { "expectsImage": false, "expectedGapReason": "structured_content_no_preview" },
+        "Table 7": { "expectsImage": false, "expectedGapReason": "structured_content_no_preview" }
       }
     },
     {
