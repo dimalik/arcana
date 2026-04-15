@@ -89,7 +89,7 @@ When arXiv nests a figure as multiple child elements, the parser downloads the w
 
 For papers without arXiv HTML, render+crop is the only path and it's still bad. Fix: score candidate crop regions by visual density, reject crops that are mostly body text, try multiple crop directions.
 
-**Impact:** Only matters for PDF-only papers (no arXiv ID). Lower priority because the main win is recovering arXiv IDs for the 2424 papers.
+**Impact:** Matters for any paper that falls back to PDF — both PDF-only papers (no arXiv ID) and papers with broken or incomplete HTML coverage (e.g., GRPO's compilation-failure HTML that only covers 2 of 7+ figures). Lower priority than P0-P2 because the main volume win is recovering arXiv IDs, but this is the only path for improving quality on the fallback cases.
 
 ### P4: Broken arXiv HTML detection
 
