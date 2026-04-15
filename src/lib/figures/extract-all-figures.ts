@@ -262,7 +262,8 @@ export async function extractAllFigures(
           height: fig.height,
           isPrimaryExtraction: fig.isPrimaryExtraction,
           description: fig.description || null,
-          gapReason: fig.gapReason || null, // Product-facing, set by merger only
+          gapReason: fig.gapReason || null,
+          imageSourceMethod: fig.imageSourceMethod || null,
           // cropOutcome is transient — NOT persisted
         };
 

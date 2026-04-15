@@ -440,6 +440,7 @@ model PaperFigure {
   width               Int?
   height              Int?
   gapReason           String?  // Product-facing: why canonical row has no image. Only set when isPrimaryExtraction=true AND imagePath is null.
+  imageSourceMethod   String?  // Provenance of imagePath. Null iff imagePath is null. Equals sourceMethod when own source provided the image; differs when borrowed from another source or rendered.
   createdAt           DateTime @default(now())
 
   paper         Paper        @relation(fields: [paperId], references: [id], onDelete: Cascade)
