@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { searchByTitle } from "@/lib/import/semantic-scholar";
+import { searchByTitle, isFigureOrSupplementDoi } from "@/lib/import/semantic-scholar";
+import { titleSimilarity } from "@/lib/references/match";
 import { logger } from "@/lib/logger";
 import { requireUserId } from "@/lib/paper-auth";
 
@@ -30,6 +31,31 @@ export async function POST(
       );
     }
 
+    // Guard: reject figure/supplement DOIs that slipped through search
+    if (isFigureOrSupplementDoi({ doi: result.doi, title: result.title })) {
+      logger.warn(`Rejected figure/supplement DOI for "${paper.title}": ${result.doi}`, {
+        category: "import",
+        metadata: { paperId: id, rejectedDoi: result.doi },
+      });
+      return NextResponse.json(
+        { error: "Search returned a figure/supplement DOI, not the paper itself" },
+        { status: 404 }
+      );
+    }
+
+    // Guard: reject results with significantly different titles (wrong paper)
+    const similarity = titleSimilarity(paper.title, result.title);
+    if (similarity < 0.6) {
+      logger.warn(`Rejected low-similarity match for "${paper.title}": "${result.title}" (score=${similarity.toFixed(2)})`, {
+        category: "import",
+        metadata: { paperId: id, matchedTitle: result.title, similarity },
+      });
+      return NextResponse.json(
+        { error: `Best match title too different (similarity=${similarity.toFixed(2)})` },
+        { status: 404 }
+      );
+    }
+
     const updateData: Record<string, unknown> = {};
     if (result.abstract) updateData.abstract = result.abstract;
     if (result.authors?.length) updateData.authors = JSON.stringify(result.authors);
@@ -45,12 +71,13 @@ export async function POST(
 
     logger.info(`Re-fetched metadata for "${paper.title}"`, {
       category: "import",
-      metadata: { paperId: id, source: result.source, fieldsUpdated: Object.keys(updateData) },
+      metadata: { paperId: id, source: result.source, fieldsUpdated: Object.keys(updateData), similarity },
     });
 
     return NextResponse.json({
       updated: Object.keys(updateData),
       source: result.source ?? "unknown",
+      similarity,
     });
   } catch (error) {
     logger.error("Failed to re-fetch metadata", {

@@ -32,6 +32,7 @@ interface EmbeddedImage {
   assetHash: string;
   filename: string;
   filepath: string;
+  yRatio: number;
 }
 
 export async function extractFiguresFromPdf(
@@ -45,24 +46,58 @@ export async function extractFiguresFromPdf(
 
   const absolutePdfPath = path.resolve(process.cwd(), pdfPath);
 
-  // Part 1: Detect captions from PDF text
+  // Part 1: Detect captions from PDF text with Y positions
   const allCaptions: DetectedCaption[] = [];
   try {
+    // Extract text blocks with their Y positions from PyMuPDF
     const { stdout } = await execFileAsync("python3", [
       "-c",
-      `import fitz, json, sys
+      `import fitz, json, sys, re
 doc = fitz.open(sys.argv[1])
 pages = []
+caption_pat = re.compile(r'(?:Figure|Fig\.|Table)\s+\d+[a-z]?\s*[:.—–-]', re.IGNORECASE)
 for i in range(min(len(doc), int(sys.argv[2]))):
-    pages.append({"page": i+1, "text": doc[i].get_text()})
+    page = doc[i]
+    ph = page.rect.height
+    blocks = page.get_text("dict")["blocks"]
+    text_lines = []
+    for b in blocks:
+        if b.get("type") == 0:  # text block
+            for line in b.get("lines", []):
+                txt = " ".join(s["text"] for s in line.get("spans", []))
+                y = line["bbox"][1]  # top of the line
+                text_lines.append({"text": txt, "y": y, "y_ratio": y / ph if ph > 0 else 0})
+    # Also get full page text for caption detection
+    full_text = page.get_text()
+    # Find caption Y positions by matching caption text to text_lines
+    caption_positions = {}
+    for tl in text_lines:
+        if caption_pat.search(tl["text"]):
+            caption_positions[tl["text"][:40]] = tl["y_ratio"]
+    pages.append({"page": i+1, "text": full_text, "caption_positions": caption_positions, "page_height": ph})
 doc.close()
 json.dump(pages, sys.stdout)`,
       absolutePdfPath,
       String(maxPages),
     ], { timeout: 30000 });
-    const pages = JSON.parse(stdout) as { page: number; text: string }[];
+    const pages = JSON.parse(stdout) as { page: number; text: string; caption_positions: Record<string, number>; page_height: number }[];
     for (const p of pages) {
-      allCaptions.push(...detectCaptions(p.text, p.page));
+      const captions = detectCaptions(p.text, p.page);
+      // Set Y positions from the PyMuPDF layout data
+      for (const cap of captions) {
+        // Match caption to a text line by label prefix
+        for (const [lineText, yRatio] of Object.entries(p.caption_positions)) {
+          if (lineText.includes(cap.label)) {
+            cap.yRatio = yRatio;
+            break;
+          }
+        }
+        // Fallback: estimate from character offset
+        if (cap.yRatio === 0 && p.text.length > 0) {
+          cap.yRatio = cap.lineIndex / p.text.length;
+        }
+      }
+      allCaptions.push(...captions);
     }
   } catch (err) {
     console.warn(`[pdf-pipeline] Text extraction failed: ${(err as Error).message}`);
@@ -94,6 +129,25 @@ json.dump(pages, sys.stdout)`,
     );
 
     if (pageImages.length > 0) {
+      // Match by directional Y proximity:
+      //   - For figures: caption is below → prefer images ABOVE the caption (yRatio < captionY)
+      //   - For tables: caption is above → prefer images BELOW the caption (yRatio > captionY)
+      // Within the correct direction, pick the closest image.
+      // Fall back to absolute distance if no image is in the correct direction.
+      const captionY = caption.yRatio;
+      const isFigure = caption.type === "figure";
+
+      pageImages.sort((a, b) => {
+        const aCorrectSide = isFigure ? a.yRatio < captionY : a.yRatio > captionY;
+        const bCorrectSide = isFigure ? b.yRatio < captionY : b.yRatio > captionY;
+
+        // Prefer images on the correct side of the caption
+        if (aCorrectSide && !bCorrectSide) return -1;
+        if (!aCorrectSide && bCorrectSide) return 1;
+
+        // Both on same side — pick closest by absolute distance
+        return Math.abs(a.yRatio - captionY) - Math.abs(b.yRatio - captionY);
+      });
       const img = pageImages[0];
       matchedImageHashes.add(img.assetHash);
 
@@ -113,12 +167,24 @@ json.dump(pages, sys.stdout)`,
       });
     } else {
       // No embedded image found — try render+crop for vector figures
+      // Compute neighbor caption Y ratios for tighter crop bounds
+      const samePage = allCaptions
+        .filter((c) => c.page === caption.page && c !== caption)
+        .map((c) => c.yRatio);
+      const above = samePage.filter((y) => y < caption.yRatio);
+      const below = samePage.filter((y) => y > caption.yRatio);
+      const neighborAboveYRatio = above.length > 0 ? Math.max(...above) : undefined;
+      const neighborBelowYRatio = below.length > 0 ? Math.min(...below) : undefined;
+
       const crop = await renderAndCropFigure({
         pdfPath: absolutePdfPath,
         page: caption.page,
-        captionYRatio: caption.lineIndex / 3000,
+        captionYRatio: caption.yRatio,
         outDir,
         label: caption.label,
+        type: caption.type,
+        neighborAboveYRatio,
+        neighborBelowYRatio,
       });
 
       if (crop.success && crop.filepath) {

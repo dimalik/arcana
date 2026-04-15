@@ -1,13 +1,14 @@
 /**
- * Figure & table extraction from PDFs.
+ * @deprecated Use src/lib/figures/extract-all-figures.ts instead.
  *
- * Strategy:
+ * This file performs direct PaperFigure upserts outside the transactional
+ * orchestrator. It exists only as a reference for future vision-LLM repair
+ * (Phase 7 of the figure extraction spec). Do not import in production code.
+ *
+ * Original strategy:
  * 1. Render each PDF page to an image using pdfjs-dist + node-canvas
  * 2. Send each page image to a vision LLM to identify figures/tables
  * 3. Store identified figures with LLM-generated descriptions
- *
- * The LLM acts as the "figure detector" — it's more robust than
- * heuristic-based approaches and can also describe what it sees.
  */
 
 import { prisma } from "@/lib/prisma";
