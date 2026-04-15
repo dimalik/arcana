@@ -290,10 +290,17 @@ export async function extractAllFigures(
                   imageSourceMethod: _ism, gapReason: _gr, ...safeFields } = fields;
                 updateFields = safeFields as typeof fields;
               } else {
-                // Label drifted — update the existing rendered row's label
-                // and skip overwriting its preview fields
+                // Label drifted — delete any blocker under the target label,
+                // then rename the rendered row to the new label.
                 const { imagePath: _, assetHash: _a, width: _w, height: _h,
                   imageSourceMethod: _ism, gapReason: _gr, ...safeFields } = fields;
+                const blocker = await tx.paperFigure.findFirst({
+                  where: { paperId, sourceMethod: fig.sourceMethod, figureLabel },
+                  select: { id: true },
+                });
+                if (blocker && blocker.id !== match.id) {
+                  await tx.paperFigure.delete({ where: { id: blocker.id } });
+                }
                 await tx.paperFigure.update({
                   where: { id: match.id },
                   data: { figureLabel, ...safeFields as typeof fields },
