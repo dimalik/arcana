@@ -19,7 +19,7 @@ The pipeline works. It's not done. Here's an honest assessment.
 
 **Preview suppression** eliminates the worst failure mode: when arXiv HTML covers a figure, the pipeline no longer generates a bad PDF crop that pollutes the results. ConfPO went from 8 ugly crop files to 0.
 
-**Transactional persistence** — the entire reconcile (upserts, label drift, stale demotion) runs in a single Prisma transaction. Reruns are idempotent. Failed runs roll back cleanly.
+**Transactional DB persistence** — the entire reconcile (upserts, label drift, stale demotion) runs in a single Prisma transaction. Reruns are idempotent. Failed runs roll back DB state cleanly. Note: source extractors still write image files to disk before the transaction, so a failed run can leave orphaned files on disk. Atomicity is DB-only, not end-to-end.
 
 ### What Doesn't Work
 
@@ -31,7 +31,7 @@ The pipeline works. It's not done. Here's an honest assessment.
 
 **Broken arXiv HTML** — GRPO's arXiv HTML shows a compilation failure banner. The pipeline still extracts what it can (2 of 7+ figures) but misses most content. No detection of broken HTML.
 
-### Per-Paper Results (5 test papers)
+### Per-Paper Results (5 test papers, snapshot from 2026-04-15 spot-check run)
 
 | Paper | Figures | Tables | Figure Quality | Table Quality |
 |-------|---------|--------|---------------|---------------|
@@ -39,7 +39,7 @@ The pipeline works. It's not done. Here's an honest assessment.
 | Speculative Decoding | 2 HTML (good) | 7 HTML (all structured) | Good | Good |
 | Zero-Shot Data Gen | 6 HTML (good) | **4 PDF crop (bad)** + 4 HTML structured | Good | **Bad** — Tables 1-4 use `ltx_tabular`, not `<table>` |
 | GRPO | 2 HTML (1 is legend strip) + 5 PDF | 2 PDF crop | Mixed — html-1 is bad | Bad — crops are body text |
-| STAGE | 22 HTML + 139 embedded | 0 | Good | N/A |
+| STAGE | 22 HTML + 135 embedded | 9 HTML (structured) | Good | Good — structured content |
 
 ---
 
@@ -58,7 +58,7 @@ Paper (with arXivId/DOI/PDF)
 ```
 
 Key design decisions:
-- **Source extractors write files only**, not DB rows. All PaperFigure persistence is in the transaction.
+- **Source extractors write files only**, not DB rows. All PaperFigure DB persistence is in the transaction. Filesystem writes (image files) happen before the transaction and are not rolled back on failure.
 - **Tables are first-class**: structured content wins as canonical; crop images are previews only.
 - **Covered labels skip crop**: if arXiv HTML or PMC already has a figure, PDF render+crop is suppressed entirely.
 - **Merge is field-level**: canonical row gets best caption from highest-priority source, best image from wherever, structured content from wherever.
@@ -99,7 +99,7 @@ GRPO's HTML has a compilation failure banner. The pipeline doesn't detect this a
 
 ### P5: Batch arXiv ID recovery
 
-All 2424 papers currently have no arXiv ID. Most were uploaded from arXiv PDFs. A batch refetch-metadata run would recover IDs and unlock the arXiv HTML path for the entire library.
+~2419 of ~2424 papers have no arXiv ID (5 were manually recovered for testing). Most were uploaded from arXiv PDFs. A batch refetch-metadata run would recover IDs and unlock the arXiv HTML path for the bulk of the library.
 
 **Impact:** Transforms the pipeline from "mostly PDF fallback" to "mostly arXiv HTML" across the whole library.
 
