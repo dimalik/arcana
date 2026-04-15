@@ -38,9 +38,10 @@ interface EmbeddedImage {
 export async function extractFiguresFromPdf(
   pdfPath: string,
   paperId: string,
-  opts?: { maxPages?: number },
+  opts?: { maxPages?: number; coveredLabels?: Set<string> },
 ): Promise<ExtractedFigure[]> {
   const maxPages = opts?.maxPages || 50;
+  const coveredLabels = opts?.coveredLabels || new Set<string>();
   const outDir = path.join(process.cwd(), "uploads", "figures", paperId);
   await mkdir(outDir, { recursive: true });
 
@@ -166,7 +167,29 @@ json.dump(pages, sys.stdout)`,
         height: img.height,
       });
     } else {
-      // No embedded image found — try render+crop for vector figures
+      // No embedded image found — try render+crop for vector figures.
+      // Skip render+crop if a high-confidence source already covers this label
+      // (avoids generating bad preview crops when HTML extraction succeeded).
+      const normalizedLabel = caption.label.toLowerCase().replace(/^fig\.?\s*/i, "figure ").trim();
+      if (coveredLabels.has(normalizedLabel)) {
+        // Emit a structural placeholder — the merge will use the HTML source
+        results.push({
+          figureLabel: caption.label,
+          captionText: caption.captionText,
+          captionSource: "pdf_ocr",
+          sourceMethod: "pdf_structural",
+          confidence: "low",
+          imagePath: null,
+          assetHash: null,
+          pdfPage: caption.page,
+          bbox: null,
+          type: caption.type,
+          width: null,
+          height: null,
+        });
+        continue;
+      }
+
       // Compute neighbor caption Y ratios for tighter crop bounds
       const samePage = allCaptions
         .filter((c) => c.page === caption.page && c !== caption)

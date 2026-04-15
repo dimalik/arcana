@@ -187,12 +187,24 @@ export async function extractAllFigures(
   }
 
   // ── Source 4: PDF fallback ────────────────────────────────────────
+  // Collect labels already covered by high-confidence sources so PDF
+  // fallback can skip render+crop for those (avoids generating bad previews
+  // when a real arXiv HTML or PMC figure already exists).
+  const coveredLabels = new Set<string>();
+  for (const srcArray of allSources) {
+    for (const fig of srcArray) {
+      if (fig.figureLabel && (fig.confidence === "high" || fig.confidence === "medium")) {
+        coveredLabels.add(fig.figureLabel.toLowerCase().replace(/^fig\.?\s*/i, "figure ").trim());
+      }
+    }
+  }
+
   if (paper.filePath && !opts?.skipPdf) {
     try {
       const pdfFigures = await extractFiguresFromPdf(
         paper.filePath,
         paperId,
-        { maxPages: opts?.maxPages || 50 },
+        { maxPages: opts?.maxPages || 50, coveredLabels },
       );
       report.sources.push({
         method: "pdf_fallback",
