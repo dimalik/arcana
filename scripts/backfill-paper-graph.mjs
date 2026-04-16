@@ -297,10 +297,15 @@ function backfillEntities() {
 function backfillReferenceEntries() {
   const identifierMap = loadIdentifierMap();
 
-  const existingLegacyIds = new Set(
-    db.prepare("SELECT legacyReferenceId FROM ReferenceEntry WHERE legacyReferenceId IS NOT NULL")
+  const existingEntries = new Map(
+    db.prepare(`
+      SELECT id, legacyReferenceId, resolvedEntityId, resolveSource
+      FROM ReferenceEntry
+      WHERE legacyReferenceId IS NOT NULL
+    `)
       .all()
-      .map((row) => row.legacyReferenceId)
+      .filter((row) => row.legacyReferenceId)
+      .map((row) => [row.legacyReferenceId, row])
   );
 
   const legacyReferences = db.prepare(`
@@ -322,13 +327,22 @@ function backfillReferenceEntries() {
     )
   `);
 
+  const updateReferenceResolution = db.prepare(`
+    UPDATE ReferenceEntry
+    SET
+      resolvedEntityId = @resolvedEntityId,
+      resolveConfidence = @resolveConfidence,
+      resolveSource = @resolveSource
+    WHERE id = @id
+  `);
+
   let created = 0;
-  let resolved = 0;
+  let rechecked = 0;
+  let resolvedOnCreate = 0;
+  let resolvedOnUpdate = 0;
 
   const run = db.transaction(() => {
     for (const reference of legacyReferences) {
-      if (existingLegacyIds.has(reference.id)) continue;
-
       let resolvedEntityId = null;
       let resolveSource = null;
       if (reference.doi) {
@@ -344,6 +358,24 @@ function backfillReferenceEntries() {
           resolvedEntityId = match;
           resolveSource = "arxiv_match";
         }
+      }
+
+      const existing = existingEntries.get(reference.id);
+      if (existing) {
+        rechecked++;
+        if (
+          resolvedEntityId &&
+          (existing.resolvedEntityId !== resolvedEntityId || existing.resolveSource !== resolveSource)
+        ) {
+          updateReferenceResolution.run({
+            id: existing.id,
+            resolvedEntityId,
+            resolveConfidence: 1.0,
+            resolveSource,
+          });
+          resolvedOnUpdate++;
+        }
+        continue;
       }
 
       insertReferenceEntry.run({
@@ -369,12 +401,12 @@ function backfillReferenceEntries() {
       });
 
       created++;
-      if (resolvedEntityId) resolved++;
+      if (resolvedEntityId) resolvedOnCreate++;
     }
   });
 
   run();
-  return { created, resolved };
+  return { created, rechecked, resolvedOnCreate, resolvedOnUpdate };
 }
 
 function backfillRelationAssertions() {
