@@ -260,7 +260,7 @@ async function main() {
       const combinedNotes = new Map<string, string>();
       const needsCondense: { paperId: string; notes: string[] }[] = [];
 
-      for (const [paperId, notes] of paperNotes) {
+      for (const [paperId, notes] of Array.from(paperNotes.entries())) {
         const combined = notes.filter(Boolean).join("\n\n---\n\n");
         if (combined.length > MAX_PAPER_CHARS) {
           needsCondense.push({ paperId, notes: notes.filter(Boolean) });
@@ -303,8 +303,10 @@ async function main() {
           condensedParts.get(paperId)!.set(parseInt(idx, 10), text);
         }
 
-        for (const [paperId, parts] of condensedParts) {
-          const sorted = Array.from(parts.entries()).sort((a, b) => a[0] - b[0]).map(([, t]) => t);
+        for (const [paperId, parts] of Array.from(condensedParts.entries())) {
+          const sorted = (Array.from(parts.entries()) as Array<[number, string]>)
+            .sort((a, b) => a[0] - b[0])
+            .map(([, text]) => text);
           combinedNotes.set(paperId, sorted.join("\n\n---\n\n"));
         }
       }
@@ -312,7 +314,7 @@ async function main() {
       // Round 2: Reduce — final synthesis
       // EXACT same as auto-process.ts line 244-253
       const reduceRequests: BatchRequest[] = [];
-      for (const [paperId, combined] of combinedNotes) {
+      for (const [paperId, combined] of Array.from(combinedNotes.entries())) {
         reduceRequests.push({
           custom_id: `${paperId}--reduce`,
           params: {
@@ -349,7 +351,7 @@ async function main() {
 
     // Import to DB
     let ok = 0;
-    for (const [paperId, summary] of batchSummaries) {
+    for (const [paperId, summary] of Array.from(batchSummaries.entries())) {
       try {
         await prisma.paper.update({ where: { id: paperId }, data: { summary } });
         ok++;

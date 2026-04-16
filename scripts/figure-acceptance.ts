@@ -105,7 +105,7 @@ async function evaluatePaper(fp: FixturePaper, paperId: string, gapReasonExists:
   // Normalize expected labels
   const expectedFigNorm = new Set(fp.expectedFigures.map(l => normalizeLabel(l)).filter(Boolean) as string[]);
   const expectedTabNorm = new Set(fp.expectedTables.map(l => normalizeLabel(l)).filter(Boolean) as string[]);
-  const allExpected = new Set([...expectedFigNorm, ...expectedTabNorm]);
+  const allExpected = new Set(Array.from(expectedFigNorm).concat(Array.from(expectedTabNorm)));
 
   // Normalize actual labels
   const actualLabels = new Map<string, typeof figures[0]>();
@@ -116,19 +116,19 @@ async function evaluatePaper(fp: FixturePaper, paperId: string, gapReasonExists:
 
   // Figure recall
   const missingFigs: string[] = [];
-  for (const norm of expectedFigNorm) {
+  for (const norm of Array.from(expectedFigNorm)) {
     if (!actualLabels.has(norm)) missingFigs.push(norm);
   }
 
   // Table recall
   const missingTabs: string[] = [];
-  for (const norm of expectedTabNorm) {
+  for (const norm of Array.from(expectedTabNorm)) {
     if (!actualLabels.has(norm)) missingTabs.push(norm);
   }
 
   // Unexpected labels
   const unexpected: string[] = [];
-  for (const [norm] of actualLabels) {
+  for (const [norm] of Array.from(actualLabels.entries())) {
     if (!allExpected.has(norm) && !norm.startsWith("uncaptioned-")) {
       unexpected.push(norm);
     }
@@ -138,7 +138,7 @@ async function evaluatePaper(fp: FixturePaper, paperId: string, gapReasonExists:
   const sourceMismatches: string[] = [];
   if (fp.expectedSources) {
     const normSources = normalizeFixtureMap(fp.expectedSources);
-    for (const [norm, expectedSource] of normSources) {
+    for (const [norm, expectedSource] of Array.from(normSources.entries())) {
       const actual = actualLabels.get(norm);
       if (actual && actual.sourceMethod !== expectedSource) {
         sourceMismatches.push(`${norm}: expected ${expectedSource}, got ${actual.sourceMethod}`);
@@ -150,7 +150,7 @@ async function evaluatePaper(fp: FixturePaper, paperId: string, gapReasonExists:
   const labelViolations: string[] = [];
   if (fp.labelExpectations) {
     const normExpectations = normalizeFixtureMap(fp.labelExpectations);
-    for (const [norm, exp] of normExpectations) {
+    for (const [norm, exp] of Array.from(normExpectations.entries())) {
       const actual = actualLabels.get(norm);
       if (!actual) continue; // Missing labels already caught in recall
 

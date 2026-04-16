@@ -363,9 +363,10 @@ async function main() {
   console.log("\n=== ROUND 2: Reduce (synthesize final summaries) ===\n");
 
   const reduceRequests: BatchRequest[] = [];
-  for (const [paperId, notes] of paperNotes) {
+  for (const [paperId, notes] of Array.from(paperNotes.entries())) {
     // Sort by chunk index and combine
-    const sorted = Array.from(notes.entries()).sort((a, b) => a[0] - b[0]);
+    const sorted = Array.from(notes.entries()) as Array<[number, string]>;
+    sorted.sort((a, b) => a[0] - b[0]);
     const combined = sorted.map(([i, text]) => `## Section ${i + 1}\n\n${text}`).join("\n\n---\n\n");
 
     // If combined is still very large, we'll truncate for the reduce step
@@ -423,7 +424,7 @@ async function main() {
 
   let imported = 0;
   let failed = 0;
-  for (const [paperId, summary] of directSummaries) {
+  for (const [paperId, summary] of Array.from(directSummaries.entries())) {
     try {
       await prisma.paper.update({
         where: { id: paperId },
