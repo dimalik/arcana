@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { searchByTitle, S2RateLimitError } from "@/lib/import/semantic-scholar";
 import { findLibraryMatchByIds } from "@/lib/references/match";
 import { requireUserId } from "@/lib/paper-auth";
+import { resolveOrCreateEntity, type IdentifierInput } from "@/lib/canonical/entity-service";
 
 export async function POST(
   _req: NextRequest,
@@ -81,6 +82,33 @@ export async function POST(
                 }),
               },
             });
+
+            try {
+              const identifiers: IdentifierInput[] = [];
+              if (result.doi) identifiers.push({ type: "doi", value: result.doi, source: "enrichment" });
+              if (result.arxivId) identifiers.push({ type: "arxiv", value: result.arxivId, source: "enrichment" });
+              if (result.semanticScholarId) {
+                identifiers.push({
+                  type: "semantic_scholar",
+                  value: result.semanticScholarId,
+                  source: "enrichment",
+                });
+              }
+
+              if (identifiers.length > 0) {
+                await resolveOrCreateEntity({
+                  title: ref.title,
+                  authors: ref.authors,
+                  year: ref.year ?? result.year,
+                  venue: ref.venue || result.venue,
+                  identifiers,
+                  source: "enrichment",
+                });
+              }
+            } catch {
+              // Non-fatal
+            }
+
             enriched++;
           } else {
             failed++;

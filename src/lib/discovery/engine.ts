@@ -10,6 +10,7 @@ import {
   titleSimilarity,
   findLibraryMatchByIds,
 } from "@/lib/references/match";
+import { collectIdentifiers, resolveOrCreateEntity } from "@/lib/canonical/entity-service";
 
 export interface DiscoveryProgress {
   type: "progress";
@@ -278,6 +279,31 @@ async function processCandidate(
       importedPaperId: libraryMatch?.paperId || null,
     },
   });
+
+  let entityId: string | null = null;
+  try {
+    const identifiers = collectIdentifiers(candidate, "discovery");
+    if (identifiers.length > 0) {
+      const result = await resolveOrCreateEntity({
+        title: candidate.title,
+        authors: candidate.authors.length > 0 ? JSON.stringify(candidate.authors) : null,
+        year: candidate.year,
+        venue: candidate.venue,
+        identifiers,
+        source: "discovery",
+      });
+      entityId = result.entityId;
+    }
+  } catch {
+    // Non-fatal
+  }
+
+  if (entityId) {
+    await prisma.discoveryProposal.update({
+      where: { id: proposal.id },
+      data: { entityId },
+    });
+  }
 
   return {
     id: proposal.id,

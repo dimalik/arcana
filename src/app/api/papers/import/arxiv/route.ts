@@ -8,6 +8,7 @@ import {
 import { processingQueue } from "@/lib/processing/queue";
 import { requireUserId } from "@/lib/paper-auth";
 import { z } from "zod";
+import { handleDuplicatePaperError, resolveEntityForImport } from "@/lib/canonical/import-dedup";
 
 const importSchema = z.object({
   input: z.string().min(1),
@@ -27,19 +28,21 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Check for duplicate (per user)
-    const existing = await prisma.paper.findFirst({
-      where: { arxivId, userId },
+    // Fetch metadata
+    const metadata = await fetchArxivMetadata(arxivId);
+
+    const resolved = await resolveEntityForImport({
+      userId,
+      title: metadata.title,
+      arxivId,
     });
-    if (existing) {
+
+    if (resolved.existingPaper) {
       return NextResponse.json(
-        { error: "Paper already imported", paper: existing },
+        { error: "Paper already imported", paper: resolved.existingPaper },
         { status: 409 }
       );
     }
-
-    // Fetch metadata
-    const metadata = await fetchArxivMetadata(arxivId);
 
     // Download PDF synchronously before creating paper (fast — just a file download)
     let filePath: string | undefined;
@@ -50,21 +53,34 @@ export async function POST(request: NextRequest) {
     }
 
     // Create paper record
-    const paper = await prisma.paper.create({
-      data: {
-        title: metadata.title,
-        userId,
-        abstract: metadata.abstract,
-        authors: JSON.stringify(metadata.authors),
-        year: metadata.year,
-        sourceType: "ARXIV",
-        sourceUrl: `https://arxiv.org/abs/${arxivId}`,
-        arxivId,
-        filePath,
-        categories: JSON.stringify(metadata.categories),
-        processingStatus: "EXTRACTING_TEXT",
-      },
-    });
+    let paper;
+    try {
+      paper = await prisma.paper.create({
+        data: {
+          title: metadata.title,
+          userId,
+          abstract: metadata.abstract,
+          authors: JSON.stringify(metadata.authors),
+          year: metadata.year,
+          sourceType: "ARXIV",
+          sourceUrl: `https://arxiv.org/abs/${arxivId}`,
+          arxivId,
+          filePath,
+          categories: JSON.stringify(metadata.categories),
+          processingStatus: "EXTRACTING_TEXT",
+          entityId: resolved.entityId,
+        },
+      });
+    } catch (error) {
+      const existing = await handleDuplicatePaperError(error, userId, resolved.entityId);
+      if (existing) {
+        return NextResponse.json(
+          { error: "Paper already imported", paper: existing },
+          { status: 409 }
+        );
+      }
+      throw error;
+    }
 
     // Queue handles: PDF text extraction → LLM pipeline
     processingQueue.enqueue(paper.id);
