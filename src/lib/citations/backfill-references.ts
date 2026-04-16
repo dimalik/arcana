@@ -24,50 +24,61 @@ async function main() {
     },
   });
 
-  const existingLegacyIds = new Set(
-    (await prisma.referenceEntry.findMany({
-      where: { legacyReferenceId: { not: null } },
-      select: { legacyReferenceId: true },
-    }))
-      .map((reference) => reference.legacyReferenceId)
-      .filter((id): id is string => Boolean(id))
+  const existingEntriesByLegacyId = new Map(
+    (
+      await prisma.referenceEntry.findMany({
+        where: { legacyReferenceId: { not: null } },
+        select: { id: true, legacyReferenceId: true },
+      })
+    )
+      .filter(
+        (reference): reference is { id: string; legacyReferenceId: string } =>
+          Boolean(reference.legacyReferenceId)
+      )
+      .map((reference) => [reference.legacyReferenceId, reference.id])
   );
 
-  const toMigrate = legacyReferences.filter((reference) => !existingLegacyIds.has(reference.id));
-
   let created = 0;
+  let rechecked = 0;
   let resolved = 0;
   let errors = 0;
 
-  for (const reference of toMigrate) {
+  for (const reference of legacyReferences) {
     try {
-      const entry = await createReferenceEntry({
-        paperId: reference.paperId,
-        title: reference.title,
-        rawCitation: reference.rawCitation,
-        authors: reference.authors,
-        year: reference.year,
-        venue: reference.venue,
-        doi: reference.doi,
-        arxivId: reference.arxivId,
-        externalUrl: reference.externalUrl,
-        semanticScholarId: reference.semanticScholarId,
-        referenceIndex: reference.referenceIndex,
-        provenance: "llm_extraction",
-        extractorVersion: "backfill_v1",
-        legacyReferenceId: reference.id,
-      });
+      let entryId = existingEntriesByLegacyId.get(reference.id);
 
-      created++;
+      if (!entryId) {
+        const entry = await createReferenceEntry({
+          paperId: reference.paperId,
+          title: reference.title,
+          rawCitation: reference.rawCitation,
+          authors: reference.authors,
+          year: reference.year,
+          venue: reference.venue,
+          doi: reference.doi,
+          arxivId: reference.arxivId,
+          externalUrl: reference.externalUrl,
+          semanticScholarId: reference.semanticScholarId,
+          referenceIndex: reference.referenceIndex,
+          provenance: "llm_extraction",
+          extractorVersion: "backfill_v1",
+          legacyReferenceId: reference.id,
+        });
+        entryId = entry.id;
+        existingEntriesByLegacyId.set(reference.id, entry.id);
+        created++;
+      } else {
+        rechecked++;
+      }
 
-      await resolveReferenceEntity(entry.id, {
+      await resolveReferenceEntity(entryId, {
         doi: reference.doi,
         arxivId: reference.arxivId,
         title: reference.title,
       });
 
       const updated = await prisma.referenceEntry.findUnique({
-        where: { id: entry.id },
+        where: { id: entryId },
         select: { resolvedEntityId: true },
       });
       if (updated?.resolvedEntityId) {
@@ -79,7 +90,7 @@ async function main() {
     }
   }
 
-  console.log(JSON.stringify({ created, resolved, errors }, null, 2));
+  console.log(JSON.stringify({ created, rechecked, resolved, errors }, null, 2));
 }
 
 main()
