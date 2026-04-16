@@ -10,6 +10,7 @@ import { requireUserId } from "@/lib/paper-auth";
 import { writeFile, mkdir } from "fs/promises";
 import path from "path";
 import { v4 as uuidv4 } from "uuid";
+import { handleDuplicatePaperError, resolveEntityForImport } from "@/lib/canonical/import-dedup";
 
 export async function POST(
   req: NextRequest,
@@ -53,20 +54,20 @@ export async function POST(
     let paper: Paper;
 
     if (reference.arxivId) {
-      // Import from arXiv
-      const existing = await prisma.paper.findFirst({
-        where: { arxivId: reference.arxivId, userId },
+      const metadata = await fetchArxivMetadata(reference.arxivId);
+      const resolved = await resolveEntityForImport({
+        userId,
+        title: metadata.title,
+        arxivId: reference.arxivId,
       });
-      if (existing) {
-        // Already in library — just link it
+
+      if (resolved.existingPaper) {
         await prisma.reference.update({
           where: { id: referenceId },
-          data: { matchedPaperId: existing.id, matchConfidence: 1.0 },
+          data: { matchedPaperId: resolved.existingPaper.id, matchConfidence: 1.0 },
         });
-        return Response.json(existing, { status: 200 });
+        return Response.json(resolved.existingPaper, { status: 200 });
       }
-
-      const metadata = await fetchArxivMetadata(reference.arxivId);
 
       // Download PDF synchronously
       let filePath: string | undefined;
@@ -76,25 +77,54 @@ export async function POST(
         console.error("ArXiv PDF download failed:", e);
       }
 
-      paper = await prisma.paper.create({
-        data: {
-          title: metadata.title,
-          userId,
-          abstract: metadata.abstract,
-          authors: JSON.stringify(metadata.authors),
-          year: metadata.year,
-          sourceType: "ARXIV",
-          sourceUrl: `https://arxiv.org/abs/${reference.arxivId}`,
-          arxivId: reference.arxivId,
-          filePath,
-          categories: JSON.stringify(metadata.categories),
-          processingStatus: "EXTRACTING_TEXT",
-        },
-      });
+      try {
+        paper = await prisma.paper.create({
+          data: {
+            title: metadata.title,
+            userId,
+            abstract: metadata.abstract,
+            authors: JSON.stringify(metadata.authors),
+            year: metadata.year,
+            sourceType: "ARXIV",
+            sourceUrl: `https://arxiv.org/abs/${reference.arxivId}`,
+            arxivId: reference.arxivId,
+            filePath,
+            categories: JSON.stringify(metadata.categories),
+            processingStatus: "EXTRACTING_TEXT",
+            entityId: resolved.entityId,
+          },
+        });
+      } catch (error) {
+        const existing = await handleDuplicatePaperError(error, userId, resolved.entityId);
+        if (existing) {
+          await prisma.reference.update({
+            where: { id: referenceId },
+            data: { matchedPaperId: existing.id, matchConfidence: 1.0 },
+          });
+          return Response.json(existing, { status: 200 });
+        }
+        throw error;
+      }
 
       // Queue handles: PDF text extraction → LLM pipeline
       processingQueue.enqueue(paper.id);
     } else if (reference.externalUrl) {
+      const resolved = await resolveEntityForImport({
+        userId,
+        title: reference.title,
+        doi: reference.doi,
+        arxivId: reference.arxivId,
+        semanticScholarId: reference.semanticScholarId,
+      });
+
+      if (resolved.existingPaper) {
+        await prisma.reference.update({
+          where: { id: referenceId },
+          data: { matchedPaperId: resolved.existingPaper.id, matchConfidence: 1.0 },
+        });
+        return Response.json(resolved.existingPaper, { status: 200 });
+      }
+
       // Try to download open access PDF
       let filePath: string | undefined;
       try {
@@ -113,42 +143,84 @@ export async function POST(
         // PDF download failed, create without file
       }
 
-      paper = await prisma.paper.create({
-        data: {
-          title: reference.title,
-          userId,
-          authors: reference.authors || JSON.stringify(authors),
-          year: reference.year,
-          venue: reference.venue,
-          doi: reference.doi,
-          sourceType: "URL",
-          sourceUrl: reference.externalUrl,
-          filePath,
-          processingStatus: filePath ? "EXTRACTING_TEXT" : "PENDING",
-        },
-      });
+      try {
+        paper = await prisma.paper.create({
+          data: {
+            title: reference.title,
+            userId,
+            authors: reference.authors || JSON.stringify(authors),
+            year: reference.year,
+            venue: reference.venue,
+            doi: reference.doi,
+            sourceType: "URL",
+            sourceUrl: reference.externalUrl,
+            filePath,
+            processingStatus: filePath ? "EXTRACTING_TEXT" : "PENDING",
+            entityId: resolved.entityId,
+          },
+        });
+      } catch (error) {
+        const existing = await handleDuplicatePaperError(error, userId, resolved.entityId);
+        if (existing) {
+          await prisma.reference.update({
+            where: { id: referenceId },
+            data: { matchedPaperId: existing.id, matchConfidence: 1.0 },
+          });
+          return Response.json(existing, { status: 200 });
+        }
+        throw error;
+      }
 
       // Queue handles: PDF text extraction → LLM pipeline (if we have a file)
       if (filePath) {
         processingQueue.enqueue(paper.id);
       }
     } else {
-      // Create minimal paper record from reference metadata
-      paper = await prisma.paper.create({
-        data: {
-          title: reference.title,
-          userId,
-          authors: reference.authors || JSON.stringify(authors),
-          year: reference.year,
-          venue: reference.venue,
-          doi: reference.doi,
-          sourceType: "URL",
-          sourceUrl: reference.doi
-            ? `https://doi.org/${reference.doi}`
-            : undefined,
-          processingStatus: "PENDING",
-        },
+      const resolved = await resolveEntityForImport({
+        userId,
+        title: reference.title,
+        doi: reference.doi,
+        arxivId: reference.arxivId,
+        semanticScholarId: reference.semanticScholarId,
       });
+
+      if (resolved.existingPaper) {
+        await prisma.reference.update({
+          where: { id: referenceId },
+          data: { matchedPaperId: resolved.existingPaper.id, matchConfidence: 1.0 },
+        });
+        return Response.json(resolved.existingPaper, { status: 200 });
+      }
+
+      // Create minimal paper record from reference metadata
+      try {
+        paper = await prisma.paper.create({
+          data: {
+            title: reference.title,
+            userId,
+            authors: reference.authors || JSON.stringify(authors),
+            year: reference.year,
+            venue: reference.venue,
+            doi: reference.doi,
+            sourceType: "URL",
+            sourceUrl: reference.doi
+              ? `https://doi.org/${reference.doi}`
+              : undefined,
+            processingStatus: "PENDING",
+            entityId: resolved.entityId,
+          },
+        });
+      } catch (error) {
+        const existing = await handleDuplicatePaperError(error, userId, resolved.entityId);
+        if (existing) {
+          await prisma.reference.update({
+            where: { id: referenceId },
+            data: { matchedPaperId: existing.id, matchConfidence: 1.0 },
+          });
+          return Response.json(existing, { status: 200 });
+        }
+        throw error;
+      }
     }
 
     // Link reference to the new paper

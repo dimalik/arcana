@@ -5,6 +5,7 @@ import { processingQueue } from "@/lib/processing/queue";
 import { findAndDownloadPdf } from "@/lib/import/pdf-finder";
 import { fetchDoiMetadata } from "@/lib/import/url";
 import { requireUserId } from "@/lib/paper-auth";
+import { handleDuplicatePaperError, resolveEntityForImport } from "@/lib/canonical/import-dedup";
 
 /**
  * POST /api/discovery/[sessionId]/proposals/[proposalId]/import
@@ -46,19 +47,20 @@ export async function POST(
     let paper;
 
     if (proposal.arxivId) {
-      // ── arXiv path (unchanged) ──────────────────────────────────────
-      const existing = await prisma.paper.findFirst({
-        where: { arxivId: proposal.arxivId, userId },
+      const metadata = await fetchArxivMetadata(proposal.arxivId);
+      const resolved = await resolveEntityForImport({
+        userId,
+        title: metadata.title,
+        arxivId: proposal.arxivId,
       });
-      if (existing) {
+
+      if (resolved.existingPaper) {
         await prisma.discoveryProposal.update({
           where: { id: proposalId },
-          data: { status: "ALREADY_IN_LIBRARY", importedPaperId: existing.id },
+          data: { status: "ALREADY_IN_LIBRARY", importedPaperId: resolved.existingPaper.id },
         });
-        return Response.json(existing, { status: 200 });
+        return Response.json(resolved.existingPaper, { status: 200 });
       }
-
-      const metadata = await fetchArxivMetadata(proposal.arxivId);
 
       let filePath: string | undefined;
       try {
@@ -67,25 +69,53 @@ export async function POST(
         console.error("ArXiv PDF download failed:", e);
       }
 
-      paper = await prisma.paper.create({
-        data: {
-          title: metadata.title,
-          userId,
-          abstract: metadata.abstract,
-          authors: JSON.stringify(metadata.authors),
-          year: metadata.year,
-          sourceType: "ARXIV",
-          sourceUrl: `https://arxiv.org/abs/${proposal.arxivId}`,
-          arxivId: proposal.arxivId,
-          filePath,
-          categories: JSON.stringify(metadata.categories),
-          processingStatus: "EXTRACTING_TEXT",
-        },
-      });
+      try {
+        paper = await prisma.paper.create({
+          data: {
+            title: metadata.title,
+            userId,
+            abstract: metadata.abstract,
+            authors: JSON.stringify(metadata.authors),
+            year: metadata.year,
+            sourceType: "ARXIV",
+            sourceUrl: `https://arxiv.org/abs/${proposal.arxivId}`,
+            arxivId: proposal.arxivId,
+            filePath,
+            categories: JSON.stringify(metadata.categories),
+            processingStatus: "EXTRACTING_TEXT",
+            entityId: resolved.entityId,
+          },
+        });
+      } catch (error) {
+        const existing = await handleDuplicatePaperError(error, userId, resolved.entityId);
+        if (existing) {
+          await prisma.discoveryProposal.update({
+            where: { id: proposalId },
+            data: { status: "ALREADY_IN_LIBRARY", importedPaperId: existing.id },
+          });
+          return Response.json(existing, { status: 200 });
+        }
+        throw error;
+      }
 
       processingQueue.enqueue(paper.id);
     } else {
       // ── Non-arXiv: aggressive PDF search + metadata fetch ───────────
+      const resolved = await resolveEntityForImport({
+        userId,
+        title: proposal.title,
+        doi: proposal.doi,
+        arxivId: proposal.arxivId,
+        semanticScholarId: proposal.semanticScholarId,
+      });
+
+      if (resolved.existingPaper) {
+        await prisma.discoveryProposal.update({
+          where: { id: proposalId },
+          data: { status: "ALREADY_IN_LIBRARY", importedPaperId: resolved.existingPaper.id },
+        });
+        return Response.json(resolved.existingPaper, { status: 200 });
+      }
 
       // 1. Try to find a PDF from multiple sources
       const pdfResult = await findAndDownloadPdf({
@@ -114,23 +144,36 @@ export async function POST(
           ? "TEXT_EXTRACTED"
           : "PENDING";
 
-      paper = await prisma.paper.create({
-        data: {
-          title: proposal.title,
-          userId,
-          authors: proposal.authors,
-          year: proposal.year,
-          venue: proposal.venue,
-          doi: proposal.doi,
-          sourceType: "URL",
-          sourceUrl:
-            proposal.externalUrl ||
-            (proposal.doi ? `https://doi.org/${proposal.doi}` : undefined),
-          filePath: pdfResult?.filePath,
-          abstract,
-          processingStatus,
-        },
-      });
+      try {
+        paper = await prisma.paper.create({
+          data: {
+            title: proposal.title,
+            userId,
+            authors: proposal.authors,
+            year: proposal.year,
+            venue: proposal.venue,
+            doi: proposal.doi,
+            sourceType: "URL",
+            sourceUrl:
+              proposal.externalUrl ||
+              (proposal.doi ? `https://doi.org/${proposal.doi}` : undefined),
+            filePath: pdfResult?.filePath,
+            abstract,
+            processingStatus,
+            entityId: resolved.entityId,
+          },
+        });
+      } catch (error) {
+        const existing = await handleDuplicatePaperError(error, userId, resolved.entityId);
+        if (existing) {
+          await prisma.discoveryProposal.update({
+            where: { id: proposalId },
+            data: { status: "ALREADY_IN_LIBRARY", importedPaperId: existing.id },
+          });
+          return Response.json(existing, { status: 200 });
+        }
+        throw error;
+      }
 
       // Always enqueue if we have something to process
       if (hasContent) {

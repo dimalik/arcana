@@ -99,6 +99,8 @@ Return a JSON object with exactly these fields:
   "authors": ["Author One", "Author Two"],
   "year": 2024,
   "venue": "Conference or journal name (null if not found)",
+  "doi": "DOI string if present (null if not found)",
+  "arxivId": "arXiv ID if present (null if not found)",
   "abstract": "The paper's abstract text",
   "keyFindings": [
     "Finding 1 — be specific, include numbers/metrics where possible",

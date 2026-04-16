@@ -4,6 +4,7 @@ import { z } from "zod";
 import { findAndDownloadPdf } from "@/lib/import/pdf-finder";
 import { processingQueue } from "@/lib/processing/queue";
 import { requireUserId } from "@/lib/paper-auth";
+import { handleDuplicatePaperError, resolveEntityForImport } from "@/lib/canonical/import-dedup";
 
 const importSchema = z.object({
   title: z.string().min(1),
@@ -44,6 +45,21 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    const resolved = await resolveEntityForImport({
+      userId,
+      title: data.title,
+      doi: data.doi ?? undefined,
+      arxivId: data.arxivId ?? undefined,
+      semanticScholarId: data.semanticScholarId,
+    });
+
+    if (resolved.existingPaper) {
+      return NextResponse.json(
+        { error: "Paper already in library", paperId: resolved.existingPaper.id },
+        { status: 409 }
+      );
+    }
+
     // Try to download the PDF before creating the paper record
     let filePath: string | undefined;
     try {
@@ -57,22 +73,35 @@ export async function POST(request: NextRequest) {
       console.error("[search/import] PDF download failed:", e);
     }
 
-    const paper = await prisma.paper.create({
-      data: {
-        title: data.title,
-        userId,
-        abstract: data.abstract ?? null,
-        authors: data.authors ? JSON.stringify(data.authors) : null,
-        year: data.year ?? null,
-        venue: data.venue ?? null,
-        doi: data.doi ?? null,
-        arxivId: data.arxivId ?? null,
-        sourceType: data.arxivId ? "ARXIV" : data.externalUrl ? "URL" : "UPLOAD",
-        sourceUrl: data.externalUrl ?? null,
-        filePath,
-        processingStatus: filePath ? "EXTRACTING_TEXT" : "PENDING",
-      },
-    });
+    let paper;
+    try {
+      paper = await prisma.paper.create({
+        data: {
+          title: data.title,
+          userId,
+          abstract: data.abstract ?? null,
+          authors: data.authors ? JSON.stringify(data.authors) : null,
+          year: data.year ?? null,
+          venue: data.venue ?? null,
+          doi: data.doi ?? null,
+          arxivId: data.arxivId ?? null,
+          sourceType: data.arxivId ? "ARXIV" : data.externalUrl ? "URL" : "UPLOAD",
+          sourceUrl: data.externalUrl ?? null,
+          filePath,
+          processingStatus: filePath ? "EXTRACTING_TEXT" : "PENDING",
+          entityId: resolved.entityId,
+        },
+      });
+    } catch (error) {
+      const existing = await handleDuplicatePaperError(error, userId, resolved.entityId);
+      if (existing) {
+        return NextResponse.json(
+          { error: "Paper already in library", paperId: existing.id },
+          { status: 409 }
+        );
+      }
+      throw error;
+    }
 
     // If we got a PDF, queue for processing (text extraction → LLM pipeline)
     if (filePath) {

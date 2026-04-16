@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { processingQueue } from "@/lib/processing/queue";
 import { requireUserId } from "@/lib/paper-auth";
 import { z } from "zod";
+import { handleDuplicatePaperError, resolveEntityForImport } from "@/lib/canonical/import-dedup";
 
 const createPaperSchema = z.object({
   title: z.string().min(1),
@@ -135,14 +136,41 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const data = createPaperSchema.parse(body);
 
-    const paper = await prisma.paper.create({
-      data: {
-        ...data,
-        userId,
-        authors: data.authors ? JSON.stringify(data.authors) : null,
-        processingStatus: data.fullText ? "TEXT_EXTRACTED" : "PENDING",
-      },
+    const resolved = await resolveEntityForImport({
+      userId,
+      title: data.title,
+      doi: data.doi,
+      arxivId: data.arxivId,
     });
+
+    if (resolved.existingPaper) {
+      return NextResponse.json(
+        { error: "Paper already in library", existingPaperId: resolved.existingPaper.id },
+        { status: 409 }
+      );
+    }
+
+    let paper;
+    try {
+      paper = await prisma.paper.create({
+        data: {
+          ...data,
+          userId,
+          authors: data.authors ? JSON.stringify(data.authors) : null,
+          processingStatus: data.fullText ? "TEXT_EXTRACTED" : "PENDING",
+          entityId: resolved.entityId,
+        },
+      });
+    } catch (error) {
+      const existing = await handleDuplicatePaperError(error, userId, resolved.entityId);
+      if (existing) {
+        return NextResponse.json(
+          { error: "Paper already in library", existingPaperId: existing.id },
+          { status: 409 }
+        );
+      }
+      throw error;
+    }
 
     // Queue handles LLM pipeline if we have text
     if (data.fullText) {
