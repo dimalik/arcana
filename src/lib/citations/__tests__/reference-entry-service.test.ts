@@ -208,7 +208,7 @@ describe("deleteReferenceEntryWithLegacyProjection", () => {
       id: "entry-1",
       legacyReferenceId: "legacy-1",
     } as never);
-    vi.mocked(prisma.$transaction).mockImplementation(async (callback: never) =>
+    vi.mocked(prisma.$transaction).mockImplementation(async (callback: any) =>
       callback({
         reference: {
           deleteMany: prisma.reference.deleteMany,
@@ -307,7 +307,7 @@ describe("enrichReferenceEntryFromCandidate", () => {
       created: false,
     });
     vi.mocked(prisma.paper.findFirst).mockResolvedValue({ id: "paper-2" } as never);
-    vi.mocked(prisma.$transaction).mockImplementation(async (callback: never) =>
+    vi.mocked(prisma.$transaction).mockImplementation(async (callback: any) =>
       callback({
         reference: {
           create: prisma.reference.create,
@@ -401,7 +401,7 @@ describe("projectReferenceEntryImportLink", () => {
       resolveConfidence: null,
       resolveSource: null,
     } as never);
-    vi.mocked(prisma.$transaction).mockImplementation(async (callback: never) =>
+    vi.mocked(prisma.$transaction).mockImplementation(async (callback: any) =>
       callback({
         reference: {
           create: prisma.reference.create,

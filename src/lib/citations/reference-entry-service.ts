@@ -114,13 +114,22 @@ export async function findReferenceEntryForPaper(
   paperId: string,
   referenceId: string,
 ): Promise<ReferenceEntryMutationTarget | null> {
-  return prisma.referenceEntry.findFirst({
+  const entry = await prisma.referenceEntry.findFirst({
     where: {
       paperId,
       OR: [{ id: referenceId }, { legacyReferenceId: referenceId }],
     },
     select: REFERENCE_ENTRY_MUTATION_SELECT,
   });
+
+  if (!entry) {
+    return null;
+  }
+
+  return {
+    ...entry,
+    resolveSource: entry.resolveSource as ResolutionMethod | null,
+  };
 }
 
 async function upsertLegacyReferenceProjection(

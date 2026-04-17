@@ -50,7 +50,6 @@ describe("classifyTitleHintResidual", () => {
         abstract: null,
         doi: "10.5555/3295222.3295349",
         arxivId: null,
-        semanticScholarId: null,
         entityId: "entity-2",
       },
     });
@@ -91,7 +90,6 @@ describe("classifyTitleHintResidual", () => {
         abstract: null,
         doi: "10.5555/3295222.3295349",
         arxivId: null,
-        semanticScholarId: null,
         entityId: "entity-2",
       },
     });
@@ -133,7 +131,6 @@ describe("classifyTitleHintResidual", () => {
         abstract: null,
         doi: null,
         arxivId: null,
-        semanticScholarId: null,
         entityId: null,
       },
     });
