@@ -7,9 +7,10 @@ const globalForPrisma = globalThis as unknown as {
 };
 
 function createPrismaClient() {
-  const dbPath = path.join(process.cwd(), "prisma", "dev.db");
+  const dbPath =
+    process.env.DATABASE_URL ?? `file:${path.join(process.cwd(), "prisma", "dev.db")}`;
   return new PrismaClient({
-    datasourceUrl: `file:${dbPath}`,
+    datasourceUrl: dbPath,
   });
 }
 
