@@ -1,6 +1,6 @@
 import { Readability } from "@mozilla/readability";
 import { JSDOM } from "jsdom";
-import { fetchWithRetry } from "@/lib/import/semantic-scholar";
+import { fetchWithRetry } from "./semantic-scholar";
 
 const OPENALEX_BASE = "https://api.openalex.org/works";
 const CROSSREF_BASE = "https://api.crossref.org/works";
@@ -68,6 +68,10 @@ export async function fetchDoiMetadata(
   // 2. Fall back to CrossRef
   const crResult = await fetchCrossRefByDoi(doi);
   if (crResult) return crResult;
+
+  // 3. Last resort: follow the DOI landing page and extract citation meta tags.
+  const landingResult = await fetchDoiLandingPageMetadata(doi);
+  if (landingResult) return landingResult;
 
   return null;
 }
@@ -149,6 +153,28 @@ async function fetchCrossRefByDoi(
     doi,
     openAccessPdfUrl: null, // CrossRef doesn't provide OA PDF URLs
   };
+}
+
+async function fetchDoiLandingPageMetadata(
+  doi: string
+): Promise<DoiMetadata | null> {
+  try {
+    const content = await extractUrlContent(`https://doi.org/${doi}`);
+    const title = content.title?.trim();
+    if (!title) return null;
+
+    return {
+      title,
+      abstract: content.excerpt?.trim() || null,
+      authors: content.authors ?? [],
+      year: content.year ?? null,
+      venue: content.siteName ?? null,
+      doi: content.doi || doi,
+      openAccessPdfUrl: content.pdfUrl ?? null,
+    };
+  } catch {
+    return null;
+  }
 }
 
 // ── HTML fetching ────────────────────────────────────────────────────

@@ -4,15 +4,19 @@ import { buildPrompt, buildDistillPrompt, cleanJsonResponse } from "./prompts";
 import type { LLMProvider } from "./models";
 import type { ProxyConfig } from "./proxy-settings";
 import { getProxyConfig } from "./proxy-settings";
-import { getTextForReferenceExtraction, getBodyTextForContextExtraction } from "@/lib/references/extract-section";
-import { findBestMatch } from "@/lib/references/match";
-import { matchCitationToReference } from "@/lib/references/match-citation";
+import { getBodyTextForContextExtraction } from "@/lib/references/extract-section";
+import { GrobidCitationMentionExtractor } from "@/lib/references/grobid/citation-mentions";
+import { extractReferenceCandidates } from "@/lib/references/extraction";
+import { persistExtractedReferences } from "@/lib/references/persist";
 import { resolveAndAssignTags, getExistingTagNames, getScoredTagHints } from "@/lib/tags/auto-tag";
 import { refreshTagScores } from "@/lib/tags/cleanup";
 import { getUserContext, buildUserContextPreamble } from "@/lib/llm/user-context";
 import { collectIdentifiers, resolveOrCreateEntity } from "@/lib/canonical/entity-service";
-import { createReferenceEntry, resolveReferenceEntity } from "@/lib/citations/reference-entry-service";
-import { createCitationMentions, type CitationMentionInput } from "@/lib/citations/citation-mention-service";
+import {
+  applyLegacyCitationContexts,
+  createCitationMentions,
+  type CitationMentionInput,
+} from "@/lib/citations/citation-mention-service";
 import { createRelationAssertion } from "@/lib/assertions/relation-assertion-service";
 import { projectLegacyRelation } from "@/lib/assertions/legacy-projection";
 
@@ -349,27 +353,30 @@ export async function runAutoProcessPipeline(opts: {
   }
 
   const { provider, modelId, proxyConfig } = defaultModel;
+  const paperSelect = {
+    id: true,
+    userId: true,
+    title: true,
+    abstract: true,
+    authors: true,
+    year: true,
+    venue: true,
+    doi: true,
+    sourceType: true,
+    arxivId: true,
+    filePath: true,
+    fullText: true,
+    entityId: true,
+  } as const;
 
-  let paper = await prisma.paper.findUnique({
+  const initialPaper = await prisma.paper.findUnique({
     where: { id: paperId },
-    select: {
-      id: true,
-      userId: true,
-      title: true,
-      abstract: true,
-      authors: true,
-      year: true,
-      venue: true,
-      doi: true,
-      sourceType: true,
-      arxivId: true,
-      fullText: true,
-      entityId: true,
-    },
+    select: paperSelect,
   });
-  if (!paper) {
+  if (!initialPaper) {
     throw new Error(`[auto-process] Paper not found: ${paperId}`);
   }
+  let paper = initialPaper;
 
   const text = paper.fullText || paper.abstract || "";
   if (!text) {
@@ -396,20 +403,7 @@ export async function runAutoProcessPipeline(opts: {
       await tryAssignEntity(paper);
       paper = (await prisma.paper.findUnique({
         where: { id: paperId },
-        select: {
-          id: true,
-          userId: true,
-          title: true,
-          abstract: true,
-          authors: true,
-          year: true,
-          venue: true,
-          doi: true,
-          sourceType: true,
-          arxivId: true,
-          fullText: true,
-          entityId: true,
-        },
+        select: paperSelect,
       })) ?? paper;
     } catch (e) {
       console.error("[auto-process] Initial entity assignment failed for", paperId, ":", e);
@@ -464,20 +458,7 @@ export async function runAutoProcessPipeline(opts: {
           });
           paper = (await prisma.paper.findUnique({
             where: { id: paperId },
-            select: {
-              id: true,
-              userId: true,
-              title: true,
-              abstract: true,
-              authors: true,
-              year: true,
-              venue: true,
-              doi: true,
-              sourceType: true,
-              arxivId: true,
-              fullText: true,
-              entityId: true,
-            },
+            select: paperSelect,
           })) ?? paper;
         }
       } catch {
@@ -493,20 +474,7 @@ export async function runAutoProcessPipeline(opts: {
       await tryAssignEntity(paper);
       paper = (await prisma.paper.findUnique({
         where: { id: paperId },
-        select: {
-          id: true,
-          userId: true,
-          title: true,
-          abstract: true,
-          authors: true,
-          year: true,
-          venue: true,
-          doi: true,
-          sourceType: true,
-          arxivId: true,
-          fullText: true,
-          entityId: true,
-        },
+        select: paperSelect,
       })) ?? paper;
     } catch (e) {
       console.error("[auto-process] Post-metadata entity assignment failed for", paperId, ":", e);
@@ -803,152 +771,74 @@ export async function runAutoProcessPipeline(opts: {
       checkCancelled();
       await setStep(paperId, "references");
       console.log("[auto-process] Extracting references for", paperId);
-      const refText = getTextForReferenceExtraction(paper.fullText);
-      const { system } = buildPrompt("extractReferences", "");
-      const refPrompt = `Here is the reference/bibliography section of the paper:\n\n${refText}`;
-      const refResult = await generateLLMResponse({ provider, modelId, system, prompt: refPrompt, maxTokens: 8000, proxyConfig });
-
-      await prisma.promptResult.create({
-        data: {
-          paperId,
-          promptType: "extractReferences",
-          prompt: "Auto-extract references",
-          result: refResult,
-          provider,
-          model: modelId,
-        },
+      const extractedReferences = await extractReferenceCandidates({
+        paperId,
+        filePath: paper.filePath ?? null,
+        fullText: paper.fullText,
+        provider,
+        modelId,
+        proxyConfig,
       });
 
-      try {
-        const cleaned = cleanJsonResponse(refResult);
-        const refs = JSON.parse(cleaned) as Array<{
-          index?: number;
-          title: string;
-          authors?: string[] | null;
-          year?: number | null;
-          venue?: string | null;
-          doi?: string | null;
-          rawCitation: string;
-        }>;
+      if (extractedReferences.llmRawResponse) {
+        await prisma.promptResult.create({
+          data: {
+            paperId,
+            promptType: "extractReferences",
+            prompt: "Auto-extract references",
+            result: extractedReferences.llmRawResponse,
+            provider,
+            model: modelId,
+          },
+        });
+      }
 
+        const refs = extractedReferences.candidates;
         if (Array.isArray(refs) && refs.length > 0) {
-          // Clear existing references for idempotency
-          await prisma.reference.deleteMany({ where: { paperId } });
-          await prisma.citationMention.deleteMany({ where: { paperId } });
-          await prisma.referenceEntry.deleteMany({ where: { paperId } });
-
-          // Fetch library papers for matching
-          const libraryPapers = await prisma.paper.findMany({
-            where: {
-              id: { not: paperId },
-              ...(paper.userId ? { userId: paper.userId } : {}),
-            },
-            select: { id: true, title: true, entityId: true },
-          });
-
-          const cappedRefs = refs.slice(0, 200);
-          let matchCount = 0;
-
-          for (const ref of cappedRefs) {
-            if (!ref.title) continue;
-
-            const match = findBestMatch(ref.title, libraryPapers);
-            const targetPaper = match
-              ? libraryPapers.find((candidate) => candidate.id === match.paperId)
-              : null;
-
-            const legacyReference = await prisma.reference.create({
-              data: {
-                paperId,
-                title: ref.title,
-                authors: ref.authors ? JSON.stringify(ref.authors) : null,
-                year: ref.year ?? null,
-                venue: ref.venue ?? null,
-                doi: ref.doi ?? null,
-                rawCitation: ref.rawCitation || ref.title,
-                referenceIndex: ref.index ?? null,
-                matchedPaperId: match?.paperId ?? null,
-                matchConfidence: match?.confidence ?? null,
-              },
-            });
-
-            const referenceEntry = await createReferenceEntry({
-              paperId,
-              title: ref.title,
-              authors: ref.authors ? JSON.stringify(ref.authors) : null,
-              year: ref.year ?? null,
-              venue: ref.venue ?? null,
-              doi: ref.doi ?? null,
-              rawCitation: ref.rawCitation || ref.title,
-              referenceIndex: ref.index ?? null,
-              provenance: "llm_extraction",
-              extractorVersion: "v1",
-              legacyReferenceId: legacyReference.id,
-            });
-
-            await resolveReferenceEntity(referenceEntry.id, {
-              doi: ref.doi ?? null,
-              arxivId: null,
-              title: ref.title,
-            });
-
-            // Create "cites" relation for matches
-            if (match) {
-              matchCount++;
-              await prisma.paperRelation
-                .create({
-                  data: {
-                    sourcePaperId: paperId,
-                    targetPaperId: match.paperId,
-                    relationType: "cites",
-                    description: `Cited in references as: "${ref.title}"`,
-                    confidence: match.confidence,
-                    isAutoGenerated: true,
-                  },
-                })
-                .catch(() => {}); // Skip duplicates
-
-              if (paper.entityId && targetPaper?.entityId) {
-                try {
-                  await createRelationAssertion({
-                    sourceEntityId: paper.entityId,
-                    targetEntityId: targetPaper.entityId,
-                    sourcePaperId: paperId,
-                    relationType: "cites",
-                    description: `Cited in references as: "${ref.title}"`,
-                    confidence: match.confidence,
-                    provenance: "reference_match",
-                    extractorVersion: "v1",
-                  });
-                  await projectLegacyRelation(
-                    paperId,
-                    match.paperId,
-                    paper.entityId,
-                    targetPaper.entityId,
-                    true
-                  );
-                } catch {
-                  // Non-fatal
-                }
-              }
-            }
-          }
-
+          const attemptSummary = extractedReferences.attempts
+            .map((attempt) => {
+              const parts = [
+                attempt.method,
+                attempt.status,
+                `${attempt.candidateCount} refs`,
+              ];
+              if (attempt.preflightResult) parts.push(`preflight=${attempt.preflightResult}`);
+              if (attempt.pageCount) parts.push(`pages=${attempt.pageCount}`);
+              if (attempt.errorSummary) parts.push(`error=${attempt.errorSummary}`);
+              return parts.join(" ");
+            })
+            .join(" | ");
           console.log(
-            `[auto-process] Extracted ${cappedRefs.length} references, ${matchCount} matched to library for`,
+            `[auto-process] Reference extraction used ${extractedReferences.method} (${refs.length} candidates)${
+              extractedReferences.fallbackReason
+                ? ` after fallback: ${extractedReferences.fallbackReason}`
+                : ""
+            }${attemptSummary ? ` [${attemptSummary}]` : ""}`,
+          );
+
+          const persisted = await persistExtractedReferences({
+            paperId,
+            paperUserId: paper.userId,
+            sourceEntityId: paper.entityId,
+            references: refs,
+            provenance:
+              extractedReferences.method === "grobid_tei"
+                ? "grobid_tei"
+                : "llm_extraction",
+            extractorVersion: extractedReferences.extractorVersion,
+          });
+          console.log(
+            `[auto-process] Extracted ${persisted.storedReferences} references, ${persisted.promotedPaperEdges} promoted paper edges, ${persisted.titleHintMatches} title hints for`,
             paperId
           );
         }
-      } catch {
-        // JSON parse failed — raw result still saved
-      }
     } catch (e) {
       console.error("[auto-process] Extract references failed:", e);
     }
   }
 
   // Step 6: Extract citation contexts from body text
-  if (paper.fullText) {
+  if (paper.fullText || paper.filePath) {
     try {
       // Check that references exist for this paper
       const existingRefs = await prisma.reference.findMany({
@@ -957,68 +847,88 @@ export async function runAutoProcessPipeline(opts: {
       });
 
       if (existingRefs.length > 0) {
-        const bodyText = getBodyTextForContextExtraction(paper.fullText);
-        if (bodyText) {
-          checkCancelled();
-          await setStep(paperId, "contexts");
-          console.log("[auto-process] Extracting citation contexts for", paperId);
-          const { system } = buildPrompt("extractCitationContexts", "");
-          const ctxPrompt = `Here is the body text of the paper:\n\n${bodyText}`;
-          const ctxResult = await generateLLMResponse({ provider, modelId, system, prompt: ctxPrompt, maxTokens: 4000, proxyConfig });
+        checkCancelled();
+        await setStep(paperId, "contexts");
+        console.log("[auto-process] Extracting citation contexts for", paperId);
 
-          try {
-            const cleaned = cleanJsonResponse(ctxResult);
-            const contexts = JSON.parse(cleaned) as Array<{
-              citation: string;
-              context: string;
-            }>;
+        let mentionInputs: CitationMentionInput[] = [];
+        let provenance = "llm_extraction";
+        let extractorVersion = "v1";
 
-            if (Array.isArray(contexts) && contexts.length > 0) {
-              const mentionInputs: CitationMentionInput[] = contexts
-                .filter((ctx) => ctx.citation && ctx.context)
-                .map((ctx) => ({
-                  citationText: ctx.citation,
-                  excerpt: ctx.context,
-                }));
-
-              if (mentionInputs.length > 0) {
-                await createCitationMentions(paperId, mentionInputs, "v1");
-              }
-
-              // Group contexts by matched reference ID
-              const contextsByRef = new Map<string, string[]>();
-
-              for (const ctx of contexts) {
-                if (!ctx.citation || !ctx.context) continue;
-                const refId = matchCitationToReference(ctx.citation, existingRefs);
-                if (!refId) continue;
-
-                const existing = contextsByRef.get(refId) || [];
-                if (!existing.includes(ctx.context)) {
-                  existing.push(ctx.context);
-                }
-                contextsByRef.set(refId, existing);
-              }
-
-              // Update references with merged contexts
-              let updated = 0;
-              const entries = Array.from(contextsByRef.entries());
-              for (const [refId, ctxList] of entries) {
-                await prisma.reference.update({
-                  where: { id: refId },
-                  data: { citationContext: ctxList.join("; ") },
-                });
-                updated++;
-              }
-
-              console.log(
-                `[auto-process] Matched citation contexts to ${updated}/${existingRefs.length} references for`,
-                paperId
-              );
-            }
-          } catch {
-            // JSON parse failed
+        if (paper.filePath) {
+          const grobidMentions = await new GrobidCitationMentionExtractor().extract(
+            paper.filePath,
+          );
+          if (grobidMentions.mentions.length > 0) {
+            mentionInputs = grobidMentions.mentions;
+            provenance = "grobid_fulltext";
+            extractorVersion = "grobid_fulltext_v1";
+            console.log(
+              `[auto-process] Parsed ${mentionInputs.length} structural citation mentions via GROBID for`,
+              paperId,
+            );
+          } else if (grobidMentions.errorSummary) {
+            console.warn(
+              "[auto-process] GROBID citation mention extraction fell back to LLM",
+              {
+                paperId,
+                reason: grobidMentions.errorSummary,
+                preflight: grobidMentions.preflight?.result ?? null,
+              },
+            );
           }
+        }
+
+        if (mentionInputs.length === 0 && paper.fullText) {
+          const bodyText = getBodyTextForContextExtraction(paper.fullText);
+          if (bodyText) {
+            const { system } = buildPrompt("extractCitationContexts", "");
+            const ctxPrompt = `Here is the body text of the paper:\n\n${bodyText}`;
+            const ctxResult = await generateLLMResponse({
+              provider,
+              modelId,
+              system,
+              prompt: ctxPrompt,
+              maxTokens: 4000,
+              proxyConfig,
+            });
+
+            try {
+              const cleaned = cleanJsonResponse(ctxResult);
+              const contexts = JSON.parse(cleaned) as Array<{
+                citation: string;
+                context: string;
+              }>;
+              if (Array.isArray(contexts) && contexts.length > 0) {
+                mentionInputs = contexts
+                  .filter((ctx) => ctx.citation && ctx.context)
+                  .map((ctx) => ({
+                    citationText: ctx.citation,
+                    excerpt: ctx.context,
+                  }));
+              }
+            } catch {
+              // JSON parse failed
+            }
+          }
+        }
+
+        if (mentionInputs.length > 0) {
+          await createCitationMentions(
+            paperId,
+            mentionInputs,
+            extractorVersion,
+            provenance,
+          );
+
+          const updated = await applyLegacyCitationContexts(
+            paperId,
+            mentionInputs,
+          );
+          console.log(
+            `[auto-process] Matched citation contexts to ${updated}/${existingRefs.length} references for`,
+            paperId,
+          );
         }
       }
     } catch (e) {

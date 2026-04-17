@@ -50,3 +50,6 @@ next-env.d.ts
 
 # claude code local settings (may contain approved command patterns with sensitive URLs)
 .claude/settings.local.json
+
+# Reference extraction evaluation corpus (copyrighted PDFs)
+benchmark/references/*.pdf
