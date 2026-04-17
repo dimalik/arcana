@@ -1,7 +1,7 @@
 // src/lib/research/fsm/run-reconciler.ts
 import { prisma } from "@/lib/prisma";
 import { withFsmBypassAsync } from "./state-guard";
-import type { RunLifecycleState, CompletionCriterion } from "./enums";
+import type { RunLifecycleState, CompletionCriterion, IntentLifecycleState } from "./enums";
 import { RUN_TERMINAL_STATES } from "./enums";
 import { evaluateCompletionCriterion, deriveIntentState } from "./intent-lifecycle";
 
@@ -129,7 +129,7 @@ export async function reconcileIntentState(intentId: string): Promise<void> {
   }));
 
   const newState = deriveIntentState(
-    intent.status as any,
+    intent.status as IntentLifecycleState,
     criterion,
     runSummaries,
   );

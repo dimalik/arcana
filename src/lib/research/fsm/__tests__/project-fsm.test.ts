@@ -15,7 +15,10 @@ import {
 import type {
   DiscoveryToHypothesisContext,
   DesignToExecutionContext,
+  GuardContext,
 } from "../project-fsm";
+
+const emptyGuardContext = {} as unknown as GuardContext;
 
 describe("FSM type definitions", () => {
   it("every project state has a transition entry", () => {
@@ -140,7 +143,7 @@ describe("evaluateTransitionGuard", () => {
       "proj-1",
       "DISCOVERY",
       "EXECUTION",
-      {} as any,
+      emptyGuardContext,
     );
     expect(result.satisfied).toBe(false);
     expect(result.checks.valid_transition.passed).toBe(false);
@@ -154,7 +157,7 @@ describe("evaluateTransitionGuard", () => {
       "proj-1",
       "HYPOTHESIS",
       "DISCOVERY",
-      {} as any,
+      emptyGuardContext,
     );
     expect(result.satisfied).toBe(true);
     expect(Object.keys(result.checks)).toHaveLength(0);
