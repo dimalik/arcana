@@ -192,7 +192,6 @@ export async function persistExtractedReferences(
           promotablePaperMatch.id,
           params.sourceEntityId,
           resolution.resolvedEntityId,
-          true,
         );
       }
     }

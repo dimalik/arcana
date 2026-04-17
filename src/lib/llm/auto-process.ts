@@ -680,8 +680,7 @@ export async function runAutoProcessPipeline(opts: {
                 paperId,
                 rel.targetPaperId,
                 paper.entityId,
-                targetPaper.entityId,
-                true
+                targetPaper.entityId
               );
             } catch {
               // Non-fatal

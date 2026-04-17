@@ -38,7 +38,7 @@ describe("projectLegacyRelation", () => {
       id: "rel-1",
     });
 
-    await projectLegacyRelation("paper-1", "paper-2", "entity-1", "entity-2", true);
+    await projectLegacyRelation("paper-1", "paper-2", "entity-1", "entity-2");
 
     expect(prisma.paperRelation.delete).toHaveBeenCalledWith({
       where: { id: "rel-1" },

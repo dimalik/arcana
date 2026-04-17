@@ -86,6 +86,12 @@ export interface CreateManualRelationInput {
   description?: string | null;
 }
 
+export interface DeleteManualRelationInput {
+  paperId: string;
+  userId: string;
+  relationId: string;
+}
+
 export interface GraphRelationListResult {
   mode: GraphRelationReadMode;
   rows: GraphRelationRow[];
@@ -466,7 +472,6 @@ export async function createManualRelation(
       linkedTarget.id,
       linkedSource.entityId,
       linkedTarget.entityId,
-      false,
       tx
     );
 
@@ -497,6 +502,146 @@ export async function createManualRelation(
         ...projected,
         targetPaper: projected.targetPaper as GraphRelatedPaperSummary,
       })
+    );
+  });
+}
+
+async function recomputeProjectedRelationsForPeerEntity(
+  sourcePaper: GraphWritePaper & { entityId: string },
+  peerEntityId: string,
+  userId: string,
+  db: GraphTxDb
+) {
+  const peerPapers = await db.paper.findMany({
+    where: { entityId: peerEntityId, userId },
+    select: GRAPH_WRITE_PAPER_SELECT,
+  });
+
+  for (const peerPaper of peerPapers as GraphWritePaper[]) {
+    if (peerPaper.id === sourcePaper.id || !peerPaper.entityId) continue;
+
+    await projectLegacyRelation(
+      sourcePaper.id,
+      peerPaper.id,
+      sourcePaper.entityId,
+      peerPaper.entityId,
+      db
+    );
+    await projectLegacyRelation(
+      peerPaper.id,
+      sourcePaper.id,
+      peerPaper.entityId,
+      sourcePaper.entityId,
+      db
+    );
+  }
+}
+
+export async function deleteManualRelation(
+  input: DeleteManualRelationInput,
+  db: GraphRootDb = prisma
+): Promise<void> {
+  return db.$transaction(async (tx) => {
+    const sourcePaper = await getPaperForGraphWrite(input.paperId, input.userId, tx);
+    if (!sourcePaper) {
+      throw new GraphRelationError("Paper not found", 404, "paper_not_found");
+    }
+
+    const aggregateKey = parseAggregateKey(input.relationId);
+    if (aggregateKey) {
+      const linkedSource = await ensurePaperEntityForGraph(sourcePaper, tx);
+      const deleted = await tx.relationAssertion.deleteMany({
+        where: {
+          relationType: aggregateKey.relationType,
+          OR: [
+            { sourcePaperId: linkedSource.id, targetEntityId: aggregateKey.peerEntityId },
+            {
+              sourceEntityId: aggregateKey.peerEntityId,
+              targetEntityId: linkedSource.entityId,
+              sourcePaper: { userId: input.userId },
+            },
+          ],
+        },
+      });
+
+      if (deleted.count === 0) {
+        throw new GraphRelationError("No assertions found", 404, "assertions_not_found");
+      }
+
+      await recomputeProjectedRelationsForPeerEntity(
+        linkedSource,
+        aggregateKey.peerEntityId,
+        input.userId,
+        tx
+      );
+      return;
+    }
+
+    const relation = await tx.paperRelation.findUnique({
+      where: { id: input.relationId },
+      include: {
+        sourcePaper: { select: GRAPH_WRITE_PAPER_SELECT },
+        targetPaper: { select: GRAPH_WRITE_PAPER_SELECT },
+      },
+    });
+
+    if (!relation) {
+      throw new GraphRelationError("Relation not found", 404, "relation_not_found");
+    }
+
+    const belongsToUser =
+      (relation.sourcePaperId === input.paperId && relation.sourcePaper?.userId === input.userId) ||
+      (relation.targetPaperId === input.paperId && relation.targetPaper?.userId === input.userId);
+
+    if (!belongsToUser) {
+      throw new GraphRelationError(
+        "Relation does not belong to this paper",
+        403,
+        "relation_forbidden"
+      );
+    }
+
+    const currentRows = await listRelationsForPaper(input.paperId, input.userId, tx);
+    const isCurrentOverlayRow = currentRows.overlayRows.some(
+      (row) => row.id === input.relationId
+    );
+
+    if (isCurrentOverlayRow) {
+      await tx.paperRelation.delete({ where: { id: input.relationId } });
+      return;
+    }
+
+    const linkedSource = await ensurePaperEntityForGraph(
+      relation.sourcePaper as GraphWritePaper,
+      tx
+    );
+    const linkedTarget = await ensurePaperEntityForGraph(
+      relation.targetPaper as GraphWritePaper,
+      tx
+    );
+
+    const deleted = await tx.relationAssertion.deleteMany({
+      where: {
+        sourcePaperId: linkedSource.id,
+        targetEntityId: linkedTarget.entityId,
+        relationType: relation.relationType,
+      },
+    });
+
+    if (deleted.count === 0) {
+      throw new GraphRelationError(
+        "Relation is no longer backed by assertions",
+        404,
+        "relation_not_asserted"
+      );
+    }
+
+    await projectLegacyRelation(
+      linkedSource.id,
+      linkedTarget.id,
+      linkedSource.entityId,
+      linkedTarget.entityId,
+      tx
     );
   });
 }
