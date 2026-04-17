@@ -6,19 +6,27 @@
  *
  * Phases handle step dependencies:
  *   Phase 1: extract + summarize in Anthropic batch, then hybrid reference extraction as a sidecar
- *   Phase 2: categorize + linking + citationContexts + distill (need Phase 1 results)
+ *   Phase 2: categorize + linking + distill in batch, plus citationContexts via
+ *            GROBID sidecar for PDF-backed papers and LLM fallback where needed
  *   Phase 3: contradictions (needs linking results from Phase 2)
  */
 
 import { prisma } from "@/lib/prisma";
 import { v4 as uuidv4 } from "uuid";
 import { getProxyConfig, type ProxyConfig } from "@/lib/llm/proxy-settings";
-import { truncateText, MAX_PAPER_CHARS } from "@/lib/llm/provider";
+import {
+  generateLLMResponse,
+  MAX_PAPER_CHARS,
+  setLlmContext,
+  truncateText,
+} from "@/lib/llm/provider";
 import { buildPrompt, buildDistillPrompt, cleanJsonResponse } from "@/lib/llm/prompts";
 import { getUserContext, buildUserContextPreamble } from "@/lib/llm/user-context";
 import { getBodyTextForContextExtraction } from "@/lib/references/extract-section";
 import { runHybridReferenceExtractionForPapers } from "@/lib/references/batch-reference-extraction";
 import { GrobidCitationMentionExtractor } from "@/lib/references/grobid/citation-mentions";
+import { loadGrobidConfig } from "@/lib/references/grobid/config";
+import { checkGrobidHealth } from "@/lib/references/grobid/health";
 import { mapLlmReferencesToCandidates } from "@/lib/references/extractors/llm";
 import { persistExtractedReferences } from "@/lib/references/persist";
 import {
@@ -342,8 +350,19 @@ async function buildPhase2Requests(
 
   const papers = await prisma.paper.findMany({
     where: { id: { in: paperIds } },
-    select: { id: true, title: true, abstract: true, summary: true, categories: true, fullText: true },
+    select: {
+      id: true,
+      title: true,
+      abstract: true,
+      summary: true,
+      categories: true,
+      fullText: true,
+      filePath: true,
+    },
   });
+
+  const useGrobidCitationSidecar =
+    await shouldUseGrobidCitationContextSidecar(papers);
 
   // Shared context for categorize
   const existingTags = await getExistingTagNames();
@@ -404,7 +423,7 @@ async function buildPhase2Requests(
       });
       if (refs.length > 0) {
         const bodyText = getBodyTextForContextExtraction(paper.fullText);
-        if (bodyText) {
+        if (bodyText && !(useGrobidCitationSidecar && paper.filePath)) {
           requests.push(buildCitationContextsRequest(paper.id, bodyText, modelId));
         }
       }
@@ -415,6 +434,19 @@ async function buildPhase2Requests(
   }
 
   return requests;
+}
+
+export async function shouldUseGrobidCitationContextSidecar(
+  papers: Array<{ fullText: string | null; filePath: string | null }>,
+): Promise<boolean> {
+  const hasPdfBackedPapers = papers.some(
+    (paper) => Boolean(paper.fullText && paper.filePath),
+  );
+  if (!hasPdfBackedPapers) return false;
+
+  const { serverUrl } = loadGrobidConfig();
+  const health = await checkGrobidHealth(serverUrl);
+  return health.status === "healthy";
 }
 
 async function buildPhase3Requests(
@@ -588,13 +620,19 @@ interface ProcessCitationContextsDeps {
   }>;
   createMentions?: typeof createCitationMentions;
   applyLegacyContexts?: typeof applyLegacyCitationContexts;
+  skipGrobid?: boolean;
+}
+
+interface ProcessCitationContextsResult {
+  method: "grobid" | "llm" | "none";
+  mentionCount: number;
 }
 
 export async function processCitationContextsResult(
   paperId: string,
   text: string,
   deps: ProcessCitationContextsDeps = {},
-) {
+): Promise<ProcessCitationContextsResult> {
   try {
     const paper = await prisma.paper.findUnique({
       where: { id: paperId },
@@ -606,7 +644,9 @@ export async function processCitationContextsResult(
     const referenceCount = await prisma.reference.count({
       where: { paperId },
     });
-    if (!paper || referenceCount === 0) return;
+    if (!paper || referenceCount === 0) {
+      return { method: "none", mentionCount: 0 };
+    }
 
     const createMentions = deps.createMentions ?? createCitationMentions;
     const applyLegacyContexts =
@@ -616,7 +656,7 @@ export async function processCitationContextsResult(
     let provenance = "llm_extraction";
     let extractorVersion = "batch_v1";
 
-    if (paper.filePath) {
+    if (paper.filePath && !deps.skipGrobid) {
       const grobidExtract =
         deps.grobidExtract ??
         (async (filePath: string) =>
@@ -640,12 +680,17 @@ export async function processCitationContextsResult(
     }
 
     if (mentionInputs.length === 0) {
+      if (!text.trim()) {
+        return { method: "none", mentionCount: 0 };
+      }
       const cleaned = cleanJsonResponse(text);
       const contexts = JSON.parse(cleaned) as Array<{
         citation: string;
         context: string;
       }>;
-      if (!Array.isArray(contexts) || contexts.length === 0) return;
+      if (!Array.isArray(contexts) || contexts.length === 0) {
+        return { method: "none", mentionCount: 0 };
+      }
 
       mentionInputs = contexts
         .filter((ctx) => ctx.citation && ctx.context)
@@ -655,13 +700,101 @@ export async function processCitationContextsResult(
         }));
     }
 
-    if (mentionInputs.length === 0) return;
+    if (mentionInputs.length === 0) {
+      return { method: "none", mentionCount: 0 };
+    }
 
     await createMentions(paperId, mentionInputs, extractorVersion, provenance);
     await applyLegacyContexts(paperId, mentionInputs);
+    return {
+      method: provenance === "grobid_fulltext" ? "grobid" : "llm",
+      mentionCount: mentionInputs.length,
+    };
   } catch {
-    /* JSON parse failed */
+    return { method: "none", mentionCount: 0 };
   }
+}
+
+export async function runCitationContextSidecarForPapers(
+  paperIds: string[],
+  modelId: string,
+): Promise<{
+  grobidPapers: number;
+  llmFallbackPapers: number;
+  failedPapers: number;
+}> {
+  const papers = await prisma.paper.findMany({
+    where: {
+      id: { in: paperIds },
+      filePath: { not: null },
+      fullText: { not: null },
+    },
+    select: {
+      id: true,
+      fullText: true,
+      userId: true,
+    },
+  });
+
+  if (papers.length === 0) {
+    return { grobidPapers: 0, llmFallbackPapers: 0, failedPapers: 0 };
+  }
+
+  const { proxyConfig } = await getAnthropicBatchConfig();
+  const { system } = buildPrompt("extractCitationContexts", "");
+
+  let grobidPapers = 0;
+  let llmFallbackPapers = 0;
+  let failedPapers = 0;
+
+  for (const paper of papers) {
+    const grobidResult = await processCitationContextsResult(paper.id, "");
+    if (grobidResult.method === "grobid") {
+      grobidPapers += 1;
+      continue;
+    }
+
+    const bodyText = getBodyTextForContextExtraction(paper.fullText ?? "");
+    if (!bodyText) {
+      failedPapers += 1;
+      continue;
+    }
+
+    try {
+      setLlmContext(
+        "batch_extractCitationContexts_fallback",
+        paper.userId ?? undefined,
+        {
+          paperId: paper.id,
+          fallback: "grobid_sidecar",
+        },
+      );
+      const llmText = await generateLLMResponse({
+        provider: "proxy",
+        modelId,
+        system,
+        prompt: bodyText,
+        maxTokens: 4000,
+        proxyConfig,
+      });
+      const llmResult = await processCitationContextsResult(paper.id, llmText, {
+        skipGrobid: true,
+      });
+      if (llmResult.method === "llm") {
+        llmFallbackPapers += 1;
+      } else {
+        failedPapers += 1;
+      }
+    } catch (error) {
+      failedPapers += 1;
+      console.warn("[batch] Citation context sidecar fallback failed", {
+        paperId: paper.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  return { grobidPapers, llmFallbackPapers, failedPapers };
 }
 
 async function processDistillResult(paperId: string, text: string, modelId: string) {
@@ -791,9 +924,13 @@ export async function pollBatch(batchDbId: string): Promise<{
 
     let succeeded = 0;
     let failed = 0;
+    const papersWithBatchCitationContextResults = new Set<string>();
 
     for (const result of results) {
       const [paperId, stepType] = result.custom_id.split("--") as [string, StepType];
+      if (stepType === "extractCitationContexts") {
+        papersWithBatchCitationContextResults.add(paperId);
+      }
       const text = getResultText(result);
 
       if (!text) {
@@ -836,6 +973,22 @@ export async function pollBatch(batchDbId: string): Promise<{
 
     // Refresh tag scores after categorize results
     if (batch.phase === 2) {
+      const sidecarPaperIds = paperIds.filter(
+        (paperId) => !papersWithBatchCitationContextResults.has(paperId),
+      );
+      if (sidecarPaperIds.length > 0) {
+        try {
+          const citationContexts = await runCitationContextSidecarForPapers(
+            sidecarPaperIds,
+            batch.modelId,
+          );
+          console.log(
+            `[batch] Phase 2 citation context sidecar: ${citationContexts.grobidPapers} via GROBID, ${citationContexts.llmFallbackPapers} via inline LLM fallback, ${citationContexts.failedPapers} failed`,
+          );
+        } catch (e) {
+          console.error("[batch] Citation context sidecar failed:", e);
+        }
+      }
       try { await refreshTagScores(); } catch { /* ignore */ }
     }
 
