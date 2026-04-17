@@ -36,13 +36,33 @@ function runOrThrow(command, args, options = {}) {
   }
 }
 
+function normalizeAggregateRowId(value) {
+  if (
+    value &&
+    typeof value === "object" &&
+    typeof value.id === "string" &&
+    value.id.startsWith("agg::") &&
+    typeof value.relationType === "string" &&
+    value.relatedPaper &&
+    typeof value.relatedPaper.id === "string"
+  ) {
+    return {
+      ...value,
+      id: `agg::paper:${value.relatedPaper.id}::${value.relationType}`,
+    };
+  }
+
+  return value;
+}
+
 function stripVolatileFields(value) {
   if (Array.isArray(value)) {
     return value.map(stripVolatileFields);
   }
   if (value && typeof value === "object") {
+    const normalized = normalizeAggregateRowId(value);
     const out = {};
-    for (const [key, child] of Object.entries(value)) {
+    for (const [key, child] of Object.entries(normalized)) {
       if (key === "generatedAt" || key === "dbPath" || key === "baselinePath") continue;
       out[key] = stripVolatileFields(child);
     }
