@@ -412,6 +412,9 @@ function buildParityReport(prepared, papers, dbPath, baselinePayload, baselinePa
   const papersOut = [];
   const mismatchDetails = [];
   const fanOutDetails = [];
+  const mismatchClassifications = new Map();
+  const missingPeerCounts = new Map();
+  const addedPeerCounts = new Map();
   let exactParityPapers = 0;
   let expectedModeSwitchPapers = 0;
   let trueMismatches = 0;
@@ -446,6 +449,24 @@ function buildParityReport(prepared, papers, dbPath, baselinePayload, baselinePa
     if (result.classification === "true_mismatch") {
       trueMismatches++;
       mismatchDetails.push(entry);
+
+      const detail = result.mismatchDetails ?? {};
+      const key = [
+        `before=${detail.beforeMode ?? before.mode}`,
+        `after=${detail.afterMode ?? after.mode}`,
+        `missing=${Boolean(detail.missingPeers?.length)}`,
+        `added=${Boolean(detail.addedPeers?.length)}`,
+        `changed=${Boolean(detail.changedPeers?.length)}`,
+        `fan=${Boolean(detail.fanOutPeers?.length)}`,
+      ].join("|");
+      mismatchClassifications.set(key, (mismatchClassifications.get(key) ?? 0) + 1);
+
+      for (const peerId of detail.missingPeers ?? []) {
+        missingPeerCounts.set(peerId, (missingPeerCounts.get(peerId) ?? 0) + 1);
+      }
+      for (const peerId of detail.addedPeers ?? []) {
+        addedPeerCounts.set(peerId, (addedPeerCounts.get(peerId) ?? 0) + 1);
+      }
     }
     if (result.multiplicity.fanOutPeers.length > 0) {
       fanOutDetails.push({
@@ -468,6 +489,19 @@ function buildParityReport(prepared, papers, dbPath, baselinePayload, baselinePa
     expectedModeSwitchPapers,
     trueMismatches,
     mismatchDetails,
+    mismatchSummary: {
+      classes: [...mismatchClassifications.entries()]
+        .map(([key, count]) => ({ key, count }))
+        .sort((a, b) => b.count - a.count),
+      topMissingPeers: [...missingPeerCounts.entries()]
+        .map(([peerPaperId, count]) => ({ peerPaperId, count }))
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 25),
+      topAddedPeers: [...addedPeerCounts.entries()]
+        .map(([peerPaperId, count]) => ({ peerPaperId, count }))
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 25),
+    },
     multiplicity: {
       papersWithFanOut: fanOutDetails.length,
       details: fanOutDetails,
