@@ -625,6 +625,22 @@ model PaperFigure {
   @@index([assetHash])
 }
 
+model ResolverCacheEntry {
+  id               String   @id @default(uuid())
+  lookupKey        String
+  lookupType       String
+  provider         String
+  responsePayload  String?
+  resolvedEntityId String?
+  httpStatus       Int
+  cachedAt         DateTime @default(now())
+  expiresAt        DateTime
+
+  @@unique([lookupKey, lookupType, provider])
+  @@index([lookupKey, lookupType])
+  @@index([expiresAt])
+}
+
 model MindPalaceRoom {
   id              String    @id @default(uuid())
   name            String    @unique

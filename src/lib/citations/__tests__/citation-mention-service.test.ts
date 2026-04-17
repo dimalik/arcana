@@ -41,4 +41,37 @@ describe("createCitationMentions", () => {
 
     expect(result).toEqual({ created: 1, unmatched: 0 });
   });
+
+  it("matches directly by referenceIndex when provided", async () => {
+    const { prisma } = await import("../../prisma");
+    const { matchCitationToReference } = await import("../../references/match-citation");
+    (prisma.referenceEntry.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { id: "ref-2", title: "BinaryBERT", authors: null, year: 2021, referenceIndex: 4 },
+    ]);
+    (prisma.citationMention.create as ReturnType<typeof vi.fn>).mockResolvedValue({ id: "mention-2" });
+
+    const result = await createCitationMentions(
+      "paper-1",
+      [
+        {
+          citationText: "Chen et al. (2023)",
+          excerpt: "Skip/SmartBERT added trainable gates for cheaper inference.",
+          referenceIndex: 4,
+          sectionLabel: "1 Introduction",
+        },
+      ],
+      "grobid_fulltext_v1",
+      "grobid_fulltext",
+    );
+
+    expect(result).toEqual({ created: 1, unmatched: 0 });
+    expect(matchCitationToReference).not.toHaveBeenCalled();
+    expect(prisma.citationMention.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        referenceEntryId: "ref-2",
+        provenance: "grobid_fulltext",
+        extractorVersion: "grobid_fulltext_v1",
+      }),
+    });
+  });
 });
