@@ -5,6 +5,8 @@ vi.mock("../../prisma", () => ({
     paper: {
       findFirst: vi.fn(),
       findMany: vi.fn(),
+      findUnique: vi.fn(),
+      update: vi.fn(),
     },
   },
 }));
@@ -14,7 +16,12 @@ vi.mock("../entity-service", () => ({
   resolveOrCreateEntity: vi.fn(),
 }));
 
-import { handleDuplicatePaperError, resolveEntityForImport } from "../import-dedup";
+import {
+  handleDuplicatePaperError,
+  hydratePaperEntityIfPossible,
+  inspectPaperEntityHydration,
+  resolveEntityForImport,
+} from "../import-dedup";
 
 describe("resolveEntityForImport", () => {
   beforeEach(() => {
@@ -84,5 +91,121 @@ describe("handleDuplicatePaperError", () => {
     const error = Object.assign(new Error("duplicate"), { code: "P2002" });
     const result = await handleDuplicatePaperError(error, "user-1", "entity-1");
     expect(result?.id).toBe("paper-1");
+  });
+});
+
+describe("inspectPaperEntityHydration", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("reports whether a paper can be hydrated from identifiers", async () => {
+    const { prisma } = await import("../../prisma");
+    const { collectIdentifiers } = await import("../entity-service");
+
+    (prisma.paper.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
+      id: "paper-1",
+      title: "Existing",
+      userId: "user-1",
+      abstract: null,
+      authors: null,
+      year: 2024,
+      venue: null,
+      doi: "10.1234/abc",
+      arxivId: null,
+      semanticScholarId: null,
+      entityId: null,
+    });
+    (collectIdentifiers as ReturnType<typeof vi.fn>).mockReturnValue([
+      { type: "doi", value: "10.1234/abc", source: "import" },
+    ]);
+
+    const result = await inspectPaperEntityHydration("paper-1");
+
+    expect(result).toEqual({
+      paperId: "paper-1",
+      title: "Existing",
+      entityId: null,
+      canHydrate: true,
+      identifierTypes: ["doi"],
+    });
+  });
+});
+
+describe("hydratePaperEntityIfPossible", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("hydrates entityId when identifiers resolve cleanly", async () => {
+    const { prisma } = await import("../../prisma");
+    const { collectIdentifiers, resolveOrCreateEntity } = await import("../entity-service");
+
+    (prisma.paper.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
+      id: "paper-1",
+      title: "Existing",
+      userId: "user-1",
+      abstract: null,
+      authors: null,
+      year: 2024,
+      venue: null,
+      doi: "10.1234/abc",
+      arxivId: null,
+      semanticScholarId: null,
+      entityId: null,
+    });
+    (collectIdentifiers as ReturnType<typeof vi.fn>).mockReturnValue([
+      { type: "doi", value: "10.1234/abc", source: "import" },
+    ]);
+    (resolveOrCreateEntity as ReturnType<typeof vi.fn>).mockResolvedValue({
+      entityId: "entity-1",
+      created: false,
+    });
+    (prisma.paper.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+    (prisma.paper.update as ReturnType<typeof vi.fn>).mockResolvedValue({
+      id: "paper-1",
+      entityId: "entity-1",
+    });
+
+    const result = await hydratePaperEntityIfPossible("paper-1");
+
+    expect(prisma.paper.update).toHaveBeenCalledWith({
+      where: { id: "paper-1" },
+      data: { entityId: "entity-1" },
+    });
+    expect(result?.status).toBe("hydrated");
+    expect(result?.entityId).toBe("entity-1");
+  });
+
+  it("reports duplicate conflicts without updating the paper", async () => {
+    const { prisma } = await import("../../prisma");
+    const { collectIdentifiers, resolveOrCreateEntity } = await import("../entity-service");
+
+    (prisma.paper.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
+      id: "paper-1",
+      title: "Existing",
+      userId: "user-1",
+      abstract: null,
+      authors: null,
+      year: 2024,
+      venue: null,
+      doi: "10.1234/abc",
+      arxivId: null,
+      semanticScholarId: null,
+      entityId: null,
+    });
+    (collectIdentifiers as ReturnType<typeof vi.fn>).mockReturnValue([
+      { type: "doi", value: "10.1234/abc", source: "import" },
+    ]);
+    (resolveOrCreateEntity as ReturnType<typeof vi.fn>).mockResolvedValue({
+      entityId: "entity-1",
+      created: false,
+    });
+    (prisma.paper.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue({ id: "paper-2" });
+
+    const result = await hydratePaperEntityIfPossible("paper-1");
+
+    expect(prisma.paper.update).not.toHaveBeenCalled();
+    expect(result?.status).toBe("duplicate_conflict");
   });
 });
