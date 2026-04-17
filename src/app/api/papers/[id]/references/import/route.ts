@@ -11,6 +11,10 @@ import { writeFile, mkdir } from "fs/promises";
 import path from "path";
 import { v4 as uuidv4 } from "uuid";
 import { handleDuplicatePaperError, resolveEntityForImport } from "@/lib/canonical/import-dedup";
+import {
+  findReferenceEntryForPaper,
+  projectReferenceEntryImportLink,
+} from "@/lib/citations/reference-entry-service";
 
 export async function POST(
   req: NextRequest,
@@ -28,19 +32,31 @@ export async function POST(
     );
   }
 
-  const reference = await prisma.reference.findFirst({
-    where: { id: referenceId, paperId: id },
-  });
+  const reference = await findReferenceEntryForPaper(id, referenceId);
 
   if (!reference) {
     return Response.json({ error: "Reference not found" }, { status: 404 });
   }
 
-  if (reference.matchedPaperId) {
-    return Response.json(
-      { error: "Reference already linked to a library paper" },
-      { status: 409 }
-    );
+  if (reference.resolvedEntityId) {
+    const linkedPaper = await prisma.paper.findFirst({
+      where: {
+        userId,
+        entityId: reference.resolvedEntityId,
+      },
+      select: {
+        id: true,
+        title: true,
+        year: true,
+        authors: true,
+      },
+    });
+    if (linkedPaper) {
+      return Response.json(
+        { error: "Reference already linked to a library paper" },
+        { status: 409 }
+      );
+    }
   }
 
   let authors: string[] = [];
@@ -62,9 +78,11 @@ export async function POST(
       });
 
       if (resolved.existingPaper) {
-        await prisma.reference.update({
-          where: { id: referenceId },
-          data: { matchedPaperId: resolved.existingPaper.id, matchConfidence: 1.0 },
+        await projectReferenceEntryImportLink({
+          paperId: id,
+          referenceId,
+          linkedPaperId: resolved.existingPaper.id,
+          linkedPaperEntityId: resolved.entityId,
         });
         return Response.json(resolved.existingPaper, { status: 200 });
       }
@@ -97,15 +115,23 @@ export async function POST(
       } catch (error) {
         const existing = await handleDuplicatePaperError(error, userId, resolved.entityId);
         if (existing) {
-          await prisma.reference.update({
-            where: { id: referenceId },
-            data: { matchedPaperId: existing.id, matchConfidence: 1.0 },
+          await projectReferenceEntryImportLink({
+            paperId: id,
+            referenceId,
+            linkedPaperId: existing.id,
+            linkedPaperEntityId: resolved.entityId,
           });
           return Response.json(existing, { status: 200 });
         }
         throw error;
       }
 
+      await projectReferenceEntryImportLink({
+        paperId: id,
+        referenceId,
+        linkedPaperId: paper.id,
+        linkedPaperEntityId: paper.entityId,
+      });
       // Queue handles: PDF text extraction → LLM pipeline
       processingQueue.enqueue(paper.id);
     } else if (reference.externalUrl) {
@@ -118,9 +144,11 @@ export async function POST(
       });
 
       if (resolved.existingPaper) {
-        await prisma.reference.update({
-          where: { id: referenceId },
-          data: { matchedPaperId: resolved.existingPaper.id, matchConfidence: 1.0 },
+        await projectReferenceEntryImportLink({
+          paperId: id,
+          referenceId,
+          linkedPaperId: resolved.existingPaper.id,
+          linkedPaperEntityId: resolved.entityId,
         });
         return Response.json(resolved.existingPaper, { status: 200 });
       }
@@ -162,15 +190,23 @@ export async function POST(
       } catch (error) {
         const existing = await handleDuplicatePaperError(error, userId, resolved.entityId);
         if (existing) {
-          await prisma.reference.update({
-            where: { id: referenceId },
-            data: { matchedPaperId: existing.id, matchConfidence: 1.0 },
+          await projectReferenceEntryImportLink({
+            paperId: id,
+            referenceId,
+            linkedPaperId: existing.id,
+            linkedPaperEntityId: resolved.entityId,
           });
           return Response.json(existing, { status: 200 });
         }
         throw error;
       }
 
+      await projectReferenceEntryImportLink({
+        paperId: id,
+        referenceId,
+        linkedPaperId: paper.id,
+        linkedPaperEntityId: paper.entityId,
+      });
       // Queue handles: PDF text extraction → LLM pipeline (if we have a file)
       if (filePath) {
         processingQueue.enqueue(paper.id);
@@ -185,9 +221,11 @@ export async function POST(
       });
 
       if (resolved.existingPaper) {
-        await prisma.reference.update({
-          where: { id: referenceId },
-          data: { matchedPaperId: resolved.existingPaper.id, matchConfidence: 1.0 },
+        await projectReferenceEntryImportLink({
+          paperId: id,
+          referenceId,
+          linkedPaperId: resolved.existingPaper.id,
+          linkedPaperEntityId: resolved.entityId,
         });
         return Response.json(resolved.existingPaper, { status: 200 });
       }
@@ -213,21 +251,23 @@ export async function POST(
       } catch (error) {
         const existing = await handleDuplicatePaperError(error, userId, resolved.entityId);
         if (existing) {
-          await prisma.reference.update({
-            where: { id: referenceId },
-            data: { matchedPaperId: existing.id, matchConfidence: 1.0 },
+          await projectReferenceEntryImportLink({
+            paperId: id,
+            referenceId,
+            linkedPaperId: existing.id,
+            linkedPaperEntityId: resolved.entityId,
           });
           return Response.json(existing, { status: 200 });
         }
         throw error;
       }
+      await projectReferenceEntryImportLink({
+        paperId: id,
+        referenceId,
+        linkedPaperId: paper.id,
+        linkedPaperEntityId: paper.entityId,
+      });
     }
-
-    // Link reference to the new paper
-    await prisma.reference.update({
-      where: { id: referenceId },
-      data: { matchedPaperId: paper.id, matchConfidence: 1.0 },
-    });
 
     return Response.json(paper, { status: 201 });
   } catch (err) {

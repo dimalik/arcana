@@ -1,0 +1,3188 @@
+{
+  "generatedAt": "2026-04-17T20:09:40.114Z",
+  "totals": {
+    "legacyReferenceCount": 59127,
+    "linkedLegacyReferenceCount": 4167,
+    "orphanLegacyReferenceCount": 0,
+    "unlinkedReferenceEntryCount": 0,
+    "strongIdentifierPromotableResidualCount": 0,
+    "auditBucketResidualCount": 4141,
+    "targetPaperHydrationCount": 309
+  },
+  "orphanLegacyReferences": [],
+  "unlinkedReferenceEntries": [],
+  "titleHintResiduals": {
+    "strongIdentifierPromotable": [],
+    "auditBucketSample": [
+      {
+        "legacyReferenceId": "4934a4da-f994-4c50-8a68-de873b526ae5",
+        "referenceEntryId": "62a141b4-01d1-4969-aa5b-b64c35a8891f",
+        "matchedPaperId": "40ff8d2d-ba84-412b-9578-ae657b0e8177",
+        "matchedPaperTitle": "Can LLMs Guide Their Own Exploration? Gradient-Guided Reinforcement Learning for LLM Reasoning",
+        "matchedPaperEntityId": "a912de42-7637-41fb-93fd-0a196bfec2ab",
+        "classification": "audit_bucket",
+        "matchedBy": "none",
+        "reason": "legacy title hint is not independently corroborated by DOI/arXiv"
+      },
+      {
+        "legacyReferenceId": "64fb0fa3-a5ad-4181-8db4-9de165ef3580",
+        "referenceEntryId": "24142163-903e-4ee5-ac14-c6c4adf3aa91",
+        "matchedPaperId": "cca2e353-2d29-4c91-a2f7-95a06e34ac70",
+        "matchedPaperTitle": "DeepSeek-R1: Incentivizing Reasoning Capability in LLMs via Reinforcement Learning",
+        "matchedPaperEntityId": "45295319-1287-44ab-8518-bd98da3c13f2",
+        "classification": "audit_bucket",
+        "matchedBy": "none",
+        "reason": "legacy title hint is not independently corroborated by DOI/arXiv"
+      },
+      {
+        "legacyReferenceId": "3a73f4d7-19e0-440c-88b6-cb228eb29f4e",
+        "referenceEntryId": "575c9a72-7532-462f-9c7b-cae204581994",
+        "matchedPaperId": "40ff8d2d-ba84-412b-9578-ae657b0e8177",
+        "matchedPaperTitle": "Can LLMs Guide Their Own Exploration? Gradient-Guided Reinforcement Learning for LLM Reasoning",
+        "matchedPaperEntityId": "a912de42-7637-41fb-93fd-0a196bfec2ab",
+        "classification": "audit_bucket",
+        "matchedBy": "none",
+        "reason": "legacy title hint is not independently corroborated by DOI/arXiv"
+      },
+      {
+        "legacyReferenceId": "11a6ddde-e524-47ad-9195-99752414060d",
+        "referenceEntryId": "216b6a63-cc0a-40aa-9541-49431d85ee6c",
+        "matchedPaperId": "69fb4006-ccd3-48a6-b983-8dfcf2489b4a",
+        "matchedPaperTitle": "Is DPO Superior to PPO for LLM Alignment? A Comprehensive Study",
+        "matchedPaperEntityId": null,
+        "classification": "audit_bucket",
+        "matchedBy": "none",
+        "reason": "matched paper lacks entityId and strong identifier corroboration"
+      },
+      {
+        "legacyReferenceId": "cbaaa053-c1c3-4ece-bbb7-8436c7aef26f",
+        "referenceEntryId": "ea880c4b-aeb3-4d88-bdb1-1dd3ab6b4142",
+        "matchedPaperId": "cca2e353-2d29-4c91-a2f7-95a06e34ac70",
+        "matchedPaperTitle": "DeepSeek-R1: Incentivizing Reasoning Capability in LLMs via Reinforcement Learning",
+        "matchedPaperEntityId": "45295319-1287-44ab-8518-bd98da3c13f2",
+        "classification": "audit_bucket",
+        "matchedBy": "none",
+        "reason": "legacy title hint is not independently corroborated by DOI/arXiv"
+      },
+      {
+        "legacyReferenceId": "7fda735a-6c5a-4909-8856-8f63dfa43166",
+        "referenceEntryId": "b232596a-3c92-4168-a0ca-2b8e1bf640e9",
+        "matchedPaperId": "be6e330f-4a4b-4ebc-944c-0b0ce30be977",
+        "matchedPaperTitle": "Natural Emergent Misalignment from Reward Hacking in Production RL",
+        "matchedPaperEntityId": null,
+        "classification": "audit_bucket",
+        "matchedBy": "none",
+        "reason": "matched paper lacks entityId and strong identifier corroboration"
+      },
+      {
+        "legacyReferenceId": "1c4a5e4b-7cb7-4eda-b069-0ad93f06c9b9",
+        "referenceEntryId": "ee24106e-b7e0-4b5b-987c-9fc56b9f986c",
+        "matchedPaperId": "40ff8d2d-ba84-412b-9578-ae657b0e8177",
+        "matchedPaperTitle": "Can LLMs Guide Their Own Exploration? Gradient-Guided Reinforcement Learning for LLM Reasoning",
+        "matchedPaperEntityId": "a912de42-7637-41fb-93fd-0a196bfec2ab",
+        "classification": "audit_bucket",
+        "matchedBy": "none",
+        "reason": "legacy title hint is not independently corroborated by DOI/arXiv"
+      },
+      {
+        "legacyReferenceId": "5e2d77cc-4e1d-44e3-8a30-eac55cdb4201",
+        "referenceEntryId": "2554ad0a-454c-4009-8d81-d8c5e96cdbee",
+        "matchedPaperId": "f6ae06cd-ab2c-43d3-aa9a-c4f65e15e838",
+        "matchedPaperTitle": "Harnessing LLM to Attack LLM-Guarded Text-to-Image Models",
+        "matchedPaperEntityId": null,
+        "classification": "audit_bucket",
+        "matchedBy": "none",
+        "reason": "matched paper lacks entityId and strong identifier corroboration"
+      },
+      {
+        "legacyReferenceId": "d6833aa4-e30c-42f6-b6f2-c25b17a90bd4",
+        "referenceEntryId": "b2d5f0f2-9ef8-46bd-ac1a-c95de13dac77",
+        "matchedPaperId": "325813eb-b70d-4ba4-aaee-1abf781a4bfc",
+        "matchedPaperTitle": "MEDUSA: Simple LLM Inference Acceleration Framework with Multiple Decoding Heads",
+        "matchedPaperEntityId": null,
+        "classification": "audit_bucket",
+        "matchedBy": "none",
+        "reason": "matched paper lacks entityId and strong identifier corroboration"
+      },
+      {
+        "legacyReferenceId": "799a9dad-6d9e-495e-b945-d58d218c6e61",
+        "referenceEntryId": "ed1b7038-035d-446a-9a6a-1ab60f8e369b",
+        "matchedPaperId": "40ff8d2d-ba84-412b-9578-ae657b0e8177",
+        "matchedPaperTitle": "Can LLMs Guide Their Own Exploration? Gradient-Guided Reinforcement Learning for LLM Reasoning",
+        "matchedPaperEntityId": "a912de42-7637-41fb-93fd-0a196bfec2ab",
+        "classification": "audit_bucket",
+        "matchedBy": "none",
+        "reason": "legacy title hint is not independently corroborated by DOI/arXiv"
+      },
+      {
+        "legacyReferenceId": "c781f479-2a18-4785-b6a3-92e45d838bd7",
+        "referenceEntryId": "805594ef-c272-400e-b0cf-89588eaca6b7",
+        "matchedPaperId": "cca2e353-2d29-4c91-a2f7-95a06e34ac70",
+        "matchedPaperTitle": "DeepSeek-R1: Incentivizing Reasoning Capability in LLMs via Reinforcement Learning",
+        "matchedPaperEntityId": "45295319-1287-44ab-8518-bd98da3c13f2",
+        "classification": "audit_bucket",
+        "matchedBy": "none",
+        "reason": "legacy title hint is not independently corroborated by DOI/arXiv"
+      },
+      {
+        "legacyReferenceId": "825caafc-d763-4afa-af95-67e602259540",
+        "referenceEntryId": "d887cfca-b4cd-4da3-940c-e51182ede921",
+        "matchedPaperId": "f8ca0248-7a4d-4150-babb-05b300f43a6b",
+        "matchedPaperTitle": "Longformer: The Long-Document Transformer",
+        "matchedPaperEntityId": null,
+        "classification": "audit_bucket",
+        "matchedBy": "none",
+        "reason": "matched paper lacks entityId and strong identifier corroboration"
+      },
+      {
+        "legacyReferenceId": "f86cb075-5250-427e-b156-e42659210405",
+        "referenceEntryId": "9e2b02d3-fea6-469c-aef1-68270754fdb8",
+        "matchedPaperId": "cceb0d3b-cbff-421c-9b56-c77caca39592",
+        "matchedPaperTitle": "On the Possibilities of AI-Generated Text Detection",
+        "matchedPaperEntityId": null,
+        "classification": "audit_bucket",
+        "matchedBy": "none",
+        "reason": "matched paper lacks entityId and strong identifier corroboration"
+      },
+      {
+        "legacyReferenceId": "1fd917f5-ea23-452b-9756-316702443623",
+        "referenceEntryId": "556ffef4-291f-4e5e-a844-5ea141ac69ca",
+        "matchedPaperId": "05f5036d-12ff-48b1-8c8d-4b18395846d1",
+        "matchedPaperTitle": "Graph-based genome alignment and genotyping with HISAT2 and HISAT-genotype",
+        "matchedPaperEntityId": null,
+        "classification": "audit_bucket",
+        "matchedBy": "none",
+        "reason": "matched paper lacks entityId and strong identifier corroboration"
+      },
+      {
+        "legacyReferenceId": "c3ef880c-21a3-4179-b6d9-31c5b5f2edef",
+        "referenceEntryId": "f8e99ec7-7cb6-4d47-98c3-68815da0cd5e",
+        "matchedPaperId": "82fef9c3-c92a-4153-9a05-a8cd23cf4e79",
+        "matchedPaperTitle": "The Entropy Mechanism of Reinforcement Learning for Reasoning Language Models",
+        "matchedPaperEntityId": null,
+        "classification": "audit_bucket",
+        "matchedBy": "none",
+        "reason": "matched paper lacks entityId and strong identifier corroboration"
+      },
+      {
+        "legacyReferenceId": "4cdbc6f7-9ec7-4df2-87cf-1ea990d2412b",
+        "referenceEntryId": "efdc93d9-2e67-4b90-9795-256e7be99287",
+        "matchedPaperId": "cca2e353-2d29-4c91-a2f7-95a06e34ac70",
+        "matchedPaperTitle": "DeepSeek-R1: Incentivizing Reasoning Capability in LLMs via Reinforcement Learning",
+        "matchedPaperEntityId": "45295319-1287-44ab-8518-bd98da3c13f2",
+        "classification": "audit_bucket",
+        "matchedBy": "none",
+        "reason": "legacy title hint is not independently corroborated by DOI/arXiv"
+      },
+      {
+        "legacyReferenceId": "5c59516e-9079-4e51-aad3-76afc17adcae",
+        "referenceEntryId": "21e78cdf-84b6-450e-8a1c-0fa4567a9388",
+        "matchedPaperId": "2d3806c1-69fc-421d-bacd-2dd368b79855",
+        "matchedPaperTitle": "Improving Reinforcement Learning from Human Feedback Using Contrastive Rewards",
+        "matchedPaperEntityId": "0f38db44-b81e-4f03-8f75-bd6848168d9e",
+        "classification": "audit_bucket",
+        "matchedBy": "none",
+        "reason": "legacy title hint is not independently corroborated by DOI/arXiv"
+      },
+      {
+        "legacyReferenceId": "414dd994-dd34-450b-8f43-e20485c9c4e3",
+        "referenceEntryId": "88e49fa3-5bf1-495d-9e8a-74c45b12341f",
+        "matchedPaperId": "82fef9c3-c92a-4153-9a05-a8cd23cf4e79",
+        "matchedPaperTitle": "The Entropy Mechanism of Reinforcement Learning for Reasoning Language Models",
+        "matchedPaperEntityId": null,
+        "classification": "audit_bucket",
+        "matchedBy": "none",
+        "reason": "matched paper lacks entityId and strong identifier corroboration"
+      },
+      {
+        "legacyReferenceId": "e9d37184-2760-4c68-8191-3097e8ccf177",
+        "referenceEntryId": "a7538ab8-61db-4324-a791-3138aa3472a6",
+        "matchedPaperId": "29b6487e-d8d1-44d3-89f3-10d0f01afbfa",
+        "matchedPaperTitle": "Stable Reinforcement Learning for Efficient Reasoning",
+        "matchedPaperEntityId": null,
+        "classification": "audit_bucket",
+        "matchedBy": "none",
+        "reason": "matched paper lacks entityId and strong identifier corroboration"
+      },
+      {
+        "legacyReferenceId": "77c2f1fa-bcea-4f8d-bd06-80437bfd048e",
+        "referenceEntryId": "0a2211c1-50b7-47d4-8e5a-2b31633907d8",
+        "matchedPaperId": "cca2e353-2d29-4c91-a2f7-95a06e34ac70",
+        "matchedPaperTitle": "DeepSeek-R1: Incentivizing Reasoning Capability in LLMs via Reinforcement Learning",
+        "matchedPaperEntityId": "45295319-1287-44ab-8518-bd98da3c13f2",
+        "classification": "audit_bucket",
+        "matchedBy": "none",
+        "reason": "legacy title hint is not independently corroborated by DOI/arXiv"
+      },
+      {
+        "legacyReferenceId": "c6d2a4e8-304f-4b64-ac76-1e23b144bf57",
+        "referenceEntryId": "44b1eece-2674-45d4-b3fc-f4c9cd7cbfc2",
+        "matchedPaperId": "cca2e353-2d29-4c91-a2f7-95a06e34ac70",
+        "matchedPaperTitle": "DeepSeek-R1: Incentivizing Reasoning Capability in LLMs via Reinforcement Learning",
+        "matchedPaperEntityId": "45295319-1287-44ab-8518-bd98da3c13f2",
+        "classification": "audit_bucket",
+        "matchedBy": "none",
+        "reason": "legacy title hint is not independently corroborated by DOI/arXiv"
+      },
+      {
+        "legacyReferenceId": "12c44ca5-881e-4a72-be80-888e06b968e2",
+        "referenceEntryId": "f2917c40-1ad0-4b84-b2c4-6f32602e38c1",
+        "matchedPaperId": "40ff8d2d-ba84-412b-9578-ae657b0e8177",
+        "matchedPaperTitle": "Can LLMs Guide Their Own Exploration? Gradient-Guided Reinforcement Learning for LLM Reasoning",
+        "matchedPaperEntityId": "a912de42-7637-41fb-93fd-0a196bfec2ab",
+        "classification": "audit_bucket",
+        "matchedBy": "none",
+        "reason": "legacy title hint is not independently corroborated by DOI/arXiv"
+      },
+      {
+        "legacyReferenceId": "65e4ca0b-1b5b-464c-9d5b-6f2f0c827bf5",
+        "referenceEntryId": "66962950-4a68-4762-af8f-ca366919f411",
+        "matchedPaperId": "40ff8d2d-ba84-412b-9578-ae657b0e8177",
+        "matchedPaperTitle": "Can LLMs Guide Their Own Exploration? Gradient-Guided Reinforcement Learning for LLM Reasoning",
+        "matchedPaperEntityId": "a912de42-7637-41fb-93fd-0a196bfec2ab",
+        "classification": "audit_bucket",
+        "matchedBy": "none",
+        "reason": "legacy title hint is not independently corroborated by DOI/arXiv"
+      },
+      {
+        "legacyReferenceId": "00cddf62-86c6-4802-97e7-11b9d369b9a1",
+        "referenceEntryId": "167b3c33-3f46-4d72-803b-437ac04565d6",
+        "matchedPaperId": "c73823d8-32c8-424d-b679-9b73d19d2888",
+        "matchedPaperTitle": "Reward Shaping to Mitigate Reward Hacking in RLHF",
+        "matchedPaperEntityId": null,
+        "classification": "audit_bucket",
+        "matchedBy": "none",
+        "reason": "matched paper lacks entityId and strong identifier corroboration"
+      },
+      {
+        "legacyReferenceId": "ca12ec54-2bb1-4d89-aadb-eec9f75cd1c9",
+        "referenceEntryId": "72265165-a28a-47b3-843b-d5c02b46e047",
+        "matchedPaperId": "bfbe3757-70c7-4e0b-a832-2f3a541ba4df",
+        "matchedPaperTitle": "Regularized Best-of-N Sampling with Minimum Bayes Risk Objective for Language Model Alignment",
+        "matchedPaperEntityId": null,
+        "classification": "audit_bucket",
+        "matchedBy": "none",
+        "reason": "matched paper lacks entityId and strong identifier corroboration"
+      },
+      {
+        "legacyReferenceId": "c890e958-fa88-4d17-993e-c97c7c4862a5",
+        "referenceEntryId": "966a9f94-eb4a-49ba-8d0d-3dc56e178223",
+        "matchedPaperId": "5a3a7d65-d3c6-4998-b209-854c56b42f72",
+        "matchedPaperTitle": "Efficient Memory Management for Large Language Model Serving with PagedAttention",
+        "matchedPaperEntityId": "62f3869f-c94b-4d72-bccc-4f240b45b717",
+        "classification": "audit_bucket",
+        "matchedBy": "none",
+        "reason": "legacy title hint is not independently corroborated by DOI/arXiv"
+      },
+      {
+        "legacyReferenceId": "12894490-2156-4f6a-b67e-4fb61173ad66",
+        "referenceEntryId": "69b8a7ed-2862-4d7c-b6a1-0ebc34db7230",
+        "matchedPaperId": "cca2e353-2d29-4c91-a2f7-95a06e34ac70",
+        "matchedPaperTitle": "DeepSeek-R1: Incentivizing Reasoning Capability in LLMs via Reinforcement Learning",
+        "matchedPaperEntityId": "45295319-1287-44ab-8518-bd98da3c13f2",
+        "classification": "audit_bucket",
+        "matchedBy": "none",
+        "reason": "legacy title hint is not independently corroborated by DOI/arXiv"
+      },
+      {
+        "legacyReferenceId": "2351057e-84df-4f5c-826d-8cc451719d01",
+        "referenceEntryId": "aaecc586-55a1-41e8-bdc0-5415eb042560",
+        "matchedPaperId": "fd5ddc75-1fa7-4192-9439-f97972401688",
+        "matchedPaperTitle": "Zero-shot Cross-Lingual Transfer for Synthetic Data Generation in Grammatical Error Detection",
+        "matchedPaperEntityId": null,
+        "classification": "audit_bucket",
+        "matchedBy": "none",
+        "reason": "matched paper lacks entityId and strong identifier corroboration"
+      },
+      {
+        "legacyReferenceId": "96592019-e4e9-49df-81b6-112cfd664315",
+        "referenceEntryId": "919e0b2d-2764-46b2-8463-b1ec9b8f50eb",
+        "matchedPaperId": "cca2e353-2d29-4c91-a2f7-95a06e34ac70",
+        "matchedPaperTitle": "DeepSeek-R1: Incentivizing Reasoning Capability in LLMs via Reinforcement Learning",
+        "matchedPaperEntityId": "45295319-1287-44ab-8518-bd98da3c13f2",
+        "classification": "audit_bucket",
+        "matchedBy": "none",
+        "reason": "legacy title hint is not independently corroborated by DOI/arXiv"
+      },
+      {
+        "legacyReferenceId": "3d54c4f3-ea20-424c-afdd-70e2edacbcd8",
+        "referenceEntryId": "2d8f476a-f6eb-4ba7-a2fb-8583653a5f35",
+        "matchedPaperId": "9af82422-7d5a-433a-b48e-fd332431bfbf",
+        "matchedPaperTitle": "Scaling Laws for Reward Model Overoptimization",
+        "matchedPaperEntityId": null,
+        "classification": "audit_bucket",
+        "matchedBy": "none",
+        "reason": "matched paper lacks entityId and strong identifier corroboration"
+      },
+      {
+        "legacyReferenceId": "7f01c0f9-f3dc-4320-b358-27452145740a",
+        "referenceEntryId": "e910f95b-ee46-442d-b61a-1a6c16746d62",
+        "matchedPaperId": "cca2e353-2d29-4c91-a2f7-95a06e34ac70",
+        "matchedPaperTitle": "DeepSeek-R1: Incentivizing Reasoning Capability in LLMs via Reinforcement Learning",
+        "matchedPaperEntityId": "45295319-1287-44ab-8518-bd98da3c13f2",
+        "classification": "audit_bucket",
+        "matchedBy": "none",
+        "reason": "legacy title hint is not independently corroborated by DOI/arXiv"
+      },
+      {
+        "legacyReferenceId": "f0b5024d-2789-4854-a611-6daabb1b39fd",
+        "referenceEntryId": "32aeaaa3-ac19-4217-b251-1574aae90126",
+        "matchedPaperId": "cca2e353-2d29-4c91-a2f7-95a06e34ac70",
+        "matchedPaperTitle": "DeepSeek-R1: Incentivizing Reasoning Capability in LLMs via Reinforcement Learning",
+        "matchedPaperEntityId": "45295319-1287-44ab-8518-bd98da3c13f2",
+        "classification": "audit_bucket",
+        "matchedBy": "none",
+        "reason": "legacy title hint is not independently corroborated by DOI/arXiv"
+      },
+      {
+        "legacyReferenceId": "dafad1bf-870b-496d-bbbe-4e264d73c1bf",
+        "referenceEntryId": "6bd84ba1-3b1a-4763-9c02-4bfb751379a0",
+        "matchedPaperId": "af4a9585-8c5f-4e70-bdf9-13cbfb20207a",
+        "matchedPaperTitle": "Tensor Product Attention Is All You Need",
+        "matchedPaperEntityId": null,
+        "classification": "audit_bucket",
+        "matchedBy": "none",
+        "reason": "matched paper lacks entityId and strong identifier corroboration"
+      },
+      {
+        "legacyReferenceId": "07ae3eef-bc88-4bd4-a997-fe09316e4c98",
+        "referenceEntryId": "e93dcae9-12b9-49de-94d6-93bb5c196834",
+        "matchedPaperId": "cca2e353-2d29-4c91-a2f7-95a06e34ac70",
+        "matchedPaperTitle": "DeepSeek-R1: Incentivizing Reasoning Capability in LLMs via Reinforcement Learning",
+        "matchedPaperEntityId": "45295319-1287-44ab-8518-bd98da3c13f2",
+        "classification": "audit_bucket",
+        "matchedBy": "none",
+        "reason": "legacy title hint is not independently corroborated by DOI/arXiv"
+      },
+      {
+        "legacyReferenceId": "128e2191-c22b-4147-81b6-d4f7951feed3",
+        "referenceEntryId": "40086198-dbdc-419a-a314-e9f59e41f61e",
+        "matchedPaperId": "82fef9c3-c92a-4153-9a05-a8cd23cf4e79",
+        "matchedPaperTitle": "The Entropy Mechanism of Reinforcement Learning for Reasoning Language Models",
+        "matchedPaperEntityId": null,
+        "classification": "audit_bucket",
+        "matchedBy": "none",
+        "reason": "matched paper lacks entityId and strong identifier corroboration"
+      },
+      {
+        "legacyReferenceId": "205bfa30-0932-4fdc-b518-c8923d3093d3",
+        "referenceEntryId": "a3b8aa32-fee7-4313-a440-ed31cb17acca",
+        "matchedPaperId": "4369dc5d-2c14-40a3-a9b4-741650873f40",
+        "matchedPaperTitle": "Reinforcement Learning for Reasoning in Small LLMs: What Works and What Doesn't",
+        "matchedPaperEntityId": null,
+        "classification": "audit_bucket",
+        "matchedBy": "none",
+        "reason": "matched paper lacks entityId and strong identifier corroboration"
+      },
+      {
+        "legacyReferenceId": "62315e0e-eb46-4811-8499-4e312adac525",
+        "referenceEntryId": "59e7911e-c142-4bf3-a6d3-bcc1e77d1543",
+        "matchedPaperId": "cca2e353-2d29-4c91-a2f7-95a06e34ac70",
+        "matchedPaperTitle": "DeepSeek-R1: Incentivizing Reasoning Capability in LLMs via Reinforcement Learning",
+        "matchedPaperEntityId": "45295319-1287-44ab-8518-bd98da3c13f2",
+        "classification": "audit_bucket",
+        "matchedBy": "none",
+        "reason": "legacy title hint is not independently corroborated by DOI/arXiv"
+      },
+      {
+        "legacyReferenceId": "27e6350c-de82-4e66-96dc-03705a400a9b",
+        "referenceEntryId": "89b2495b-b011-4f1e-93b0-8a5d29da402f",
+        "matchedPaperId": "cca2e353-2d29-4c91-a2f7-95a06e34ac70",
+        "matchedPaperTitle": "DeepSeek-R1: Incentivizing Reasoning Capability in LLMs via Reinforcement Learning",
+        "matchedPaperEntityId": "45295319-1287-44ab-8518-bd98da3c13f2",
+        "classification": "audit_bucket",
+        "matchedBy": "none",
+        "reason": "legacy title hint is not independently corroborated by DOI/arXiv"
+      },
+      {
+        "legacyReferenceId": "2a0c99fc-efc1-4fe5-91ac-ef4fb7d2c1a7",
+        "referenceEntryId": "4ac35531-e203-4ad2-88ed-937cd3eb7603",
+        "matchedPaperId": "cca2e353-2d29-4c91-a2f7-95a06e34ac70",
+        "matchedPaperTitle": "DeepSeek-R1: Incentivizing Reasoning Capability in LLMs via Reinforcement Learning",
+        "matchedPaperEntityId": "45295319-1287-44ab-8518-bd98da3c13f2",
+        "classification": "audit_bucket",
+        "matchedBy": "none",
+        "reason": "legacy title hint is not independently corroborated by DOI/arXiv"
+      },
+      {
+        "legacyReferenceId": "2ace10da-80db-43f1-bf24-cd0630b8c3ce",
+        "referenceEntryId": "70cc522b-86e2-4d98-94e9-f62d40f69c8e",
+        "matchedPaperId": "b67a7f7a-30ac-4c42-9379-bafe8cdce256",
+        "matchedPaperTitle": "DetectGPT: Zero-Shot Machine-Generated Text Detection using Probability Curvature",
+        "matchedPaperEntityId": "d0feae52-e8ce-4c56-986a-246da7e6aa3d",
+        "classification": "audit_bucket",
+        "matchedBy": "none",
+        "reason": "legacy title hint is not independently corroborated by DOI/arXiv"
+      },
+      {
+        "legacyReferenceId": "b4a5fdcb-fb47-40f4-8236-c7d5e12c3af1",
+        "referenceEntryId": "e6ae602a-b096-446b-963d-9c137e337b5a",
+        "matchedPaperId": "c1122bae-a960-417b-a3d0-4a0ca6df4390",
+        "matchedPaperTitle": "SynSciPass: detecting appropriate uses of scientific text generation",
+        "matchedPaperEntityId": null,
+        "classification": "audit_bucket",
+        "matchedBy": "none",
+        "reason": "matched paper lacks entityId and strong identifier corroboration"
+      },
+      {
+        "legacyReferenceId": "f2edbeb7-642e-4275-9d2d-3e69cd5905f3",
+        "referenceEntryId": "4333911f-fda3-47cd-b1a9-741f6d94edb1",
+        "matchedPaperId": "9af82422-7d5a-433a-b48e-fd332431bfbf",
+        "matchedPaperTitle": "Scaling Laws for Reward Model Overoptimization",
+        "matchedPaperEntityId": null,
+        "classification": "audit_bucket",
+        "matchedBy": "none",
+        "reason": "matched paper lacks entityId and strong identifier corroboration"
+      },
+      {
+        "legacyReferenceId": "d2f5a42d-f533-4583-b3e8-c47ae4bb920d",
+        "referenceEntryId": "6785ab29-e19e-4459-9ffa-0e258f69aa9e",
+        "matchedPaperId": "cca2e353-2d29-4c91-a2f7-95a06e34ac70",
+        "matchedPaperTitle": "DeepSeek-R1: Incentivizing Reasoning Capability in LLMs via Reinforcement Learning",
+        "matchedPaperEntityId": "45295319-1287-44ab-8518-bd98da3c13f2",
+        "classification": "audit_bucket",
+        "matchedBy": "none",
+        "reason": "legacy title hint is not independently corroborated by DOI/arXiv"
+      },
+      {
+        "legacyReferenceId": "dcd103d2-3cf8-4114-85af-298ed3217f9b",
+        "referenceEntryId": "7fc598df-29bd-4504-badb-1dce4eefb830",
+        "matchedPaperId": "cca2e353-2d29-4c91-a2f7-95a06e34ac70",
+        "matchedPaperTitle": "DeepSeek-R1: Incentivizing Reasoning Capability in LLMs via Reinforcement Learning",
+        "matchedPaperEntityId": "45295319-1287-44ab-8518-bd98da3c13f2",
+        "classification": "audit_bucket",
+        "matchedBy": "none",
+        "reason": "legacy title hint is not independently corroborated by DOI/arXiv"
+      },
+      {
+        "legacyReferenceId": "7deecfbe-9f1c-4bdf-8429-ad0937c899eb",
+        "referenceEntryId": "fd11e5dc-6ecb-4a7e-b1b4-8d9d349080e4",
+        "matchedPaperId": "881077bf-be68-4d5e-99fd-5e33619a9766",
+        "matchedPaperTitle": "DAPO: An Open-Source LLM Reinforcement Learning System at Scale",
+        "matchedPaperEntityId": "f1ef8ac8-74b3-40cb-9ed8-03ba5e784048",
+        "classification": "audit_bucket",
+        "matchedBy": "none",
+        "reason": "legacy title hint is not independently corroborated by DOI/arXiv"
+      },
+      {
+        "legacyReferenceId": "862e4c7a-31bf-4019-a004-00e3b9983f38",
+        "referenceEntryId": "d852a775-37e3-46da-99f3-776c0f524076",
+        "matchedPaperId": "40ff8d2d-ba84-412b-9578-ae657b0e8177",
+        "matchedPaperTitle": "Can LLMs Guide Their Own Exploration? Gradient-Guided Reinforcement Learning for LLM Reasoning",
+        "matchedPaperEntityId": "a912de42-7637-41fb-93fd-0a196bfec2ab",
+        "classification": "audit_bucket",
+        "matchedBy": "none",
+        "reason": "legacy title hint is not independently corroborated by DOI/arXiv"
+      },
+      {
+        "legacyReferenceId": "e88e2fe0-4133-40d2-9ab9-ce75995635c2",
+        "referenceEntryId": "9b8a22d3-d28d-4413-89d0-dad49c610a98",
+        "matchedPaperId": "325813eb-b70d-4ba4-aaee-1abf781a4bfc",
+        "matchedPaperTitle": "MEDUSA: Simple LLM Inference Acceleration Framework with Multiple Decoding Heads",
+        "matchedPaperEntityId": null,
+        "classification": "audit_bucket",
+        "matchedBy": "none",
+        "reason": "matched paper lacks entityId and strong identifier corroboration"
+      },
+      {
+        "legacyReferenceId": "d3761de5-a73f-48a6-a36f-6755be0c2149",
+        "referenceEntryId": "621a5cd1-0cb4-4917-94fc-13d6cdf27120",
+        "matchedPaperId": "cca2e353-2d29-4c91-a2f7-95a06e34ac70",
+        "matchedPaperTitle": "DeepSeek-R1: Incentivizing Reasoning Capability in LLMs via Reinforcement Learning",
+        "matchedPaperEntityId": "45295319-1287-44ab-8518-bd98da3c13f2",
+        "classification": "audit_bucket",
+        "matchedBy": "none",
+        "reason": "legacy title hint is not independently corroborated by DOI/arXiv"
+      },
+      {
+        "legacyReferenceId": "72ed6c9e-ff88-4026-a35e-aa0b11891c16",
+        "referenceEntryId": "38d54736-31e9-4106-a202-fa571e29f3b3",
+        "matchedPaperId": "9af82422-7d5a-433a-b48e-fd332431bfbf",
+        "matchedPaperTitle": "Scaling Laws for Reward Model Overoptimization",
+        "matchedPaperEntityId": null,
+        "classification": "audit_bucket",
+        "matchedBy": "none",
+        "reason": "matched paper lacks entityId and strong identifier corroboration"
+      },
+      {
+        "legacyReferenceId": "ae4ef7d3-9c2c-4cc4-ae25-8d4627381aaf",
+        "referenceEntryId": "b851019c-cad1-4506-8675-5a78b90538ac",
+        "matchedPaperId": "9af82422-7d5a-433a-b48e-fd332431bfbf",
+        "matchedPaperTitle": "Scaling Laws for Reward Model Overoptimization",
+        "matchedPaperEntityId": null,
+        "classification": "audit_bucket",
+        "matchedBy": "none",
+        "reason": "matched paper lacks entityId and strong identifier corroboration"
+      },
+      {
+        "legacyReferenceId": "cdf323ab-5c80-4f65-92ed-912f0fc70ee0",
+        "referenceEntryId": "eacd26ae-1ed7-4c90-9d18-fd1ddc65ff15",
+        "matchedPaperId": "e64b4261-c1bf-403b-b825-ce4c686dafed",
+        "matchedPaperTitle": "Dense Reward for Free in Reinforcement Learning from Human Feedback",
+        "matchedPaperEntityId": "cef95ab8-c0f4-499b-9df3-9921e90f113e",
+        "classification": "audit_bucket",
+        "matchedBy": "none",
+        "reason": "legacy title hint is not independently corroborated by DOI/arXiv"
+      },
+      {
+        "legacyReferenceId": "339ddd58-9ac3-40ec-9378-732179f33688",
+        "referenceEntryId": "eee91e0d-d836-4d57-a390-8475d601e08f",
+        "matchedPaperId": "9af82422-7d5a-433a-b48e-fd332431bfbf",
+        "matchedPaperTitle": "Scaling Laws for Reward Model Overoptimization",
+        "matchedPaperEntityId": null,
+        "classification": "audit_bucket",
+        "matchedBy": "none",
+        "reason": "matched paper lacks entityId and strong identifier corroboration"
+      },
+      {
+        "legacyReferenceId": "9c168256-9379-4fd3-afb4-462e0d1247a8",
+        "referenceEntryId": "f98ca077-825a-4845-a374-06ee9d56a17e",
+        "matchedPaperId": "40ff8d2d-ba84-412b-9578-ae657b0e8177",
+        "matchedPaperTitle": "Can LLMs Guide Their Own Exploration? Gradient-Guided Reinforcement Learning for LLM Reasoning",
+        "matchedPaperEntityId": "a912de42-7637-41fb-93fd-0a196bfec2ab",
+        "classification": "audit_bucket",
+        "matchedBy": "none",
+        "reason": "legacy title hint is not independently corroborated by DOI/arXiv"
+      },
+      {
+        "legacyReferenceId": "b7fd45db-f580-4780-98b1-7043aee9b3c1",
+        "referenceEntryId": "efffb88d-22a0-4ace-b051-0ff162572e47",
+        "matchedPaperId": "40ff8d2d-ba84-412b-9578-ae657b0e8177",
+        "matchedPaperTitle": "Can LLMs Guide Their Own Exploration? Gradient-Guided Reinforcement Learning for LLM Reasoning",
+        "matchedPaperEntityId": "a912de42-7637-41fb-93fd-0a196bfec2ab",
+        "classification": "audit_bucket",
+        "matchedBy": "none",
+        "reason": "legacy title hint is not independently corroborated by DOI/arXiv"
+      },
+      {
+        "legacyReferenceId": "7e7aecf5-8aca-45f0-b142-57da625c9c30",
+        "referenceEntryId": "f6077cf0-d505-475e-9f75-29c47b687f41",
+        "matchedPaperId": "9af82422-7d5a-433a-b48e-fd332431bfbf",
+        "matchedPaperTitle": "Scaling Laws for Reward Model Overoptimization",
+        "matchedPaperEntityId": null,
+        "classification": "audit_bucket",
+        "matchedBy": "none",
+        "reason": "matched paper lacks entityId and strong identifier corroboration"
+      },
+      {
+        "legacyReferenceId": "49a14962-8ebd-4733-b366-35efced1e875",
+        "referenceEntryId": "b761d69b-3b45-42ff-b46a-6a13ae4cdf0c",
+        "matchedPaperId": "40ff8d2d-ba84-412b-9578-ae657b0e8177",
+        "matchedPaperTitle": "Can LLMs Guide Their Own Exploration? Gradient-Guided Reinforcement Learning for LLM Reasoning",
+        "matchedPaperEntityId": "a912de42-7637-41fb-93fd-0a196bfec2ab",
+        "classification": "audit_bucket",
+        "matchedBy": "none",
+        "reason": "legacy title hint is not independently corroborated by DOI/arXiv"
+      },
+      {
+        "legacyReferenceId": "65a706f7-df89-430b-a40a-ae05e8fcdd98",
+        "referenceEntryId": "9ab7d75f-b201-44f6-8258-3e824c732e30",
+        "matchedPaperId": "cca2e353-2d29-4c91-a2f7-95a06e34ac70",
+        "matchedPaperTitle": "DeepSeek-R1: Incentivizing Reasoning Capability in LLMs via Reinforcement Learning",
+        "matchedPaperEntityId": "45295319-1287-44ab-8518-bd98da3c13f2",
+        "classification": "audit_bucket",
+        "matchedBy": "none",
+        "reason": "legacy title hint is not independently corroborated by DOI/arXiv"
+      },
+      {
+        "legacyReferenceId": "672a8c2d-fd86-4c8c-8c4e-3166c68e0531",
+        "referenceEntryId": "ac2bbe60-aba9-4ad9-9f13-8a0d0a160548",
+        "matchedPaperId": "40ff8d2d-ba84-412b-9578-ae657b0e8177",
+        "matchedPaperTitle": "Can LLMs Guide Their Own Exploration? Gradient-Guided Reinforcement Learning for LLM Reasoning",
+        "matchedPaperEntityId": "a912de42-7637-41fb-93fd-0a196bfec2ab",
+        "classification": "audit_bucket",
+        "matchedBy": "none",
+        "reason": "legacy title hint is not independently corroborated by DOI/arXiv"
+      },
+      {
+        "legacyReferenceId": "691f7b86-c5c0-413a-af98-f8cabe592960",
+        "referenceEntryId": "3487e47e-eeba-4b62-9cb7-9cd8a4c456d1",
+        "matchedPaperId": "40ff8d2d-ba84-412b-9578-ae657b0e8177",
+        "matchedPaperTitle": "Can LLMs Guide Their Own Exploration? Gradient-Guided Reinforcement Learning for LLM Reasoning",
+        "matchedPaperEntityId": "a912de42-7637-41fb-93fd-0a196bfec2ab",
+        "classification": "audit_bucket",
+        "matchedBy": "none",
+        "reason": "legacy title hint is not independently corroborated by DOI/arXiv"
+      },
+      {
+        "legacyReferenceId": "8ea5b3cf-df23-41b4-9045-4a01ad990d09",
+        "referenceEntryId": "1a2e023d-e656-4f9b-bc64-00af331e3f1b",
+        "matchedPaperId": "cca2e353-2d29-4c91-a2f7-95a06e34ac70",
+        "matchedPaperTitle": "DeepSeek-R1: Incentivizing Reasoning Capability in LLMs via Reinforcement Learning",
+        "matchedPaperEntityId": "45295319-1287-44ab-8518-bd98da3c13f2",
+        "classification": "audit_bucket",
+        "matchedBy": "none",
+        "reason": "legacy title hint is not independently corroborated by DOI/arXiv"
+      },
+      {
+        "legacyReferenceId": "a3afbddd-ab13-48b4-94f2-b59921f9ebeb",
+        "referenceEntryId": "7f7b242f-f204-47c6-9a0f-744b6d875e5f",
+        "matchedPaperId": "cca2e353-2d29-4c91-a2f7-95a06e34ac70",
+        "matchedPaperTitle": "DeepSeek-R1: Incentivizing Reasoning Capability in LLMs via Reinforcement Learning",
+        "matchedPaperEntityId": "45295319-1287-44ab-8518-bd98da3c13f2",
+        "classification": "audit_bucket",
+        "matchedBy": "none",
+        "reason": "legacy title hint is not independently corroborated by DOI/arXiv"
+      },
+      {
+        "legacyReferenceId": "6d8b4080-edfb-4b99-ac9d-1f53c4678d62",
+        "referenceEntryId": "edcf005a-a920-4ccc-8574-00e93d0e9376",
+        "matchedPaperId": "f8ca0248-7a4d-4150-babb-05b300f43a6b",
+        "matchedPaperTitle": "Longformer: The Long-Document Transformer",
+        "matchedPaperEntityId": null,
+        "classification": "audit_bucket",
+        "matchedBy": "none",
+        "reason": "matched paper lacks entityId and strong identifier corroboration"
+      },
+      {
+        "legacyReferenceId": "2fe79ded-93b4-4a08-97bf-5a554c86e151",
+        "referenceEntryId": "ad6b89f8-53da-40c2-a554-6a73fcfc51b2",
+        "matchedPaperId": "8b823963-9f5a-42e2-ba9d-88aab1cfadea",
+        "matchedPaperTitle": "Generating Long Sequences with Sparse Transformers",
+        "matchedPaperEntityId": "7beb573f-7a85-42a0-a3a3-e4716104e7c6",
+        "classification": "audit_bucket",
+        "matchedBy": "none",
+        "reason": "legacy title hint is not independently corroborated by DOI/arXiv"
+      },
+      {
+        "legacyReferenceId": "31ceabb0-ca3b-4ec0-be7d-e55d2f124db0",
+        "referenceEntryId": "1f4b79be-e808-4db8-9028-f1272ef20756",
+        "matchedPaperId": "1543790c-3c77-4b75-b2eb-aacb6de79893",
+        "matchedPaperTitle": "FlashAttention: Fast and Memory-Efficient Exact Attention with IO-Awareness",
+        "matchedPaperEntityId": "d049e453-2f42-4a42-96a6-e96c6080277b",
+        "classification": "audit_bucket",
+        "matchedBy": "none",
+        "reason": "legacy title hint is not independently corroborated by DOI/arXiv"
+      },
+      {
+        "legacyReferenceId": "e536b58a-5fae-41c2-9943-cfd0982e8c41",
+        "referenceEntryId": "00e33b8c-b8d3-4efe-9376-860d61da5935",
+        "matchedPaperId": "40ff8d2d-ba84-412b-9578-ae657b0e8177",
+        "matchedPaperTitle": "Can LLMs Guide Their Own Exploration? Gradient-Guided Reinforcement Learning for LLM Reasoning",
+        "matchedPaperEntityId": "a912de42-7637-41fb-93fd-0a196bfec2ab",
+        "classification": "audit_bucket",
+        "matchedBy": "none",
+        "reason": "legacy title hint is not independently corroborated by DOI/arXiv"
+      },
+      {
+        "legacyReferenceId": "61f34d43-f9ea-46a5-a9d8-59a907a893d1",
+        "referenceEntryId": "855567e4-068d-4bab-bf18-f7ae187d1b9e",
+        "matchedPaperId": "325813eb-b70d-4ba4-aaee-1abf781a4bfc",
+        "matchedPaperTitle": "MEDUSA: Simple LLM Inference Acceleration Framework with Multiple Decoding Heads",
+        "matchedPaperEntityId": null,
+        "classification": "audit_bucket",
+        "matchedBy": "none",
+        "reason": "matched paper lacks entityId and strong identifier corroboration"
+      },
+      {
+        "legacyReferenceId": "e69c01f1-9850-4067-971f-b84c9249e7f5",
+        "referenceEntryId": "5b545012-6901-4ef8-87b3-81b4eb4bdbbd",
+        "matchedPaperId": "1b42462f-e18a-4bb1-98d7-a852c3023347",
+        "matchedPaperTitle": "EAGLE: Speculative Sampling Requires Rethinking Feature Uncertainty",
+        "matchedPaperEntityId": "09ee9c1f-7a79-4aa6-ad80-7e7e62604302",
+        "classification": "audit_bucket",
+        "matchedBy": "none",
+        "reason": "legacy title hint is not independently corroborated by DOI/arXiv"
+      },
+      {
+        "legacyReferenceId": "5e2ba99f-5b68-4d07-ab0a-29ae1c947aba",
+        "referenceEntryId": "ffcc37a9-076b-43cf-9b51-ac1cb2e28737",
+        "matchedPaperId": "9dba8a3f-b3b6-4521-a760-19d0a1b32e07",
+        "matchedPaperTitle": "Turning Trash into Treasure: Accelerating Inference of Large Language Models with Token Recycling",
+        "matchedPaperEntityId": null,
+        "classification": "audit_bucket",
+        "matchedBy": "none",
+        "reason": "matched paper lacks entityId and strong identifier corroboration"
+      },
+      {
+        "legacyReferenceId": "1b74e58e-45d3-4db5-965a-0e5a3eff3f7d",
+        "referenceEntryId": "804633c7-d769-40ea-bcdc-ee98474e507a",
+        "matchedPaperId": "40ff8d2d-ba84-412b-9578-ae657b0e8177",
+        "matchedPaperTitle": "Can LLMs Guide Their Own Exploration? Gradient-Guided Reinforcement Learning for LLM Reasoning",
+        "matchedPaperEntityId": "a912de42-7637-41fb-93fd-0a196bfec2ab",
+        "classification": "audit_bucket",
+        "matchedBy": "none",
+        "reason": "legacy title hint is not independently corroborated by DOI/arXiv"
+      },
+      {
+        "legacyReferenceId": "9511a9fa-e34e-4459-9e77-0c51b2351f5f",
+        "referenceEntryId": "8054daba-f147-4058-a59c-16ae039dba27",
+        "matchedPaperId": "0776e8f6-da27-49b2-85cc-dd2056f84948",
+        "matchedPaperTitle": "Black-box Generation of Adversarial Text Sequences to Evade Deep Learning Classifiers",
+        "matchedPaperEntityId": "b1bcf90e-3707-4baf-9ca5-fea3fd0c4ebd",
+        "classification": "audit_bucket",
+        "matchedBy": "none",
+        "reason": "legacy title hint is not independently corroborated by DOI/arXiv"
+      },
+      {
+        "legacyReferenceId": "c0bd41f4-5caa-4721-a886-8a34eb28d134",
+        "referenceEntryId": "ed922199-947c-4d0f-aa0b-6263421f9e2b",
+        "matchedPaperId": "7d8e6b0d-7928-499f-97dc-7a1df2750386",
+        "matchedPaperTitle": "Arabic Synonym BERT-based Adversarial Examples for Text Classification",
+        "matchedPaperEntityId": "b4a3a7c9-1d5f-4f70-9a4d-244b54ad083c",
+        "classification": "audit_bucket",
+        "matchedBy": "none",
+        "reason": "legacy title hint is not independently corroborated by DOI/arXiv"
+      },
+      {
+        "legacyReferenceId": "7385fa86-a540-487a-9b82-b44c52783b71",
+        "referenceEntryId": "db7e6d8c-a504-4932-b9cf-e09a8dd0d543",
+        "matchedPaperId": "0776e8f6-da27-49b2-85cc-dd2056f84948",
+        "matchedPaperTitle": "Black-box Generation of Adversarial Text Sequences to Evade Deep Learning Classifiers",
+        "matchedPaperEntityId": "b1bcf90e-3707-4baf-9ca5-fea3fd0c4ebd",
+        "classification": "audit_bucket",
+        "matchedBy": "none",
+        "reason": "legacy title hint is not independently corroborated by DOI/arXiv"
+      },
+      {
+        "legacyReferenceId": "0ee07c82-244d-43cf-8dc2-3aa49778fa79",
+        "referenceEntryId": "1c892bad-5286-4569-a332-ca718484b6d3",
+        "matchedPaperId": "40ff8d2d-ba84-412b-9578-ae657b0e8177",
+        "matchedPaperTitle": "Can LLMs Guide Their Own Exploration? Gradient-Guided Reinforcement Learning for LLM Reasoning",
+        "matchedPaperEntityId": "a912de42-7637-41fb-93fd-0a196bfec2ab",
+        "classification": "audit_bucket",
+        "matchedBy": "none",
+        "reason": "legacy title hint is not independently corroborated by DOI/arXiv"
+      },
+      {
+        "legacyReferenceId": "5a019299-686d-4715-a52f-4e891d6eb55b",
+        "referenceEntryId": "27740a3f-b5f6-439d-a696-b5d4fd0db3ab",
+        "matchedPaperId": "a155e50c-34ca-4aa2-b7f8-8b715170c40e",
+        "matchedPaperTitle": "STEER: Unified Style Transfer with Expert Reinforcement",
+        "matchedPaperEntityId": null,
+        "classification": "audit_bucket",
+        "matchedBy": "none",
+        "reason": "matched paper lacks entityId and strong identifier corroboration"
+      },
+      {
+        "legacyReferenceId": "a49f50c0-e4c1-4ecf-bfab-533277c650dc",
+        "referenceEntryId": "00ee7fb9-13c2-44c5-8050-8ad75b6af7f8",
+        "matchedPaperId": "cca2e353-2d29-4c91-a2f7-95a06e34ac70",
+        "matchedPaperTitle": "DeepSeek-R1: Incentivizing Reasoning Capability in LLMs via Reinforcement Learning",
+        "matchedPaperEntityId": "45295319-1287-44ab-8518-bd98da3c13f2",
+        "classification": "audit_bucket",
+        "matchedBy": "none",
+        "reason": "legacy title hint is not independently corroborated by DOI/arXiv"
+      },
+      {
+        "legacyReferenceId": "2c323561-a659-43b5-9af6-831fcf9f53a8",
+        "referenceEntryId": "f61bf665-c012-4edd-a0eb-bca4a8e152cf",
+        "matchedPaperId": "40ff8d2d-ba84-412b-9578-ae657b0e8177",
+        "matchedPaperTitle": "Can LLMs Guide Their Own Exploration? Gradient-Guided Reinforcement Learning for LLM Reasoning",
+        "matchedPaperEntityId": "a912de42-7637-41fb-93fd-0a196bfec2ab",
+        "classification": "audit_bucket",
+        "matchedBy": "none",
+        "reason": "legacy title hint is not independently corroborated by DOI/arXiv"
+      },
+      {
+        "legacyReferenceId": "2cdbbecc-0b61-4461-938c-373b15e2df6d",
+        "referenceEntryId": "7a5c5ce3-2bdf-492b-9932-3448a03d6789",
+        "matchedPaperId": "8bf86d8e-b334-4dcc-8838-b7a31a9a6ed9",
+        "matchedPaperTitle": "Direct Preference Optimization: Your Language Model is Secretly a Reward Model",
+        "matchedPaperEntityId": "afaac51a-fb71-4d5f-bf85-56756dae4758",
+        "classification": "audit_bucket",
+        "matchedBy": "none",
+        "reason": "legacy title hint is not independently corroborated by DOI/arXiv"
+      },
+      {
+        "legacyReferenceId": "17fd2ca3-5a1c-4e0d-92b9-68fff11e5857",
+        "referenceEntryId": "444e5eb5-24c4-4acc-a27d-6d90bfe69729",
+        "matchedPaperId": "2d19f534-c611-4be6-abd9-7c2b5c4a3574",
+        "matchedPaperTitle": "Robust Reinforcement Learning from Human Feedback for Large Language Models Fine-Tuning",
+        "matchedPaperEntityId": null,
+        "classification": "audit_bucket",
+        "matchedBy": "none",
+        "reason": "matched paper lacks entityId and strong identifier corroboration"
+      },
+      {
+        "legacyReferenceId": "8def39eb-7c97-4670-8d34-0ab8532965fe",
+        "referenceEntryId": "4d15d12b-36c0-4f2a-8356-fcadeded2eda",
+        "matchedPaperId": "cca2e353-2d29-4c91-a2f7-95a06e34ac70",
+        "matchedPaperTitle": "DeepSeek-R1: Incentivizing Reasoning Capability in LLMs via Reinforcement Learning",
+        "matchedPaperEntityId": "45295319-1287-44ab-8518-bd98da3c13f2",
+        "classification": "audit_bucket",
+        "matchedBy": "none",
+        "reason": "legacy title hint is not independently corroborated by DOI/arXiv"
+      },
+      {
+        "legacyReferenceId": "ac16f16f-770c-423c-b97a-22057ef03d86",
+        "referenceEntryId": "808cc7ba-be51-4c64-8247-83d5606f019b",
+        "matchedPaperId": "40ff8d2d-ba84-412b-9578-ae657b0e8177",
+        "matchedPaperTitle": "Can LLMs Guide Their Own Exploration? Gradient-Guided Reinforcement Learning for LLM Reasoning",
+        "matchedPaperEntityId": "a912de42-7637-41fb-93fd-0a196bfec2ab",
+        "classification": "audit_bucket",
+        "matchedBy": "none",
+        "reason": "legacy title hint is not independently corroborated by DOI/arXiv"
+      },
+      {
+        "legacyReferenceId": "69059ea9-43a8-4cd7-b40c-fb6c15f0b71a",
+        "referenceEntryId": "62c4d3ea-103e-4d7a-81b9-e0cffb226f02",
+        "matchedPaperId": "f995176d-ce4d-438d-a83a-4d0d91e84363",
+        "matchedPaperTitle": "ORPO: Monolithic Preference Optimization without Reference Model",
+        "matchedPaperEntityId": null,
+        "classification": "audit_bucket",
+        "matchedBy": "none",
+        "reason": "matched paper lacks entityId and strong identifier corroboration"
+      },
+      {
+        "legacyReferenceId": "8462adf4-80d6-47e0-a912-450a4315e6b8",
+        "referenceEntryId": "5166ece1-ac12-4e9a-a442-89e04f298e96",
+        "matchedPaperId": "9af82422-7d5a-433a-b48e-fd332431bfbf",
+        "matchedPaperTitle": "Scaling Laws for Reward Model Overoptimization",
+        "matchedPaperEntityId": null,
+        "classification": "audit_bucket",
+        "matchedBy": "none",
+        "reason": "matched paper lacks entityId and strong identifier corroboration"
+      },
+      {
+        "legacyReferenceId": "249b518b-37fd-45a0-9a62-faf1252b9a3a",
+        "referenceEntryId": "979dcf01-30df-4580-80ac-abbb3433ce7d",
+        "matchedPaperId": "8efdaeba-bb64-4a6f-bb0d-c5a52131a77b",
+        "matchedPaperTitle": "Secrets of RLHF in Large Language Models Part II: Reward Modeling",
+        "matchedPaperEntityId": null,
+        "classification": "audit_bucket",
+        "matchedBy": "none",
+        "reason": "matched paper lacks entityId and strong identifier corroboration"
+      },
+      {
+        "legacyReferenceId": "d261fcf0-7393-4a7e-9cf2-7cba1a02d527",
+        "referenceEntryId": "99e561bb-fb3e-4b3a-8fd5-f47ea7a5ff99",
+        "matchedPaperId": "69fb4006-ccd3-48a6-b983-8dfcf2489b4a",
+        "matchedPaperTitle": "Is DPO Superior to PPO for LLM Alignment? A Comprehensive Study",
+        "matchedPaperEntityId": null,
+        "classification": "audit_bucket",
+        "matchedBy": "none",
+        "reason": "matched paper lacks entityId and strong identifier corroboration"
+      },
+      {
+        "legacyReferenceId": "676b3d24-c63d-4bd5-9365-8c2fa43e5f02",
+        "referenceEntryId": "bd67a4aa-2ae4-4d19-8c52-987f78f2befe",
+        "matchedPaperId": "4a4b1bf0-a9b8-4c18-abfd-2d1a75e5a7d7",
+        "matchedPaperTitle": "Scaling Laws for Reward Model Overoptimization in Direct Alignment Algorithms",
+        "matchedPaperEntityId": null,
+        "classification": "audit_bucket",
+        "matchedBy": "none",
+        "reason": "matched paper lacks entityId and strong identifier corroboration"
+      },
+      {
+        "legacyReferenceId": "317b4f0c-61c1-4bda-a66c-4c37a7f3dc3b",
+        "referenceEntryId": "a6c5292a-2dc2-4a0d-bc3e-5b95ad6d6825",
+        "matchedPaperId": "2271189b-9871-448f-beef-f23df1a6a8c5",
+        "matchedPaperTitle": "On the Limited Generalization Capability of the Implicit Reward Model Induced by Direct Preference Optimization",
+        "matchedPaperEntityId": null,
+        "classification": "audit_bucket",
+        "matchedBy": "none",
+        "reason": "matched paper lacks entityId and strong identifier corroboration"
+      },
+      {
+        "legacyReferenceId": "3178d5cd-8129-4584-bbc3-8c2cc9c60139",
+        "referenceEntryId": "99f909dd-0ad5-4e12-a81e-d18031982e42",
+        "matchedPaperId": "2271189b-9871-448f-beef-f23df1a6a8c5",
+        "matchedPaperTitle": "On the Limited Generalization Capability of the Implicit Reward Model Induced by Direct Preference Optimization",
+        "matchedPaperEntityId": null,
+        "classification": "audit_bucket",
+        "matchedBy": "none",
+        "reason": "matched paper lacks entityId and strong identifier corroboration"
+      },
+      {
+        "legacyReferenceId": "11cda881-8b8a-4448-a8de-26704347e01a",
+        "referenceEntryId": "e2c82bc1-d696-4c16-8761-3124c2478135",
+        "matchedPaperId": "69fb4006-ccd3-48a6-b983-8dfcf2489b4a",
+        "matchedPaperTitle": "Is DPO Superior to PPO for LLM Alignment? A Comprehensive Study",
+        "matchedPaperEntityId": null,
+        "classification": "audit_bucket",
+        "matchedBy": "none",
+        "reason": "matched paper lacks entityId and strong identifier corroboration"
+      },
+      {
+        "legacyReferenceId": "c05d234e-2a59-4c28-94d3-1e68edecc6c6",
+        "referenceEntryId": "0ab5256a-f3ce-4271-93a7-42d72025648a",
+        "matchedPaperId": "9f7c569e-86d2-4ed2-825d-6930f58d80c2",
+        "matchedPaperTitle": "Quest: Query-Aware Sparsity for Efficient Long-Context LLM Inference",
+        "matchedPaperEntityId": null,
+        "classification": "audit_bucket",
+        "matchedBy": "none",
+        "reason": "matched paper lacks entityId and strong identifier corroboration"
+      },
+      {
+        "legacyReferenceId": "cd370845-2f1f-4728-96b2-c7e55a2e309e",
+        "referenceEntryId": "c833d185-a0ae-49b5-9046-b260e8cad79d",
+        "matchedPaperId": "29d5944d-9d73-4125-98d4-fbc2c8ddd3b8",
+        "matchedPaperTitle": "DuoAttention: Efficient Long-Context LLM Inference with Retrieval and Streaming Heads",
+        "matchedPaperEntityId": "02e1c7e4-3121-4a4f-b684-09164823b384",
+        "classification": "audit_bucket",
+        "matchedBy": "none",
+        "reason": "legacy title hint is not independently corroborated by DOI/arXiv"
+      },
+      {
+        "legacyReferenceId": "0e316bd2-df4a-4439-929c-2b1c26704e86",
+        "referenceEntryId": "3b111cde-47ca-40c5-b52b-60c22f6aceb2",
+        "matchedPaperId": "cca2e353-2d29-4c91-a2f7-95a06e34ac70",
+        "matchedPaperTitle": "DeepSeek-R1: Incentivizing Reasoning Capability in LLMs via Reinforcement Learning",
+        "matchedPaperEntityId": "45295319-1287-44ab-8518-bd98da3c13f2",
+        "classification": "audit_bucket",
+        "matchedBy": "none",
+        "reason": "legacy title hint is not independently corroborated by DOI/arXiv"
+      },
+      {
+        "legacyReferenceId": "dbfef38a-e21f-4058-a565-1a6f0b837e4b",
+        "referenceEntryId": "92bb6c49-09e3-4775-a2a6-78d234424fad",
+        "matchedPaperId": "889bf3f6-2b25-4ca0-8f61-ab29ca717b1b",
+        "matchedPaperTitle": "OpenAssistant Conversations - Democratizing Large Language Model Alignment",
+        "matchedPaperEntityId": null,
+        "classification": "audit_bucket",
+        "matchedBy": "none",
+        "reason": "matched paper lacks entityId and strong identifier corroboration"
+      },
+      {
+        "legacyReferenceId": "7a7cba75-1952-49ed-b59e-9ff33a317806",
+        "referenceEntryId": "fea94113-bfff-4e59-8eaa-82cd98c647ea",
+        "matchedPaperId": "40ff8d2d-ba84-412b-9578-ae657b0e8177",
+        "matchedPaperTitle": "Can LLMs Guide Their Own Exploration? Gradient-Guided Reinforcement Learning for LLM Reasoning",
+        "matchedPaperEntityId": "a912de42-7637-41fb-93fd-0a196bfec2ab",
+        "classification": "audit_bucket",
+        "matchedBy": "none",
+        "reason": "legacy title hint is not independently corroborated by DOI/arXiv"
+      },
+      {
+        "legacyReferenceId": "09e762a7-9690-43cd-a5fe-bea56387dbec",
+        "referenceEntryId": "bf1f2d4e-88b9-4b1d-9904-519ac51c26ff",
+        "matchedPaperId": "c66536da-841d-404a-9ef1-066d2b7e49e9",
+        "matchedPaperTitle": "Diffusion Model Alignment Using Direct Preference Optimization",
+        "matchedPaperEntityId": "915bfdd4-93b4-4717-b846-334e3b2fa45f",
+        "classification": "audit_bucket",
+        "matchedBy": "none",
+        "reason": "legacy title hint is not independently corroborated by DOI/arXiv"
+      },
+      {
+        "legacyReferenceId": "d9c05b03-9457-402f-91cd-a066058cbc29",
+        "referenceEntryId": "d5cdd5c9-34b7-40b4-b8d8-8f4d138262c3",
+        "matchedPaperId": "cca2e353-2d29-4c91-a2f7-95a06e34ac70",
+        "matchedPaperTitle": "DeepSeek-R1: Incentivizing Reasoning Capability in LLMs via Reinforcement Learning",
+        "matchedPaperEntityId": "45295319-1287-44ab-8518-bd98da3c13f2",
+        "classification": "audit_bucket",
+        "matchedBy": "none",
+        "reason": "legacy title hint is not independently corroborated by DOI/arXiv"
+      },
+      {
+        "legacyReferenceId": "24bac343-eff8-45c6-aaef-011226525b6e",
+        "referenceEntryId": "7e39cd4a-d887-4833-a48c-1973efa470ee",
+        "matchedPaperId": "40ff8d2d-ba84-412b-9578-ae657b0e8177",
+        "matchedPaperTitle": "Can LLMs Guide Their Own Exploration? Gradient-Guided Reinforcement Learning for LLM Reasoning",
+        "matchedPaperEntityId": "a912de42-7637-41fb-93fd-0a196bfec2ab",
+        "classification": "audit_bucket",
+        "matchedBy": "none",
+        "reason": "legacy title hint is not independently corroborated by DOI/arXiv"
+      },
+      {
+        "legacyReferenceId": "dac51b31-a9e4-4a2c-b114-0552a150c80b",
+        "referenceEntryId": "35ab30bd-7238-411a-862b-2d61abbe1994",
+        "matchedPaperId": "3e2528dc-1547-4131-8307-3ab9524efad5",
+        "matchedPaperTitle": "Video-R1: Reinforcing Video Reasoning in MLLMs",
+        "matchedPaperEntityId": null,
+        "classification": "audit_bucket",
+        "matchedBy": "none",
+        "reason": "matched paper lacks entityId and strong identifier corroboration"
+      },
+      {
+        "legacyReferenceId": "c1675e8d-ca6b-4f2a-a9ac-167ff07fb930",
+        "referenceEntryId": "5bc475db-95d9-42f2-a1d0-dbe199ce568e",
+        "matchedPaperId": "cca2e353-2d29-4c91-a2f7-95a06e34ac70",
+        "matchedPaperTitle": "DeepSeek-R1: Incentivizing Reasoning Capability in LLMs via Reinforcement Learning",
+        "matchedPaperEntityId": "45295319-1287-44ab-8518-bd98da3c13f2",
+        "classification": "audit_bucket",
+        "matchedBy": "none",
+        "reason": "legacy title hint is not independently corroborated by DOI/arXiv"
+      },
+      {
+        "legacyReferenceId": "ad56fc7b-02da-4352-b3fc-cce38b3d0c72",
+        "referenceEntryId": "d8c5d7d3-8494-42c3-b050-437c1d741982",
+        "matchedPaperId": "0611e406-e5ff-4d9b-b5ea-1382ec3dd832",
+        "matchedPaperTitle": "Visual-RFT: Visual Reinforcement Fine-Tuning",
+        "matchedPaperEntityId": null,
+        "classification": "audit_bucket",
+        "matchedBy": "none",
+        "reason": "matched paper lacks entityId and strong identifier corroboration"
+      },
+      {
+        "legacyReferenceId": "76a32f71-7274-4925-a9ef-af5eac00eb27",
+        "referenceEntryId": "948636a3-2356-4fb1-b573-df9d3356bba3",
+        "matchedPaperId": "af4a9585-8c5f-4e70-bdf9-13cbfb20207a",
+        "matchedPaperTitle": "Tensor Product Attention Is All You Need",
+        "matchedPaperEntityId": null,
+        "classification": "audit_bucket",
+        "matchedBy": "none",
+        "reason": "matched paper lacks entityId and strong identifier corroboration"
+      }
+    ]
+  },
+  "targetPaperHydrationSet": [
+    {
+      "paperId": "69fb4006-ccd3-48a6-b983-8dfcf2489b4a",
+      "title": "Is DPO Superior to PPO for LLM Alignment? A Comprehensive Study",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "be6e330f-4a4b-4ebc-944c-0b0ce30be977",
+      "title": "Natural Emergent Misalignment from Reward Hacking in Production RL",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "f6ae06cd-ab2c-43d3-aa9a-c4f65e15e838",
+      "title": "Harnessing LLM to Attack LLM-Guarded Text-to-Image Models",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "325813eb-b70d-4ba4-aaee-1abf781a4bfc",
+      "title": "MEDUSA: Simple LLM Inference Acceleration Framework with Multiple Decoding Heads",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "f8ca0248-7a4d-4150-babb-05b300f43a6b",
+      "title": "Longformer: The Long-Document Transformer",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "cceb0d3b-cbff-421c-9b56-c77caca39592",
+      "title": "On the Possibilities of AI-Generated Text Detection",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "05f5036d-12ff-48b1-8c8d-4b18395846d1",
+      "title": "Graph-based genome alignment and genotyping with HISAT2 and HISAT-genotype",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "82fef9c3-c92a-4153-9a05-a8cd23cf4e79",
+      "title": "The Entropy Mechanism of Reinforcement Learning for Reasoning Language Models",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "29b6487e-d8d1-44d3-89f3-10d0f01afbfa",
+      "title": "Stable Reinforcement Learning for Efficient Reasoning",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "c73823d8-32c8-424d-b679-9b73d19d2888",
+      "title": "Reward Shaping to Mitigate Reward Hacking in RLHF",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "bfbe3757-70c7-4e0b-a832-2f3a541ba4df",
+      "title": "Regularized Best-of-N Sampling with Minimum Bayes Risk Objective for Language Model Alignment",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "fd5ddc75-1fa7-4192-9439-f97972401688",
+      "title": "Zero-shot Cross-Lingual Transfer for Synthetic Data Generation in Grammatical Error Detection",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "9af82422-7d5a-433a-b48e-fd332431bfbf",
+      "title": "Scaling Laws for Reward Model Overoptimization",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "af4a9585-8c5f-4e70-bdf9-13cbfb20207a",
+      "title": "Tensor Product Attention Is All You Need",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "4369dc5d-2c14-40a3-a9b4-741650873f40",
+      "title": "Reinforcement Learning for Reasoning in Small LLMs: What Works and What Doesn't",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "c1122bae-a960-417b-a3d0-4a0ca6df4390",
+      "title": "SynSciPass: detecting appropriate uses of scientific text generation",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "9dba8a3f-b3b6-4521-a760-19d0a1b32e07",
+      "title": "Turning Trash into Treasure: Accelerating Inference of Large Language Models with Token Recycling",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "a155e50c-34ca-4aa2-b7f8-8b715170c40e",
+      "title": "STEER: Unified Style Transfer with Expert Reinforcement",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "2d19f534-c611-4be6-abd9-7c2b5c4a3574",
+      "title": "Robust Reinforcement Learning from Human Feedback for Large Language Models Fine-Tuning",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "f995176d-ce4d-438d-a83a-4d0d91e84363",
+      "title": "ORPO: Monolithic Preference Optimization without Reference Model",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "8efdaeba-bb64-4a6f-bb0d-c5a52131a77b",
+      "title": "Secrets of RLHF in Large Language Models Part II: Reward Modeling",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "4a4b1bf0-a9b8-4c18-abfd-2d1a75e5a7d7",
+      "title": "Scaling Laws for Reward Model Overoptimization in Direct Alignment Algorithms",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "2271189b-9871-448f-beef-f23df1a6a8c5",
+      "title": "On the Limited Generalization Capability of the Implicit Reward Model Induced by Direct Preference Optimization",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "9f7c569e-86d2-4ed2-825d-6930f58d80c2",
+      "title": "Quest: Query-Aware Sparsity for Efficient Long-Context LLM Inference",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "889bf3f6-2b25-4ca0-8f61-ab29ca717b1b",
+      "title": "OpenAssistant Conversations - Democratizing Large Language Model Alignment",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "3e2528dc-1547-4131-8307-3ab9524efad5",
+      "title": "Video-R1: Reinforcing Video Reasoning in MLLMs",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "0611e406-e5ff-4d9b-b5ea-1382ec3dd832",
+      "title": "Visual-RFT: Visual Reinforcement Fine-Tuning",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "87151e11-80a5-497d-a748-1c601b35f29c",
+      "title": "Language Models (Mostly) Know What They Know",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "41207be5-b14a-4387-80cf-b5dd7db435c8",
+      "title": "Rich Human Feedback for Text-to-Image Generation",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "818d6a68-fe9a-4dfc-b22a-d007ce9fba4b",
+      "title": "Towards an AI co-scientist",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "073aac74-75f8-4702-8393-16069e8462f3",
+      "title": "WARM: On the Benefits of Weight Averaged Reward Models",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "8ad0ec4c-fe1d-42cf-9360-b18eb871d031",
+      "title": "Group Relative Policy Optimization for Text-to-Speech with Large Language Models",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "8b0e7e54-33c8-4e9d-b0d7-cbde0a1fabfe",
+      "title": "Uncertainty-Penalized Reinforcement Learning from Human Feedback with Diverse Reward LoRA Ensembles",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "63986c9b-8c13-4a6d-8d39-b98fc44f70c9",
+      "title": "Iterative Data Smoothing: Mitigating Reward Overfitting and Overoptimization in RLHF",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "5f886153-a609-4529-a5da-599aceca88cf",
+      "title": "Spotting LLMs With Binoculars: Zero-Shot Detection of Machine-Generated Text",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "824ab551-8555-4fb4-ba4d-78fbaf15bab0",
+      "title": "RADAR: Robust AI-Text Detection via Adversarial Learning",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "2757db51-a647-48a9-a326-cc09f8bc7425",
+      "title": "It Takes Two: Your GRPO Is Secretly DPO",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "aeaad8a0-b6bd-42dc-964c-69391fb9f663",
+      "title": "Reformer: The Efficient Transformer",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "e29d187d-a32a-485c-95bd-44077571975d",
+      "title": "YaRN: Efficient Context Window Extension of Large Language Models",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "f060cdb5-a16a-4b2b-92d5-7ab3d14bc24d",
+      "title": "Unsupervised Text Style Transfer via LLMs and Attention Masking with Multi-way Interactions",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "dbe50aa0-5e03-45a4-8f93-0078f7d43e44",
+      "title": "SemEval-2024 Task 8: Multidomain, Multimodel and Multilingual Machine-Generated Text Detection",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "2f142b35-e557-46c6-8b4c-6f9cedf64d20",
+      "title": "Reinforcing the Diffusion Chain of Lateral Thought with Diffusion Language Models",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "46cc9d09-0a17-4cd9-9e33-6fe14bec1226",
+      "title": "Learning to Evade Static PE Machine Learning Malware Models via Reinforcement Learning",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "5de551db-6f35-4d89-9595-4d9cc494bd63",
+      "title": "Reducing Transformer Key-Value Cache Size with Cross-Layer Attention",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "a82dbe46-ec10-4d30-b7a8-e519cc0ce401",
+      "title": "Text Detoxification using Large Pre-trained Neural Models",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "b3eab06a-95d7-4639-bf58-a33d3e53c80d",
+      "title": "PEGASUS: Pre-training with Extracted Gap-sentences for Abstractive Summarization",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "df3cc504-2680-47d9-aa10-72eef4ab54fc",
+      "title": "LuxVeri at GenAI Detection Task 1: Inverse Perplexity Weighted Ensemble for Robust Detection of AI-Generated Text across English and Multilingual Contexts",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "082c39a4-1e02-4004-b81b-d417ddc5fe3a",
+      "title": "Stylometric Detection of AI-Generated Text in Twitter Timelines",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "d3749bc6-e751-47ca-a6f2-1f2557d85565",
+      "title": "The Word Entropy of Natural Languages",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "7b8621d4-73ab-4590-9915-10ac5e1f2115",
+      "title": "RLNVR: Reinforcement Learning from Non-Verified Real-World Rewards",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "ceccdcd1-7496-49ad-abf0-04b30bfde30c",
+      "title": "Reinforcement Learning Based Text Style Transfer without Parallel Training Corpus",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "a06093bd-35f4-44fc-a0e8-54383d74e9ab",
+      "title": "Technical Report on the Pangram AI-Generated Text Classifier",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "2469041d-3e51-472f-bca7-ce5b6874ac63",
+      "title": "SAC3: Reliable Hallucination Detection in Black-Box Language Models via Semantic-aware Cross-check Consistency",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "ad9cf976-baec-4e94-9812-98e2c1b592ff",
+      "title": "Unsupervised Token-level Hallucination Detection from Summary Generation By-products",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "2728a1fd-b23a-4ad2-b469-b08cfa52de94",
+      "title": "ImageBind-LLM: Multi-modality Instruction Tuning",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "afda6fd7-12eb-4337-b418-9536dceffa50",
+      "title": "ResearchAgent: Iterative Research Idea Generation over Scientific Literature with Large Language Models",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "39ec2789-b2dd-4e66-9294-bce887ae8d92",
+      "title": "PyramidInfer: Pyramid KV Cache Compression for High-throughput LLM Inference",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "9b440dca-c37c-4e5d-bc97-4f05a7748068",
+      "title": "The Entropy of Words—Learnability and Expressivity across More than 1000 Languages",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "0eeab53c-d66e-4ef9-a757-b144f24ceeb2",
+      "title": "TempParaphraser: \"Heating Up\" Text to Evade AI-Text Detection through Paraphrasing",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "eab0da62-1883-48e6-b88c-706afbe97107",
+      "title": "An Empirical Study of AI-Generated Text Detection Tools",
+      "entityId": null,
+      "canHydrate": true,
+      "identifierTypes": [
+        "arxiv"
+      ]
+    },
+    {
+      "paperId": "387acb1b-7ad2-42f1-b1da-be01a3bb1281",
+      "title": "Token-level Direct Preference Optimization",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "bf9b83ea-e94f-4b73-b886-5cecc9434715",
+      "title": "Hierarchical Transformers for Long Document Classification",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "5b5a8ebf-16af-40f0-a57d-343a56a13822",
+      "title": "Provable Robust Watermarking for AI-Generated Text",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "bc215cd8-1069-43e8-84fa-7e435ae78bde",
+      "title": "On Learning Text Style Transfer with Direct Rewards",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "50e5b4c4-84df-47cb-91e1-c9ec3c67f2be",
+      "title": "Unsupervised Text Style Transfer with Padded Masked Language Models",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "9d7e5475-c541-42e5-af84-dff75bfe86f7",
+      "title": "Plan-based Reward Shaping for Reinforcement Learning",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "92a2f42e-2a88-42bc-978a-17af0b9f5cd5",
+      "title": "Multi-Style Transfer with Discriminative Feedback on Disjoint Corpus",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "b892924e-837d-4df0-a3ac-be6af041d6ad",
+      "title": "LongCoder: A Long-Range Pre-trained Language Model for Code Completion",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "1ea74f87-d4c5-42dd-affe-2545c0774bfa",
+      "title": "SpAtten: Efficient Sparse Attention Architecture with Cascade Token and Head Pruning",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "cef14a19-59a1-4cdf-90e8-7e9f8a67f7bb",
+      "title": "Squeezed Attention: Accelerating Long Context Length LLM Inference",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "24d28a92-96ee-4bfd-b11d-fa045f5337fa",
+      "title": "SparQ Attention: Bandwidth-Efficient LLM Inference",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "1acc230c-d5c1-4a3b-9ba2-729cc4d2ba99",
+      "title": "RewardBench 2: Advancing Reward Model Evaluation",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "01e28a27-7ae9-46a7-b760-caa7cf858210",
+      "title": "Direct Preference Optimization: Your Language Model is Secretly a Reward Model",
+      "entityId": null,
+      "canHydrate": true,
+      "identifierTypes": [
+        "arxiv"
+      ]
+    },
+    {
+      "paperId": "c4b23092-a9b1-4325-b5d8-1d70a42b29f0",
+      "title": "On Multi-Token Prediction for Efficient LLM Inference",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "92f8d696-7ace-49ac-8c9b-021741e943dc",
+      "title": "Speculative Decoding via Early-exiting for Faster LLM Inference with Thompson Sampling Control Mechanism",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "eb8b2c9a-a7bd-4a1e-9468-22abf5f39781",
+      "title": "SALO: An Efficient Spatial Accelerator Enabling Hybrid Sparse Attention Mechanisms for Long Sequences",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "b578b825-c21e-435f-bace-dfd452f108bb",
+      "title": "RRHF: Rank Responses to Align Language Models with Human Feedback without tears",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "184391e0-359e-4a87-843e-4f4a800c21bd",
+      "title": "Hierarchical Context Pruning: Optimizing Real-World Code Completion with Repository-Level Pretrained Code LLMs",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "b79c5720-34f8-4549-99bc-5096493da16d",
+      "title": "Quark: Controllable Text Generation with Reinforced [Un]learning",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "a4347ee9-8594-4a72-8a9f-48cf5c767ac3",
+      "title": "Random-Access Infinite Context Length for Transformers",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "07783628-4714-43c5-96f2-a13246d63bfb",
+      "title": "RAID: A Shared Benchmark for Robust Evaluation of Machine-Generated Text Detectors",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "8066b382-1cf2-4737-aa6f-b5774e7396e9",
+      "title": "Reward Model Ensembles Help Mitigate Overoptimization",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "450c85a7-6c92-49bd-be10-b1282160f11a",
+      "title": "MULTITuDE: Large-Scale Multilingual Machine-Generated Text Detection Benchmark",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "2d3e888a-d3c0-40ec-ac0a-a0f03c1489d0",
+      "title": "Uncertainty Quantification for Large Language Model Reward Learning under Heterogeneous Human Feedback",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "b399730f-99b9-4efe-89bb-469550a4acca",
+      "title": "Unsupervised Contextual Paraphrase Generation using Lexical Control and Reinforcement Learning",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "ad21b7a3-5e86-4653-b9ea-ab587ee8e8a2",
+      "title": "Neural Paraphrase Generation using Transfer Learning",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "f72179f0-bb58-46aa-8f8f-9497958053cd",
+      "title": "KVQuant: Towards 10 Million Context Length LLM Inference with KV Cache Quantization",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "513168a1-f6ff-42ef-941e-abf1ac35890b",
+      "title": "Sparse VideoGen: Accelerating Video Diffusion Transformers with Spatial-Temporal Sparsity",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "46bdee64-bca4-418d-8765-9b71b4a9834b",
+      "title": "NOLIMA: Long-Context Evaluation Beyond Literal Matching",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "e02f5c99-1b07-43b3-8cb6-6966336f65b9",
+      "title": "TOBLEND: Token-Level Blending With an Ensemble of LLMs to Attack AI-Generated Text Detection",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "75616331-3886-492d-a8f5-e51d54938b4f",
+      "title": "Paraphrasing evades detectors of AI-generated text, but retrieval is an effective defense",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "8a315382-2c0c-4e16-be9c-ed26c0be1dc8",
+      "title": "Hidding the Ghostwriters: An Adversarial Evaluation of AI-Generated Student Essay Detection",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "e6d115f0-4f9b-495c-9732-3add0c0f8ab7",
+      "title": "Humanizing Machine-Generated Content: Evading AI-Text Detection through Adversarial Attack",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "eb258dd5-e74d-4429-b890-ac868ce07438",
+      "title": "Q-Insight: Understanding Image Quality via Visual Reinforcement Learning",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "ccdf64c3-1cd4-45ca-9aba-fde6b0410456",
+      "title": "SQL-R1: Training Natural Language to SQL Reasoning Model By Reinforcement Learning",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "f2c2e7d6-b87c-4ee2-bbe3-d9e0050d3800",
+      "title": "OpenTuringBench: An Open-Model-based Benchmark and Framework for Machine-Generated Text Detection and Attribution",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "6f700542-98a3-48bc-bef7-95651d173f8c",
+      "title": "Turning Up the Heat: Min-p Sampling for Creative and Coherent LLM Outputs",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "b48165c0-eef6-4fc6-b194-4ec8b9f3c642",
+      "title": "Machine-generated text detection prevents language model collapse",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "6497a8e6-e48e-4edb-b5e9-8197223b899f",
+      "title": "M4: Multi-Generator, Multi-Domain, and Multi-Lingual Black-Box Machine-Generated Text Detection",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "27da661c-d885-4324-bae4-67d9589add86",
+      "title": "HiAgent: Hierarchical Working Memory Management for Solving Long-Horizon Agent Tasks with Large Language Model",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "2b6973f6-fe07-4ee6-bf4c-0ffc03d3202a",
+      "title": "MLAgentBench: Evaluating Language Agents on Machine Learning Experimentation",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "49c20fa7-1443-4e10-b865-160dd0663540",
+      "title": "Is Best-of-N the Best of Them? Coverage, Scaling, and Optimality in Inference-Time Alignment",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "f7958d91-d702-4240-9847-bb459199a87a",
+      "title": "Soft Best-of-n Sampling for Model Alignment",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "7f32c008-2fb3-4c9a-b40a-6b8c07edea3d",
+      "title": "Multi-Dimensional Optimization for Text Summarization via Reinforcement Learning",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "ee656752-fd12-4974-9dd6-3b6399d53a11",
+      "title": "MAGE: Machine-generated Text Detection in the Wild",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "d84d88e3-7651-46ea-84ba-90389e008086",
+      "title": "MultiSocial: Multilingual Benchmark of Machine-Generated Text Detection of Social-Media Texts",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "c1d7432c-f2dd-46d9-9462-4a2dfbf259e4",
+      "title": "SPC: Evolving Self-Play Critic via Adversarial Games for LLM Reasoning",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "7b37ea8f-b98f-41ad-a8d5-e81a7ead97b1",
+      "title": "Simple linear attention language models balance the recall-throughput tradeoff",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "2ace6885-c0d6-4044-8aa5-5b8c2edf91a9",
+      "title": "Training-Free Long-Context Scaling of Large Language Models",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "4f39612e-4f0c-442c-b7ef-eedfadb738bd",
+      "title": "Hopfield Networks Is All You Need",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "d69711d4-0df2-443c-9f10-4e94787ce8a0",
+      "title": "Simple and Effective Masked Diffusion Language Models",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "b7578f87-613e-4065-b6bc-43128791da63",
+      "title": "Understanding the Effects of Human-written Paraphrases in LLM-generated Text Detection",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "5292eddb-0756-4e18-a7d9-af6df9cf4eec",
+      "title": "Native Sparse Attention: Hardware-Aligned and Natively Trainable Sparse Attention",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "281e6a6a-d26b-4c86-9146-775a1afb322b",
+      "title": "Who Wrote This? The Key to Zero-Shot LLM-Generated Text Detection Is GECSCORE",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "e6109424-f294-4b1f-b916-a2aa1370f5fb",
+      "title": "LLM-as-a-Coauthor: Can Mixed Human-Written and Machine-Generated Text Be Detected?",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "c6ffc8a9-9b55-4466-92ed-081850d80d5d",
+      "title": "Revealing Weaknesses in Text Watermarking Through Self-Information Rewrite Attacks",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "889c2787-ed88-4377-9e71-bdae56f55778",
+      "title": "Vision-R1: Incentivizing Reasoning Capability in Multimodal Large Language Models",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "39238aa7-d0bb-48bb-a993-8844dae75525",
+      "title": "Hypothesis Generation with Large Language Models",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "816fe4af-3f39-4878-a3ac-a7b19177d4d5",
+      "title": "RM-R1: Reward Modeling as Reasoning",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "d29dffb9-220f-416d-9056-4365a7f24ead",
+      "title": "Rewarded soups: towards Pareto-optimal alignment by interpolating weights fine-tuned on diverse rewards",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "59f962dd-60df-439f-9312-8c4ec76349d3",
+      "title": "Learning to Watermark LLM-generated Text via Reinforcement Learning",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "15e48f11-9da2-40b7-9609-2aa495bf9eeb",
+      "title": "Large Language Models can be Guided to Evade AI-Generated Text Detection",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "ec234d1a-9539-4862-baf8-1cd93bd79154",
+      "title": "Paraphrasing Attack Resilience of Various AI-Generated Text Detection Methods",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "b3cf4c0e-a43f-42ae-befa-b9b692814983",
+      "title": "RS-DPO: A Hybrid Rejection Sampling and Direct Preference Optimization Method for Alignment of Large Language Models",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "d5594311-6bdf-4b3b-aa7a-43d86f7cb0ad",
+      "title": "Statistical Rejection Sampling Improves Preference Optimization",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "a8158238-89d1-4ce1-a011-56e8bbc0030a",
+      "title": "The AI Scientist-v2: Workshop-Level Automated Scientific Discovery via Agentic Tree Search",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "3c5c9e90-f1d7-44a2-94b3-31c664bd1fed",
+      "title": "Kosmos: An AI Scientist for Autonomous Discovery",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "9cf5b398-55fb-4c47-aa62-8305df405b0b",
+      "title": "RLPROMPT: Optimizing Discrete Text Prompts with Reinforcement Learning",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "ddedbfe0-d2e1-4110-87dd-e3d3c7998d44",
+      "title": "Kernel Language Entropy: Fine-grained Uncertainty Quantification for LLMs from Semantic Similarities",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "49622d21-05b3-4eae-8456-302c77b14b94",
+      "title": "Group Relative Policy Optimization for Image Captioning",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "e5aaed80-b20e-4dd9-ab4e-6a5dac8da41d",
+      "title": "Self-Evaluation Guided Beam Search for Reasoning",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "6fd375f6-e77c-4965-9956-552a92516750",
+      "title": "Leftover Lunch: Advantage-Based Offline Reinforcement Learning for Language Models",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "40d1eb92-4aba-46e0-9c9e-78af9e85a1f0",
+      "title": "Simplify RLHF as Reward-Weighted SFT: A Variational Method",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "68f2ae34-aaac-4f03-b0de-1ba17ba76d07",
+      "title": "LLM Post-Training: A Deep Dive into Reasoning Large Language Models",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "a792107b-b083-487b-851e-aca425d316c0",
+      "title": "Token Prediction as Implicit Classification to Identify LLM-Generated Text",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "c1d47b19-c8d1-4269-a0f0-3bc9fcc45375",
+      "title": "Goal-Directed Story Generation: Augmenting Generative Language Models with Reinforcement Learning",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "e2bae4ce-0aeb-4b2b-a44f-7078c5850ae4",
+      "title": "How You Prompt Matters! Even Task-Oriented Constraints in Instructions Affect LLM-Generated Text Detection",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "f7da87f9-510e-4f12-9713-53f38ba29625",
+      "title": "SWE-bench: Can Language Models Resolve Real-World GitHub Issues?",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "61bd154e-7866-493f-85b0-76fc1be944df",
+      "title": "Spurious Correlations in Reference-Free Evaluation of Text Generation",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "a8a85de1-4688-4c86-9ede-01ac17db4f5b",
+      "title": "Imitate Before Detect: Aligning Machine Stylistic Preference for Machine-Revised Text Detection",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "c4b371b4-7a8f-4a43-9bf9-135316dc0406",
+      "title": "Learning to Rewrite: Generalized LLM-Generated Text Detection",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "9fe631e4-cc4d-410d-9842-a636aee713a3",
+      "title": "PCGRLLM: Large Language Model-Driven Reward Design for Procedural Content Generation Reinforcement Learning",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "ba205744-5bd2-4563-9558-f7ad7a39da28",
+      "title": "Part I: Tricks or Traps? A Deep Dive into RL for LLM Reasoning",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "1685f15b-65df-4061-8438-1bdfcc7543c4",
+      "title": "β-DPO: Direct Preference Optimization with Dynamic β",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "0115d433-e378-4e29-be72-f237dc4991f8",
+      "title": "ZEP: A TEMPORAL KNOWLEDGE GRAPH ARCHITECTURE FOR AGENT MEMORY",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "f9f55ef1-5928-4749-a0ec-d864d2b61244",
+      "title": "MEM-α: LEARNING MEMORY CONSTRUCTION VIA REINFORCEMENT LEARNING",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "a9fbade5-17de-4edc-abbe-e695f234dd81",
+      "title": "Robust AI-Generated Text Detection by Restricted Embeddings",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "405d0c65-a8e4-497f-9102-a730f80b0a6d",
+      "title": "Okapi: Instruction-tuned Large Language Models in Multiple Languages with Reinforcement Learning from Human Feedback",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "887f3df0-926d-443b-973e-5db275b9c45a",
+      "title": "The Flan Collection: Designing Data and Methods for Effective Instruction Tuning",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "140040fa-db08-48f7-ae4c-c18c827497c2",
+      "title": "RAIDAR: Generative AI Detection via Rewriting",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "8c0b9295-bd53-4e96-8f05-c9c97bbbd410",
+      "title": "Resolving the Identity Crisis in Text-to-Image Generation",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "3ca8c264-5f97-4917-9fe2-ec2daad33ffb",
+      "title": "Taming Preference Mode Collapse via Directional Decoupling Alignment in Diffusion Reinforcement Learning",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "ea070948-34fa-42b2-97f5-eec286a644bd",
+      "title": "MapReduce LoRA: Advancing the Pareto Front in Multi-Preference Optimization for Generative Models",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "c7e3d1c2-8c06-4f64-bd0b-1390324a4ef4",
+      "title": "RubricRL: Simple Generalizable Rewards for Text-to-Image Generation",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "65e1709d-91bb-4b1b-b2ba-61c54cfeff94",
+      "title": "OPENTHINKIMG: Learning to Think with Images via Visual Tool Reinforcement Learning",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "359de481-489a-40ef-944a-5b76775f8132",
+      "title": "Zero-Shot Detection of LLM-Generated Text using Token Cohesiveness",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "0defd31e-32d5-4c4e-90fc-777b6fddce9a",
+      "title": "J-Guard: Journalism Guided Adversarially Robust Detection of AI-generated News",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "57ba09db-5f1f-48ca-9a75-1528d9769a58",
+      "title": "Robust Preference Optimization through Reward Model Distillation",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "11b1f7c7-1cc3-4aca-a19c-a99152017519",
+      "title": "Unsupervised Evaluation Metrics and Learning Criteria for Non-Parallel Textual Transfer",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "eaec2466-f7e1-4dd1-ad9c-9040f308fee3",
+      "title": "Preference Learning with Lie Detectors can Induce Honesty or Evasion",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "dcff9e84-3816-4d1a-a1d1-ac1f67ab45ce",
+      "title": "Kangaroo: Lossless Self-Speculative Decoding for Accelerating LLMs via Double Early Exiting",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "9ec470c6-d4b8-46ed-bfc6-f8dc74ad85fb",
+      "title": "Hierarchical Text Classification: Fine-tuned GPT-2 vs BERT-BiLSTM",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "7fbccb1c-8378-4ef5-87ff-52e19bd64bd0",
+      "title": "k-SEMSTAMP: A Clustering-Based Semantic Watermark for Detection of Machine-Generated Text",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "e8f71f51-e64c-47ab-a742-695b3a1beb72",
+      "title": "How Well Do LLMs Imitate Human Writing Style?",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "df2b3a9d-a369-40e3-94ae-1d6a2c6718bb",
+      "title": "Provably Mitigating Overoptimization in RLHF: Your SFT Loss is Implicitly an Adversarial Regularizer",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "8652f164-5327-47f5-b481-71fb7176263e",
+      "title": "Lightweight Robust Direct Preference Optimization",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "cd08e945-c52e-422f-a53f-2462d0540aa5",
+      "title": "Logic-RL: Unleashing LLM Reasoning with Rule-Based Reinforcement Learning",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "e5e3df03-629a-46e0-aed5-93297d88b9a2",
+      "title": "Value Augmented Sampling for Language Model Alignment and Personalization",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "d07e257f-ac90-4161-988c-d314a30bd559",
+      "title": "Language Model Alignment with Elastic Reset",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "5fb7cab9-cac5-4680-b5dc-4fbdad8aec0a",
+      "title": "The Unreasonable Effectiveness of Entropy Minimization in LLM Reasoning",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "e37ea296-8b84-4dab-9dde-697f506d9be7",
+      "title": "Never Lost in the Middle: Mastering Long-Context Question Answering with Position-Agnostic Decompositional Training",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "1b372e54-c9f3-4f05-ab43-deb16c2d8030",
+      "title": "Group Sequence Policy Optimization",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "f33ce98d-f5e2-49c8-8409-c0550378ff69",
+      "title": "Layer-Wise Pruning of Transformer Attention Heads for Efficient Language Modeling",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "1fffaeba-af75-492f-8b21-7a9d40757aea",
+      "title": "LLM-Detector: Improving AI-Generated Chinese Text Detection with Open-Source LLM Instruction Tuning",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "d8e0dce4-5821-413f-8468-0665f04cc70e",
+      "title": "Long Code Arena: a Set of Benchmarks for Long-Context Code Models",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "7787d55f-0320-4b68-b37d-537feda00404",
+      "title": "MJ-BENCH: Is Your Multimodal Reward Model Really a Good Judge for Text-to-Image Generation?",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "00118960-d129-4cb2-882e-5ab885edca32",
+      "title": "RetrievalAttention: Accelerating Long-Context LLM Inference via Vector Retrieval",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "61cea0bb-bb39-41be-97f3-8a86dbb97208",
+      "title": "KL-Regularized Reinforcement Learning Is Designed to Mode Collapse",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "81440bd3-762c-470f-9552-3f5b55e0d4ad",
+      "title": "Towards a Unified View of Large Language Model Post-Training",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "7e03c93d-9d30-4dad-9497-f917a7b8b64a",
+      "title": "wd1: Weighted Policy Optimization for Reasoning in Diffusion Language Models",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "dfcad40b-4585-4f08-aa5b-d8362f815295",
+      "title": "MGT-Prism: Enhancing Domain Generalization for Machine-Generated Text Detection via Spectral Alignment",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "2d30347f-c361-4f95-9746-4671222a2356",
+      "title": "Training-Free LLM-Generated Text Detection by Mining Token Probability Sequences",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "5adda086-18bf-43fa-8905-82f5446b81cd",
+      "title": "Layer by Layer: Uncovering Hidden Representations in Language Models",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "37b153c1-36a7-42cf-8797-5b6ba4ccc49d",
+      "title": "On the Algorithmic Bias of Aligning Large Language Models with RLHF: Preference Collapse and Matching Regularization",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "c7ab7901-a662-490c-88d4-6403202c4a6d",
+      "title": "Segment Policy Optimization: Effective Segment-Level Credit Assignment in RL for Large Language Models",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "9db00946-7d2c-4239-9c88-81c1423376fe",
+      "title": "Multi-Objective Preference Optimization: Improving Human Alignment of Generative Models",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "fa1258c5-5047-4661-ad5f-ff72e2b1a686",
+      "title": "Panacea: Pareto Alignment via Preference Adaptation for LLMs",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "23e102d2-305e-4910-bceb-f5ac746272c9",
+      "title": "LoCoBench: A Benchmark for Long-Context Large Language Models in Complex Software Engineering",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "d8d5f8ee-6471-49fe-ab84-0f536743e812",
+      "title": "RepoQA: Evaluating Long Context Code Understanding",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "fa9f5937-201a-4f04-a14a-40a5ca429491",
+      "title": "VideoScore2: Think Before You Score in Generative Video Evaluation",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "2f4a3b07-8455-48e4-b69a-9f3b08254f86",
+      "title": "MagicMirror: A Large-Scale Dataset and Benchmark for Fine-Grained Artifacts Assessment in Text-to-Image Generation",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "ccb248bf-95b0-40ef-a825-33cbeb63c5f7",
+      "title": "Pareto Set Learning for Multi-Objective Reinforcement Learning",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "43b537c9-c614-40ed-81bc-1e997fd1f207",
+      "title": "Jointly Reinforcing Diversity and Quality in Language Model Generations",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "245d70ad-867a-494b-a28f-f5af6b22cabd",
+      "title": "Vulnerabilities in AI-generated Image Detection: The Challenge of Adversarial Attacks",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "7b0d8c15-2a51-421a-bf92-fb7f641b0ebc",
+      "title": "Group Robust Preference Optimization in Reward-free RLHF",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "f42e8e7a-6742-435b-ae1d-244418bbaf06",
+      "title": "Optimizing Adaptive Attacks against Watermarks for Language Models",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "d61306f2-e071-48c3-bdf4-8728233963c7",
+      "title": "Semantic Entropy Probes: Robust and Cheap Hallucination Detection in LLMs",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "bb1d7a30-b3e5-44fc-81e5-e26d5ce0ff01",
+      "title": "Learned Hallucination Detection in Black-Box LLMs using Token-level Entropy Production Rate",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "68de607e-028a-4eff-a01d-3c03fceafc90",
+      "title": "Sliding Window Attention Training for Efficient Large Language Models",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "d053c3d9-e277-41da-b83b-fb70694e5c47",
+      "title": "Safe RLHF-V: Safe Reinforcement Learning from Multi-modal Human Feedback",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "ce3bb19d-198c-4439-a90b-4541a3b0d06b",
+      "title": "Reward-Augmented Decoding: Efficient Controlled Text Generation With a Unidirectional Reward Model",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "fcc019f3-4016-4e12-9ace-24206c1e635a",
+      "title": "Hardware-Efficient Attention for Fast Decoding",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "49b5da03-7356-4a8c-8a06-31ebca1c2354",
+      "title": "Towards Economical Inference: Enabling DeepSeek's Multi-Head Latent Attention in Any Transformer-based LLMs",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "90519ac7-e971-42b3-867d-85b9d35d26ea",
+      "title": "Reinforcement Learning Outperforms Supervised Fine-Tuning: A Case Study on Audio Question Answering",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "98c9c170-89d2-4e94-92a5-88890d5a497a",
+      "title": "Seedance 1.0: Exploring the Boundaries of Video Generation Models",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "f3ce2ee8-889a-49fc-b855-635df5002205",
+      "title": "Learning a Pessimistic Reward Model in RLHF",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "efe0a1a5-b6a1-4f9c-a1a3-2d9df5946c04",
+      "title": "New Evaluation Metrics Capture Quality Degradation due to LLM Watermarking",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "e96b7d8b-65f4-4c61-a0ca-76622a99a454",
+      "title": "Revisiting Replay and Gradient Alignment for Continual Pre-Training of Large Language Models",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "8b1efe9d-db85-44dc-b423-9f3c5dc94ee7",
+      "title": "Specializing Smaller Language Models towards Multi-Step Reasoning",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "27b2cefe-62c7-4735-9da9-acfecaf7f313",
+      "title": "Think Together and Work Better: Combining Humans' and LLMs' Think-Aloud Outcomes for Effective Text Evaluation",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "29412285-c878-4576-9258-221e6c364037",
+      "title": "MEDEC: A Benchmark for Medical Error Detection and Correction in Clinical Notes",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "3c20709d-a375-4132-996b-7e202ff5c333",
+      "title": "Parrot: Pareto-optimal Multi-Reward Reinforcement Learning Framework for Text-to-Image Generation",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "8a4f5e9d-30e4-40d1-bae4-94cfee7f397e",
+      "title": "VinePPO: Accurate Credit Assignment in RL for LLM Mathematical Reasoning",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "26e2d84e-c2ac-4c75-826e-c9107117b289",
+      "title": "Geometric-Mean Policy Optimization",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "dd995629-be11-4d8d-8290-c95d1655d8fe",
+      "title": "REPOFORMER: Selective Retrieval for Repository-Level Code Completion",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "c405d1bb-2ea3-4546-a2e7-326d52ebe991",
+      "title": "Ring Attention with Blockwise Transformers for Near-Infinite Context",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "dee12a18-9200-43f0-8f9f-55a59ee8917c",
+      "title": "RM-BENCH: Benchmarking Reward Models of Language Models with Subtlety and Style",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "8ef96d65-8afe-4e0c-9744-9c8150f689e6",
+      "title": "S-GRPO: Early Exit via Reinforcement Learning in Reasoning Models",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "79857d9f-bd6e-4591-81c7-b6d781289590",
+      "title": "Jointly Measuring Diversity and Quality in Text Generation Models",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "f546e682-0a52-4bef-8fc1-ffef3072c62e",
+      "title": "TGRPO: Fine-tuning Vision-Language-Action Model via Trajectory-wise Group Relative Policy Optimization",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "3b946102-6392-48fd-9355-aca32fcbecf4",
+      "title": "Teaching Large Language Models to Reason with Reinforcement Learning",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "6466f7d2-adc8-4713-9c68-ed2cf3cc6e8a",
+      "title": "Step-level Reward for Free in RL-based T2I Diffusion Model Fine-tuning",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "44e0e26f-f6cb-495e-b2e7-2e882bb3d8cc",
+      "title": "UniVG-R1: Reasoning Guided Universal Visual Grounding with Reinforcement Learning",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "360df01a-b238-4bd5-b5ce-1253c53f56b9",
+      "title": "T-Detect: Tail-Aware Statistical Normalization for Robust Detection of Adversarial Machine-Generated Text",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "d8720a4f-763f-40ef-a419-9874ff14a13c",
+      "title": "How Much Backtracking is Enough? Exploring the Interplay of SFT and RL in Enhancing LLM Reasoning",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "c2794a12-e320-4a60-ba60-e9c473356821",
+      "title": "Step-wise Adaptive Integration of Supervised Fine-tuning and Reinforcement Learning for Task-Specific LLMs",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "ac5183b9-b679-4e9e-a200-6c28457d8ca9",
+      "title": "SuperRL: Reinforcement Learning with Supervision to Boost Language Model Reasoning",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "46dada48-ebb9-4606-843f-469b34b9be42",
+      "title": "Learning to Optimize Multi-Objective Alignment Through Dynamic Reward Weighting",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "222c16de-8956-4ba9-90b8-4839b54b9fa5",
+      "title": "Revisiting Group Relative Policy Optimization: Insights into On-Policy and Off-Policy Training",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "83b3f54e-bbc4-4343-842a-b8d14af3a58b",
+      "title": "Poolingformer: Long Document Modeling with Pooling Attention",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "e2d257c0-8777-4af5-9b07-c410d7be2b45",
+      "title": "LLM2Vec: Large Language Models Are Secretly Powerful Text Encoders",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "a29dd3a5-c2d5-4438-aa7f-cc9093f54af3",
+      "title": "Scalable Multi-Robot Collaboration with Large Language Models: Centralized or Decentralized Systems?",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "2785fee6-8624-49bd-b3dc-c072e472d73a",
+      "title": "Reward-Guided Speculative Decoding for Efficient LLM Reasoning",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "fd935d3d-b371-41f4-99d8-532d92b40452",
+      "title": "RL Fine-Tuning Heals OOD Forgetting in SFT",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "3f5cbb10-3690-4053-9fe5-5beac119fe77",
+      "title": "R1-Code-Interpreter: LLMs Reason with Code via Supervised and Multi-Stage Reinforcement Learning",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "d02cf132-293f-4e11-90a6-bac84c8fd32d",
+      "title": "The Accuracy Paradox in RLHF: When Better Reward Models Don't Yield Better Language Models",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "9f395647-af81-43ad-a2d7-92239419c61d",
+      "title": "Voting or Consensus? Decision-Making in Multi-Agent Debate",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "27fe0442-a927-4c36-8e73-d09b49ac33b9",
+      "title": "Reinforcement Fine-Tuning Naturally Mitigates Forgetting in Continual Post-Training",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "e491f2dc-00a4-4a87-addf-3d799dcffeab",
+      "title": "SWIFT: On-the-Fly Self-Speculative Decoding for LLM Inference Acceleration",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "41eba1f8-847d-4f63-9b0f-d0d78839d084",
+      "title": "Self-Play with Execution Feedback: Improving Instruction-Following Capabilities of Large Language Models",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "2c21fa2f-accc-45bb-ba2c-8d75b646bc7a",
+      "title": "OneReward: Unified Mask-Guided Image Generation via Multi-Task Human Preference Learning",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "f287a96a-e83a-44ad-9b0d-981ba0bff63c",
+      "title": "KInIT at SemEval-2024 Task 8: Fine-tuned LLMs for Multilingual Machine-Generated Text Detection",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "b79807f8-0e3f-4fe0-84ab-9895cdf4ebcb",
+      "title": "SimPO: Simple Preference Optimization with a Reference-Free Reward",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "f04592bf-40c3-4299-b255-7e463009c4ec",
+      "title": "Spiffy: Multiplying Diffusion LLM Acceleration via Lossless Speculative Decoding",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "ebcf3b14-9696-40e7-b4d3-804911b303c6",
+      "title": "Self Speculative Decoding for Diffusion Large Language Models",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "a67a2b43-458d-450f-b5e8-a88003e5e8ac",
+      "title": "One-Minute Video Generation with Test-Time Training",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "14d64335-1a14-4a47-81fa-176a91e38e36",
+      "title": "Teaching Code LLMs to Use Autocompletion Tools in Repository-Level Code Generation",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "feca4247-8c60-465e-8fe5-e2931f48a0dc",
+      "title": "Noise-contrastive estimation: A new estimation principle for unnormalized statistical models",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "e92f32ed-17a8-4d50-93ce-a89d6f048d11",
+      "title": "LongVILA: Scaling Long-Context Visual Language Models for Long Videos",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "4e2ca8a9-4566-4e82-acee-cd20f671aafa",
+      "title": "Personalized Preference Fine-tuning of Diffusion Models",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "595fc5a0-c7e5-49a6-ae0d-404125c0beca",
+      "title": "Policy Filtration for RLHF to Mitigate Noise in Reward Models",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "47b40485-54ac-4f2e-93f0-28634e9e5703",
+      "title": "TRIFORCE: Lossless Acceleration of Long Sequence Generation with Hierarchical Speculative Decoding",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "854c90de-4559-4a78-9b0c-46ab1df910d7",
+      "title": "Suri: Multi-constraint Instruction Following for Long-form Text Generation",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "72da2cd5-a772-465e-99fb-aea483a43ebb",
+      "title": "MDPO: Overcoming the Training-Inference Divide of Masked Diffusion Language Models",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "a68489bb-6af1-422f-b0fa-99e76765a3dc",
+      "title": "SELA: Tree-Search Enhanced LLM Agents for Automated Machine Learning",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "c5f7eb64-149c-4aba-a2ff-bdf719d9488b",
+      "title": "On the Relation between Quality-Diversity Evaluation and Distribution-Fitting Goal in Text Generation",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "22f6d5aa-e515-4e10-8fb9-7ed615011a66",
+      "title": "Hybrid Group Relative Policy Optimization: A Multi-Sample Approach to Enhancing Policy Optimization",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "0af29c06-0ad4-4a3c-bc0c-1b5616ab1760",
+      "title": "Scaf-GRPO: Scaffolded Group Relative Policy Optimization for Enhancing LLM Reasoning",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "dae6d0f9-f5c9-4d52-b84e-9c4c60e5f524",
+      "title": "Value-Free Policy Optimization via Reward Partitioning",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "cf57ae98-d92b-428a-ab83-16d7f9d3272b",
+      "title": "Pareto Multi-Objective Alignment for Language Models",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "a1397a5a-c38f-46e2-aeba-d3908a2ffa5e",
+      "title": "MA-RLHF: Reinforcement Learning from Human Feedback with Macro Actions",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "30c65518-0f8a-4929-9ad1-58527fd7a6a7",
+      "title": "ID-Aligner: Enhancing Identity-Preserving Text-to-Image Generation with Reward Feedback Learning",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "d97c907a-afac-4870-a16e-28fe7545b8ce",
+      "title": "NOT ALL ROLLOUTS ARE USEFUL: DOWN-SAMPLING ROLLOUTS IN LLM REINFORCEMENT LEARNING",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "96d6ab6b-651b-49a7-99eb-94ca92b37654",
+      "title": "ReST-MCTS∗: LLM Self-Training via Process Reward Guided Tree Search",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "746c325a-f058-4d11-8f1c-fdc65fcfb03a",
+      "title": "Star Attention: Efficient LLM Inference over Long Sequences",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "a81aae09-3e26-4306-90a1-6db0d2404069",
+      "title": "XAttention: Block Sparse Attention with Antidiagonal Scoring",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "630a6f1a-5c26-40b9-8b88-a18d6efdd8be",
+      "title": "REFA: Reference Free Alignment with Fine-Grained Length Control",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "311a7c63-7933-4da0-aab8-c366962afe0f",
+      "title": "MORL-Prompt: An Empirical Analysis of Multi-Objective Reinforcement Learning for Discrete Prompt Optimization",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "d624c56c-547c-438a-8aa8-61c8d077b580",
+      "title": "The AI Scientist: Towards Fully Automated Open-Ended Scientific Discovery",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "6f158c92-719d-40a4-a71d-7169b75e038f",
+      "title": "Perception Test: A Diagnostic Benchmark for Multimodal Video Models",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "3884fde4-f1fe-47c0-9b0e-b88f598c68c2",
+      "title": "Towards Better Optimization for Listwise Preference in Diffusion Models",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "3263554f-dc87-43af-b4f3-dd145ef56b14",
+      "title": "M4GT-Bench: Evaluation Benchmark for Black-Box Machine-Generated Text Detection",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "f151ba89-49f3-4f57-b08d-86f0111d2e94",
+      "title": "LongLLMLingua: Accelerating and Enhancing LLMs in Long Context Scenarios via Prompt Compression",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "1c0e2350-c152-407c-a3e3-590013f10b36",
+      "title": "MJ-BENCH: Is Your Multimodal Reward Model Really a Good Judge for Text-to-Image Generation?",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "6fb7796e-5243-474b-9937-2e38063ec369",
+      "title": "VinePPO: Refining Credit Assignment in RL Training of LLMs",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "ee24b893-c5b7-4412-ada0-335f217aef75",
+      "title": "QCQA: Quality and Capacity-aware grouped Query Attention",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "c25bd9fa-f9a5-4fcd-b97c-85c478e1cfd6",
+      "title": "Sparser is Faster and Less is More: Efficient Sparse Attention for Long-Range Transformers",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "73138580-c7a9-4766-90cd-b7f12461f9a9",
+      "title": "LServe: Efficient Long-Sequence LLM Serving with Unified Sparse Attention",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "d3048a91-fce8-4239-820f-a762f6b7f440",
+      "title": "Representing Long-Range Context for Graph Neural Networks with Global Attention",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "d285a766-f16e-4676-9c11-a368be850427",
+      "title": "Helping or Herding? Reward Model Ensembles Mitigate but do not Eliminate Reward Hacking",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "4aeb7785-7fa4-4f0c-90d2-e9421d5738a4",
+      "title": "SafeGenBench: A Benchmark Framework for Security Vulnerability Detection in LLM-Generated Code",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "3428aa1d-e1ce-4763-afd1-7d73b73357e7",
+      "title": "Understanding the Effects of RLHF on LLM Generalisation and Diversity",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "9504a872-cd0f-4643-ba16-f53ea6e5ef2b",
+      "title": "SuffixDecoding: Extreme Speculative Decoding for Emerging AI Applications",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "3d8f3739-4aef-4f64-bfd7-a7f600567a8e",
+      "title": "LLM-DetectAIve: a Tool for Fine-Grained Machine-Generated Text Detection",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "283f309e-805a-4a92-9552-c534f4bdbabf",
+      "title": "Walking Down the Memory Maze: Beyond Context Limit Through Interactive Reading",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "3870cc8c-8126-4dbd-bbb7-88a29293b92b",
+      "title": "Towards Improved Preference Optimization Pipeline: from Data Generation to Budget-Controlled Regularization",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "670354d7-4425-415c-96aa-d94d5d0380ab",
+      "title": "Mitigating Reward Over-Optimization in RLHF via Behavior-Supported Regularization",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "7220c0f7-562a-4e71-a349-0c00008c98aa",
+      "title": "What Can RL Bring to VLA Generalization? An Empirical Study",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "79f6afc4-8156-431d-8d9c-37017897f5c0",
+      "title": "Multi-Layer GRPO: Enhancing Reasoning and Self-Correction in Large Language Models",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "0bdafeb7-02fb-463a-a9b9-e6ac5b27be8f",
+      "title": "MLKV: Multi-Layer Key-Value Heads for Memory Efficient Transformer Decoding",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "97f79ea3-fb47-4dbe-9969-a66c95e0c248",
+      "title": "Mind the Privacy Unit! User-Level Differential Privacy for Language Model Fine-Tuning",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "47390ca6-a183-4812-af08-15eaa5ebdd89",
+      "title": "Think Before You Speak: Training Language Models with Pause Tokens",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "4e9ac13c-de25-4d51-bc06-bb1c30922145",
+      "title": "RULER: What's the Real Context Size of Your Long-Context Language Models?",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "31924cea-03ac-48d3-9a2e-344ec435ba4a",
+      "title": "Learning to Plan & Reason for Evaluation with Thinking-LLM-as-a-Judge",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "b88b56ad-4dc6-40bb-ba1a-c79436010b81",
+      "title": "Mixture-of-Transformers: A Sparse and Scalable Architecture for Multi-Modal Foundation Models",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "61b3350d-efa5-42f1-ab09-e4c783770dc3",
+      "title": "Training-Free Group Relative Policy Optimization",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "93ab48f6-8788-4837-bed7-12d4ba2b448c",
+      "title": "Q-ROAR: Outlier-Aware Rescaling for RoPE Position Interpolation in Quantized Long-Context LLMs",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "20da106d-f2a5-4c87-8824-d0ae8085a64e",
+      "title": "SPG: Sandwiched Policy Gradient for Masked Diffusion Language Models",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "024352d8-1015-40aa-8890-fbab1223ac06",
+      "title": "d2: Improved Techniques for Training Reasoning Diffusion Language Models",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "8e7a6f3a-514d-40ef-a589-100ffcfde152",
+      "title": "Step-Aware Policy Optimization for Reasoning in Diffusion Large Language Models",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "7baed42b-9841-4929-90d0-c171f18d47b7",
+      "title": "Taming Masked Diffusion Language Models via Consistency Trajectory Reinforcement Learning with Fewer Decoding Step",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "02b38992-0231-4c7c-a081-6489a17c4e29",
+      "title": "d1: Scaling Reasoning in Diffusion Large Language Models via Reinforcement Learning",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "d5221cb5-58ca-40c2-849d-75c23c7ed2cf",
+      "title": "VORTA: Efficient Video Diffusion via Routing Sparse Attention",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "ddcdaea1-8c83-46cf-a68d-a4f4398401ee",
+      "title": "Revisiting Character-level Adversarial Attacks for Language Models",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "b80a887a-a1da-4d89-a790-c70192bf4d87",
+      "title": "Your Language Model Can Secretly Write Like Humans: Contrastive Paraphrase Attacks on LLM-Generated Text Detectors",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "302fbdb3-8784-419e-9d6e-b10f148b0994",
+      "title": "LongRAG: Enhancing Retrieval-Augmented Generation with Long-context LLMs",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "35925b0e-9a4a-4408-8ce5-6a33b95e5849",
+      "title": "SimMark: A Robust Sentence-Level Similarity-Based Watermarking Algorithm for Large Language Models",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "6ce905d3-b5ae-4b07-80f5-a720888808cf",
+      "title": "Toward Diverse Text Generation with Inverse Reinforcement Learning",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    },
+    {
+      "paperId": "bfba22b4-925d-4432-995e-26e95bfcf54d",
+      "title": "Transforming Delete, Retrieve, Generate Approach for Controlled Text Style Transfer",
+      "entityId": null,
+      "canHydrate": false,
+      "identifierTypes": []
+    }
+  ]
+}

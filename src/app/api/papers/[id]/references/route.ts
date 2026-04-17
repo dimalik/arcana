@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
 import { requirePaperAccess } from "@/lib/paper-auth";
+import { deleteReferenceEntryWithLegacyProjection } from "@/lib/citations/reference-entry-service";
+import { listPaperReferenceViews } from "@/lib/references/read-model";
 
 export async function GET(
   _req: NextRequest,
@@ -12,15 +13,7 @@ export async function GET(
     return NextResponse.json({ error: "Paper not found" }, { status: 404 });
   }
 
-  const references = await prisma.reference.findMany({
-    where: { paperId: id },
-    orderBy: { referenceIndex: "asc" },
-    include: {
-      matchedPaper: {
-        select: { id: true, title: true, year: true, authors: true },
-      },
-    },
-  });
+  const references = await listPaperReferenceViews(id, paper.userId);
 
   return NextResponse.json(references);
 }
@@ -43,19 +36,13 @@ export async function DELETE(
     );
   }
 
-  // Validate reference belongs to this paper
-  const reference = await prisma.reference.findFirst({
-    where: { id: referenceId, paperId: id },
-  });
-
-  if (!reference) {
+  const deleted = await deleteReferenceEntryWithLegacyProjection(id, referenceId);
+  if (!deleted) {
     return NextResponse.json(
       { error: "Reference not found" },
       { status: 404 }
     );
   }
-
-  await prisma.reference.delete({ where: { id: referenceId } });
 
   return NextResponse.json({ success: true });
 }

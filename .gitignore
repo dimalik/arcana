@@ -58,6 +58,7 @@ tmp/
 
 # Reference extraction evaluation corpus (copyrighted PDFs)
 benchmark/references/*.pdf
+benchmark/references/**/*.pdf
 prisma/backups/
 
 # Private internal planning docs

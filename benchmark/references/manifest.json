@@ -1,4 +1,65 @@
 {
-  "description": "Reference extraction evaluation corpus. PDFs in this directory are gitignored. See Phase 0 spec.",
-  "papers": []
+  "description": "Reference extraction evaluation corpus. PDFs may live under benchmark/references/ (gitignored) or another local absolute path. Each paper entry names a PDF path, optional expected refs path, and a source-category tag.",
+  "papers": [
+    {
+      "paperId": "arxiv-58055cfe",
+      "pdfPath": "benchmark/references/corpus/arxiv-58055cfe.pdf",
+      "sourceCategory": "arxiv_html",
+      "expectedPath": null
+    },
+    {
+      "paperId": "arxiv-3f924db0",
+      "pdfPath": "benchmark/references/corpus/arxiv-3f924db0.pdf",
+      "sourceCategory": "arxiv_html",
+      "expectedPath": null
+    },
+    {
+      "paperId": "arxiv-ba6f4767",
+      "pdfPath": "benchmark/references/corpus/arxiv-ba6f4767.pdf",
+      "sourceCategory": "arxiv_html",
+      "expectedPath": null
+    },
+    {
+      "paperId": "arxiv-4cc4a6f3",
+      "pdfPath": "benchmark/references/corpus/arxiv-4cc4a6f3.pdf",
+      "sourceCategory": "arxiv_html",
+      "expectedPath": null
+    },
+    {
+      "paperId": "publisher-cc6460c7",
+      "pdfPath": "benchmark/references/corpus/publisher-cc6460c7.pdf",
+      "sourceCategory": "publisher_html",
+      "expectedPath": null
+    },
+    {
+      "paperId": "publisher-f68ef81f",
+      "pdfPath": "benchmark/references/corpus/publisher-f68ef81f.pdf",
+      "sourceCategory": "publisher_html",
+      "expectedPath": null
+    },
+    {
+      "paperId": "unpaywall-f80b10ef",
+      "pdfPath": "benchmark/references/corpus/unpaywall-f80b10ef.pdf",
+      "sourceCategory": "pdf_only",
+      "expectedPath": null
+    },
+    {
+      "paperId": "unpaywall-128288c5",
+      "pdfPath": "benchmark/references/corpus/unpaywall-128288c5.pdf",
+      "sourceCategory": "pdf_only",
+      "expectedPath": null
+    },
+    {
+      "paperId": "existing-c7cfd481",
+      "pdfPath": "benchmark/references/corpus/existing-c7cfd481.pdf",
+      "sourceCategory": "pdf_only",
+      "expectedPath": null
+    },
+    {
+      "paperId": "pmc-oa-2c59405b",
+      "pdfPath": "benchmark/references/corpus/pmc-oa-2c59405b.pdf",
+      "sourceCategory": "pmc_jats",
+      "expectedPath": null
+    }
+  ]
 }

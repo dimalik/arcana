@@ -17,6 +17,10 @@ export interface CreateCitationMentionsResult {
   unmatched: number;
 }
 
+export interface ReplaceCitationMentionsResult extends CreateCitationMentionsResult {
+  legacyUpdated: number;
+}
+
 interface LegacyReferenceContextRecord {
   id: string;
   title: string;
@@ -112,6 +116,34 @@ export async function applyLegacyCitationContexts(
   }
 
   return updated;
+}
+
+export async function replaceCitationMentionsWithLegacyProjection(
+  paperId: string,
+  mentions: CitationMentionInput[],
+  extractorVersion: string | null,
+  provenance = "llm_extraction",
+): Promise<ReplaceCitationMentionsResult> {
+  await prisma.citationMention.deleteMany({
+    where: { paperId },
+  });
+  await prisma.reference.updateMany({
+    where: { paperId },
+    data: { citationContext: null },
+  });
+
+  const mentionResult = await createCitationMentions(
+    paperId,
+    mentions,
+    extractorVersion,
+    provenance,
+  );
+  const legacyUpdated = await applyLegacyCitationContexts(paperId, mentions);
+
+  return {
+    ...mentionResult,
+    legacyUpdated,
+  };
 }
 
 function buildLegacyCitationContexts(

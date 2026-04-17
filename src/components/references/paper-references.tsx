@@ -39,6 +39,8 @@ interface MatchedPaper {
 
 interface Reference {
   id: string;
+  referenceEntryId: string;
+  legacyReferenceId: string | null;
   title: string;
   authors: string | null;
   year: number | null;
@@ -53,6 +55,11 @@ interface Reference {
   arxivId: string | null;
   externalUrl: string | null;
   matchedPaper: MatchedPaper | null;
+  linkState: "canonical_entity_linked" | "import_dedup_only_reusable" | "unresolved";
+  importReusablePaperId: string | null;
+  resolvedEntityId: string | null;
+  resolveConfidence: number | null;
+  resolveSource: string | null;
 }
 
 export function PaperReferences({ paperId }: { paperId: string }) {
@@ -237,24 +244,8 @@ export function PaperReferences({ paperId }: { paperId: string }) {
         { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ referenceId: refId }) }
       );
       if (res.ok) {
-        const paper = await res.json();
-        setReferences((prev) =>
-          prev.map((r) =>
-            r.id === refId
-              ? {
-                  ...r,
-                  matchedPaperId: paper.id,
-                  matchConfidence: 1.0,
-                  matchedPaper: {
-                    id: paper.id,
-                    title: paper.title,
-                    year: paper.year,
-                    authors: paper.authors,
-                  },
-                }
-              : r
-          )
-        );
+        await res.json();
+        await fetchReferences();
         toast.success("Paper imported to library");
       } else {
         const data = await res.json();

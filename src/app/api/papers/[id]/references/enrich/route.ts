@@ -1,9 +1,8 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { searchByTitle, S2RateLimitError } from "@/lib/import/semantic-scholar";
-import { findLibraryMatchByIds } from "@/lib/references/match";
 import { requireUserId } from "@/lib/paper-auth";
-import { resolveOrCreateEntity, type IdentifierInput } from "@/lib/canonical/entity-service";
+import { enrichReferenceEntryFromCandidate } from "@/lib/citations/reference-entry-service";
 
 export async function POST(
   _req: NextRequest,
@@ -17,18 +16,18 @@ export async function POST(
     return Response.json({ error: "Paper not found" }, { status: 404 });
   }
 
-  const references = await prisma.reference.findMany({
+  const references = await prisma.referenceEntry.findMany({
     where: { paperId: id, semanticScholarId: null },
+    select: {
+      id: true,
+      title: true,
+      year: true,
+    },
   });
 
   if (references.length === 0) {
     return Response.json({ enriched: 0, failed: 0, total: 0 });
   }
-
-  // Load library papers for re-matching
-  const libraryPapers = await prisma.paper.findMany({
-    select: { id: true, title: true, doi: true, arxivId: true },
-  });
 
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
@@ -56,58 +55,12 @@ export async function POST(
           const result = await searchByTitle(ref.title, ref.year);
 
           if (result) {
-            // Re-check library match with enriched data
-            const libraryMatch = findLibraryMatchByIds(
-              {
-                doi: result.doi,
-                arxivId: result.arxivId,
-                title: ref.title,
-              },
-              libraryPapers
-            );
-
-            await prisma.reference.update({
-              where: { id: ref.id },
-              data: {
-                semanticScholarId: result.semanticScholarId,
-                arxivId: result.arxivId,
-                externalUrl: result.externalUrl,
-                authors: ref.authors || JSON.stringify(result.authors),
-                year: ref.year ?? result.year,
-                venue: ref.venue || result.venue,
-                doi: ref.doi || result.doi,
-                ...(libraryMatch && {
-                  matchedPaperId: libraryMatch.paperId,
-                  matchConfidence: libraryMatch.confidence,
-                }),
-              },
+            await enrichReferenceEntryFromCandidate({
+              paperId: id,
+              referenceId: ref.id,
+              userId,
+              candidate: result,
             });
-
-            try {
-              const identifiers: IdentifierInput[] = [];
-              if (result.doi) identifiers.push({ type: "doi", value: result.doi, source: "enrichment" });
-              if (result.arxivId) identifiers.push({ type: "arxiv", value: result.arxivId, source: "enrichment" });
-              if (result.semanticScholarId) {
-                identifiers.push({
-                  type: "semantic_scholar",
-                  value: result.semanticScholarId,
-                  source: "enrichment",
-                });
-              }
-
-              if (identifiers.length > 0) {
-                await resolveOrCreateEntity({
-                  title: ref.title,
-                  authors: ref.authors,
-                  year: ref.year ?? result.year,
-                  venue: ref.venue || result.venue,
-                  identifiers,
-                  source: "enrichment",
-                });
-              }
-            } catch {
-              // Non-fatal
-            }
 
             enriched++;
           } else {

@@ -16,6 +16,31 @@ const EXISTING_PAPER_SELECT = {
   authors: true,
 } as const;
 
+const HYDRATION_PAPER_SELECT = {
+  id: true,
+  userId: true,
+  title: true,
+  abstract: true,
+  authors: true,
+  year: true,
+  venue: true,
+  doi: true,
+  arxivId: true,
+  entityId: true,
+} as const;
+
+export interface PaperEntityHydrationInspection {
+  paperId: string;
+  title: string;
+  entityId: string | null;
+  canHydrate: boolean;
+  identifierTypes: string[];
+}
+
+export interface PaperEntityHydrationResult extends PaperEntityHydrationInspection {
+  status: "already_linked" | "hydrated" | "no_identifiers" | "duplicate_conflict";
+}
+
 export async function resolveEntityForImport(input: {
   userId: string;
   title: string;
@@ -90,4 +115,101 @@ export async function handleDuplicatePaperError(
     where: { userId, entityId },
     select: EXISTING_PAPER_SELECT,
   });
+}
+
+export async function inspectPaperEntityHydration(
+  paperId: string
+): Promise<PaperEntityHydrationInspection | null> {
+  const paper = await prisma.paper.findUnique({
+    where: { id: paperId },
+    select: HYDRATION_PAPER_SELECT,
+  });
+  if (!paper) return null;
+
+  const identifiers = collectIdentifiers(paper, "import");
+  return {
+    paperId: paper.id,
+    title: paper.title,
+    entityId: paper.entityId,
+    canHydrate: identifiers.length > 0,
+    identifierTypes: identifiers.map((identifier) => identifier.type),
+  };
+}
+
+export async function hydratePaperEntityIfPossible(
+  paperId: string
+): Promise<PaperEntityHydrationResult | null> {
+  const paper = await prisma.paper.findUnique({
+    where: { id: paperId },
+    select: HYDRATION_PAPER_SELECT,
+  });
+  if (!paper) return null;
+
+  const identifiers = collectIdentifiers(paper, "import");
+  if (paper.entityId) {
+    return {
+      paperId: paper.id,
+      title: paper.title,
+      entityId: paper.entityId,
+      canHydrate: true,
+      identifierTypes: identifiers.map((identifier) => identifier.type),
+      status: "already_linked",
+    };
+  }
+
+  if (identifiers.length === 0) {
+    return {
+      paperId: paper.id,
+      title: paper.title,
+      entityId: null,
+      canHydrate: false,
+      identifierTypes: [],
+      status: "no_identifiers",
+    };
+  }
+
+  const result = await resolveOrCreateEntity({
+    title: paper.title,
+    authors: paper.authors,
+    year: paper.year,
+    venue: paper.venue,
+    abstract: paper.abstract,
+    identifiers,
+    source: "import",
+  });
+
+  if (paper.userId) {
+    const duplicate = await prisma.paper.findFirst({
+      where: {
+        userId: paper.userId,
+        entityId: result.entityId,
+        NOT: { id: paper.id },
+      },
+      select: { id: true },
+    });
+    if (duplicate) {
+      return {
+        paperId: paper.id,
+        title: paper.title,
+        entityId: null,
+        canHydrate: true,
+        identifierTypes: identifiers.map((identifier) => identifier.type),
+        status: "duplicate_conflict",
+      };
+    }
+  }
+
+  await prisma.paper.update({
+    where: { id: paper.id },
+    data: { entityId: result.entityId },
+  });
+
+  return {
+    paperId: paper.id,
+    title: paper.title,
+    entityId: result.entityId,
+    canHydrate: true,
+    identifierTypes: identifiers.map((identifier) => identifier.type),
+    status: "hydrated",
+  };
 }
