@@ -1,11 +1,56 @@
 #!/usr/bin/env node
 
 import path from "node:path";
+import fs from "node:fs";
 import crypto from "node:crypto";
 import Database from "better-sqlite3";
 
-const dbPath = process.argv[2] || path.join(process.cwd(), "prisma", "dev.db");
-const db = new Database(dbPath);
+function parseArgs(argv) {
+  const defaultDbPath = path.join(process.cwd(), "prisma", "dev.db");
+  const args = {
+    dbPath: defaultDbPath,
+    apply: false,
+    dryRun: false,
+    outPath: null,
+    confirmRealDb: false,
+  };
+
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i];
+    if (arg === "--db-path") args.dbPath = argv[++i];
+    else if (arg === "--apply") args.apply = true;
+    else if (arg === "--dry-run") args.dryRun = true;
+    else if (arg === "--out") args.outPath = argv[++i];
+    else if (arg === "--confirm-real-db") args.confirmRealDb = true;
+    else if (!arg.startsWith("--") && args.dbPath === defaultDbPath) args.dbPath = arg;
+    else if (arg === "--help") {
+      console.log(
+        "Usage: node scripts/backfill-paper-graph.mjs " +
+          "[--db-path <path>] [--apply] [--dry-run] [--out <path>] [--confirm-real-db]"
+      );
+      process.exit(0);
+    }
+  }
+
+  if (!args.apply && !args.dryRun) {
+    args.dryRun = true;
+  }
+
+  return args;
+}
+
+const args = parseArgs(process.argv.slice(2));
+const defaultDbPath = path.resolve(path.join(process.cwd(), "prisma", "dev.db"));
+const resolvedDbPath = path.resolve(args.dbPath);
+
+if (args.apply && resolvedDbPath === defaultDbPath && !args.confirmRealDb) {
+  throw new Error(
+    "Refusing to apply against prisma/dev.db without --confirm-real-db. " +
+      "Use --db-path for snapshot work or pass --confirm-real-db during the coordinated cutover only."
+  );
+}
+
+const db = new Database(resolvedDbPath);
 
 function normalizeIdentifier(type, value) {
   const trimmed = String(value).trim();
@@ -494,12 +539,29 @@ function readCounts() {
 
 function main() {
   const before = readCounts();
-  const entities = backfillEntities();
-  const references = backfillReferenceEntries();
-  const assertions = backfillRelationAssertions();
-  const after = readCounts();
+  const summary = {
+    mode: args.apply ? "apply" : "dry-run",
+    dbPath: resolvedDbPath,
+    before,
+    entities: null,
+    references: null,
+    assertions: null,
+    after: before,
+  };
 
-  console.log(JSON.stringify({ dbPath, before, entities, references, assertions, after }, null, 2));
+  if (args.apply) {
+    summary.entities = backfillEntities();
+    summary.references = backfillReferenceEntries();
+    summary.assertions = backfillRelationAssertions();
+    summary.after = readCounts();
+  }
+
+  if (args.outPath) {
+    fs.mkdirSync(path.dirname(args.outPath), { recursive: true });
+    fs.writeFileSync(args.outPath, JSON.stringify(summary, null, 2) + "\n");
+  }
+
+  console.log(JSON.stringify(summary, null, 2));
 }
 
 try {
