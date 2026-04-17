@@ -2,6 +2,7 @@ import { prisma } from "../prisma";
 import { normalizeIdentifier, type IdentifierType } from "./normalize";
 
 const SOURCE_PRIORITY: Record<string, number> = {
+  graph_auto_heal: -1,
   llm_extraction: 0,
   import: 1,
   enrichment: 1,
@@ -34,6 +35,11 @@ export interface ResolveOrCreateResult {
   created: boolean;
 }
 
+type EntityServiceDb = Pick<
+  typeof prisma,
+  "paperIdentifier" | "paperEntity" | "paperEntityCandidateLink"
+>;
+
 const IDENTIFIER_PRIORITY: Record<string, number> = {
   doi: 0,
   arxiv: 1,
@@ -44,7 +50,8 @@ const IDENTIFIER_PRIORITY: Record<string, number> = {
 };
 
 export async function resolveOrCreateEntity(
-  input: ResolveOrCreateInput
+  input: ResolveOrCreateInput,
+  db: EntityServiceDb = prisma
 ): Promise<ResolveOrCreateResult> {
   const normalized = input.identifiers
     .map((id) => ({
@@ -59,12 +66,12 @@ export async function resolveOrCreateEntity(
 
   for (let i = 0; i < normalized.length; i++) {
     const id = normalized[i];
-    const existing = await prisma.paperIdentifier.findUnique({
+    const existing = await db.paperIdentifier.findUnique({
       where: { type_value: { type: id.type, value: id.value } },
       include: { entity: true },
     });
     if (existing) {
-      resolvedEntityId = await followMergeChain(existing.entity.id);
+      resolvedEntityId = await followMergeChain(existing.entity.id, db);
       matchedIdentifierIndex = i;
       break;
     }
@@ -75,7 +82,7 @@ export async function resolveOrCreateEntity(
       if (i === matchedIdentifierIndex) continue;
       const id = normalized[i];
       try {
-        await prisma.paperIdentifier.create({
+        await db.paperIdentifier.create({
           data: {
             entityId: resolvedEntityId,
             type: id.type,
@@ -86,7 +93,7 @@ export async function resolveOrCreateEntity(
           },
         });
       } catch {
-        const conflicting = await prisma.paperIdentifier.findUnique({
+        const conflicting = await db.paperIdentifier.findUnique({
           where: { type_value: { type: id.type, value: id.value } },
         });
         if (conflicting && conflicting.entityId !== resolvedEntityId) {
@@ -94,7 +101,8 @@ export async function resolveOrCreateEntity(
             resolvedEntityId,
             conflicting.entityId,
             "identifier_conflict",
-            id.confidence ?? 0.8
+            id.confidence ?? 0.8,
+            db
           );
         }
       }
@@ -109,13 +117,14 @@ export async function resolveOrCreateEntity(
         venue: input.venue,
         abstract: input.abstract,
       },
-      input.source
+      input.source,
+      db
     );
 
     return { entityId: resolvedEntityId, created: false };
   }
 
-  const entity = await prisma.paperEntity.create({
+  const entity = await db.paperEntity.create({
     data: {
       title: input.title,
       authors: input.authors,
@@ -133,7 +142,7 @@ export async function resolveOrCreateEntity(
 
   for (const id of normalized) {
     try {
-      await prisma.paperIdentifier.create({
+      await db.paperIdentifier.create({
         data: {
           entityId: entity.id,
           type: id.type,
@@ -144,18 +153,19 @@ export async function resolveOrCreateEntity(
         },
       });
     } catch {
-      const conflicting = await prisma.paperIdentifier.findUnique({
+      const conflicting = await db.paperIdentifier.findUnique({
         where: { type_value: { type: id.type, value: id.value } },
       });
       if (conflicting && conflicting.entityId !== entity.id) {
         if (id.type === "doi" || id.type === "arxiv") {
-          raceConflictEntityId = await followMergeChain(conflicting.entityId);
+          raceConflictEntityId = await followMergeChain(conflicting.entityId, db);
         } else {
           await createCandidateLink(
             entity.id,
             conflicting.entityId,
             "identifier_conflict",
-            id.confidence ?? 0.8
+            id.confidence ?? 0.8,
+            db
           );
         }
       }
@@ -163,32 +173,35 @@ export async function resolveOrCreateEntity(
   }
 
   if (raceConflictEntityId) {
-    const orphanIdentifiers = await prisma.paperIdentifier.findMany({
+    const orphanIdentifiers = await db.paperIdentifier.findMany({
       where: { entityId: entity.id },
     });
 
     for (const ident of orphanIdentifiers) {
       try {
-        await prisma.paperIdentifier.update({
+        await db.paperIdentifier.update({
           where: { id: ident.id },
           data: { entityId: raceConflictEntityId },
         });
       } catch {
-        await prisma.paperIdentifier.delete({ where: { id: ident.id } }).catch(() => {});
+        await db.paperIdentifier.delete({ where: { id: ident.id } }).catch(() => {});
       }
     }
 
-    await prisma.paperEntity.delete({ where: { id: entity.id } }).catch(() => {});
+    await db.paperEntity.delete({ where: { id: entity.id } }).catch(() => {});
     return { entityId: raceConflictEntityId, created: false };
   }
 
   return { entityId: entity.id, created: true };
 }
 
-async function followMergeChain(entityId: string): Promise<string> {
+async function followMergeChain(
+  entityId: string,
+  db: Pick<typeof prisma, "paperEntity"> = prisma
+): Promise<string> {
   let currentId = entityId;
   for (let depth = 0; depth < 10; depth++) {
-    const entity = await prisma.paperEntity.findUnique({
+    const entity = await db.paperEntity.findUnique({
       where: { id: currentId },
       select: { id: true, mergedIntoEntityId: true },
     });
@@ -209,9 +222,10 @@ export async function updateEntityMetadata(
     venue?: string | null;
     abstract?: string | null;
   },
-  source: string
+  source: string,
+  db: Pick<typeof prisma, "paperEntity"> = prisma
 ): Promise<void> {
-  const entity = await prisma.paperEntity.findUnique({ where: { id: entityId } });
+  const entity = await db.paperEntity.findUnique({ where: { id: entityId } });
   if (!entity) return;
 
   const newPriority = SOURCE_PRIORITY[source] ?? 0;
@@ -238,7 +252,7 @@ export async function updateEntityMetadata(
   }
 
   if (Object.keys(updates).length > 0) {
-    await prisma.paperEntity.update({
+    await db.paperEntity.update({
       where: { id: entityId },
       data: updates,
     });
@@ -249,12 +263,13 @@ export async function createCandidateLink(
   entityAId: string,
   entityBId: string,
   reason: string,
-  confidence: number
+  confidence: number,
+  db: Pick<typeof prisma, "paperEntityCandidateLink"> = prisma
 ): Promise<void> {
   const [orderedA, orderedB] =
     entityAId < entityBId ? [entityAId, entityBId] : [entityBId, entityAId];
 
-  await prisma.paperEntityCandidateLink.create({
+  await db.paperEntityCandidateLink.create({
     data: {
       entityAId: orderedA,
       entityBId: orderedB,

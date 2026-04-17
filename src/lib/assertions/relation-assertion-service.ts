@@ -20,9 +20,16 @@ export interface AddEvidenceInput {
   referenceEntryId?: string | null;
 }
 
-export async function createRelationAssertion(input: CreateAssertionInput) {
+type RelationAssertionWriteDb = Pick<typeof prisma, "relationAssertion">;
+type RelationEvidenceDb = Pick<typeof prisma, "relationEvidence">;
+type RelationAssertionDb = RelationAssertionWriteDb & RelationEvidenceDb;
+
+export async function createRelationAssertion(
+  input: CreateAssertionInput,
+  db: RelationAssertionWriteDb = prisma
+) {
   if (!input.sourcePaperId) {
-    return prisma.relationAssertion.create({
+    return db.relationAssertion.create({
       data: {
         sourceEntityId: input.sourceEntityId,
         targetEntityId: input.targetEntityId,
@@ -37,7 +44,7 @@ export async function createRelationAssertion(input: CreateAssertionInput) {
     });
   }
 
-  return prisma.relationAssertion.upsert({
+  return db.relationAssertion.upsert({
     where: {
       sourcePaperId_targetEntityId_relationType_provenance: {
         sourcePaperId: input.sourcePaperId,
@@ -65,8 +72,11 @@ export async function createRelationAssertion(input: CreateAssertionInput) {
   });
 }
 
-export async function addEvidence(input: AddEvidenceInput) {
-  return prisma.relationEvidence.create({
+export async function addEvidence(
+  input: AddEvidenceInput,
+  db: RelationEvidenceDb = prisma
+) {
+  return db.relationEvidence.create({
     data: {
       assertionId: input.assertionId,
       type: input.type,
@@ -79,11 +89,12 @@ export async function addEvidence(input: AddEvidenceInput) {
 
 export async function createAssertionWithEvidence(
   assertion: CreateAssertionInput,
-  evidenceList: Omit<AddEvidenceInput, "assertionId">[]
+  evidenceList: Omit<AddEvidenceInput, "assertionId">[],
+  db: RelationAssertionDb = prisma
 ) {
-  const created = await createRelationAssertion(assertion);
+  const created = await createRelationAssertion(assertion, db);
   for (const evidence of evidenceList) {
-    await addEvidence({ ...evidence, assertionId: created.id });
+    await addEvidence({ ...evidence, assertionId: created.id }, db);
   }
   return created;
 }

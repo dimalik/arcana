@@ -15,6 +15,8 @@ export interface AggregatedRelation {
   description: string | null;
 }
 
+type RelationAggregateDb = Pick<typeof prisma, "relationAssertion">;
+
 const PROVENANCE_PRIORITY: Record<string, number> = {
   reference_match: 0,
   citation_analysis: 1,
@@ -26,9 +28,10 @@ const PROVENANCE_PRIORITY: Record<string, number> = {
 export async function getAggregatedRelationsForPaper(
   paperId: string,
   entityId: string,
-  userId: string
+  userId: string,
+  db: RelationAggregateDb = prisma
 ): Promise<AggregatedRelation[]> {
-  const assertions = await prisma.relationAssertion.findMany({
+  const assertions = await db.relationAssertion.findMany({
     where: {
       OR: [
         { sourcePaperId: paperId },
