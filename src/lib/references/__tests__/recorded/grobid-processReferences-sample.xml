@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<TEI xmlns="http://www.tei-c.org/ns/1.0">
+  <text>
+    <body />
+    <back>
+      <div type="references">
+        <listBibl>
+          <biblStruct xml:id="b0">
+            <analytic>
+              <title level="a">Attention Is All You Need</title>
+              <author>
+                <persName>
+                  <surname>Vaswani</surname>
+                  <forename>Ashish</forename>
+                </persName>
+              </author>
+              <author>
+                <persName>
+                  <surname>Shazeer</surname>
+                  <forename>Noam</forename>
+                </persName>
+              </author>
+              <idno type="DOI">10.5555/3295222.3295349</idno>
+            </analytic>
+            <monogr>
+              <title level="m">Advances in Neural Information Processing Systems</title>
+              <imprint>
+                <date>2017</date>
+              </imprint>
+            </monogr>
+            <note type="raw_reference">Vaswani, A., Shazeer, N., et al. (2017). Attention Is All You Need. In NeurIPS.</note>
+          </biblStruct>
+          <biblStruct xml:id="b1">
+            <analytic>
+              <title level="a">BERT: Pre-training of Deep Bidirectional Transformers</title>
+              <author>
+                <persName>
+                  <surname>Devlin</surname>
+                  <forename>Jacob</forename>
+                </persName>
+              </author>
+              <idno type="arXiv">1810.04805</idno>
+            </analytic>
+            <monogr>
+              <title level="m">NAACL</title>
+              <imprint>
+                <date>2019</date>
+              </imprint>
+            </monogr>
+            <note type="raw_reference">Devlin, J. et al. (2019). BERT. In NAACL.</note>
+          </biblStruct>
+        </listBibl>
+      </div>
+    </back>
+  </text>
+</TEI>

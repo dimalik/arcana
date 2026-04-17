@@ -75,6 +75,10 @@ async function main() {
         doi: reference.doi,
         arxivId: reference.arxivId,
         title: reference.title,
+        authors: reference.authors,
+        year: reference.year,
+        venue: reference.venue,
+        rawCitation: reference.rawCitation,
       });
 
       const updated = await prisma.referenceEntry.findUnique({

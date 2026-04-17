@@ -7,7 +7,7 @@
  * The DB field `semanticScholarId` stores whichever source ID found the match.
  */
 
-import { titleSimilarity } from "@/lib/references/match";
+import { titleSimilarity } from "../references/match";
 
 const OPENALEX_BASE = "https://api.openalex.org/works";
 const OPENALEX_SELECT =
@@ -171,8 +171,12 @@ async function searchOpenAlex(
   title: string,
   year: number | null | undefined
 ): Promise<S2Result | null> {
+  let filter = `title.search:${title}`;
+  if (year) {
+    filter += `,publication_year:${year}`;
+  }
   const url =
-    `${OPENALEX_BASE}?filter=title.search:${encodeURIComponent(title)}` +
+    `${OPENALEX_BASE}?filter=${encodeURIComponent(filter)}` +
     `&select=${OPENALEX_SELECT}&per_page=5`;
   const res = await fetchWithRetry(url, "openalex", 200);
   if (!res) return null;
@@ -228,7 +232,7 @@ let _cachedS2Key: string | null | undefined;
 
 export async function getS2Headers(): Promise<Record<string, string> | undefined> {
   if (_cachedS2Key === undefined) {
-    const { getApiKey } = await import("@/lib/llm/api-keys");
+    const { getApiKey } = await import("../llm/api-keys");
     _cachedS2Key = await getApiKey("s2");
   }
   return _cachedS2Key ? { "x-api-key": _cachedS2Key } : undefined;
@@ -385,10 +389,13 @@ async function searchOpenAlexMulti(
   query: string,
   year: number | null | undefined
 ): Promise<S2Result[]> {
-  let url =
-    `${OPENALEX_BASE}?filter=title.search:${encodeURIComponent(query)}` +
+  let filter = `title.search:${query}`;
+  if (year) {
+    filter += `,publication_year:${year}`;
+  }
+  const url =
+    `${OPENALEX_BASE}?filter=${encodeURIComponent(filter)}` +
     `&select=${OPENALEX_SELECT}&per_page=5`;
-  if (year) url += `&filter=publication_year:${year}`;
   const res = await fetchWithRetry(url, "openalex", 200);
   if (!res) return [];
 

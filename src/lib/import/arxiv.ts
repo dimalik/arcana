@@ -13,6 +13,8 @@ interface ArxivMetadata {
   pdfUrl: string;
 }
 
+export interface ArxivSearchResult extends ArxivMetadata {}
+
 export function parseArxivId(input: string): string | null {
   // Handle full URLs: https://arxiv.org/abs/2301.12345 or https://arxiv.org/pdf/2301.12345
   const urlMatch = input.match(/arxiv\.org\/(?:abs|pdf)\/(\d{4}\.\d{4,5}(?:v\d+)?)/);
@@ -79,6 +81,40 @@ export async function fetchArxivMetadata(
   };
 }
 
+export async function searchArxivByTitle(
+  title: string,
+  maxResults = 5,
+): Promise<ArxivSearchResult[]> {
+  const query = `ti:"${title.replace(/"/g, '\\"')}"`;
+  const response = await fetch(
+    `https://export.arxiv.org/api/query?search_query=${encodeURIComponent(query)}&start=0&max_results=${maxResults}&sortBy=relevance&sortOrder=descending`,
+    { headers: { "User-Agent": "Arcana-Paper-Finder/1.0" } },
+  );
+
+  const xml = await response.text();
+  if (xml.includes("Rate exceeded")) {
+    throw new Error("arxiv API rate limit — try again in a few seconds");
+  }
+
+  const parser = new XMLParser({
+    ignoreAttributes: false,
+    removeNSPrefix: true,
+  });
+  const result = parser.parse(xml);
+  const entries = Array.isArray(result.feed?.entry)
+    ? result.feed.entry
+    : result.feed?.entry
+      ? [result.feed.entry]
+      : [];
+
+  return entries
+    .map((entry: Record<string, unknown>) => parseArxivEntry(entry))
+    .filter(
+      (entry: ArxivSearchResult | null): entry is ArxivSearchResult =>
+        Boolean(entry),
+    );
+}
+
 export async function downloadArxivPdf(arxivId: string): Promise<string> {
   const uploadDir = path.join(process.cwd(), "uploads");
   await mkdir(uploadDir, { recursive: true });
@@ -96,4 +132,60 @@ export async function downloadArxivPdf(arxivId: string): Promise<string> {
   await writeFile(filePath, buffer);
 
   return `uploads/${filename}`;
+}
+
+function parseArxivEntry(entry: Record<string, unknown> | null | undefined): ArxivSearchResult | null {
+  if (!entry) return null;
+
+  const idValue = typeof entry.id === "string" ? entry.id : "";
+  const arxivId = parseArxivId(idValue);
+  if (!arxivId) return null;
+
+  const authors = Array.isArray(entry.author)
+    ? entry.author
+        .map((author) =>
+          author && typeof author === "object" && typeof (author as { name?: unknown }).name === "string"
+            ? (author as { name: string }).name
+            : null,
+        )
+        .filter((author): author is string => Boolean(author))
+    : entry.author &&
+        typeof entry.author === "object" &&
+        typeof (entry.author as { name?: unknown }).name === "string"
+      ? [(entry.author as { name: string }).name]
+      : [];
+
+  const published = typeof entry.published === "string" ? entry.published : "";
+  const year = published ? new Date(published).getFullYear() : new Date().getFullYear();
+  const categories = Array.isArray(entry.category)
+    ? entry.category
+        .map((category) =>
+          category &&
+          typeof category === "object" &&
+          typeof (category as { "@_term"?: unknown })["@_term"] === "string"
+            ? (category as { "@_term": string })["@_term"]
+            : null,
+        )
+        .filter((category): category is string => Boolean(category))
+    : entry.category &&
+        typeof entry.category === "object" &&
+        typeof (entry.category as { "@_term"?: unknown })["@_term"] === "string"
+      ? [(entry.category as { "@_term": string })["@_term"]]
+      : [];
+
+  return {
+    title:
+      typeof entry.title === "string"
+        ? entry.title.replace(/\s+/g, " ").trim()
+        : "",
+    abstract:
+      typeof entry.summary === "string"
+        ? entry.summary.replace(/\s+/g, " ").trim()
+        : "",
+    authors,
+    year,
+    arxivId,
+    categories,
+    pdfUrl: `https://arxiv.org/pdf/${arxivId}.pdf`,
+  };
 }
