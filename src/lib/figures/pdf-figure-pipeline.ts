@@ -37,6 +37,35 @@ interface EmbeddedImage {
   yRatio: number;
 }
 
+interface PdfCropAcceptanceInput {
+  type: "figure" | "table";
+  width: number;
+  height: number;
+  regionKind: "graphics" | "text" | "fallback";
+}
+
+interface PdfCropAcceptanceResult {
+  accepted: boolean;
+  rejectionReason?: "crop_rejected";
+}
+
+function evaluatePdfCropAcceptance(input: PdfCropAcceptanceInput): PdfCropAcceptanceResult {
+  const aspect = input.width / input.height;
+  const minHeight = input.type === "figure" ? 120 : 80;
+  const minWidth = input.type === "figure" ? 240 : 200;
+  const isTooThin = input.height < minHeight;
+  const isTooNarrow = input.width < minWidth;
+  const isExtremeAspect = aspect > 20 || aspect < 0.1;
+
+  if (input.type === "figure" && input.regionKind !== "graphics") {
+    return { accepted: false, rejectionReason: "crop_rejected" };
+  }
+  if (isTooThin || isTooNarrow || isExtremeAspect) {
+    return { accepted: false, rejectionReason: "crop_rejected" };
+  }
+  return { accepted: true };
+}
+
 export async function extractFiguresFromPdf(
   pdfPath: string,
   paperId: string,
@@ -215,13 +244,14 @@ json.dump(pages, sys.stdout)`,
       });
 
       if (crop.success && crop.filepath && crop.width && crop.height) {
-        // Crop quality gate: reject crops that are clearly bad
-        const aspect = crop.width / crop.height;
-        const isTooThin = crop.height < 80; // less than ~27pt at 300dpi
-        const isTooNarrow = crop.width < 200;
-        const isExtremeAspect = aspect > 20 || aspect < 0.1;
+        const cropAcceptance = evaluatePdfCropAcceptance({
+          type: caption.type,
+          width: crop.width,
+          height: crop.height,
+          regionKind: crop.regionKind ?? "fallback",
+        });
 
-        if (isTooThin || isTooNarrow || isExtremeAspect) {
+        if (!cropAcceptance.accepted) {
           results.push({
             figureLabel: caption.label,
             captionText: caption.captionText,
@@ -300,3 +330,7 @@ json.dump(pages, sys.stdout)`,
 
   return results;
 }
+
+export const pdfFigurePipelineInternals = {
+  evaluatePdfCropAcceptance,
+};

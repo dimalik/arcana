@@ -10,6 +10,12 @@
     "lint": "next lint",
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
+    "figures:extract": "node --import tsx scripts/extract-figures.ts",
+    "figures:acceptance": "node --import tsx scripts/figure-acceptance.ts",
+    "figures:bootstrap-legacy": "node --import tsx scripts/bootstrap-legacy-figures.ts",
+    "figures:ops": "node --import tsx scripts/figure-ops.ts",
+    "figures:rollout": "node scripts/figure-rollout.js",
+    "figures:review-dataset": "node --import tsx scripts/figure-review-dataset.ts",
     "check:experiment-integrity": "node scripts/check-experiment-integrity.js",
     "trace": "node scripts/dump-agent-trace.js",
     "project:activity": "node scripts/show-project-activity.js",
@@ -81,6 +87,7 @@
     "playwright": "^1.59.1",
     "postcss": "^8",
     "tailwindcss": "^3.4.1",
+    "tsx": "^4.21.0",
     "typescript": "^5",
     "vitest": "^3.2.4"
   }

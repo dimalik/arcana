@@ -1,0 +1,1027 @@
+{
+  "version": 1,
+  "description": "Human-confirmed review dataset for figure extraction quality. Leave target fields unset until confirmed; the scorer ignores unset checks.",
+  "papers": [
+    {
+      "paperId": "007d5dc2-73d3-4e4e-b87d-e567840f5a51",
+      "arxivId": "2506.08712",
+      "title": "ConfPO: Exploiting Policy Model Confidence for Critical Token Selection in Preference Optimization",
+      "bucket": "clean_arxiv_html",
+      "priority": "high",
+      "reviewFocus": "Clean arXiv HTML baseline with rendered table previews.",
+      "targetsStatus": "confirmed",
+      "targets": {
+        "expectedPrimaryFigures": 19,
+        "expectedFiguresWithImages": 19,
+        "maxGapFigures": 0,
+        "requiredLabels": [
+          "Figure 1",
+          "Figure 2",
+          "Figure 3",
+          "Figure 4",
+          "Figure 5",
+          "Figure 6",
+          "Figure 7",
+          "Figure 8",
+          "Figure 9",
+          "Figure 10",
+          "Figure 11",
+          "Figure 12",
+          "Table 1",
+          "Table 2",
+          "Table 3",
+          "Table 4",
+          "Table 5",
+          "Table 6",
+          "Table 7"
+        ],
+        "labelTargets": {
+          "Figure 1": {
+            "expectsImage": true,
+            "expectedSourceMethod": "arxiv_html"
+          },
+          "Figure 12": {
+            "expectsImage": true,
+            "expectedSourceMethod": "arxiv_html"
+          },
+          "Table 1": {
+            "expectsImage": true,
+            "expectedSourceMethod": "arxiv_html",
+            "expectedImageSourceMethod": "html_table_render",
+            "expectedGapReason": null
+          },
+          "Table 2": {
+            "expectsImage": true,
+            "expectedImageSourceMethod": "html_table_render",
+            "expectedGapReason": null
+          },
+          "Table 3": {
+            "expectsImage": true,
+            "expectedImageSourceMethod": "html_table_render",
+            "expectedGapReason": null
+          },
+          "Table 4": {
+            "expectsImage": true,
+            "expectedImageSourceMethod": "html_table_render",
+            "expectedGapReason": null
+          },
+          "Table 5": {
+            "expectsImage": true,
+            "expectedImageSourceMethod": "html_table_render",
+            "expectedGapReason": null
+          },
+          "Table 6": {
+            "expectsImage": true,
+            "expectedImageSourceMethod": "html_table_render",
+            "expectedGapReason": null
+          },
+          "Table 7": {
+            "expectsImage": true,
+            "expectedSourceMethod": "arxiv_html",
+            "expectedImageSourceMethod": "html_table_render",
+            "expectedGapReason": null
+          }
+        }
+      }
+    },
+    {
+      "paperId": "002b4889-6859-48ae-a500-c92373c6ce9a",
+      "arxivId": "2602.05494",
+      "title": "A Unified Framework for Rethinking Policy Divergence Measures in GRPO",
+      "bucket": "broken_arxiv_html",
+      "priority": "high",
+      "reviewFocus": "arXiv HTML is partially broken; figures 2-4 should still survive via fallback without losing table previews.",
+      "targetsStatus": "confirmed",
+      "targets": {
+        "expectedPrimaryFigures": 8,
+        "maxGapFigures": 0,
+        "requiredLabels": [
+          "Figure 1",
+          "Figure 2",
+          "Figure 3",
+          "Figure 4",
+          "Table 1",
+          "Table 2",
+          "Table 3",
+          "Table 4"
+        ],
+        "labelTargets": {
+          "Figure 1": {
+            "expectsImage": true,
+            "expectedSourceMethod": "arxiv_html"
+          },
+          "Table 1": {
+            "expectsImage": true,
+            "expectedSourceMethod": "arxiv_html",
+            "expectedImageSourceMethod": "html_table_render",
+            "expectedGapReason": null
+          },
+          "Table 2": {
+            "expectsImage": true,
+            "expectedImageSourceMethod": "html_table_render",
+            "expectedGapReason": null
+          },
+          "Table 3": {
+            "expectsImage": true,
+            "expectedImageSourceMethod": "html_table_render",
+            "expectedGapReason": null
+          },
+          "Table 4": {
+            "expectsImage": true,
+            "expectedImageSourceMethod": "html_table_render",
+            "expectedGapReason": null
+          }
+        }
+      }
+    },
+    {
+      "paperId": "004c102c-f06d-4b5a-b603-631c0eba55b2",
+      "arxivId": "2509.25027",
+      "title": "STAGE: Stable and Generalizable GRPO for Autoregressive Image Generation",
+      "bucket": "panel_heavy_clean_html",
+      "priority": "high",
+      "reviewFocus": "Grouped/panel arXiv figures should not create anonymous subfigure junk.",
+      "targetsStatus": "confirmed",
+      "targets": {
+        "expectedPrimaryFigures": 31,
+        "expectedFiguresWithImages": 31,
+        "maxGapFigures": 0,
+        "requiredLabels": [
+          "Figure 1",
+          "Figure 2",
+          "Figure 3",
+          "Figure 4",
+          "Figure 5",
+          "Figure 6",
+          "Figure 7",
+          "Figure 8",
+          "Figure 9",
+          "Figure 10",
+          "Figure 11",
+          "Figure 12",
+          "Figure 13",
+          "Figure 14",
+          "Figure 15",
+          "Figure 16",
+          "Figure 17",
+          "Figure 18",
+          "Figure 19",
+          "Figure 20",
+          "Figure 21",
+          "Figure 22",
+          "Table 1",
+          "Table 2",
+          "Table 3",
+          "Table 4",
+          "Table 5",
+          "Table 6",
+          "Table 7",
+          "Table 8",
+          "Table 9"
+        ],
+        "forbiddenLabels": [
+          "html-fig-0",
+          "html-fig-1",
+          "html-fig-2"
+        ],
+        "labelTargets": {
+          "Figure 1": {
+            "expectsImage": true,
+            "expectedSourceMethod": "arxiv_html"
+          },
+          "Table 1": {
+            "expectsImage": true,
+            "expectedSourceMethod": "arxiv_html"
+          }
+        }
+      }
+    },
+    {
+      "paperId": "0058726e-5d5d-4ab3-84d5-700f8b22c318",
+      "arxivId": "2510.21391",
+      "title": "A Single Example Can Improve Zero-Shot Data Generation",
+      "bucket": "ltx_tabular",
+      "priority": "high",
+      "reviewFocus": "Mix of ltx_tabular and normal HTML tables should render consistently.",
+      "targetsStatus": "confirmed",
+      "targets": {
+        "expectedPrimaryFigures": 14,
+        "expectedFiguresWithImages": 14,
+        "maxGapFigures": 0,
+        "requiredLabels": [
+          "Figure 1",
+          "Figure 2",
+          "Figure 3",
+          "Figure 4",
+          "Figure 5",
+          "Figure 6",
+          "Table 1",
+          "Table 2",
+          "Table 3",
+          "Table 4",
+          "Table 5",
+          "Table 6",
+          "Table 7",
+          "Table 8"
+        ],
+        "labelTargets": {
+          "Figure 1": {
+            "expectsImage": true,
+            "expectedSourceMethod": "arxiv_html"
+          },
+          "Table 1": {
+            "expectsImage": true,
+            "expectedSourceMethod": "arxiv_html",
+            "expectedImageSourceMethod": "html_table_render",
+            "expectedGapReason": null
+          },
+          "Table 5": {
+            "expectsImage": true,
+            "expectedSourceMethod": "arxiv_html",
+            "expectedImageSourceMethod": "html_table_render",
+            "expectedGapReason": null
+          }
+        }
+      }
+    },
+    {
+      "paperId": "62c0caa0-08b1-4f3e-8395-b7f4e6ee1789",
+      "arxivId": "2402.08265",
+      "title": "A Dense Reward View on Aligning Text-to-Image Diffusion with Preference",
+      "bucket": "grouped_parent_figures",
+      "priority": "critical",
+      "reviewFocus": "Grouped parent figures should keep structured semantics without losing visible previews on first publish.",
+      "targetsStatus": "confirmed",
+      "targets": {
+        "expectedPrimaryFigures": 31,
+        "expectedFiguresWithImages": 31,
+        "maxGapFigures": 0,
+        "requiredLabels": [
+          "Figure 1",
+          "Figure 2",
+          "Figure 3",
+          "Figure 4",
+          "Figure 5",
+          "Figure 6",
+          "Figure 7",
+          "Figure 8",
+          "Figure 9",
+          "Figure 10",
+          "Figure 11",
+          "Figure 12",
+          "Figure 13",
+          "Figure 14",
+          "Figure 15",
+          "Figure 16",
+          "Figure 17",
+          "Figure 18",
+          "Figure 19",
+          "Figure 20",
+          "Figure 21",
+          "Figure 22",
+          "Figure 23",
+          "Figure 24",
+          "Table 1",
+          "Table 2",
+          "Table 3",
+          "Table 4",
+          "Table 5",
+          "Table 6",
+          "Table 7"
+        ],
+        "labelTargets": {
+          "Figure 1": {
+            "expectsImage": true,
+            "expectedSourceMethod": "arxiv_html"
+          },
+          "Figure 2": {
+            "expectsImage": true,
+            "expectedSourceMethod": "arxiv_html"
+          },
+          "Figure 6": {
+            "expectsImage": true,
+            "expectedSourceMethod": "arxiv_html"
+          },
+          "Figure 7": {
+            "expectsImage": true,
+            "expectedSourceMethod": "arxiv_html"
+          },
+          "Table 1": {
+            "expectsImage": true,
+            "expectedSourceMethod": "arxiv_html",
+            "expectedImageSourceMethod": "html_table_render",
+            "expectedGapReason": null
+          },
+          "Table 2": {
+            "expectsImage": true,
+            "expectedSourceMethod": "arxiv_html",
+            "expectedImageSourceMethod": "html_table_render",
+            "expectedGapReason": null
+          },
+          "Table 3": {
+            "expectsImage": true,
+            "expectedSourceMethod": "arxiv_html",
+            "expectedImageSourceMethod": "html_table_render",
+            "expectedGapReason": null
+          },
+          "Table 4": {
+            "expectsImage": true,
+            "expectedSourceMethod": "arxiv_html",
+            "expectedImageSourceMethod": "html_table_render",
+            "expectedGapReason": null
+          },
+          "Table 5": {
+            "expectsImage": true,
+            "expectedSourceMethod": "arxiv_html",
+            "expectedImageSourceMethod": "html_table_render",
+            "expectedGapReason": null
+          },
+          "Table 6": {
+            "expectsImage": true,
+            "expectedSourceMethod": "arxiv_html",
+            "expectedImageSourceMethod": "html_table_render",
+            "expectedGapReason": null
+          },
+          "Table 7": {
+            "expectsImage": true,
+            "expectedSourceMethod": "arxiv_html",
+            "expectedImageSourceMethod": "html_table_render",
+            "expectedGapReason": null
+          }
+        }
+      }
+    },
+    {
+      "paperId": "dc61929a-bb59-441f-a92f-7d863cf62e38",
+      "arxivId": "2502.12743",
+      "title": "\"I know myself better, but not really greatly\": How Well Can LLMs Detect and Explain LLM-Generated Texts?",
+      "bucket": "table_heavy_grobid",
+      "priority": "high",
+      "reviewFocus": "Table-heavy paper where GROBID helps semantics but should not create junk canonicals.",
+      "targetsStatus": "partially_confirmed",
+      "targets": {
+        "expectedPrimaryFigures": 17,
+        "expectedFiguresWithImages": 17,
+        "maxGapFigures": 0,
+        "requiredLabels": [
+          "Figure 1",
+          "Table 1",
+          "Table 2",
+          "Table 3",
+          "Table 4",
+          "Table 5",
+          "Table 6",
+          "Table 7",
+          "Table 8",
+          "Table 9",
+          "Table 10",
+          "Table 11",
+          "Table 12",
+          "Table 13",
+          "Table 14",
+          "Table 15",
+          "Table 16"
+        ],
+        "labelTargets": {
+          "Figure 1": {
+            "expectsImage": true
+          },
+          "Table 1": {
+            "expectsImage": true,
+            "expectedSourceMethod": "arxiv_html"
+          },
+          "Table 7": {
+            "expectsImage": true
+          },
+          "Table 16": {
+            "expectsImage": true
+          }
+        }
+      }
+    },
+    {
+      "paperId": "9b5e18f3-fa1a-472f-94dd-e9bd46fd8417",
+      "title": "Accelerating Large Language Model Inference with Dynamic Self-Speculative Decoding",
+      "bucket": "pdf_only",
+      "priority": "high",
+      "reviewFocus": "Pure PDF fallback sentinel; completeness matters more than legacy count stability as long as labeled artifacts stay visible and gap-free.",
+      "targetsStatus": "confirmed",
+      "targets": {
+        "expectedRolloutStatus": "published_extraction",
+        "minimumPrimaryFigures": 5,
+        "minimumFiguresWithImages": 5,
+        "maxGapFigures": 0,
+        "requiredLabels": [
+          "Figure 1",
+          "Figure 2",
+          "Table 1",
+          "Figure 3",
+          "Figure 4"
+        ],
+        "labelTargets": {
+          "Figure 1": {
+            "expectsImage": true
+          },
+          "Figure 2": {
+            "expectsImage": true
+          },
+          "Table 1": {
+            "expectsImage": true
+          },
+          "Figure 3": {
+            "expectsImage": true
+          },
+          "Figure 4": {
+            "expectsImage": true
+          }
+        }
+      }
+    },
+    {
+      "paperId": "01e28a27-7ae9-46a7-b760-caa7cf858210",
+      "arxivId": "2305.18290",
+      "title": "Direct Preference Optimization: Your Language Model is Secretly a Reward Model",
+      "bucket": "legacy_bootstrap",
+      "priority": "medium",
+      "reviewFocus": "Legacy bootstrap sentinel; migration state should stay stable while we improve extraction-backed copies elsewhere.",
+      "targetsStatus": "partially_confirmed",
+      "targets": {
+        "expectedRolloutStatus": "published_bootstrap",
+        "expectedPrimaryFigures": 5,
+        "requiredLabels": [
+          "Figure 1",
+          "Figure 2",
+          "Figure 3",
+          "Table 1",
+          "Table 2"
+        ],
+        "labelTargets": {
+          "Figure 1": {
+            "expectsImage": true
+          },
+          "Figure 2": {
+            "expectPresent": true
+          },
+          "Figure 3": {
+            "expectPresent": true
+          },
+          "Table 1": {
+            "expectsImage": true
+          },
+          "Table 2": {
+            "expectsImage": true
+          }
+        }
+      }
+    },
+    {
+      "paperId": "f78162c6-7dcc-427e-9914-f49a8b851271",
+      "arxivId": "2403.15365",
+      "title": "A Transfer Attack to Image Watermarks",
+      "bucket": "large_mixed_html_pdf",
+      "priority": "medium",
+      "reviewFocus": "Large arXiv figure block should collapse into labeled figures only, with appendix tables rendered and no anonymous html-fig aliases left.",
+      "targetsStatus": "confirmed",
+      "targets": {
+        "expectedRolloutStatus": "published_extraction",
+        "expectedPrimaryFigures": 17,
+        "expectedFiguresWithImages": 17,
+        "maxGapFigures": 0,
+        "requiredLabels": [
+          "Figure 1",
+          "Figure 6",
+          "Figure 10",
+          "Figure 15",
+          "Table 1",
+          "Table 2"
+        ],
+        "labelTargets": {
+          "Figure 1": {
+            "expectsImage": true,
+            "expectedSourceMethod": "arxiv_html"
+          },
+          "Figure 6": {
+            "expectsImage": true,
+            "expectedSourceMethod": "arxiv_html"
+          },
+          "Figure 10": {
+            "expectsImage": true,
+            "expectedSourceMethod": "arxiv_html"
+          },
+          "Figure 15": {
+            "expectsImage": true,
+            "expectedSourceMethod": "arxiv_html"
+          },
+          "Table 1": {
+            "expectsImage": true,
+            "expectedSourceMethod": "arxiv_html",
+            "expectedImageSourceMethod": "html_table_render",
+            "expectedGapReason": null
+          },
+          "Table 2": {
+            "expectsImage": true,
+            "expectedSourceMethod": "arxiv_html",
+            "expectedImageSourceMethod": "html_table_render",
+            "expectedGapReason": null
+          }
+        }
+      }
+    },
+    {
+      "paperId": "622d7f75-c24b-4aaf-9a6c-28a0ce0198ae",
+      "arxivId": "2510.13829",
+      "title": "A Linguistics-Aware LLM Watermarking via Syntactic Predictability",
+      "bucket": "html_with_sparse_pdf_fallback",
+      "priority": "medium",
+      "reviewFocus": "After nested-panel suppression, the paper should publish as a clean arXiv HTML surface with rendered previews for all tables.",
+      "targetsStatus": "confirmed",
+      "targets": {
+        "expectedPrimaryFigures": 19,
+        "expectedFiguresWithImages": 19,
+        "maxGapFigures": 0,
+        "requiredLabels": [
+          "Figure 1",
+          "Figure 2",
+          "Figure 6",
+          "Table 1",
+          "Table 13"
+        ],
+        "labelTargets": {
+          "Figure 1": {
+            "expectsImage": true,
+            "expectedSourceMethod": "arxiv_html"
+          },
+          "Figure 2": {
+            "expectsImage": true,
+            "expectedSourceMethod": "arxiv_html"
+          },
+          "Figure 6": {
+            "expectsImage": true,
+            "expectedSourceMethod": "arxiv_html"
+          },
+          "Table 1": {
+            "expectsImage": true,
+            "expectedSourceMethod": "arxiv_html",
+            "expectedImageSourceMethod": "html_table_render",
+            "expectedGapReason": null
+          },
+          "Table 13": {
+            "expectsImage": true,
+            "expectedSourceMethod": "arxiv_html",
+            "expectedImageSourceMethod": "html_table_render",
+            "expectedGapReason": null
+          }
+        }
+      }
+    },
+    {
+      "paperId": "5c31b94c-8677-4d43-83bb-43b222b77de4",
+      "arxivId": "2412.05139",
+      "title": "A Practical Examination of AI-Generated Text Detectors for Large Language Models",
+      "bucket": "table_saturated_html_pdf",
+      "priority": "high",
+      "reviewFocus": "Table-saturated detector paper should publish as labeled arXiv figures plus rendered HTML tables, with no anonymous html-fig aliases left.",
+      "targetsStatus": "confirmed",
+      "targets": {
+        "expectedPrimaryFigures": 22,
+        "expectedFiguresWithImages": 22,
+        "maxGapFigures": 0,
+        "requiredLabels": [
+          "Figure 1",
+          "Figure 2",
+          "Figure 5",
+          "Table 1",
+          "Table 17"
+        ],
+        "labelTargets": {
+          "Figure 1": {
+            "expectsImage": true,
+            "expectedSourceMethod": "arxiv_html"
+          },
+          "Figure 2": {
+            "expectsImage": true,
+            "expectedSourceMethod": "arxiv_html"
+          },
+          "Figure 5": {
+            "expectsImage": true,
+            "expectedSourceMethod": "arxiv_html"
+          },
+          "Table 1": {
+            "expectsImage": true,
+            "expectedSourceMethod": "arxiv_html",
+            "expectedImageSourceMethod": "html_table_render",
+            "expectedGapReason": null
+          },
+          "Table 17": {
+            "expectsImage": true,
+            "expectedSourceMethod": "arxiv_html",
+            "expectedImageSourceMethod": "html_table_render",
+            "expectedGapReason": null
+          }
+        }
+      }
+    },
+    {
+      "paperId": "cf55f775-17ec-4b59-aaf7-c8fc87a35e4e",
+      "arxivId": "2507.02554",
+      "title": "AI Research Agents for Machine Learning: Search, Exploration, and Generalization in MLE-bench",
+      "bucket": "structured_tables_missing_previews",
+      "priority": "critical",
+      "reviewFocus": "arXiv tables should publish with rendered previews and no remaining structured-table gaps.",
+      "targetsStatus": "confirmed",
+      "targets": {
+        "expectedPrimaryFigures": 22,
+        "expectedFiguresWithImages": 22,
+        "maxGapFigures": 0,
+        "requiredLabels": [
+          "Figure 1",
+          "Figure 7",
+          "Figure 17",
+          "Table 1",
+          "Table 2",
+          "Table 3"
+        ],
+        "labelTargets": {
+          "Figure 1": {
+            "expectsImage": true,
+            "expectedSourceMethod": "arxiv_html"
+          },
+          "Figure 7": {
+            "expectsImage": true,
+            "expectedSourceMethod": "arxiv_html"
+          },
+          "Figure 17": {
+            "expectsImage": true,
+            "expectedSourceMethod": "arxiv_html"
+          },
+          "Table 1": {
+            "expectsImage": true,
+            "expectedSourceMethod": "arxiv_html",
+            "expectedImageSourceMethod": "html_table_render"
+          },
+          "Table 2": {
+            "expectsImage": true,
+            "expectedSourceMethod": "arxiv_html",
+            "expectedImageSourceMethod": "html_table_render"
+          },
+          "Table 3": {
+            "expectsImage": true,
+            "expectedSourceMethod": "arxiv_html",
+            "expectedImageSourceMethod": "html_table_render"
+          }
+        }
+      }
+    },
+    {
+      "paperId": "7ed60518-c85e-4d0c-b8fe-7ab4c6ea5384",
+      "arxivId": "2504.21044",
+      "title": "AGATE: Stealthy Black-box Watermarking for Multimodal Model Copyright Protection",
+      "bucket": "multimodal_mixed_sources",
+      "priority": "medium",
+      "reviewFocus": "Multimodal paper should collapse to the real labeled arXiv surface, with rendered previews for HTML tables and no anonymous html-fig aliases.",
+      "targetsStatus": "confirmed",
+      "targets": {
+        "expectedPrimaryFigures": 10,
+        "expectedFiguresWithImages": 10,
+        "maxGapFigures": 0,
+        "requiredLabels": [
+          "Figure 1",
+          "Figure 3",
+          "Figure 5",
+          "Table 1",
+          "Table 5"
+        ],
+        "labelTargets": {
+          "Figure 1": {
+            "expectsImage": true,
+            "expectedSourceMethod": "arxiv_html"
+          },
+          "Figure 3": {
+            "expectsImage": true,
+            "expectedSourceMethod": "arxiv_html"
+          },
+          "Figure 5": {
+            "expectsImage": true,
+            "expectedSourceMethod": "arxiv_html"
+          },
+          "Table 1": {
+            "expectsImage": true,
+            "expectedSourceMethod": "arxiv_html",
+            "expectedImageSourceMethod": "html_table_render",
+            "expectedGapReason": null
+          },
+          "Table 5": {
+            "expectsImage": true,
+            "expectedSourceMethod": "arxiv_html",
+            "expectedImageSourceMethod": "html_table_render",
+            "expectedGapReason": null
+          }
+        }
+      }
+    },
+    {
+      "paperId": "aeb5decd-9d6d-48aa-8dc5-2058d064b3cf",
+      "arxivId": "2509.13317",
+      "title": "3D Aware Region Prompted Vision Language Model",
+      "bucket": "clean_html_table_dense",
+      "priority": "medium",
+      "reviewFocus": "HTML-first paper with many rendered tables; this should remain a clean structured baseline.",
+      "targetsStatus": "confirmed",
+      "targets": {
+        "expectedPrimaryFigures": 22,
+        "expectedFiguresWithImages": 22,
+        "maxGapFigures": 0,
+        "requiredLabels": [
+          "Figure 1",
+          "Figure 6",
+          "Table 1",
+          "Table 8",
+          "Table 16"
+        ],
+        "labelTargets": {
+          "Figure 1": {
+            "expectsImage": true,
+            "expectedSourceMethod": "arxiv_html"
+          },
+          "Figure 6": {
+            "expectsImage": true,
+            "expectedSourceMethod": "arxiv_html"
+          },
+          "Table 1": {
+            "expectsImage": true,
+            "expectedSourceMethod": "arxiv_html",
+            "expectedImageSourceMethod": "html_table_render",
+            "expectedGapReason": null
+          },
+          "Table 8": {
+            "expectsImage": true,
+            "expectedSourceMethod": "arxiv_html",
+            "expectedImageSourceMethod": "html_table_render",
+            "expectedGapReason": null
+          },
+          "Table 16": {
+            "expectsImage": true,
+            "expectedSourceMethod": "arxiv_html",
+            "expectedImageSourceMethod": "html_table_render",
+            "expectedGapReason": null
+          }
+        }
+      }
+    },
+    {
+      "paperId": "a06d7e10-dcfd-4bfc-ad3d-f84aaaa271c8",
+      "arxivId": "2412.11851",
+      "title": "A Benchmark and Robustness Study of In-Context-Learning with Large Language Models in Music Entity Detection",
+      "bucket": "mixed_html_pdf_charts",
+      "priority": "medium",
+      "reviewFocus": "The paper should publish as a fully structured arXiv HTML surface, including SVG figures that previously fell back to PDF crops.",
+      "targetsStatus": "confirmed",
+      "targets": {
+        "expectedPrimaryFigures": 19,
+        "expectedFiguresWithImages": 19,
+        "maxGapFigures": 0,
+        "requiredLabels": [
+          "Figure 1",
+          "Figure 2",
+          "Figure 8",
+          "Table 1",
+          "Table 8"
+        ],
+        "labelTargets": {
+          "Figure 1": {
+            "expectsImage": true,
+            "expectedSourceMethod": "arxiv_html"
+          },
+          "Figure 2": {
+            "expectsImage": true,
+            "expectedSourceMethod": "arxiv_html"
+          },
+          "Figure 8": {
+            "expectsImage": true,
+            "expectedSourceMethod": "arxiv_html"
+          },
+          "Table 1": {
+            "expectsImage": true,
+            "expectedSourceMethod": "arxiv_html",
+            "expectedImageSourceMethod": "html_table_render",
+            "expectedGapReason": null
+          },
+          "Table 8": {
+            "expectsImage": true,
+            "expectedSourceMethod": "arxiv_html",
+            "expectedImageSourceMethod": "html_table_render",
+            "expectedGapReason": null
+          }
+        }
+      }
+    },
+    {
+      "paperId": "cc432553-7a8e-43d7-a501-0d411653f20f",
+      "arxivId": "2406.07780",
+      "title": "A Critical Look At Tokenwise Reward-Guided Text Generation",
+      "bucket": "table_heavy_single_pdf_table",
+      "priority": "medium",
+      "reviewFocus": "Table-heavy reward-guided paper should now publish as a fully structured arXiv HTML surface, including the previously merged Table 15/16 appendix block.",
+      "targetsStatus": "confirmed",
+      "targets": {
+        "expectedPrimaryFigures": 19,
+        "expectedFiguresWithImages": 19,
+        "maxGapFigures": 0,
+        "requiredLabels": [
+          "Figure 1",
+          "Figure 3",
+          "Table 1",
+          "Table 11",
+          "Table 15",
+          "Table 16"
+        ],
+        "labelTargets": {
+          "Figure 1": {
+            "expectsImage": true,
+            "expectedSourceMethod": "arxiv_html"
+          },
+          "Figure 3": {
+            "expectsImage": true,
+            "expectedSourceMethod": "arxiv_html"
+          },
+          "Table 1": {
+            "expectsImage": true,
+            "expectedSourceMethod": "arxiv_html",
+            "expectedImageSourceMethod": "html_table_render",
+            "expectedGapReason": null
+          },
+          "Table 11": {
+            "expectsImage": true,
+            "expectedSourceMethod": "arxiv_html",
+            "expectedImageSourceMethod": "html_table_render",
+            "expectedGapReason": null
+          },
+          "Table 15": {
+            "expectsImage": true,
+            "expectedSourceMethod": "arxiv_html",
+            "expectedImageSourceMethod": "html_table_render",
+            "expectedGapReason": null
+          },
+          "Table 16": {
+            "expectsImage": true,
+            "expectedSourceMethod": "arxiv_html",
+            "expectedImageSourceMethod": "html_table_render",
+            "expectedGapReason": null
+          }
+        }
+      }
+    },
+    {
+      "paperId": "da7e5b4d-7882-4080-973a-0c44b3341e4d",
+      "arxivId": "2402.09727",
+      "title": "A Human-Inspired Reading Agent with Gist Memory of Very Long Contexts",
+      "bucket": "pdf_only_large",
+      "priority": "high",
+      "reviewFocus": "Large PDF-only paper; keep a high-recall labeled surface and block only catastrophic losses or new gaps.",
+      "targetsStatus": "confirmed",
+      "targets": {
+        "minimumPrimaryFigures": 19,
+        "minimumFiguresWithImages": 19,
+        "maxGapFigures": 0,
+        "requiredLabels": [
+          "Figure 1",
+          "Figure 2",
+          "Figure 8",
+          "Table 1",
+          "Table 11"
+        ],
+        "labelTargets": {
+          "Figure 1": {
+            "expectsImage": true,
+            "expectedSourceMethod": "pdf_embedded"
+          },
+          "Figure 2": {
+            "expectsImage": true,
+            "expectedSourceMethod": "pdf_render_crop"
+          },
+          "Figure 8": {
+            "expectsImage": true,
+            "expectedSourceMethod": "pdf_render_crop"
+          },
+          "Table 1": {
+            "expectsImage": true,
+            "expectedSourceMethod": "pdf_render_crop"
+          },
+          "Table 11": {
+            "expectsImage": true,
+            "expectedSourceMethod": "pdf_render_crop"
+          }
+        }
+      }
+    },
+    {
+      "paperId": "00118960-d129-4cb2-882e-5ab885edca32",
+      "title": "RetrievalAttention: Accelerating Long-Context LLM Inference via Vector Retrieval",
+      "bucket": "pdf_crop_only",
+      "priority": "medium",
+      "reviewFocus": "Pure crop-only paper; favor completeness and plausible labeled artifact recovery over legacy count matching, while rejecting obvious garbage or gaps.",
+      "targetsStatus": "partially_confirmed",
+      "targets": {
+        "minimumPrimaryFigures": 26,
+        "minimumFiguresWithImages": 26,
+        "maxGapFigures": 0,
+        "requiredLabels": [
+          "Figure 1",
+          "Figure 5",
+          "Figure 8",
+          "Figure 12",
+          "Table 1",
+          "Table 4",
+          "Table 7",
+          "Table 8",
+          "Table 10"
+        ],
+        "labelTargets": {
+          "Figure 1": {
+            "expectsImage": true,
+            "expectedSourceMethod": "pdf_render_crop"
+          },
+          "Figure 5": {
+            "expectsImage": true,
+            "expectedSourceMethod": "pdf_render_crop"
+          },
+          "Figure 8": {
+            "expectsImage": true,
+            "expectedSourceMethod": "pdf_render_crop"
+          },
+          "Figure 12": {
+            "expectsImage": true,
+            "expectedSourceMethod": "pdf_render_crop"
+          },
+          "Table 1": {
+            "expectsImage": true,
+            "expectedSourceMethod": "pdf_render_crop"
+          },
+          "Table 4": {
+            "expectsImage": true,
+            "expectedSourceMethod": "pdf_render_crop"
+          },
+          "Table 7": {
+            "expectsImage": true,
+            "expectedSourceMethod": "pdf_render_crop"
+          },
+          "Table 8": {
+            "expectsImage": true,
+            "expectedSourceMethod": "pdf_embedded"
+          },
+          "Table 10": {
+            "expectsImage": true,
+            "expectedSourceMethod": "pdf_render_crop"
+          }
+        }
+      }
+    },
+    {
+      "paperId": "002ab01d-46d0-4c39-ade8-c52195ffe74b",
+      "title": "Eigen Attention: Attention in Low-Rank Space for KV Cache Compression",
+      "bucket": "pdf_embedded_plus_crop",
+      "priority": "medium",
+      "reviewFocus": "PDF-only mixed embedded/crop paper; preserve the current mixed-source labeled surface and allow additional plausible artifacts without introducing gaps.",
+      "targetsStatus": "partially_confirmed",
+      "targets": {
+        "minimumPrimaryFigures": 14,
+        "minimumFiguresWithImages": 14,
+        "maxGapFigures": 0,
+        "requiredLabels": [
+          "Figure 1",
+          "Figure 4",
+          "Figure 6",
+          "Table 1",
+          "Table 3",
+          "Table 9"
+        ],
+        "labelTargets": {
+          "Figure 1": {
+            "expectsImage": true,
+            "expectedSourceMethod": "pdf_render_crop"
+          },
+          "Figure 4": {
+            "expectsImage": true,
+            "expectedSourceMethod": "pdf_embedded"
+          },
+          "Figure 6": {
+            "expectsImage": true,
+            "expectedSourceMethod": "pdf_render_crop"
+          },
+          "Table 1": {
+            "expectsImage": true,
+            "expectedSourceMethod": "pdf_render_crop"
+          },
+          "Table 3": {
+            "expectsImage": true,
+            "expectedSourceMethod": "pdf_embedded"
+          },
+          "Table 9": {
+            "expectsImage": true,
+            "expectedSourceMethod": "pdf_render_crop"
+          }
+        }
+      }
+    }
+  ]
+}
