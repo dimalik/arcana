@@ -845,7 +845,7 @@ export default function ResearchPage() {
             Rediscovery Benchmark
           </DialogTitle>
           <DialogDescription className="text-xs text-muted-foreground">
-            Select a paper from your library. The system will extract a blinded research question, use the paper's references as seeds, and test if the agent can independently rediscover the method.
+            Select a paper from your library. The system will extract a blinded research question, use the paper&apos;s references as seeds, and test if the agent can independently rediscover the method.
           </DialogDescription>
           <div className="space-y-3 py-2">
             <select

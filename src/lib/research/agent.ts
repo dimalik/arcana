@@ -1411,7 +1411,7 @@ Check RESEARCH_LOG.md for the detailed research narrative.
       Object.entries(tools).filter(([name]) => allowed.has(name))
     ) as typeof tools;
   };
-  let fsmFilteredTools = await getFilteredTools();
+  const fsmFilteredTools = await getFilteredTools();
 
   // Deterministic test mode: replay a fixed tool-call fixture instead of live LLM generation.
   if (runtimeOptions?.mockLlmFixtureId) {

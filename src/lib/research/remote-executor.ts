@@ -402,7 +402,7 @@ async function finalizeRemoteJobFromHelper(params: {
   const oomDetected = helperStatus.oom_detected ?? false;
   const failed = oomDetected || (exitCode !== null && exitCode !== 0);
 
-  let finalStdout = helperStatus.stdout_tail || job.stdout || "";
+  const finalStdout = helperStatus.stdout_tail || job.stdout || "";
   let finalStderr = helperStatus.stderr_tail || job.stderr || "";
   if (oomDetected && helperStatus.oom_detail) {
     finalStderr = `${finalStderr}\n\n[OOM DETECTED] ${helperStatus.oom_detail}`.trim();
