@@ -148,7 +148,7 @@ describe("ensurePaperEntityForGraph", () => {
         arxivId: null,
         semanticScholarId: null,
       })
-    ).rejects.toMatchObject<Partial<GraphRelationError>>({
+    ).rejects.toMatchObject({
       status: 409,
       code: "missing_identifiers",
     });
