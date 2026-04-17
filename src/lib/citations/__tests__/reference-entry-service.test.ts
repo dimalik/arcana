@@ -2,9 +2,15 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../../prisma", () => ({
   prisma: {
+    $transaction: vi.fn(),
     referenceEntry: {
       create: vi.fn(),
+      findFirst: vi.fn(),
+      delete: vi.fn(),
       update: vi.fn(),
+    },
+    reference: {
+      deleteMany: vi.fn(),
     },
     paperIdentifier: {
       findUnique: vi.fn(),
@@ -23,7 +29,11 @@ vi.mock("../../references/resolve", () => ({
 import { prisma } from "../../prisma";
 import { resolveOrCreateEntity } from "../../canonical/entity-service";
 import { resolveReferenceOnline } from "../../references/resolve";
-import { createReferenceEntry, resolveReferenceEntity } from "../reference-entry-service";
+import {
+  createReferenceEntry,
+  deleteReferenceEntryWithLegacyProjection,
+  resolveReferenceEntity,
+} from "../reference-entry-service";
 
 describe("createReferenceEntry", () => {
   beforeEach(() => {
@@ -177,5 +187,65 @@ describe("resolveReferenceEntity", () => {
     });
     expect(prisma.referenceEntry.update).not.toHaveBeenCalled();
     expect(resolveOrCreateEntity).not.toHaveBeenCalled();
+  });
+});
+
+describe("deleteReferenceEntryWithLegacyProjection", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("deletes the reference entry and legacy reference in one transaction", async () => {
+    vi.mocked(prisma.referenceEntry.findFirst).mockResolvedValue({
+      id: "entry-1",
+      legacyReferenceId: "legacy-1",
+    } as never);
+    vi.mocked(prisma.$transaction).mockImplementation(async (callback: never) =>
+      callback({
+        reference: {
+          deleteMany: prisma.reference.deleteMany,
+        },
+        referenceEntry: {
+          delete: prisma.referenceEntry.delete,
+        },
+      }),
+    );
+    vi.mocked(prisma.reference.deleteMany).mockResolvedValue({ count: 1 } as never);
+    vi.mocked(prisma.referenceEntry.delete).mockResolvedValue({ id: "entry-1" } as never);
+
+    const result = await deleteReferenceEntryWithLegacyProjection("paper-1", "legacy-1");
+
+    expect(prisma.referenceEntry.findFirst).toHaveBeenCalledWith({
+      where: {
+        paperId: "paper-1",
+        OR: [{ id: "legacy-1" }, { legacyReferenceId: "legacy-1" }],
+      },
+      select: {
+        id: true,
+        legacyReferenceId: true,
+      },
+    });
+    expect(prisma.reference.deleteMany).toHaveBeenCalledWith({
+      where: {
+        id: "legacy-1",
+        paperId: "paper-1",
+      },
+    });
+    expect(prisma.referenceEntry.delete).toHaveBeenCalledWith({
+      where: { id: "entry-1" },
+    });
+    expect(result).toEqual({
+      referenceEntryId: "entry-1",
+      legacyReferenceId: "legacy-1",
+    });
+  });
+
+  it("returns null when no reference entry exists for the requested id", async () => {
+    vi.mocked(prisma.referenceEntry.findFirst).mockResolvedValue(null as never);
+
+    const result = await deleteReferenceEntryWithLegacyProjection("paper-1", "missing");
+
+    expect(result).toBeNull();
+    expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 });

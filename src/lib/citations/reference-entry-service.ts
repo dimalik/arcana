@@ -33,6 +33,11 @@ export interface ReferenceEntityResolution {
   externalUrl: string | null;
 }
 
+export interface DeleteReferenceEntryResult {
+  referenceEntryId: string;
+  legacyReferenceId: string | null;
+}
+
 export async function createReferenceEntry(input: CreateReferenceEntryInput) {
   return prisma.referenceEntry.create({
     data: {
@@ -52,6 +57,46 @@ export async function createReferenceEntry(input: CreateReferenceEntryInput) {
       legacyReferenceId: input.legacyReferenceId,
     },
   });
+}
+
+export async function deleteReferenceEntryWithLegacyProjection(
+  paperId: string,
+  referenceId: string,
+): Promise<DeleteReferenceEntryResult | null> {
+  const referenceEntry = await prisma.referenceEntry.findFirst({
+    where: {
+      paperId,
+      OR: [{ id: referenceId }, { legacyReferenceId: referenceId }],
+    },
+    select: {
+      id: true,
+      legacyReferenceId: true,
+    },
+  });
+
+  if (!referenceEntry) {
+    return null;
+  }
+
+  await prisma.$transaction(async (tx) => {
+    if (referenceEntry.legacyReferenceId) {
+      await tx.reference.deleteMany({
+        where: {
+          id: referenceEntry.legacyReferenceId,
+          paperId,
+        },
+      });
+    }
+
+    await tx.referenceEntry.delete({
+      where: { id: referenceEntry.id },
+    });
+  });
+
+  return {
+    referenceEntryId: referenceEntry.id,
+    legacyReferenceId: referenceEntry.legacyReferenceId,
+  };
 }
 
 export async function resolveReferenceEntity(
