@@ -22,11 +22,12 @@ const SOURCE_PRIORITY: Record<string, number> = {
   pmc_jats: 1,
   arxiv_html: 2,
   publisher_html: 3,
-  pdf_embedded: 4,
-  pdf_render_crop: 5,
-  pdf_structural: 6,
-  vision_llm: 7,
-  html_download: 8, // legacy
+  grobid_tei: 4,
+  pdf_embedded: 5,
+  pdf_render_crop: 6,
+  pdf_structural: 7,
+  vision_llm: 8,
+  html_download: 9, // legacy
 };
 
 export interface MergeableFigure {
@@ -57,6 +58,11 @@ export interface MergedFigure extends MergeableFigure {
   isPrimaryExtraction: boolean;
 }
 
+export interface IdentityMergeResult {
+  canonical: MergedFigure | null;
+  alternates: MergedFigure[];
+}
+
 export function getPriority(sourceMethod: string): number {
   return SOURCE_PRIORITY[sourceMethod] ?? 99;
 }
@@ -69,6 +75,139 @@ interface AnnotatedFigure extends MergeableFigure {
 interface IdentityGroup {
   /** All member figures, sorted by priority (highest first = lowest number) */
   members: AnnotatedFigure[];
+}
+
+function selectCanonicalMember(members: AnnotatedFigure[], isTable: boolean): AnnotatedFigure {
+  if (isTable) {
+    return members.find((member) => member.description && member.description.length > 100)
+      || members.find((member) => member.normalizedLabel || member.captionText)
+      || members.find((member) => member.imagePath)
+      || members[0];
+  }
+
+  return members.find((member) => member.normalizedLabel || member.captionText)
+    || members.find((member) => member.imagePath)
+    || members[0];
+}
+
+function buildAlternate(member: AnnotatedFigure): MergedFigure {
+  return {
+    figureLabel: member.figureLabel,
+    captionText: member.captionText,
+    captionSource: member.captionSource,
+    sourceMethod: member.sourceMethod,
+    sourceUrl: member.sourceUrl,
+    confidence: member.confidence,
+    imagePath: member.imagePath,
+    assetHash: member.assetHash,
+    pdfPage: member.pdfPage,
+    bbox: member.bbox,
+    type: member.type,
+    width: member.width,
+    height: member.height,
+    description: member.description,
+    gapReason: null,
+    imageSourceMethod: member.imagePath ? member.sourceMethod : null,
+    isPrimaryExtraction: false,
+  };
+}
+
+export function mergeIdentityMembers(membersInput: MergeableFigure[]): IdentityMergeResult {
+  const members: AnnotatedFigure[] = membersInput
+    .map((member) => ({
+      ...member,
+      priority: getPriority(member.sourceMethod),
+      normalizedLabel: normalizeLabel(member.figureLabel),
+    }))
+    .sort((a, b) => a.priority - b.priority);
+
+  if (members.length === 0) {
+    return { canonical: null, alternates: [] };
+  }
+
+  const isTable = members.some(m => m.type === "table");
+  const isUnlabeledPdfOnlyGroup = members.every(
+    (m) => !m.normalizedLabel
+      && (m.sourceMethod === "pdf_embedded"
+        || m.sourceMethod === "grobid_tei"
+        || m.sourceMethod === "pdf_render_crop"
+        || m.sourceMethod === "pdf_structural"),
+  );
+
+  if (isUnlabeledPdfOnlyGroup) {
+    return {
+      canonical: null,
+      alternates: members.map(buildAlternate),
+    };
+  }
+
+  const canonicalMember = selectCanonicalMember(members, isTable);
+
+  const bestCaptionMember = members.find(m => m.captionText);
+  const finalDescription = canonicalMember.description ?? members.find(m => m.description)?.description ?? null;
+  const isStructuredTable = isTable
+    && finalDescription != null
+    && finalDescription.length > 100;
+
+  let bestImageMember: AnnotatedFigure | null = null;
+  if (canonicalMember.imagePath) {
+    bestImageMember = canonicalMember;
+  } else if (!isStructuredTable) {
+    bestImageMember = members.find(m => m.imagePath) || null;
+  } else {
+    const unsafeSources = new Set(["grobid_tei", "pdf_embedded", "pdf_render_crop", "pdf_structural"]);
+    bestImageMember = members.find(m => m.imagePath && !unsafeSources.has(m.sourceMethod)) || null;
+  }
+
+  const finalImagePath = bestImageMember?.imagePath ?? null;
+  const imageSourceMethod = finalImagePath
+    ? (bestImageMember === canonicalMember
+      ? canonicalMember.sourceMethod
+      : bestImageMember!.sourceMethod)
+    : null;
+
+  let gapReason: string | null = null;
+  if (!finalImagePath) {
+    if (isStructuredTable) {
+      gapReason = "structured_content_no_preview";
+    } else {
+      const cropMember = members.find(m => m.cropOutcome === "failed" || m.cropOutcome === "rejected");
+      if (cropMember?.cropOutcome === "failed") {
+        gapReason = "crop_failed";
+      } else if (cropMember?.cropOutcome === "rejected") {
+        gapReason = "crop_rejected";
+      } else {
+        gapReason = "no_image_candidate";
+      }
+    }
+  }
+
+  const canonical: MergedFigure = {
+    sourceMethod: canonicalMember.sourceMethod,
+    figureLabel: canonicalMember.figureLabel,
+    sourceUrl: canonicalMember.sourceUrl,
+    confidence: canonicalMember.confidence,
+    bbox: canonicalMember.bbox,
+    type: canonicalMember.type,
+    pdfPage: canonicalMember.pdfPage ?? members.find(m => m.pdfPage != null)?.pdfPage ?? null,
+    imagePath: finalImagePath,
+    assetHash: bestImageMember?.assetHash ?? null,
+    width: bestImageMember?.width ?? null,
+    height: bestImageMember?.height ?? null,
+    captionText: bestCaptionMember?.captionText ?? null,
+    captionSource: bestCaptionMember?.captionSource ?? canonicalMember.captionSource,
+    description: finalDescription,
+    gapReason,
+    imageSourceMethod,
+    isPrimaryExtraction: true,
+  };
+
+  return {
+    canonical,
+    alternates: members
+      .filter((member) => member !== canonicalMember)
+      .map(buildAlternate),
+  };
 }
 
 /**
@@ -132,115 +271,11 @@ export function mergeFigureSources(
   const output: MergedFigure[] = [];
 
   groups.forEach((group) => {
-    const members = group.members; // sorted by priority (highest first)
-    const isTable = members.some(m => m.type === "table");
-
-    // Pick canonical based on type:
-    let canonicalMember: AnnotatedFigure;
-    if (isTable) {
-      // Tables: structured content wins, then image, then highest priority
-      canonicalMember =
-        members.find(m => m.description && m.description.length > 100) ||
-        members.find(m => m.imagePath) ||
-        members[0];
-    } else {
-      // Figures: image wins, then highest priority
-      canonicalMember = members.find(m => m.imagePath) || members[0];
+    const result = mergeIdentityMembers(group.members);
+    if (result.canonical) {
+      output.push(result.canonical);
     }
-
-    // Best caption: from the highest-priority member that has one
-    const bestCaptionMember = members.find(m => m.captionText);
-    const finalDescription = canonicalMember.description ?? members.find(m => m.description)?.description ?? null;
-
-    // Image grafting — with safety rules for structured tables.
-    //
-    // For FIGURES: graft the best available image from any member.
-    // For STRUCTURED TABLES: do NOT graft pdf_embedded or pdf_render_crop
-    //   images. Those are often mismatched figure grids near the caption.
-    //   No preview is better than a wrong preview.
-    const isStructuredTable = isTable
-      && finalDescription != null
-      && finalDescription.length > 100;
-
-    let bestImageMember: AnnotatedFigure | null = null;
-    if (canonicalMember.imagePath) {
-      bestImageMember = canonicalMember;
-    } else if (!isStructuredTable) {
-      // Figures and non-structured tables: graft from any member
-      bestImageMember = members.find(m => m.imagePath) || null;
-    } else {
-      // Structured tables: only graft from trusted sources (not PDF)
-      const unsafeSources = new Set(["pdf_embedded", "pdf_render_crop", "pdf_structural"]);
-      bestImageMember = members.find(m => m.imagePath && !unsafeSources.has(m.sourceMethod)) || null;
-    }
-
-    const finalImagePath = bestImageMember?.imagePath ?? null;
-    const imageSourceMethod = finalImagePath
-      ? (bestImageMember === canonicalMember
-        ? canonicalMember.sourceMethod
-        : bestImageMember!.sourceMethod)
-      : null;
-
-    // Assign gapReason: only when canonical has no image
-    let gapReason: string | null = null;
-    if (!finalImagePath) {
-      if (isStructuredTable) {
-        gapReason = "structured_content_no_preview";
-      } else {
-        const cropMember = members.find(m => m.cropOutcome === "failed" || m.cropOutcome === "rejected");
-        if (cropMember?.cropOutcome === "failed") {
-          gapReason = "crop_failed";
-        } else if (cropMember?.cropOutcome === "rejected") {
-          gapReason = "crop_rejected";
-        } else {
-          gapReason = "no_image_candidate";
-        }
-      }
-    }
-
-    output.push({
-      sourceMethod: canonicalMember.sourceMethod,
-      figureLabel: canonicalMember.figureLabel,
-      sourceUrl: canonicalMember.sourceUrl,
-      confidence: canonicalMember.confidence,
-      bbox: canonicalMember.bbox,
-      type: canonicalMember.type,
-      pdfPage: canonicalMember.pdfPage ?? members.find(m => m.pdfPage != null)?.pdfPage ?? null,
-      imagePath: finalImagePath,
-      assetHash: bestImageMember?.assetHash ?? null,
-      width: bestImageMember?.width ?? null,
-      height: bestImageMember?.height ?? null,
-      captionText: bestCaptionMember?.captionText ?? null,
-      captionSource: bestCaptionMember?.captionSource ?? canonicalMember.captionSource,
-      description: finalDescription,
-      gapReason,
-      imageSourceMethod,
-      isPrimaryExtraction: true,
-    });
-
-    // Alternates: every other member, raw fields, non-primary
-    for (const member of members) {
-      if (member === canonicalMember) continue;
-      output.push({
-        figureLabel: member.figureLabel,
-        captionText: member.captionText,
-        captionSource: member.captionSource,
-        sourceMethod: member.sourceMethod,
-        sourceUrl: member.sourceUrl,
-        confidence: member.confidence,
-        imagePath: member.imagePath,
-        assetHash: member.assetHash,
-        pdfPage: member.pdfPage,
-        bbox: member.bbox,
-        type: member.type,
-        width: member.width,
-        height: member.height,
-        description: member.description,
-        gapReason: null, // Alternates never get gapReason
-        imageSourceMethod: member.imagePath ? member.sourceMethod : null,
-        isPrimaryExtraction: false,
-      });
-    }
+    output.push(...result.alternates);
   });
 
   return output;

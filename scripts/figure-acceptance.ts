@@ -1,4 +1,4 @@
-#!/usr/bin/env npx tsx
+#!/usr/bin/env -S node --import tsx
 /**
  * Figure extraction acceptance runner.
  *
@@ -6,9 +6,10 @@
  * of papers with known expected figures and tables.
  *
  * Usage:
- *   npx tsx scripts/figure-acceptance.ts              # report from existing DB (default)
- *   npx tsx scripts/figure-acceptance.ts --extract     # extract then report
- *   npx tsx scripts/figure-acceptance.ts --extract --paper 2506.08712  # single paper
+ *   node --import tsx scripts/figure-acceptance.ts                         # report from existing DB (default)
+ *   node --import tsx scripts/figure-acceptance.ts --extract               # extract then report
+ *   node --import tsx scripts/figure-acceptance.ts --extract --paper 2506.08712
+ *   npm run figures:acceptance
  */
 
 import { prisma } from "../src/lib/prisma";
