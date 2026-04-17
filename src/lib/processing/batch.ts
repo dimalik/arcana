@@ -5,7 +5,7 @@
  * avoids rate limits. Results come back asynchronously (typically 1-4 hours).
  *
  * Phases handle step dependencies:
- *   Phase 1: extract + summarize + extractReferences (independent, only need fullText)
+ *   Phase 1: extract + summarize in Anthropic batch, then hybrid reference extraction as a sidecar
  *   Phase 2: categorize + linking + citationContexts + distill (need Phase 1 results)
  *   Phase 3: contradictions (needs linking results from Phase 2)
  */
@@ -13,13 +13,19 @@
 import { prisma } from "@/lib/prisma";
 import { v4 as uuidv4 } from "uuid";
 import { getProxyConfig, type ProxyConfig } from "@/lib/llm/proxy-settings";
-import { getDefaultModel } from "@/lib/llm/auto-process";
 import { truncateText, MAX_PAPER_CHARS } from "@/lib/llm/provider";
 import { buildPrompt, buildDistillPrompt, cleanJsonResponse } from "@/lib/llm/prompts";
 import { getUserContext, buildUserContextPreamble } from "@/lib/llm/user-context";
-import { getTextForReferenceExtraction, getBodyTextForContextExtraction } from "@/lib/references/extract-section";
-import { findBestMatch } from "@/lib/references/match";
-import { matchCitationToReference } from "@/lib/references/match-citation";
+import { getBodyTextForContextExtraction } from "@/lib/references/extract-section";
+import { runHybridReferenceExtractionForPapers } from "@/lib/references/batch-reference-extraction";
+import { GrobidCitationMentionExtractor } from "@/lib/references/grobid/citation-mentions";
+import { mapLlmReferencesToCandidates } from "@/lib/references/extractors/llm";
+import { persistExtractedReferences } from "@/lib/references/persist";
+import {
+  applyLegacyCitationContexts,
+  createCitationMentions,
+  type CitationMentionInput,
+} from "@/lib/citations/citation-mention-service";
 import { resolveAndAssignTags, getExistingTagNames, getScoredTagHints } from "@/lib/tags/auto-tag";
 import { refreshTagScores } from "@/lib/tags/cleanup";
 
@@ -227,15 +233,6 @@ function buildSummarizeRequest(paperId: string, truncatedText: string, modelId: 
   };
 }
 
-function buildExtractReferencesRequest(paperId: string, refText: string, modelId: string): BatchRequest {
-  const { system } = buildPrompt("extractReferences", "");
-  const prompt = `Here is the reference/bibliography section of the paper:\n\n${refText}`;
-  return {
-    custom_id: `${paperId}--extractReferences`,
-    params: { model: modelId, max_tokens: 8000, system, messages: [{ role: "user", content: prompt }] },
-  };
-}
-
 function buildCategorizeRequest(paperId: string, truncatedText: string, modelId: string, goodTags: string[], overusedTags: string[]): BatchRequest {
   const { system, prompt } = buildPrompt("categorize", truncatedText, undefined, {
     existingTags: goodTags,
@@ -331,13 +328,6 @@ async function buildPhase1Requests(
       requests.push(buildSummarizeRequest(paper.id, truncated, modelId, userContextPreamble));
     }
 
-    // Extract references (only if we have full text)
-    if (paper.fullText) {
-      const refText = getTextForReferenceExtraction(paper.fullText);
-      if (refText) {
-        requests.push(buildExtractReferencesRequest(paper.id, refText, modelId));
-      }
-    }
   }
 
   return { requests, skippedForChunking };
@@ -514,6 +504,9 @@ async function processSummarizeResult(paperId: string, text: string, modelId: st
   await prisma.paper.update({ where: { id: paperId }, data: { summary: text } });
 }
 
+// Backward-compatibility path for already-submitted batches that still contain
+// extractReferences requests. New Phase 1 batches run reference extraction as a
+// post-batch hybrid sidecar instead.
 async function processExtractReferencesResult(paperId: string, text: string, modelId: string) {
   await prisma.promptResult.create({
     data: { paperId, promptType: "extractReferences", prompt: "Auto-extract references (batch)", result: text, provider: "proxy", model: modelId },
@@ -527,35 +520,20 @@ async function processExtractReferencesResult(paperId: string, text: string, mod
     }>;
 
     if (!Array.isArray(refs) || refs.length === 0) return;
-
-    await prisma.reference.deleteMany({ where: { paperId } });
-    const libraryPapers = await prisma.paper.findMany({
-      where: { id: { not: paperId } },
-      select: { id: true, title: true },
+    const paper = await prisma.paper.findUnique({
+      where: { id: paperId },
+      select: { userId: true, entityId: true },
     });
+    if (!paper) return;
 
-    for (const ref of refs.slice(0, 200)) {
-      if (!ref.title) continue;
-      const match = findBestMatch(ref.title, libraryPapers);
-      await prisma.reference.create({
-        data: {
-          paperId, title: ref.title,
-          authors: ref.authors ? JSON.stringify(ref.authors) : null,
-          year: ref.year ?? null, venue: ref.venue ?? null, doi: ref.doi ?? null,
-          rawCitation: ref.rawCitation || ref.title, referenceIndex: ref.index ?? null,
-          matchedPaperId: match?.paperId ?? null, matchConfidence: match?.confidence ?? null,
-        },
-      });
-      if (match) {
-        await prisma.paperRelation.create({
-          data: {
-            sourcePaperId: paperId, targetPaperId: match.paperId,
-            relationType: "cites", description: `Cited as: "${ref.title}"`,
-            confidence: match.confidence, isAutoGenerated: true,
-          },
-        }).catch(() => {});
-      }
-    }
+    await persistExtractedReferences({
+      paperId,
+      paperUserId: paper.userId,
+      sourceEntityId: paper.entityId,
+      references: mapLlmReferencesToCandidates(refs),
+      provenance: "llm_extraction",
+      extractorVersion: "batch_v1",
+    });
   } catch { /* JSON parse failed */ }
 }
 
@@ -601,35 +579,89 @@ async function processLinkingResult(paperId: string, text: string, modelId: stri
   } catch { /* JSON parse failed */ }
 }
 
-async function processCitationContextsResult(paperId: string, text: string) {
-  try {
-    const cleaned = cleanJsonResponse(text);
-    const contexts = JSON.parse(cleaned) as Array<{ citation: string; context: string }>;
-    if (!Array.isArray(contexts) || contexts.length === 0) return;
+interface ProcessCitationContextsDeps {
+  grobidExtract?: (
+    filePath: string,
+  ) => Promise<{
+    mentions: CitationMentionInput[];
+    errorSummary?: string;
+  }>;
+  createMentions?: typeof createCitationMentions;
+  applyLegacyContexts?: typeof applyLegacyCitationContexts;
+}
 
-    const existingRefs = await prisma.reference.findMany({
-      where: { paperId },
-      select: { id: true, title: true, authors: true, year: true, referenceIndex: true },
+export async function processCitationContextsResult(
+  paperId: string,
+  text: string,
+  deps: ProcessCitationContextsDeps = {},
+) {
+  try {
+    const paper = await prisma.paper.findUnique({
+      where: { id: paperId },
+      select: {
+        filePath: true,
+      },
     });
 
-    const contextsByRef = new Map<string, string[]>();
-    for (const ctx of contexts) {
-      if (!ctx.citation || !ctx.context) continue;
-      const refId = matchCitationToReference(ctx.citation, existingRefs);
-      if (!refId) continue;
-      const existing = contextsByRef.get(refId) || [];
-      if (!existing.includes(ctx.context)) existing.push(ctx.context);
-      contextsByRef.set(refId, existing);
+    const referenceCount = await prisma.reference.count({
+      where: { paperId },
+    });
+    if (!paper || referenceCount === 0) return;
+
+    const createMentions = deps.createMentions ?? createCitationMentions;
+    const applyLegacyContexts =
+      deps.applyLegacyContexts ?? applyLegacyCitationContexts;
+
+    let mentionInputs: CitationMentionInput[] = [];
+    let provenance = "llm_extraction";
+    let extractorVersion = "batch_v1";
+
+    if (paper.filePath) {
+      const grobidExtract =
+        deps.grobidExtract ??
+        (async (filePath: string) =>
+          new GrobidCitationMentionExtractor({ priority: "backfill" }).extract(
+            filePath,
+          ));
+      const grobidMentions = await grobidExtract(paper.filePath);
+      if (grobidMentions.mentions.length > 0) {
+        mentionInputs = grobidMentions.mentions;
+        provenance = "grobid_fulltext";
+        extractorVersion = "grobid_fulltext_v1";
+      } else if (grobidMentions.errorSummary) {
+        console.warn(
+          "[batch] GROBID citation mention extraction fell back to LLM",
+          {
+            paperId,
+            reason: grobidMentions.errorSummary,
+          },
+        );
+      }
     }
 
-    const entries = Array.from(contextsByRef.entries());
-    for (const [refId, ctxList] of entries) {
-      await prisma.reference.update({
-        where: { id: refId },
-        data: { citationContext: ctxList.join("; ") },
-      });
+    if (mentionInputs.length === 0) {
+      const cleaned = cleanJsonResponse(text);
+      const contexts = JSON.parse(cleaned) as Array<{
+        citation: string;
+        context: string;
+      }>;
+      if (!Array.isArray(contexts) || contexts.length === 0) return;
+
+      mentionInputs = contexts
+        .filter((ctx) => ctx.citation && ctx.context)
+        .map((ctx) => ({
+          citationText: ctx.citation,
+          excerpt: ctx.context,
+        }));
     }
-  } catch { /* JSON parse failed */ }
+
+    if (mentionInputs.length === 0) return;
+
+    await createMentions(paperId, mentionInputs, extractorVersion, provenance);
+    await applyLegacyContexts(paperId, mentionInputs);
+  } catch {
+    /* JSON parse failed */
+  }
 }
 
 async function processDistillResult(paperId: string, text: string, modelId: string) {
@@ -785,6 +817,20 @@ export async function pollBatch(batchDbId: string): Promise<{
       } catch (e) {
         failed++;
         console.error(`[batch] Error processing ${result.custom_id}:`, e);
+      }
+    }
+
+    if (batch.phase === 1) {
+      try {
+        const hybridReferences = await runHybridReferenceExtractionForPapers(
+          paperIds,
+          batch.modelId,
+        );
+        console.log(
+          `[batch] Phase 1 hybrid references: ${hybridReferences.persistedPapers} papers persisted, ${hybridReferences.grobidPapers} via GROBID, ${hybridReferences.llmFallbackPapers} via LLM fallback, ${hybridReferences.failedPapers} failed`,
+        );
+      } catch (e) {
+        console.error("[batch] Hybrid reference extraction phase failed:", e);
       }
     }
 
