@@ -2,6 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireUserId } from "@/lib/paper-auth";
 import { extractAllFigures } from "@/lib/figures/extract-all-figures";
+import {
+  FIGURE_VIEW_SELECT,
+  mapPaperFiguresToView,
+} from "@/lib/figures/read-model";
 
 /**
  * GET — List extracted figures for a paper.
@@ -18,6 +22,7 @@ export async function GET(
   const showAll = request.nextUrl.searchParams.get("all") === "true";
 
   const figures = await prisma.paperFigure.findMany({
+    select: FIGURE_VIEW_SELECT,
     where: {
       paperId: id,
       ...(showAll ? {} : { isPrimaryExtraction: true }),
@@ -25,7 +30,7 @@ export async function GET(
     orderBy: [{ pdfPage: "asc" }, { figureIndex: "asc" }],
   });
 
-  return NextResponse.json(figures);
+  return NextResponse.json(mapPaperFiguresToView(figures));
 }
 
 /**
