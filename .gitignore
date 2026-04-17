@@ -50,6 +50,11 @@ next-env.d.ts
 
 # claude code local settings (may contain approved command patterns with sensitive URLs)
 .claude/settings.local.json
+.claude/
+.playwright-mcp/
+scripts/__pycache__/
+tmp/
+".exit_code > stdout.log 2> stderr.log & echo $!"
 
 # Reference extraction evaluation corpus (copyrighted PDFs)
 benchmark/references/*.pdf
