@@ -12,6 +12,7 @@
 import { writeFile, mkdir } from "fs/promises";
 import { createHash } from "crypto";
 import path from "path";
+import { JSDOM } from "jsdom";
 
 const BROWSER_HEADERS = {
   "User-Agent":
@@ -26,6 +27,16 @@ interface FigureCandidate {
   type: "figure" | "table";
   /** For table <figure> blocks: the raw HTML of the <table> element. */
   tableHtml?: string;
+  /** For inline/vector figure assets embedded directly in the HTML block. */
+  inlineImageData?: string;
+  inlineImageMimeType?: string;
+  sourceUrl?: string | null;
+}
+
+interface FigureAssetCandidate {
+  url: string;
+  inlineImageData?: string;
+  inlineImageMimeType?: string;
 }
 
 /** Parse "Figure 3", "Table 1", "Fig. 2a" etc from the start of a caption. */
@@ -54,6 +65,156 @@ export interface FigureDownloadResult {
   sourceUrl: string | null;
   /** Figures written in THIS run — use for merge input, not DB reads. */
   figures: HtmlFigureRecord[];
+}
+
+function stripTags(value: string): string {
+  return value.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function getDirectChild(element: Element, tagName: string): Element | null {
+  const normalized = tagName.toLowerCase();
+  for (const child of Array.from(element.children)) {
+    if (child.tagName.toLowerCase() === normalized) return child;
+  }
+  return null;
+}
+
+function resolveAssetUrl(rawUrl: string, effectiveBase: string): string | null {
+  try {
+    return new URL(rawUrl, effectiveBase).href;
+  } catch {
+    return null;
+  }
+}
+
+function getCaptionText(element: Element): string {
+  const captionEl = getDirectChild(element, "figcaption");
+  return (captionEl?.textContent || "").replace(/\s+/g, " ").trim().slice(0, 500);
+}
+
+function getElementText(element: Element | null): string {
+  return (element?.textContent || "").replace(/\s+/g, " ").trim().slice(0, 500);
+}
+
+function isUnlabeledSubfigure(
+  figureId: string | null,
+  figureClass: string,
+  caption: string,
+  figureLabel: string | null,
+  isNestedFigure: boolean,
+): boolean {
+  if (figureLabel) return false;
+  return (
+    isNestedFigure
+  ) || (
+    !!figureId && /\.sf\d+$/i.test(figureId)
+  ) || (
+    /\bltx_figure_panel\b/i.test(figureClass) &&
+    /^\([a-z]\)\s*/i.test(caption)
+  );
+}
+
+function extractFigureAssetCandidate(
+  figure: Element,
+  effectiveBase: string,
+): FigureAssetCandidate | null {
+  const imgEl = figure.querySelector("img");
+  if (imgEl) {
+    const rawUrl = imgEl.getAttribute("src");
+    if (rawUrl && !SKIP_PATTERNS.test(rawUrl)) {
+      const resolvedUrl = resolveAssetUrl(rawUrl, effectiveBase);
+      if (resolvedUrl) {
+        return { url: resolvedUrl };
+      }
+    }
+  }
+
+  const objectEl = figure.querySelector("object[data], embed[src]");
+  if (objectEl) {
+    const rawUrl =
+      objectEl.getAttribute("data") ||
+      objectEl.getAttribute("src");
+    if (rawUrl && !SKIP_PATTERNS.test(rawUrl)) {
+      const resolvedUrl = resolveAssetUrl(rawUrl, effectiveBase);
+      if (resolvedUrl) {
+        return { url: resolvedUrl };
+      }
+    }
+  }
+
+  const inlineSvg = figure.querySelector("svg.ltx_picture, svg");
+  if (inlineSvg) {
+    return {
+      url: "",
+      inlineImageData: inlineSvg.outerHTML.trim(),
+      inlineImageMimeType: "image/svg+xml",
+    };
+  }
+
+  return null;
+}
+
+function extractTableHtmlFromElement(element: Element): string | null {
+  const stdTable = element.querySelector("table");
+  if (stdTable) {
+    return stdTable.outerHTML;
+  }
+
+  const ltxTable = element.querySelector(".ltx_tabular");
+  if (ltxTable) {
+    const clone = element.cloneNode(true) as HTMLElement;
+    clone.querySelectorAll("figcaption").forEach((node) => node.remove());
+    const tableHtml = clone.innerHTML.trim();
+    if (tableHtml.length > 50) {
+      return tableHtml;
+    }
+  }
+
+  return null;
+}
+
+function extractMultiCaptionTableCandidates(
+  figure: HTMLElement,
+  sourceUrl: string | null,
+): FigureCandidate[] {
+  const directChildren = Array.from(figure.children);
+  const directCaptions = directChildren.filter((child) => child.tagName.toLowerCase() === "figcaption");
+  if (directCaptions.length <= 1) return [];
+
+  const candidates: FigureCandidate[] = [];
+  let pendingBlocks: Element[] = [];
+
+  for (const child of directChildren) {
+    if (child.tagName.toLowerCase() === "figcaption") {
+      const caption = getElementText(child);
+      const figureLabel = parseFigureLabel(caption);
+      const type = /^table\s/i.test(caption) ? "table" as const : "figure" as const;
+
+      if (type === "table" && figureLabel) {
+        const tableBlock = pendingBlocks[pendingBlocks.length - 1];
+        if (tableBlock) {
+          const tableHtml = extractTableHtmlFromElement(tableBlock);
+          if (tableHtml) {
+            candidates.push({
+              url: "",
+              caption,
+              figureLabel,
+              type: "table",
+              tableHtml,
+              sourceUrl,
+            });
+          }
+        }
+      }
+
+      pendingBlocks = [];
+      continue;
+    }
+
+    pendingBlocks.push(child);
+  }
+
+  return candidates;
 }
 
 /**
@@ -104,14 +265,14 @@ export async function downloadFiguresFromHtml(
     const fig = figures[i];
 
     // Table figures from HTML: no image to download, store structured content
-    if (fig.tableHtml && !fig.url) {
+    if (fig.tableHtml && !fig.url && !fig.inlineImageData) {
       const figureLabel = fig.figureLabel || `html-table-${i}`;
       written.push({
         figureLabel,
         captionText: fig.caption || null,
         captionSource: fig.caption ? "html_figcaption" : "none",
         sourceMethod: source,
-        sourceUrl: "",
+        sourceUrl: fig.sourceUrl || "",
         confidence,
         imagePath: null,
         assetHash: null,
@@ -120,6 +281,54 @@ export async function downloadFiguresFromHtml(
       });
       downloaded++;
       continue;
+    }
+
+    if (!fig.url && !fig.inlineImageData) {
+      const figureLabel = fig.figureLabel || `html-fig-${i}`;
+      written.push({
+        figureLabel,
+        captionText: fig.caption || null,
+        captionSource: fig.caption ? "html_figcaption" : "none",
+        sourceMethod: source,
+        sourceUrl: fig.sourceUrl || "",
+        confidence: fig.figureLabel ? confidence : "low",
+        imagePath: null,
+        assetHash: null,
+        type: fig.type,
+      });
+      downloaded++;
+      continue;
+    }
+
+    if (fig.inlineImageData) {
+      try {
+        const figureLabel = fig.figureLabel || `html-fig-${i}`;
+        const buffer = Buffer.from(fig.inlineImageData, "utf8");
+        if (buffer.length < 100) continue;
+
+        const assetHash = createHash("sha256").update(buffer).digest("hex");
+        const mimeType = fig.inlineImageMimeType || "image/svg+xml";
+        const ext = mimeType.includes("svg") ? "svg" : "bin";
+        const filename = `html-${i}.${ext}`;
+        const fullPath = path.join(figDir, filename);
+        await writeFile(fullPath, buffer);
+
+        written.push({
+          figureLabel,
+          captionText: fig.caption || null,
+          captionSource: fig.caption ? "html_figcaption" : "none",
+          sourceMethod: source,
+          sourceUrl: fig.sourceUrl || "",
+          confidence,
+          imagePath: `uploads/figures/${paperId}/${filename}`,
+          assetHash,
+          type: fig.type,
+        });
+        downloaded++;
+        continue;
+      } catch {
+        continue;
+      }
     }
 
     try {
@@ -189,7 +398,7 @@ export async function downloadFiguresFromHtml(
         captionText: fig.caption || null,
         captionSource: fig.caption ? "html_figcaption" : "none",
         sourceMethod: source,
-        sourceUrl: fig.url,
+        sourceUrl: fig.sourceUrl || fig.url,
         confidence: figConfidence,
         imagePath,
         assetHash,
@@ -263,97 +472,155 @@ async function extractPublisherFigures(doi: string): Promise<HtmlExtractionResul
 const SKIP_PATTERNS = /logo|icon|banner|avatar|header|footer|social|tracking|pixel|badge|button|arrow|spinner|loading|captcha|widget/i;
 
 export function extractFiguresFromHtml(html: string, baseUrl: string): FigureCandidate[] {
+  const dom = new JSDOM(html, { url: baseUrl });
+  const document = dom.window.document;
   const figures: FigureCandidate[] = [];
   const seenUrls = new Set<string>();
 
   // Respect <base href="..."> if present (arXiv HTML uses this for relative image paths)
-  const baseTag = html.match(/<base[^>]+href=["']([^"']+)["']/i);
-  const effectiveBase = baseTag ? new URL(baseTag[1], baseUrl).href : baseUrl;
+  const effectiveBase = document.baseURI || baseUrl;
 
-  // Strategy 1: <figure> elements — handles both <img> figures and <table> figures
-  const figureBlockRegex = /<figure[^>]*>([\s\S]*?)<\/figure>/gi;
-  let match: RegExpExecArray | null;
-  while ((match = figureBlockRegex.exec(html)) !== null) {
-    const block = match[1];
+  const allFigures = Array.from(document.querySelectorAll("figure")).filter(
+    (figure): figure is HTMLElement => figure instanceof document.defaultView!.HTMLElement,
+  );
 
-    // Extract caption
-    const captionMatch = block.match(/<figcaption[^>]*>([\s\S]*?)<\/figcaption>/i);
-    const caption = captionMatch
-      ? captionMatch[1].replace(/<[^>]+>/g, "").trim().slice(0, 500)
-      : "";
+  for (const figure of allFigures) {
+    const figureId = figure.getAttribute("id");
+    const figureClass = figure.getAttribute("class") || "";
+    const caption = getCaptionText(figure);
     const figureLabel = parseFigureLabel(caption);
+    const type = /^table\s/i.test(caption) || /\bltx_table\b/i.test(figureClass) ? "table" as const : "figure" as const;
+    const sourceUrl = figureId ? new URL(`#${figureId}`, effectiveBase).href : null;
+    const isNestedFigure = !!figure.parentElement?.closest("figure");
+    const descendantFigures = Array.from(figure.querySelectorAll("figure")).filter(
+      (child): child is HTMLElement => child instanceof document.defaultView!.HTMLElement,
+    );
+    const hasNestedFigures = descendantFigures.length > 0;
 
-    // Check for table content inside the figure block.
-    // arXiv HTML uses two patterns:
-    //   1. Standard <table> elements (most papers)
-    //   2. LaTeXML <span class="ltx_tabular ..."> nested spans (some papers)
-    const hasImg = /<img[^>]+src=/i.test(block);
-    const stdTableMatch = block.match(/<table[^>]*>[\s\S]*?<\/table>/i);
-
-    if (stdTableMatch && !hasImg) {
-      figures.push({ url: "", caption, figureLabel, type: "table", tableHtml: stdTableMatch[0] });
+    if (isUnlabeledSubfigure(figureId, figureClass, caption, figureLabel, isNestedFigure)) {
       continue;
     }
 
-    // ltx_tabular: deeply nested spans, can't regex-match the closing tag.
-    // Pragmatic: strip figcaption and use remaining block as table content.
-    // May include LaTeXML scaffolding — acceptable for tranche 1.
-    if (!hasImg && /class="[^"]*ltx_tabular/.test(block)) {
-      const tableHtml = block.replace(/<figcaption[^>]*>[\s\S]*?<\/figcaption>/gi, "").trim();
-      if (tableHtml.length > 50) {
-        figures.push({ url: "", caption, figureLabel, type: "table", tableHtml });
+    if (type === "table") {
+      const multiCaptionTables = extractMultiCaptionTableCandidates(figure, sourceUrl);
+      if (multiCaptionTables.length > 0) {
+        figures.push(...multiCaptionTables);
         continue;
       }
     }
 
-    // Extract img src
-    const imgMatch = block.match(/<img[^>]+src=["']([^"']+)["']/i);
-    if (!imgMatch) continue;
+    if (hasNestedFigures) {
+      const descendantHasLabeledFigure = descendantFigures.some((child) => {
+        const childCaption = getCaptionText(child);
+        return !!parseFigureLabel(childCaption);
+      });
 
-    const imgSrc = imgMatch[1];
-    if (SKIP_PATTERNS.test(imgSrc)) continue;
+      if (figureLabel && !descendantHasLabeledFigure) {
+        const semanticOnlyKey = sourceUrl || `${effectiveBase}#semantic-${figures.length}`;
+        if (seenUrls.has(semanticOnlyKey)) continue;
+        seenUrls.add(semanticOnlyKey);
+        const previewBridge = extractFigureAssetCandidate(figure, effectiveBase)
+          ?? descendantFigures
+            .map((child) => extractFigureAssetCandidate(child, effectiveBase))
+            .find((asset): asset is FigureAssetCandidate => !!asset);
+        figures.push({
+          url: previewBridge?.url ?? "",
+          caption,
+          figureLabel,
+          type,
+          inlineImageData: previewBridge?.inlineImageData,
+          inlineImageMimeType: previewBridge?.inlineImageMimeType,
+          sourceUrl,
+        });
+      }
+      continue;
+    }
 
-    let resolvedUrl: string;
-    try {
-      resolvedUrl = new URL(imgSrc, effectiveBase).href;
-    } catch { continue; }
+    if (type === "table") {
+      const stdTable = figure.querySelector("table");
+      if (stdTable) {
+        figures.push({
+          url: "",
+          caption,
+          figureLabel,
+          type: "table",
+          tableHtml: stdTable.outerHTML,
+          sourceUrl,
+        });
+        continue;
+      }
 
-    if (seenUrls.has(resolvedUrl)) continue;
-    seenUrls.add(resolvedUrl);
+      const tableHtml = extractTableHtmlFromElement(figure);
+      if (tableHtml) {
+        figures.push({
+          url: "",
+          caption,
+          figureLabel,
+          type: "table",
+          tableHtml,
+          sourceUrl,
+        });
+        continue;
+      }
+    }
 
-    const type = /^table\s/i.test(caption) ? "table" as const : "figure" as const;
+    const assetCandidate = extractFigureAssetCandidate(figure, effectiveBase);
+    const looksLikeFigureContainer =
+      /\bltx_figure\b/i.test(figureClass) ||
+      /^fig(?:ure)?\s/i.test(caption);
+    if (assetCandidate?.url && !seenUrls.has(assetCandidate.url)) {
+      seenUrls.add(assetCandidate.url);
+      figures.push({
+        url: assetCandidate.url,
+        caption,
+        figureLabel,
+        type,
+        sourceUrl: sourceUrl || assetCandidate.url,
+      });
+      continue;
+    }
 
-    figures.push({ url: resolvedUrl, caption, figureLabel, type });
+    if (assetCandidate?.inlineImageData && looksLikeFigureContainer) {
+      const syntheticUrl = sourceUrl || `${effectiveBase}#inline-svg-${figures.length}`;
+      if (seenUrls.has(syntheticUrl)) continue;
+      seenUrls.add(syntheticUrl);
+      figures.push({
+        url: "",
+        caption,
+        figureLabel,
+        type: "figure",
+        inlineImageData: assetCandidate.inlineImageData,
+        inlineImageMimeType: assetCandidate.inlineImageMimeType ?? "image/svg+xml",
+        sourceUrl: syntheticUrl,
+      });
+    }
   }
 
   // Strategy 2: Standalone <img> tags with figure-like attributes (if no <figure> blocks found)
   if (figures.length === 0) {
-    const imgRegex = /<img[^>]+src=["']([^"']+)["'][^>]*>/gi;
-    while ((match = imgRegex.exec(html)) !== null) {
-      const fullTag = match[0];
-      const src = match[1];
-
-      if (SKIP_PATTERNS.test(src)) continue;
+    for (const img of Array.from(document.querySelectorAll("img"))) {
+      const src = img.getAttribute("src");
+      if (!src || SKIP_PATTERNS.test(src)) continue;
+      const fullTag = img.outerHTML;
       if (SKIP_PATTERNS.test(fullTag)) continue;
 
-      // Require some signal that this is a content image
-      const alt = fullTag.match(/alt=["']([^"']*?)["']/i)?.[1] || "";
+      const alt = img.getAttribute("alt") || "";
       const isFigure = /fig|figure|table|chart|plot|graph|diagram|result/i.test(src + alt);
-      // Also accept large images (width > 200)
-      const widthMatch = fullTag.match(/width=["']?(\d+)/i);
-      const isLarge = widthMatch && parseInt(widthMatch[1]) > 200;
+      const widthValue = img.getAttribute("width");
+      const isLarge = widthValue ? parseInt(widthValue, 10) > 200 : false;
 
       if (!isFigure && !isLarge) continue;
 
-      let resolvedUrl: string;
-      try {
-        resolvedUrl = new URL(src, effectiveBase).href;
-      } catch { continue; }
-
-      if (seenUrls.has(resolvedUrl)) continue;
+      const resolvedUrl = resolveAssetUrl(src, effectiveBase);
+      if (!resolvedUrl || seenUrls.has(resolvedUrl)) continue;
       seenUrls.add(resolvedUrl);
 
-      figures.push({ url: resolvedUrl, caption: alt.slice(0, 500), figureLabel: parseFigureLabel(alt), type: "figure" });
+      figures.push({
+        url: resolvedUrl,
+        caption: alt.slice(0, 500),
+        figureLabel: parseFigureLabel(alt),
+        type: "figure",
+      });
     }
   }
 

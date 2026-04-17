@@ -15,11 +15,28 @@ import { writeFile, mkdir } from "fs/promises";
 import { createHash } from "crypto";
 import path from "path";
 import { extractFiguresFromPdf } from "./pdf-figure-pipeline";
+import { extractFiguresWithGrobid, isGrobidConfigured } from "./grobid-tei-extractor";
 import { downloadPmcFigures } from "./pmc-jats-extractor";
 import { downloadFiguresFromHtml } from "@/lib/import/figure-downloader";
 import { extractWithPublisherParser } from "./publisher-parsers";
+import {
+  persistExtractionEvidence,
+  type ExtractionSourceBatch,
+} from "./extraction-foundation";
+import {
+  prepareCapabilitySnapshotForExtraction,
+  type CapabilitySnapshotContext,
+} from "./capability-substrate";
+import { createIdentityResolutionSnapshot } from "./identity-resolution";
+import {
+  createProjectionRunSnapshot,
+  publishProjectionRun,
+} from "./projection-publication";
+import {
+  acquirePaperWorkLease,
+  releasePaperWorkLease,
+} from "./publication-guards";
 import { mergeFigureSources, type MergeableFigure } from "./source-merger";
-import { normalizeLabel } from "./label-utils";
 
 const BROWSER_HEADERS = {
   "User-Agent":
@@ -40,6 +57,144 @@ export interface ExtractionReport {
   gapPlaceholders: number;
   /** Number of merged figures that failed to persist to DB. */
   persistErrors: number;
+}
+
+export interface FigureExtractionPaperInput {
+  id: string;
+  title: string | null;
+  filePath: string | null;
+  doi: string | null;
+  arxivId: string | null;
+  sourceUrl: string | null;
+}
+
+export interface FigureSourceCollectionResult {
+  sourceBatches: ExtractionSourceBatch[];
+  allSources: MergeableFigure[][];
+  sourceReport: ExtractionReport["sources"];
+}
+
+export async function collectFigureSourceBatches(
+  paper: FigureExtractionPaperInput,
+  capabilitySnapshot: CapabilitySnapshotContext,
+  opts?: { maxPages?: number; skipPdf?: boolean },
+): Promise<FigureSourceCollectionResult> {
+  const capabilityBySource = new Map(
+    capabilitySnapshot.entries.map((entry) => [entry.source, entry]),
+  );
+
+  const sourceBatches: ExtractionSourceBatch[] = [];
+  const allSources: MergeableFigure[][] = [];
+  const sourceReport: ExtractionReport["sources"] = [];
+
+  if (capabilityBySource.get("pmc_jats")?.status === "usable") {
+    try {
+      const result = await downloadPmcFigures(paper.id, paper.doi!);
+      const figures = result.figures.map(toMergeable);
+      sourceReport.push({ method: "pmc_jats", attempted: true, figuresFound: result.downloaded });
+      sourceBatches.push({ method: "pmc_jats", attempted: true, figures });
+      if (figures.length > 0) allSources.push(figures);
+    } catch (err) {
+      const error = (err as Error).message;
+      sourceReport.push({ method: "pmc_jats", attempted: true, figuresFound: 0, error });
+      sourceBatches.push({ method: "pmc_jats", attempted: true, figures: [], error });
+    }
+  } else {
+    sourceReport.push({ method: "pmc_jats", attempted: false, figuresFound: 0 });
+    sourceBatches.push({ method: "pmc_jats", attempted: false, figures: [] });
+  }
+
+  if (capabilityBySource.get("arxiv_html")?.status === "usable") {
+    try {
+      const result = await downloadFiguresFromHtml(paper.id, {
+        arxivId: paper.arxivId,
+        doi: null,
+      });
+      const figures = result.figures.map(toMergeable);
+      sourceReport.push({ method: "arxiv_html", attempted: true, figuresFound: result.downloaded });
+      sourceBatches.push({ method: "arxiv_html", attempted: true, figures });
+      if (figures.length > 0) allSources.push(figures);
+    } catch (err) {
+      const error = (err as Error).message;
+      sourceReport.push({ method: "arxiv_html", attempted: true, figuresFound: 0, error });
+      sourceBatches.push({ method: "arxiv_html", attempted: true, figures: [], error });
+    }
+  } else {
+    sourceReport.push({ method: "arxiv_html", attempted: false, figuresFound: 0 });
+    sourceBatches.push({ method: "arxiv_html", attempted: false, figures: [] });
+  }
+
+  if (capabilityBySource.get("publisher_html")?.status === "usable") {
+    try {
+      const pubResult = await tryPublisherFigures(paper.id, paper.doi!);
+      const figures = pubResult.figures.map(toMergeable);
+      sourceReport.push({ method: "publisher_html", attempted: true, figuresFound: pubResult.downloaded });
+      sourceBatches.push({ method: "publisher_html", attempted: true, figures });
+      if (figures.length > 0) allSources.push(figures);
+    } catch (err) {
+      const error = (err as Error).message;
+      sourceReport.push({ method: "publisher_html", attempted: true, figuresFound: 0, error });
+      sourceBatches.push({ method: "publisher_html", attempted: true, figures: [], error });
+    }
+  } else {
+    sourceReport.push({ method: "publisher_html", attempted: false, figuresFound: 0 });
+    sourceBatches.push({ method: "publisher_html", attempted: false, figures: [] });
+  }
+
+  const coveredLabels = new Set<string>();
+  for (const srcArray of allSources) {
+    for (const fig of srcArray) {
+      if (fig.figureLabel && (fig.confidence === "high" || fig.confidence === "medium")) {
+        coveredLabels.add(fig.figureLabel.toLowerCase().replace(/^fig\.?\s*/i, "figure ").trim());
+      }
+    }
+  }
+
+  if (paper.filePath && !opts?.skipPdf && isGrobidConfigured()) {
+    try {
+      const figures = await extractFiguresWithGrobid(path.resolve(process.cwd(), paper.filePath));
+      sourceReport.push({ method: "grobid_tei", attempted: true, figuresFound: figures.length });
+      sourceBatches.push({ method: "grobid_tei", attempted: true, figures });
+      if (figures.length > 0) allSources.push(figures);
+    } catch (err) {
+      const error = (err as Error).message;
+      sourceReport.push({ method: "grobid_tei", attempted: true, figuresFound: 0, error });
+      sourceBatches.push({ method: "grobid_tei", attempted: true, figures: [], error });
+    }
+  } else {
+    sourceReport.push({ method: "grobid_tei", attempted: false, figuresFound: 0 });
+    sourceBatches.push({ method: "grobid_tei", attempted: false, figures: [] });
+  }
+
+  if (paper.filePath && !opts?.skipPdf) {
+    try {
+      const pdfFigures = await extractFiguresFromPdf(
+        paper.filePath,
+        paper.id,
+        { maxPages: opts?.maxPages || 50, coveredLabels },
+      );
+      const figures = pdfFigures.map((figure) => toMergeable({
+        ...figure,
+        sourceUrl: null,
+      }));
+      sourceReport.push({ method: "pdf_fallback", attempted: true, figuresFound: pdfFigures.length });
+      sourceBatches.push({ method: "pdf_fallback", attempted: true, figures });
+      allSources.push(figures);
+    } catch (err) {
+      const error = (err as Error).message;
+      sourceReport.push({ method: "pdf_fallback", attempted: true, figuresFound: 0, error });
+      sourceBatches.push({ method: "pdf_fallback", attempted: true, figures: [], error });
+    }
+  } else {
+    sourceReport.push({ method: "pdf_fallback", attempted: false, figuresFound: 0 });
+    sourceBatches.push({ method: "pdf_fallback", attempted: false, figures: [] });
+  }
+
+  return {
+    sourceBatches,
+    allSources,
+    sourceReport,
+  };
 }
 
 /** Convert an extractor record to MergeableFigure (fills missing fields with null). */
@@ -110,125 +265,18 @@ export async function extractAllFigures(
     persistErrors: 0,
   };
 
-  // allSources collects ONLY figures produced by THIS run's extractors.
-  // Never read back from DB — that would re-introduce stale rows.
-  const allSources: MergeableFigure[][] = [];
-
-  // ── Source 1: PMC/JATS ────────────────────────────────────────────
-  if (paper.doi) {
-    try {
-      const result = await downloadPmcFigures(paperId, paper.doi);
-      report.sources.push({
-        method: "pmc_jats",
-        attempted: true,
-        figuresFound: result.downloaded,
-      });
-      if (result.figures.length > 0) {
-        allSources.push(result.figures.map(toMergeable));
-      }
-    } catch (err) {
-      report.sources.push({
-        method: "pmc_jats",
-        attempted: true,
-        figuresFound: 0,
-        error: (err as Error).message,
-      });
-    }
-  } else {
-    report.sources.push({ method: "pmc_jats", attempted: false, figuresFound: 0 });
-  }
-
-  // ── Source 2: arXiv HTML ──────────────────────────────────────────
-  if (paper.arxivId) {
-    try {
-      const result = await downloadFiguresFromHtml(paperId, {
-        arxivId: paper.arxivId,
-        doi: null,
-      });
-      report.sources.push({
-        method: "arxiv_html",
-        attempted: true,
-        figuresFound: result.downloaded,
-      });
-      if (result.figures.length > 0) {
-        allSources.push(result.figures.map(toMergeable));
-      }
-    } catch (err) {
-      report.sources.push({
-        method: "arxiv_html",
-        attempted: true,
-        figuresFound: 0,
-        error: (err as Error).message,
-      });
-    }
-  } else {
-    report.sources.push({ method: "arxiv_html", attempted: false, figuresFound: 0 });
-  }
-
-  // ── Source 3: Publisher HTML ───────────────────────────────────────
-  if (paper.doi) {
-    try {
-      const pubResult = await tryPublisherFigures(paperId, paper.doi);
-      report.sources.push({
-        method: "publisher_html",
-        attempted: true,
-        figuresFound: pubResult.downloaded,
-      });
-      if (pubResult.figures.length > 0) {
-        allSources.push(pubResult.figures.map(toMergeable));
-      }
-    } catch (err) {
-      report.sources.push({
-        method: "publisher_html",
-        attempted: true,
-        figuresFound: 0,
-        error: (err as Error).message,
-      });
-    }
-  } else {
-    report.sources.push({ method: "publisher_html", attempted: false, figuresFound: 0 });
-  }
-
-  // ── Source 4: PDF fallback ────────────────────────────────────────
-  // Collect labels already covered by high-confidence sources so PDF
-  // fallback can skip render+crop for those (avoids generating bad previews
-  // when a real arXiv HTML or PMC figure already exists).
-  const coveredLabels = new Set<string>();
-  for (const srcArray of allSources) {
-    for (const fig of srcArray) {
-      if (fig.figureLabel && (fig.confidence === "high" || fig.confidence === "medium")) {
-        coveredLabels.add(fig.figureLabel.toLowerCase().replace(/^fig\.?\s*/i, "figure ").trim());
-      }
-    }
-  }
-
-  if (paper.filePath && !opts?.skipPdf) {
-    try {
-      const pdfFigures = await extractFiguresFromPdf(
-        paper.filePath,
-        paperId,
-        { maxPages: opts?.maxPages || 50, coveredLabels },
-      );
-      report.sources.push({
-        method: "pdf_fallback",
-        attempted: true,
-        figuresFound: pdfFigures.length,
-      });
-      allSources.push(pdfFigures.map(f => toMergeable({
-        ...f,
-        sourceUrl: null,
-      })));
-    } catch (err) {
-      report.sources.push({
-        method: "pdf_fallback",
-        attempted: true,
-        figuresFound: 0,
-        error: (err as Error).message,
-      });
-    }
-  } else {
-    report.sources.push({ method: "pdf_fallback", attempted: false, figuresFound: 0 });
-  }
+  const capabilitySnapshot = await prisma.$transaction((tx) => prepareCapabilitySnapshotForExtraction(tx, {
+    id: paper.id,
+    doi: paper.doi,
+    arxivId: paper.arxivId,
+    sourceUrl: paper.sourceUrl,
+  }));
+  const { sourceBatches, allSources, sourceReport } = await collectFigureSourceBatches(
+    paper,
+    capabilitySnapshot,
+    opts,
+  );
+  report.sources = sourceReport;
 
   // ── Merge ─────────────────────────────────────────────────────────
   const merged = mergeFigureSources(...allSources);
@@ -241,152 +289,35 @@ export async function extractAllFigures(
   let persistErrors = 0;
   try {
     await prisma.$transaction(async (tx) => {
-      const touchedIds = new Set<string>();
-
-      for (let i = 0; i < merged.length; i++) {
-        const fig = merged[i];
-        const figureLabel = fig.figureLabel
-          || (fig.assetHash ? `uncaptioned-${fig.assetHash.slice(0, 12)}` : `uncaptioned-p${fig.pdfPage || 0}-${i}`);
-
-        const fields = {
-          sourceUrl: fig.sourceUrl,
-          figureIndex: i,
-          type: fig.type,
-          captionText: fig.captionText,
-          captionSource: fig.captionSource,
-          confidence: fig.confidence,
-          imagePath: fig.imagePath,
-          assetHash: fig.assetHash,
-          pdfPage: fig.pdfPage,
-          bbox: fig.bbox,
-          width: fig.width,
-          height: fig.height,
-          isPrimaryExtraction: fig.isPrimaryExtraction,
-          description: fig.description || null,
-          gapReason: fig.gapReason || null,
-          imageSourceMethod: fig.imageSourceMethod || null,
-          // cropOutcome is transient — NOT persisted
-        };
-
-        // Preview preservation: if the merge emits imagePath=null for a
-        // structured table, check if any existing row with the same
-        // normalized label has a rendered preview. If so, adopt that row
-        // (preserving its preview) instead of creating/updating a new one.
-        // Uses normalized labels so "Table 1" matches "Tab. 1".
-        let updateFields = fields;
-        let adoptedRowId: string | null = null;
-        if (!fig.imagePath && fig.gapReason === "structured_content_no_preview") {
-          const norm = normalizeLabel(figureLabel);
-          if (norm) {
-            const renderedRows = await tx.paperFigure.findMany({
-              where: { paperId, sourceMethod: fig.sourceMethod, imageSourceMethod: "html_table_render" },
-              select: { id: true, figureLabel: true },
-            });
-            const match = renderedRows.find(r => normalizeLabel(r.figureLabel) === norm);
-            if (match) {
-              if (match.figureLabel === figureLabel) {
-                // Same exact label — just skip overwriting preview fields
-                const { imagePath: _, assetHash: _a, width: _w, height: _h,
-                  imageSourceMethod: _ism, gapReason: _gr, ...safeFields } = fields;
-                updateFields = safeFields as typeof fields;
-              } else {
-                // Label drifted — delete any blocker under the target label,
-                // then rename the rendered row to the new label.
-                const { imagePath: _, assetHash: _a, width: _w, height: _h,
-                  imageSourceMethod: _ism, gapReason: _gr, ...safeFields } = fields;
-                const blocker = await tx.paperFigure.findFirst({
-                  where: { paperId, sourceMethod: fig.sourceMethod, figureLabel },
-                  select: { id: true },
-                });
-                if (blocker && blocker.id !== match.id) {
-                  await tx.paperFigure.delete({ where: { id: blocker.id } });
-                }
-                await tx.paperFigure.update({
-                  where: { id: match.id },
-                  data: { figureLabel, ...safeFields as typeof fields },
-                });
-                touchedIds.add(match.id);
-                adoptedRowId = match.id;
-              }
-            }
-          }
-        }
-        if (adoptedRowId) continue; // Row adopted via label-drift preview preservation
-
-        // Label drift: same image exists under a different label.
-        if (fig.assetHash) {
-          const byHash = await tx.paperFigure.findFirst({
-            where: { paperId, sourceMethod: fig.sourceMethod, assetHash: fig.assetHash },
-            select: { id: true, figureLabel: true },
-          });
-          if (byHash && byHash.figureLabel !== figureLabel) {
-            const blocker = await tx.paperFigure.findFirst({
-              where: { paperId, sourceMethod: fig.sourceMethod, figureLabel },
-              select: { id: true },
-            });
-            if (blocker && blocker.id !== byHash.id) {
-              await tx.paperFigure.delete({ where: { id: blocker.id } });
-            }
-            await tx.paperFigure.update({
-              where: { id: byHash.id },
-              data: { figureLabel, ...updateFields },
-            });
-            touchedIds.add(byHash.id);
-            continue;
-          }
-        }
-
-        // Normal path: upsert by (paperId, sourceMethod, figureLabel)
-        const row = await tx.paperFigure.upsert({
-          where: {
-            paperId_sourceMethod_figureLabel: {
-              paperId,
-              sourceMethod: fig.sourceMethod,
-              figureLabel,
-            },
-          },
-          create: {
-            paperId,
-            sourceMethod: fig.sourceMethod,
-            figureLabel,
-            ...fields,
-          },
-          update: updateFields,
-          select: { id: true },
-        });
-        touchedIds.add(row.id);
-      }
-
-      // Demote all rows not touched by this run, with one exception:
-      // rendered-preview rows (imageSourceMethod=html_table_render) are
-      // preserved IF the current extraction still has a matching label.
-      // This prevents label drift from destroying expensive previews,
-      // while still demoting genuinely stale rows (tables that disappeared).
-      const existingRows = await tx.paperFigure.findMany({
-        where: { paperId },
-        select: { id: true, imageSourceMethod: true, figureLabel: true },
-      });
-      const mergedNormalizedLabels = new Set(
-        merged.map(f => normalizeLabel(f.figureLabel)).filter(Boolean) as string[],
+      const leaseToken = await acquirePaperWorkLease(
+        tx,
+        paperId,
+        "extract-all-figures",
       );
-      const staleIds = existingRows
-        .filter(row => {
-          if (touchedIds.has(row.id)) return false;
-          if (row.imageSourceMethod === "html_table_render" && row.figureLabel) {
-            // Preserve if the current extraction still has this table
-            // (using normalized labels so "Table 1" matches "Tab. 1")
-            const norm = normalizeLabel(row.figureLabel);
-            return !norm || !mergedNormalizedLabels.has(norm);
-          }
-          return true;
-        })
-        .map(row => row.id);
-      if (staleIds.length > 0) {
-        await tx.paperFigure.updateMany({
-          where: { id: { in: staleIds } },
-          data: { isPrimaryExtraction: false },
+
+      try {
+        const extractionRunId = await persistExtractionEvidence(
+          tx,
+          paperId,
+          capabilitySnapshot.capabilitySnapshotId,
+          sourceBatches,
+          {
+          coverageClass: capabilitySnapshot.coverageClass,
+          mergedCount: merged.length,
+          sourceReport: report.sources,
+          skipPdf: opts?.skipPdf ?? false,
+          maxPages: opts?.maxPages || 50,
+          },
+        );
+        const identityResolutionId = await createIdentityResolutionSnapshot(tx, {
+          paperId,
+          provenanceKind: "extraction",
+          extractionRunId,
         });
-        console.log(`[extract-all] Demoted ${staleIds.length} stale rows for paper ${paperId}`);
+        const projectionRunId = await createProjectionRunSnapshot(tx, paperId, identityResolutionId);
+        await publishProjectionRun(tx, paperId, identityResolutionId, projectionRunId, merged, leaseToken);
+      } finally {
+        await releasePaperWorkLease(tx, paperId, leaseToken);
       }
     });
   } catch (err) {

@@ -1,14 +1,15 @@
-#!/usr/bin/env npx tsx
+#!/usr/bin/env -S node --import tsx
 /**
  * Extract figures from one or more papers.
  *
  * Usage:
- *   npx tsx scripts/extract-figures.ts <paper-id>           # single paper
- *   npx tsx scripts/extract-figures.ts <id1> <id2> ...      # multiple papers
- *   npx tsx scripts/extract-figures.ts --arxiv               # all papers with arXivId
- *   npx tsx scripts/extract-figures.ts --all                 # all papers with a PDF
- *   npx tsx scripts/extract-figures.ts --limit 10            # first 10 papers
- *   npx tsx scripts/extract-figures.ts --dry-run <paper-id>  # show what would run, don't extract
+ *   node --import tsx scripts/extract-figures.ts <paper-id>           # single paper
+ *   node --import tsx scripts/extract-figures.ts <id1> <id2> ...      # multiple papers
+ *   node --import tsx scripts/extract-figures.ts --arxiv              # all papers with arXivId
+ *   node --import tsx scripts/extract-figures.ts --all                # all papers with a PDF
+ *   node --import tsx scripts/extract-figures.ts --limit 10           # first 10 papers
+ *   node --import tsx scripts/extract-figures.ts --dry-run <paper-id> # show what would run, don't extract
+ *   npm run figures:extract -- <paper-id>
  */
 
 import { prisma } from "../src/lib/prisma";
@@ -54,10 +55,11 @@ async function main() {
     // Treat remaining args as paper IDs
     const ids = filtered.filter(a => !a.startsWith("--"));
     if (ids.length === 0) {
-      console.log("Usage: npx tsx scripts/extract-figures.ts <paper-id> [<paper-id> ...]");
-      console.log("       npx tsx scripts/extract-figures.ts --arxiv");
-      console.log("       npx tsx scripts/extract-figures.ts --all [--limit N]");
-      console.log("       npx tsx scripts/extract-figures.ts --dry-run <paper-id>");
+      console.log("Usage: node --import tsx scripts/extract-figures.ts <paper-id> [<paper-id> ...]");
+      console.log("       node --import tsx scripts/extract-figures.ts --arxiv");
+      console.log("       node --import tsx scripts/extract-figures.ts --all [--limit N]");
+      console.log("       node --import tsx scripts/extract-figures.ts --dry-run <paper-id>");
+      console.log("       npm run figures:extract -- <paper-id>");
       process.exit(1);
     }
     papers = await prisma.paper.findMany({

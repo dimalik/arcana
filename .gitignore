@@ -53,3 +53,4 @@ next-env.d.ts
 
 # Reference extraction evaluation corpus (copyrighted PDFs)
 benchmark/references/*.pdf
+prisma/backups/

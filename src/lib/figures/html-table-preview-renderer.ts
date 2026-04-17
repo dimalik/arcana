@@ -13,6 +13,20 @@ import { writeFile, mkdir } from "fs/promises";
 import { createHash } from "crypto";
 import path from "path";
 
+import {
+  createRenderedPreview,
+  createEnrichmentPreviewSelectionRun,
+  publishPreviewSelectionRun,
+  upsertRenderedPreviewAsset,
+} from "./projection-publication";
+import {
+  acquirePaperWorkLease,
+  releasePaperWorkLease,
+} from "./publication-guards";
+
+const HTML_TABLE_RENDERER_VERSION = "html-table-renderer-v1";
+const HTML_TABLE_RENDER_TEMPLATE_VERSION = "html-table-css-v1";
+
 const TABLE_CSS = `
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body {
@@ -82,6 +96,7 @@ interface RenderResult {
   assetHash?: string;
   width?: number;
   height?: number;
+  byteSize?: number;
   error?: string;
 }
 
@@ -115,6 +130,7 @@ async function renderTableHtml(
       assetHash,
       width: Math.round(box.width),
       height: Math.round(box.height),
+      byteSize: buffer.length,
     };
   } catch (err) {
     return { success: false, error: (err as Error).message };
@@ -130,33 +146,60 @@ export interface TablePreviewResult {
 }
 
 /**
- * Post-pass: render previews for canonical structured tables with no image.
+ * Post-pass: render previews for active structured tables with no selected preview.
  *
- * Queries DB for rows matching:
- *   isPrimaryExtraction=true, type=table, imagePath=null,
- *   gapReason=structured_content_no_preview, description.length > 100
+ * Queries the active preview-selection snapshot for rows matching:
+ *   selectedPreviewSource=none, type=table,
+ *   gapReason=structured_content_no_preview, structuredContent.length > 100
  *
- * On success: updates imagePath, assetHash, width, height,
- *   imageSourceMethod=html_table_render, clears gapReason.
- * On failure: leaves the row untouched.
+ * On success: writes rendered preview assets and publishes a new enrichment
+ * preview-selection snapshot for the active projection.
  */
 export async function renderTablePreviews(
   paperId: string,
 ): Promise<TablePreviewResult> {
   const { prisma } = await import("@/lib/prisma");
 
-  const candidates = await prisma.paperFigure.findMany({
-    where: {
-      paperId,
-      isPrimaryExtraction: true,
-      type: "table",
-      imagePath: null,
-      gapReason: "structured_content_no_preview",
+  const publicationState = await prisma.paperPublicationState.findUnique({
+    where: { paperId },
+    select: {
+      activeProjectionRunId: true,
+      activePreviewSelectionRunId: true,
     },
-    select: { id: true, figureLabel: true, description: true },
   });
 
-  const eligible = candidates.filter(c => c.description && c.description.length > 100);
+  if (!publicationState?.activeProjectionRunId || !publicationState.activePreviewSelectionRunId) {
+    return { rendered: 0, failed: 0, skipped: 0 };
+  }
+
+  const activeProjectionRunId = publicationState.activeProjectionRunId;
+  const activePreviewSelectionRunId = publicationState.activePreviewSelectionRunId;
+
+  const candidates = await prisma.previewSelectionFigure.findMany({
+    where: {
+      previewSelectionRunId: activePreviewSelectionRunId,
+      selectedPreviewSource: "none",
+      projectionFigure: {
+        projectionRunId: activeProjectionRunId,
+        type: "table",
+        gapReason: "structured_content_no_preview",
+      },
+    },
+    select: {
+      projectionFigureId: true,
+      projectionFigure: {
+        select: {
+          figureLabel: true,
+          structuredContent: true,
+        },
+      },
+    },
+  });
+
+  const eligible = candidates.filter(
+    (candidate) => candidate.projectionFigure.structuredContent
+      && candidate.projectionFigure.structuredContent.length > 100,
+  );
   if (eligible.length === 0) {
     return { rendered: 0, failed: 0, skipped: candidates.length };
   }
@@ -165,54 +208,188 @@ export async function renderTablePreviews(
   await mkdir(figDir, { recursive: true });
 
   let browser: Browser;
+  const renderRun = await prisma.renderRun.create({
+    data: {
+      paperId,
+      projectionRunId: activeProjectionRunId,
+      rendererVersion: HTML_TABLE_RENDERER_VERSION,
+      templateVersion: HTML_TABLE_RENDER_TEMPLATE_VERSION,
+      browserVersion: "launch_pending",
+      status: "running",
+      metadata: JSON.stringify({
+        eligibleCount: eligible.length,
+        skippedCount: candidates.length - eligible.length,
+      }),
+    },
+    select: { id: true },
+  });
+
   try {
     browser = await chromium.launch({ headless: true });
   } catch (err) {
+    await prisma.renderRun.update({
+      where: { id: renderRun.id },
+      data: {
+        status: "failed",
+        browserVersion: "launch_failed",
+        completedAt: new Date(),
+        metadata: JSON.stringify({
+          eligibleCount: eligible.length,
+          renderedCount: 0,
+          failedCount: eligible.length,
+          skippedCount: candidates.length - eligible.length,
+          error: (err as Error).message,
+        }),
+      },
+    });
     console.warn(`[table-preview] Failed to launch browser: ${(err as Error).message}`);
     return { rendered: 0, failed: eligible.length, skipped: 0 };
   }
 
+  await prisma.renderRun.update({
+    where: { id: renderRun.id },
+    data: {
+      browserVersion: browser.version(),
+    },
+  });
+
   let rendered = 0;
   let failed = 0;
+  const renderedOutputs: Array<{
+    projectionFigureId: string;
+    storagePath: string;
+    assetHash: string;
+    width: number;
+    height: number;
+    byteSize: number;
+    inputHash: string;
+  }> = [];
 
   try {
     for (const row of eligible) {
-      const safeLabel = (row.figureLabel || "table")
+      const safeLabel = (row.projectionFigure.figureLabel || "table")
         .replace(/[^a-zA-Z0-9]/g, "_")
         .toLowerCase();
       const filename = `table-preview-${safeLabel}.png`;
       const outPath = path.join(figDir, filename);
 
-      const result = await renderTableHtml(browser, row.description!, outPath);
+      const result = await renderTableHtml(
+        browser,
+        row.projectionFigure.structuredContent!,
+        outPath,
+      );
 
       if (result.success) {
         const relativePath = `uploads/figures/${paperId}/${filename}`;
-        try {
-          await prisma.paperFigure.update({
-            where: { id: row.id },
-            data: {
-              imagePath: relativePath,
-              assetHash: result.assetHash,
-              width: result.width,
-              height: result.height,
-              imageSourceMethod: "html_table_render",
-              gapReason: null,
-            },
-          });
-          rendered++;
-          console.log(`[table-preview] Rendered ${row.figureLabel} (${result.width}x${result.height})`);
-        } catch (err) {
-          console.warn(`[table-preview] DB update failed for ${row.figureLabel}: ${(err as Error).message}`);
-          failed++;
-        }
+        renderedOutputs.push({
+          projectionFigureId: row.projectionFigureId,
+          storagePath: relativePath,
+          assetHash: result.assetHash!,
+          width: result.width!,
+          height: result.height!,
+          byteSize: result.byteSize!,
+          inputHash: createHash("sha256").update(row.projectionFigure.structuredContent!).digest("hex"),
+        });
+        rendered++;
+        console.log(
+          `[table-preview] Rendered ${row.projectionFigure.figureLabel} (${result.width}x${result.height})`,
+        );
       } else {
-        console.warn(`[table-preview] Render failed for ${row.figureLabel}: ${result.error}`);
+        console.warn(`[table-preview] Render failed for ${row.projectionFigure.figureLabel}: ${result.error}`);
         failed++;
       }
     }
   } finally {
     await browser.close();
   }
+
+  if (renderedOutputs.length > 0) {
+    try {
+      await prisma.$transaction(async (tx) => {
+        const leaseToken = await acquirePaperWorkLease(
+          tx,
+          paperId,
+          "html-table-preview-renderer",
+        );
+
+        try {
+          const replacements = [];
+          for (const output of renderedOutputs) {
+            const assetId = await upsertRenderedPreviewAsset(tx, paperId, {
+              storagePath: output.storagePath,
+              contentHash: output.assetHash,
+              width: output.width,
+              height: output.height,
+              byteSize: output.byteSize,
+            });
+            const renderedPreviewId = await createRenderedPreview(
+              tx,
+              renderRun.id,
+              output.projectionFigureId,
+              assetId,
+              "html_table",
+              output.inputHash,
+            );
+
+            replacements.push({
+              projectionFigureId: output.projectionFigureId,
+              assetId,
+              renderedPreviewId,
+              sourceMethod: "html_table_render",
+            });
+          }
+
+          const previewSelectionRunId = await createEnrichmentPreviewSelectionRun(
+            tx,
+            paperId,
+            activeProjectionRunId,
+            activePreviewSelectionRunId,
+            replacements,
+          );
+
+          await publishPreviewSelectionRun(
+            tx,
+            paperId,
+            previewSelectionRunId,
+            leaseToken,
+            activeProjectionRunId,
+          );
+        } finally {
+          await releasePaperWorkLease(tx, paperId, leaseToken);
+        }
+      });
+    } catch (err) {
+      await prisma.renderRun.update({
+        where: { id: renderRun.id },
+        data: {
+          status: "failed",
+          completedAt: new Date(),
+          metadata: JSON.stringify({
+            eligibleCount: eligible.length,
+            renderedCount: rendered,
+            failedCount: failed,
+            skippedCount: candidates.length - eligible.length,
+            error: (err as Error).message,
+          }),
+        },
+      });
+      throw err;
+    }
+  }
+
+  await prisma.renderRun.update({
+    where: { id: renderRun.id },
+    data: {
+      status: renderedOutputs.length > 0 ? "completed" : "failed",
+      completedAt: new Date(),
+      metadata: JSON.stringify({
+        eligibleCount: eligible.length,
+        renderedCount: rendered,
+        failedCount: failed,
+        skippedCount: candidates.length - eligible.length,
+      }),
+    },
+  });
 
   return { rendered, failed, skipped: candidates.length - eligible.length };
 }
