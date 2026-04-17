@@ -38,6 +38,57 @@ export interface DeleteReferenceEntryResult {
   legacyReferenceId: string | null;
 }
 
+export interface ReferenceEntryProjectionResult {
+  referenceEntryId: string;
+  legacyReferenceId: string | null;
+}
+
+export interface ReferenceEntryMutationTarget {
+  id: string;
+  paperId: string;
+  legacyReferenceId: string | null;
+  title: string;
+  authors: string | null;
+  year: number | null;
+  venue: string | null;
+  doi: string | null;
+  rawCitation: string;
+  referenceIndex: number | null;
+  semanticScholarId: string | null;
+  arxivId: string | null;
+  externalUrl: string | null;
+  resolvedEntityId: string | null;
+  resolveConfidence: number | null;
+  resolveSource: ResolutionMethod | null;
+}
+
+export interface EnrichReferenceEntryResult {
+  referenceEntryId: string;
+  legacyReferenceId: string | null;
+  linkedPaperId: string | null;
+}
+
+const REFERENCE_ENTRY_MUTATION_SELECT = {
+  id: true,
+  paperId: true,
+  legacyReferenceId: true,
+  title: true,
+  authors: true,
+  year: true,
+  venue: true,
+  doi: true,
+  rawCitation: true,
+  referenceIndex: true,
+  semanticScholarId: true,
+  arxivId: true,
+  externalUrl: true,
+  resolvedEntityId: true,
+  resolveConfidence: true,
+  resolveSource: true,
+} as const;
+
+type LegacyProjectionTx = Pick<typeof prisma, "reference" | "referenceEntry" | "paper">;
+
 export async function createReferenceEntry(input: CreateReferenceEntryInput) {
   return prisma.referenceEntry.create({
     data: {
@@ -57,6 +108,220 @@ export async function createReferenceEntry(input: CreateReferenceEntryInput) {
       legacyReferenceId: input.legacyReferenceId,
     },
   });
+}
+
+export async function findReferenceEntryForPaper(
+  paperId: string,
+  referenceId: string,
+): Promise<ReferenceEntryMutationTarget | null> {
+  return prisma.referenceEntry.findFirst({
+    where: {
+      paperId,
+      OR: [{ id: referenceId }, { legacyReferenceId: referenceId }],
+    },
+    select: REFERENCE_ENTRY_MUTATION_SELECT,
+  });
+}
+
+async function upsertLegacyReferenceProjection(
+  tx: LegacyProjectionTx,
+  target: ReferenceEntryMutationTarget,
+  input: {
+    title: string;
+    authors: string | null;
+    year: number | null;
+    venue: string | null;
+    doi: string | null;
+    rawCitation: string;
+    referenceIndex: number | null;
+    matchedPaperId: string | null;
+    matchConfidence: number | null;
+    citationContext?: string | null;
+    semanticScholarId: string | null;
+    arxivId: string | null;
+    externalUrl: string | null;
+  },
+): Promise<string> {
+  if (target.legacyReferenceId) {
+    await tx.reference.update({
+      where: { id: target.legacyReferenceId },
+      data: input,
+    });
+    return target.legacyReferenceId;
+  }
+
+  const legacyReference = await tx.reference.create({
+    data: {
+      paperId: target.paperId,
+      ...input,
+    },
+  });
+  await tx.referenceEntry.update({
+    where: { id: target.id },
+    data: { legacyReferenceId: legacyReference.id },
+  });
+  return legacyReference.id;
+}
+
+function mapCandidateResolutionMethod(
+  source: SearchSource | "arxiv" | undefined,
+): ResolutionMethod | null {
+  if (source === "openalex") return "openalex_candidate";
+  if (source === "crossref") return "crossref_candidate";
+  if (source === "s2") return "semantic_scholar_candidate";
+  if (source === "arxiv") return "arxiv_candidate";
+  return null;
+}
+
+export async function enrichReferenceEntryFromCandidate(params: {
+  paperId: string;
+  referenceId: string;
+  userId: string | null | undefined;
+  candidate: Omit<S2Result, "source"> & { source?: SearchSource | "arxiv" };
+}): Promise<EnrichReferenceEntryResult | null> {
+  const target = await findReferenceEntryForPaper(params.paperId, params.referenceId);
+  if (!target) {
+    return null;
+  }
+
+  const authors = target.authors || JSON.stringify(params.candidate.authors);
+  const year = target.year ?? params.candidate.year;
+  const venue = target.venue || params.candidate.venue;
+  const doi = target.doi || params.candidate.doi;
+  const arxivId = target.arxivId || params.candidate.arxivId;
+  const semanticScholarId = target.semanticScholarId || params.candidate.semanticScholarId;
+  const externalUrl = target.externalUrl || params.candidate.externalUrl;
+
+  const identifiers = buildIdentifierInputs(params.candidate);
+  let resolvedEntityId = target.resolvedEntityId;
+  let resolveConfidence = target.resolveConfidence;
+  let resolveSource = target.resolveSource;
+
+  if (identifiers.length > 0) {
+    const entity = await resolveOrCreateEntity({
+      title: params.candidate.title,
+      authors:
+        params.candidate.authors.length > 0
+          ? JSON.stringify(params.candidate.authors)
+          : authors,
+      year,
+      venue,
+      abstract: params.candidate.abstract,
+      identifiers,
+      source: mapEntitySource(params.candidate.source),
+    });
+
+    resolvedEntityId = entity.entityId;
+    resolveConfidence = doi || arxivId ? 1.0 : 0.9;
+    resolveSource = mapCandidateResolutionMethod(params.candidate.source);
+  }
+
+  const linkedPaper =
+    params.userId && resolvedEntityId
+      ? await prisma.paper.findFirst({
+          where: {
+            userId: params.userId,
+            entityId: resolvedEntityId,
+          },
+          select: { id: true },
+        })
+      : null;
+
+  const updated = await prisma.$transaction(async (tx) => {
+    const nextEntry = await tx.referenceEntry.update({
+      where: { id: target.id },
+      data: {
+        authors,
+        year,
+        venue,
+        doi,
+        arxivId,
+        semanticScholarId,
+        externalUrl,
+        resolvedEntityId,
+        resolveConfidence,
+        resolveSource,
+      },
+      select: {
+        id: true,
+        legacyReferenceId: true,
+      },
+    });
+
+    const legacyReferenceId = await upsertLegacyReferenceProjection(tx, target, {
+      title: target.title,
+      authors,
+      year,
+      venue,
+      doi,
+      rawCitation: target.rawCitation,
+      referenceIndex: target.referenceIndex,
+      matchedPaperId: linkedPaper?.id ?? null,
+      matchConfidence: linkedPaper ? (resolveConfidence ?? 1.0) : null,
+      semanticScholarId,
+      arxivId,
+      externalUrl,
+    });
+
+    return {
+      referenceEntryId: nextEntry.id,
+      legacyReferenceId,
+      linkedPaperId: linkedPaper?.id ?? null,
+    };
+  });
+
+  return updated;
+}
+
+export async function projectReferenceEntryImportLink(params: {
+  paperId: string;
+  referenceId: string;
+  linkedPaperId: string;
+  linkedPaperEntityId: string | null;
+}): Promise<ReferenceEntryProjectionResult | null> {
+  const target = await findReferenceEntryForPaper(params.paperId, params.referenceId);
+  if (!target) {
+    return null;
+  }
+
+  const updated = await prisma.$transaction(async (tx) => {
+    const nextEntry = await tx.referenceEntry.update({
+      where: { id: target.id },
+      data: params.linkedPaperEntityId
+        ? {
+            resolvedEntityId: params.linkedPaperEntityId,
+            resolveConfidence: target.resolveConfidence ?? 1.0,
+            resolveSource: target.resolveSource ?? "identifier_exact",
+          }
+        : {},
+      select: {
+        id: true,
+        legacyReferenceId: true,
+      },
+    });
+
+    const legacyReferenceId = await upsertLegacyReferenceProjection(tx, target, {
+      title: target.title,
+      authors: target.authors,
+      year: target.year,
+      venue: target.venue,
+      doi: target.doi,
+      rawCitation: target.rawCitation,
+      referenceIndex: target.referenceIndex,
+      matchedPaperId: params.linkedPaperId,
+      matchConfidence: 1.0,
+      semanticScholarId: target.semanticScholarId,
+      arxivId: target.arxivId,
+      externalUrl: target.externalUrl,
+    });
+
+    return {
+      referenceEntryId: nextEntry.id,
+      legacyReferenceId,
+    };
+  });
+
+  return updated;
 }
 
 export async function deleteReferenceEntryWithLegacyProjection(

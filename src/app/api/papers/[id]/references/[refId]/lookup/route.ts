@@ -1,8 +1,8 @@
 import { NextRequest } from "next/server";
-import { prisma } from "@/lib/prisma";
 import { searchByTitle, S2RateLimitError } from "@/lib/import/semantic-scholar";
-import { findLibraryMatchByIds } from "@/lib/references/match";
 import { requirePaperAccess } from "@/lib/paper-auth";
+import { enrichReferenceEntryFromCandidate, findReferenceEntryForPaper } from "@/lib/citations/reference-entry-service";
+import { getPaperReferenceViewById } from "@/lib/references/read-model";
 
 export async function POST(
   _req: NextRequest,
@@ -14,9 +14,7 @@ export async function POST(
     return Response.json({ error: "Paper not found" }, { status: 404 });
   }
 
-  const reference = await prisma.reference.findFirst({
-    where: { id: refId, paperId: id },
-  });
+  const reference = await findReferenceEntryForPaper(id, refId);
 
   if (!reference) {
     return Response.json({ error: "Reference not found" }, { status: 404 });
@@ -32,45 +30,23 @@ export async function POST(
       );
     }
 
-    // Re-check library match with enriched data (scoped to user's papers)
-    const libraryPapers = await prisma.paper.findMany({
-      where: { userId: paper.userId },
-      select: { id: true, title: true, doi: true, arxivId: true },
+    const updated = await enrichReferenceEntryFromCandidate({
+      paperId: id,
+      referenceId: refId,
+      userId: paper.userId,
+      candidate: result,
     });
+    if (!updated) {
+      return Response.json({ error: "Reference not found" }, { status: 404 });
+    }
 
-    const libraryMatch = findLibraryMatchByIds(
-      {
-        doi: result.doi,
-        arxivId: result.arxivId,
-        title: reference.title,
-      },
-      libraryPapers
-    );
-
-    const updated = await prisma.reference.update({
-      where: { id: refId },
-      data: {
-        semanticScholarId: result.semanticScholarId,
-        arxivId: result.arxivId,
-        externalUrl: result.externalUrl,
-        authors: reference.authors || JSON.stringify(result.authors),
-        year: reference.year ?? result.year,
-        venue: reference.venue || result.venue,
-        doi: reference.doi || result.doi,
-        ...(libraryMatch && {
-          matchedPaperId: libraryMatch.paperId,
-          matchConfidence: libraryMatch.confidence,
-        }),
-      },
-      include: {
-        matchedPaper: {
-          select: { id: true, title: true, year: true, authors: true },
-        },
-      },
-    });
+    const view = await getPaperReferenceViewById(id, paper.userId, updated.referenceEntryId);
+    if (!view) {
+      return Response.json({ error: "Reference not found" }, { status: 404 });
+    }
 
     return Response.json({
-      reference: updated,
+      reference: view,
       externalLinks: {
         openAlex: result.semanticScholarId,
         doi: result.doi ? `https://doi.org/${result.doi}` : null,

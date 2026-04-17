@@ -10,7 +10,12 @@ vi.mock("../../prisma", () => ({
       update: vi.fn(),
     },
     reference: {
+      create: vi.fn(),
       deleteMany: vi.fn(),
+      update: vi.fn(),
+    },
+    paper: {
+      findFirst: vi.fn(),
     },
     paperIdentifier: {
       findUnique: vi.fn(),
@@ -32,6 +37,9 @@ import { resolveReferenceOnline } from "../../references/resolve";
 import {
   createReferenceEntry,
   deleteReferenceEntryWithLegacyProjection,
+  enrichReferenceEntryFromCandidate,
+  findReferenceEntryForPaper,
+  projectReferenceEntryImportLink,
   resolveReferenceEntity,
 } from "../reference-entry-service";
 
@@ -247,5 +255,193 @@ describe("deleteReferenceEntryWithLegacyProjection", () => {
 
     expect(result).toBeNull();
     expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+});
+
+describe("findReferenceEntryForPaper", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("looks up reference entries by either entry id or legacy reference id", async () => {
+    vi.mocked(prisma.referenceEntry.findFirst).mockResolvedValue({ id: "entry-1" } as never);
+
+    await findReferenceEntryForPaper("paper-1", "legacy-1");
+
+    expect(prisma.referenceEntry.findFirst).toHaveBeenCalledWith({
+      where: {
+        paperId: "paper-1",
+        OR: [{ id: "legacy-1" }, { legacyReferenceId: "legacy-1" }],
+      },
+      select: expect.any(Object),
+    });
+  });
+});
+
+describe("enrichReferenceEntryFromCandidate", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("updates reference entry truth and projects legacy fields in one transaction", async () => {
+    vi.mocked(prisma.referenceEntry.findFirst).mockResolvedValue({
+      id: "entry-1",
+      paperId: "paper-1",
+      legacyReferenceId: "legacy-1",
+      title: "Attention Is All You Need",
+      authors: null,
+      year: 2017,
+      venue: null,
+      doi: null,
+      rawCitation: "Attention Is All You Need",
+      referenceIndex: 1,
+      semanticScholarId: null,
+      arxivId: null,
+      externalUrl: null,
+      resolvedEntityId: null,
+      resolveConfidence: null,
+      resolveSource: null,
+    } as never);
+    vi.mocked(resolveOrCreateEntity).mockResolvedValue({
+      entityId: "entity-1",
+      created: false,
+    });
+    vi.mocked(prisma.paper.findFirst).mockResolvedValue({ id: "paper-2" } as never);
+    vi.mocked(prisma.$transaction).mockImplementation(async (callback: never) =>
+      callback({
+        reference: {
+          create: prisma.reference.create,
+          update: prisma.reference.update,
+        },
+        referenceEntry: {
+          update: prisma.referenceEntry.update,
+        },
+        paper: {
+          findFirst: prisma.paper.findFirst,
+        },
+      }),
+    );
+    vi.mocked(prisma.referenceEntry.update).mockResolvedValue({
+      id: "entry-1",
+      legacyReferenceId: "legacy-1",
+    } as never);
+    vi.mocked(prisma.reference.update).mockResolvedValue({ id: "legacy-1" } as never);
+
+    const result = await enrichReferenceEntryFromCandidate({
+      paperId: "paper-1",
+      referenceId: "legacy-1",
+      userId: "user-1",
+      candidate: {
+        semanticScholarId: "s2:abc",
+        title: "Attention Is All You Need",
+        abstract: null,
+        authors: ["Ashish Vaswani"],
+        year: 2017,
+        venue: "NeurIPS",
+        doi: "10.5555/3295222.3295349",
+        arxivId: null,
+        openReviewId: null,
+        externalUrl: "https://doi.org/10.5555/3295222.3295349",
+        citationCount: 1000,
+        openAccessPdfUrl: null,
+        source: "s2",
+      },
+    });
+
+    expect(prisma.referenceEntry.update).toHaveBeenCalledWith({
+      where: { id: "entry-1" },
+      data: expect.objectContaining({
+        doi: "10.5555/3295222.3295349",
+        semanticScholarId: "s2:abc",
+        resolvedEntityId: "entity-1",
+        resolveSource: "semantic_scholar_candidate",
+      }),
+      select: {
+        id: true,
+        legacyReferenceId: true,
+      },
+    });
+    expect(prisma.reference.update).toHaveBeenCalledWith({
+      where: { id: "legacy-1" },
+      data: expect.objectContaining({
+        doi: "10.5555/3295222.3295349",
+        matchedPaperId: "paper-2",
+        matchConfidence: 1,
+      }),
+    });
+    expect(result).toEqual({
+      referenceEntryId: "entry-1",
+      legacyReferenceId: "legacy-1",
+      linkedPaperId: "paper-2",
+    });
+  });
+});
+
+describe("projectReferenceEntryImportLink", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("projects import-time paper links while only promoting canonical truth when the paper has an entity", async () => {
+    vi.mocked(prisma.referenceEntry.findFirst).mockResolvedValue({
+      id: "entry-1",
+      paperId: "paper-1",
+      legacyReferenceId: "legacy-1",
+      title: "Attention Is All You Need",
+      authors: null,
+      year: 2017,
+      venue: "NeurIPS",
+      doi: null,
+      rawCitation: "Attention Is All You Need",
+      referenceIndex: 1,
+      semanticScholarId: null,
+      arxivId: null,
+      externalUrl: null,
+      resolvedEntityId: null,
+      resolveConfidence: null,
+      resolveSource: null,
+    } as never);
+    vi.mocked(prisma.$transaction).mockImplementation(async (callback: never) =>
+      callback({
+        reference: {
+          create: prisma.reference.create,
+          update: prisma.reference.update,
+        },
+        referenceEntry: {
+          update: prisma.referenceEntry.update,
+        },
+        paper: {
+          findFirst: prisma.paper.findFirst,
+        },
+      }),
+    );
+    vi.mocked(prisma.referenceEntry.update).mockResolvedValue({
+      id: "entry-1",
+      legacyReferenceId: "legacy-1",
+    } as never);
+    vi.mocked(prisma.reference.update).mockResolvedValue({ id: "legacy-1" } as never);
+
+    await projectReferenceEntryImportLink({
+      paperId: "paper-1",
+      referenceId: "legacy-1",
+      linkedPaperId: "paper-2",
+      linkedPaperEntityId: null,
+    });
+
+    expect(prisma.referenceEntry.update).toHaveBeenCalledWith({
+      where: { id: "entry-1" },
+      data: {},
+      select: {
+        id: true,
+        legacyReferenceId: true,
+      },
+    });
+    expect(prisma.reference.update).toHaveBeenCalledWith({
+      where: { id: "legacy-1" },
+      data: expect.objectContaining({
+        matchedPaperId: "paper-2",
+        matchConfidence: 1,
+      }),
+    });
   });
 });

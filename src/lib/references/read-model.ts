@@ -143,10 +143,52 @@ export async function listPaperReferenceViews(
   paperId: string,
   userId: string | null | undefined,
 ): Promise<PaperReferenceView[]> {
-  const [referenceEntries, localPapers] = await Promise.all([
-    prisma.referenceEntry.findMany({
-      where: { paperId },
-      orderBy: [{ referenceIndex: "asc" }, { createdAt: "asc" }],
+  const localPapers = await loadLocalLibraryPapers(paperId, userId);
+  const referenceEntries = await prisma.referenceEntry.findMany({
+    where: { paperId },
+    orderBy: [{ referenceIndex: "asc" }, { createdAt: "asc" }],
+    select: {
+      id: true,
+      legacyReferenceId: true,
+      title: true,
+      authors: true,
+      year: true,
+      venue: true,
+      doi: true,
+      rawCitation: true,
+      referenceIndex: true,
+      semanticScholarId: true,
+      arxivId: true,
+      externalUrl: true,
+      resolvedEntityId: true,
+      resolveConfidence: true,
+      resolveSource: true,
+      createdAt: true,
+      citationMentions: {
+        select: {
+          excerpt: true,
+          createdAt: true,
+        },
+        orderBy: { createdAt: "asc" },
+      },
+    },
+  });
+
+  return mapReferenceEntriesToViews(referenceEntries, localPapers);
+}
+
+export async function getPaperReferenceViewById(
+  paperId: string,
+  userId: string | null | undefined,
+  referenceId: string,
+): Promise<PaperReferenceView | null> {
+  const [localPapers, referenceEntry] = await Promise.all([
+    loadLocalLibraryPapers(paperId, userId),
+    prisma.referenceEntry.findFirst({
+      where: {
+        paperId,
+        OR: [{ id: referenceId }, { legacyReferenceId: referenceId }],
+      },
       select: {
         id: true,
         legacyReferenceId: true,
@@ -173,25 +215,41 @@ export async function listPaperReferenceViews(
         },
       },
     }),
-    userId
-      ? prisma.paper.findMany({
-          where: {
-            userId,
-            id: { not: paperId },
-          },
-          orderBy: { createdAt: "asc" },
-          select: {
-            id: true,
-            entityId: true,
-            title: true,
-            year: true,
-            authors: true,
-            createdAt: true,
-          },
-        })
-      : Promise.resolve([]),
   ]);
 
+  if (!referenceEntry) return null;
+  return mapReferenceEntriesToViews([referenceEntry], localPapers)[0] ?? null;
+}
+
+async function loadLocalLibraryPapers(
+  paperId: string,
+  userId: string | null | undefined,
+): Promise<LocalPaperCandidate[]> {
+  if (!userId) {
+    return [];
+  }
+
+  return prisma.paper.findMany({
+    where: {
+      userId,
+      id: { not: paperId },
+    },
+    orderBy: { createdAt: "asc" },
+    select: {
+      id: true,
+      entityId: true,
+      title: true,
+      year: true,
+      authors: true,
+      createdAt: true,
+    },
+  });
+}
+
+function mapReferenceEntriesToViews(
+  referenceEntries: ReferenceEntryRecord[],
+  localPapers: LocalPaperCandidate[],
+): PaperReferenceView[] {
   const localPaperByEntityId = new Map<string, LocalPaperCandidate>();
   const localPaperByNormalizedTitle = new Map<string, LocalPaperCandidate>();
 
