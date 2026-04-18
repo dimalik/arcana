@@ -57,7 +57,8 @@ vi.mock("../source-merger", () => ({
 }));
 
 import { prisma } from "@/lib/prisma";
-import { extractAllFigures } from "../extract-all-figures";
+import { downloadFiguresFromHtml } from "@/lib/import/figure-downloader";
+import { collectFigureSourceBatches, extractAllFigures } from "../extract-all-figures";
 
 describe("extractAllFigures contract", () => {
   afterEach(() => {
@@ -78,5 +79,90 @@ describe("extractAllFigures contract", () => {
     ).rejects.toThrow("extractAllFigures maxPages must be an integer between 1 and 100");
 
     expect(prisma.paper.findUnique).not.toHaveBeenCalled();
+  });
+
+  it("carries downloader trust diagnostics into the arxiv source report", async () => {
+    vi.mocked(downloadFiguresFromHtml).mockResolvedValue({
+      downloaded: 2,
+      source: "arxiv_html",
+      sourceUrl: "https://arxiv.org/html/2602.05494",
+      qualityStatus: "downgraded",
+      reasonCode: "anonymous_html_candidates_suppressed",
+      rawCandidateCount: 3,
+      keptCandidateCount: 2,
+      suppressedCandidateCount: 1,
+      figures: [
+        {
+          figureLabel: "Figure 1",
+          captionText: "Figure 1: Trusted figure.",
+          captionSource: "html_figcaption",
+          sourceMethod: "arxiv_html",
+          sourceUrl: "https://arxiv.org/html/2602.05494#F1",
+          confidence: "high",
+          imagePath: "uploads/figures/paper-1/html-0.png",
+          assetHash: "hash-1",
+          type: "figure",
+        },
+        {
+          figureLabel: "Table 1",
+          captionText: "Table 1: Trusted table.",
+          captionSource: "html_figcaption",
+          sourceMethod: "arxiv_html",
+          sourceUrl: "https://arxiv.org/html/2602.05494#T1",
+          confidence: "high",
+          imagePath: null,
+          assetHash: null,
+          type: "table",
+          tableHtml: "<table><tr><td>A</td></tr></table>",
+        },
+      ],
+    });
+
+    const result = await collectFigureSourceBatches(
+      {
+        id: "paper-1",
+        title: "Broken HTML",
+        filePath: null,
+        doi: null,
+        arxivId: "2602.05494",
+        sourceUrl: null,
+      },
+      {
+        capabilitySnapshotId: "snapshot-1",
+        coverageClass: "arxiv_usable",
+        entries: [
+          {
+            source: "pmc_jats",
+            status: "unusable",
+            reasonCode: "missing_doi",
+            sourceCapabilityEvaluationId: "cap-1",
+          },
+          {
+            source: "arxiv_html",
+            status: "usable",
+            reasonCode: "arxiv_id_present",
+            sourceCapabilityEvaluationId: "cap-2",
+          },
+          {
+            source: "publisher_html",
+            status: "unusable",
+            reasonCode: "missing_doi",
+            sourceCapabilityEvaluationId: "cap-3",
+          },
+        ],
+      },
+      { skipPdf: true, maxPages: 20 },
+    );
+
+    expect(result.sourceReport.find((entry) => entry.method === "arxiv_html")).toMatchObject({
+      method: "arxiv_html",
+      attempted: true,
+      figuresFound: 2,
+      qualityStatus: "downgraded",
+      reasonCode: "anonymous_html_candidates_suppressed",
+      rawCandidateCount: 3,
+      keptCandidateCount: 2,
+      suppressedCandidateCount: 1,
+    });
   });
 });

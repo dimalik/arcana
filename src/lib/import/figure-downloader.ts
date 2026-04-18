@@ -63,8 +63,22 @@ export interface FigureDownloadResult {
   downloaded: number;
   source: "arxiv_html" | "publisher_html" | null;
   sourceUrl: string | null;
+  qualityStatus: "trusted" | "downgraded" | "suppressed" | "no_candidates";
+  reasonCode: string | null;
+  rawCandidateCount: number;
+  keptCandidateCount: number;
+  suppressedCandidateCount: number;
   /** Figures written in THIS run — use for merge input, not DB reads. */
   figures: HtmlFigureRecord[];
+}
+
+export interface HtmlTrustDecision {
+  figures: FigureCandidate[];
+  qualityStatus: "trusted" | "downgraded" | "suppressed" | "no_candidates";
+  reasonCode: string | null;
+  rawCandidateCount: number;
+  keptCandidateCount: number;
+  suppressedCandidateCount: number;
 }
 
 function stripTags(value: string): string {
@@ -217,6 +231,53 @@ function extractMultiCaptionTableCandidates(
   return candidates;
 }
 
+export function applyHtmlTrustPolicy(figures: FigureCandidate[]): HtmlTrustDecision {
+  if (figures.length === 0) {
+    return {
+      figures: [],
+      qualityStatus: "no_candidates",
+      reasonCode: "no_html_candidates",
+      rawCandidateCount: 0,
+      keptCandidateCount: 0,
+      suppressedCandidateCount: 0,
+    };
+  }
+
+  const labeled = figures.filter((figure) => !!figure.figureLabel);
+  const anonymous = figures.filter((figure) => !figure.figureLabel);
+
+  if (anonymous.length === 0) {
+    return {
+      figures,
+      qualityStatus: "trusted",
+      reasonCode: null,
+      rawCandidateCount: figures.length,
+      keptCandidateCount: figures.length,
+      suppressedCandidateCount: 0,
+    };
+  }
+
+  if (labeled.length === 0) {
+    return {
+      figures: [],
+      qualityStatus: "suppressed",
+      reasonCode: "anonymous_only_html_candidates",
+      rawCandidateCount: figures.length,
+      keptCandidateCount: 0,
+      suppressedCandidateCount: anonymous.length,
+    };
+  }
+
+  return {
+    figures: labeled,
+    qualityStatus: "downgraded",
+    reasonCode: "anonymous_html_candidates_suppressed",
+    rawCandidateCount: figures.length,
+    keptCandidateCount: labeled.length,
+    suppressedCandidateCount: anonymous.length,
+  };
+}
+
 /**
  * Download figures from arXiv HTML or publisher pages for a paper.
  * Returns count of figures downloaded and which source was used.
@@ -228,28 +289,64 @@ export async function downloadFiguresFromHtml(
   let figures: FigureCandidate[] = [];
   let source: "arxiv_html" | "publisher_html" | null = null;
   let sourcePageUrl: string | null = null;
+  let trustDecision: HtmlTrustDecision = {
+    figures: [],
+    qualityStatus: "no_candidates",
+    reasonCode: "no_html_candidates",
+    rawCandidateCount: 0,
+    keptCandidateCount: 0,
+    suppressedCandidateCount: 0,
+  };
 
   // Try arXiv HTML first (most reliable, always available for recent papers)
   if (opts.arxivId) {
     const result = await extractArxivFigures(opts.arxivId);
-    if (result.figures.length > 0) {
-      figures = result.figures;
+    if (result.pageUrl) {
+      trustDecision = applyHtmlTrustPolicy(result.figures);
+      figures = trustDecision.figures;
       source = "arxiv_html";
       sourcePageUrl = result.pageUrl;
     }
   }
 
   // Try publisher page if no arXiv figures found
-  if (figures.length === 0 && opts.doi) {
+  if ((source == null || figures.length === 0) && opts.doi) {
     const result = await extractPublisherFigures(opts.doi);
-    if (result.figures.length > 0) {
-      figures = result.figures;
+    if (result.pageUrl) {
+      trustDecision = applyHtmlTrustPolicy(result.figures);
+      figures = trustDecision.figures;
       source = "publisher_html";
       sourcePageUrl = result.pageUrl;
     }
   }
 
-  if (figures.length === 0 || !source) return { downloaded: 0, source: null, sourceUrl: null, figures: [] };
+  if (!source) {
+    return {
+      downloaded: 0,
+      source: null,
+      sourceUrl: null,
+      qualityStatus: "no_candidates",
+      reasonCode: "html_source_unavailable",
+      rawCandidateCount: 0,
+      keptCandidateCount: 0,
+      suppressedCandidateCount: 0,
+      figures: [],
+    };
+  }
+
+  if (figures.length === 0) {
+    return {
+      downloaded: 0,
+      source,
+      sourceUrl: sourcePageUrl,
+      qualityStatus: trustDecision.qualityStatus,
+      reasonCode: trustDecision.reasonCode,
+      rawCandidateCount: trustDecision.rawCandidateCount,
+      keptCandidateCount: 0,
+      suppressedCandidateCount: trustDecision.suppressedCandidateCount,
+      figures: [],
+    };
+  }
 
   const confidence = source === "arxiv_html" ? "high" : "medium";
 
@@ -413,7 +510,17 @@ export async function downloadFiguresFromHtml(
   if (downloaded > 0) {
     console.log(`[figure-downloader] ${source}: ${downloaded}/${figures.length} figures for paper ${paperId}`);
   }
-  return { downloaded, source, sourceUrl: sourcePageUrl, figures: written };
+  return {
+    downloaded,
+    source,
+    sourceUrl: sourcePageUrl,
+    qualityStatus: trustDecision.qualityStatus,
+    reasonCode: trustDecision.reasonCode,
+    rawCandidateCount: trustDecision.rawCandidateCount,
+    keptCandidateCount: trustDecision.keptCandidateCount,
+    suppressedCandidateCount: trustDecision.suppressedCandidateCount,
+    figures: written,
+  };
 }
 
 // ── ArXiv HTML figures ──────────────────────────────────────────────

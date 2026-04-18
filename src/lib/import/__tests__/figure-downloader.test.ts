@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { extractFiguresFromHtml } from "../figure-downloader";
+import { applyHtmlTrustPolicy, extractFiguresFromHtml } from "../figure-downloader";
 
 describe("extractFiguresFromHtml", () => {
   const baseUrl = "https://arxiv.org/html/2510.21391v1/";
@@ -290,6 +290,54 @@ describe("extractFiguresFromHtml", () => {
       const results = extractFiguresFromHtml(html, "https://arxiv.org/html/2510.21391");
       expect(results).toHaveLength(1);
       expect(results[0].url).toBe("https://arxiv.org/html/2510.21391v1/figures/arch.png");
+    });
+  });
+
+  describe("broken HTML trust policy", () => {
+    it("downgrades partially broken HTML by suppressing anonymous candidates", () => {
+      const html = `
+        <figure id="S1.F1">
+          <img src="fig1.png" />
+          <figcaption>Figure 1: Trusted labeled figure.</figcaption>
+        </figure>
+        <figure id="S1.T1">
+          <table><tr><td>A</td></tr></table>
+          <figcaption>Table 1: Trusted labeled table.</figcaption>
+        </figure>
+        <figure id="S1.broken">
+          <img src="junk.png" />
+        </figure>
+      `;
+
+      const raw = extractFiguresFromHtml(html, baseUrl);
+      const result = applyHtmlTrustPolicy(raw);
+
+      expect(result.qualityStatus).toBe("downgraded");
+      expect(result.reasonCode).toBe("anonymous_html_candidates_suppressed");
+      expect(result.rawCandidateCount).toBe(3);
+      expect(result.keptCandidateCount).toBe(2);
+      expect(result.suppressedCandidateCount).toBe(1);
+      expect(result.figures.map((figure) => figure.figureLabel)).toEqual(["Figure 1", "Table 1"]);
+    });
+
+    it("suppresses anonymous-only HTML candidate sets", () => {
+      const html = `
+        <figure id="S1.broken1">
+          <img src="junk1.png" />
+        </figure>
+        <figure id="S1.broken2">
+          <img src="junk2.png" />
+        </figure>
+      `;
+
+      const raw = extractFiguresFromHtml(html, baseUrl);
+      const result = applyHtmlTrustPolicy(raw);
+
+      expect(result.qualityStatus).toBe("suppressed");
+      expect(result.reasonCode).toBe("anonymous_only_html_candidates");
+      expect(result.keptCandidateCount).toBe(0);
+      expect(result.suppressedCandidateCount).toBe(2);
+      expect(result.figures).toEqual([]);
     });
   });
 });

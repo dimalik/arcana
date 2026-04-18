@@ -54,6 +54,11 @@ export interface ExtractionReport {
     attempted: boolean;
     figuresFound: number;
     error?: string;
+    qualityStatus?: "trusted" | "downgraded" | "suppressed" | "no_candidates";
+    reasonCode?: string | null;
+    rawCandidateCount?: number;
+    keptCandidateCount?: number;
+    suppressedCandidateCount?: number;
   }[];
   totalFigures: number;
   figuresWithImages: number;
@@ -156,7 +161,16 @@ export async function collectFigureSourceBatches(
         doi: null,
       });
       const figures = result.figures.map(toMergeable);
-      sourceReport.push({ method: "arxiv_html", attempted: true, figuresFound: result.downloaded });
+      sourceReport.push({
+        method: "arxiv_html",
+        attempted: true,
+        figuresFound: result.downloaded,
+        qualityStatus: result.qualityStatus,
+        reasonCode: result.reasonCode,
+        rawCandidateCount: result.rawCandidateCount,
+        keptCandidateCount: result.keptCandidateCount,
+        suppressedCandidateCount: result.suppressedCandidateCount,
+      });
       sourceBatches.push({ method: "arxiv_html", attempted: true, figures });
       if (figures.length > 0) allSources.push(figures);
     } catch (err) {
