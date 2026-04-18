@@ -15,6 +15,7 @@ function usage() {
   console.log("");
   console.log("Options:");
   console.log("  --base <url>        API base URL (default: http://127.0.0.1:3000)");
+  console.log("  --db <path>         SQLite DB used for paper selection + session token");
   console.log("  --max-pages <n>     maxPages sent to extraction API (default: 30)");
   console.log("  --dry-run           print selected papers, do not call API");
   console.log("  --log <path>        JSONL output path (default: tmp/figure-rollout-<timestamp>.jsonl)");
@@ -36,6 +37,7 @@ function parseArgs(argv) {
     limit: null,
     logPath: null,
     resumePath: null,
+    dbPath: null,
   };
 
   for (let i = 2; i < argv.length; i += 1) {
@@ -43,6 +45,9 @@ function parseArgs(argv) {
     switch (arg) {
       case "--base":
         opts.base = argv[++i];
+        break;
+      case "--db":
+        opts.dbPath = argv[++i];
         break;
       case "--max-pages":
         opts.maxPages = parseInt(argv[++i], 10) || 30;
@@ -88,6 +93,33 @@ function parseArgs(argv) {
   return opts;
 }
 
+const KNOWN_EXTRACTION_STATUSES = new Set(["success", "partial", "conflict"]);
+
+function normalizeExtractionStatus(payload, httpStatus) {
+  if (payload && KNOWN_EXTRACTION_STATUSES.has(payload.status)) {
+    return payload.status;
+  }
+  if (httpStatus === 207) return "partial";
+  if (httpStatus === 409) {
+    return "conflict";
+  }
+  if (payload && payload.ok === true) {
+    return "success";
+  }
+  return "failed";
+}
+
+function isSuccessfulExtractionStatus(extractionStatus) {
+  return extractionStatus === "success";
+}
+
+function summarizeSources(sources) {
+  return (sources || [])
+    .filter((src) => src.attempted && src.figuresFound > 0)
+    .map((src) => `${src.method}=${src.figuresFound}`)
+    .join(", ") || "none";
+}
+
 function loadCompletedIds(logPath) {
   if (!logPath || !fs.existsSync(logPath)) return new Set();
   const completed = new Set();
@@ -95,7 +127,7 @@ function loadCompletedIds(logPath) {
   for (const line of lines) {
     try {
       const row = JSON.parse(line);
-      if (row.paperId && row.ok === true) {
+      if (row.paperId && (row.extractionStatus === "success" || row.ok === true)) {
         completed.add(row.paperId);
       }
     } catch {
@@ -163,6 +195,30 @@ function identityString(paper) {
   return parts.join(" ");
 }
 
+function buildRunResult({ paper, startedAt, started, httpStatus, payload, error }) {
+  const extractionStatus = error
+    ? "request_error"
+    : normalizeExtractionStatus(payload, httpStatus);
+
+  return {
+    paperId: paper.id,
+    title: paper.title,
+    identity: identityString(paper),
+    startedAt,
+    finishedAt: new Date().toISOString(),
+    durationMs: Date.now() - started,
+    httpStatus,
+    extractionStatus,
+    ok: extractionStatus === "success",
+    persistErrors: payload?.persistErrors ?? null,
+    totalFigures: payload?.totalFigures ?? null,
+    figuresWithImages: payload?.figuresWithImages ?? null,
+    gapPlaceholders: payload?.gapPlaceholders ?? null,
+    sources: payload?.sources ?? [],
+    error: error ?? payload?.error ?? null,
+  };
+}
+
 async function runOne(base, token, paper, maxPages) {
   const startedAt = new Date().toISOString();
   const started = Date.now();
@@ -179,45 +235,29 @@ async function runOne(base, token, paper, maxPages) {
     });
 
     const payload = await res.json().catch(() => ({}));
-    return {
-      paperId: paper.id,
-      title: paper.title,
-      identity: identityString(paper),
+    return buildRunResult({
+      paper,
       startedAt,
-      finishedAt: new Date().toISOString(),
-      durationMs: Date.now() - started,
+      started,
       httpStatus: res.status,
-      ok: payload.ok === true,
-      persistErrors: payload.persistErrors ?? null,
-      totalFigures: payload.totalFigures ?? null,
-      figuresWithImages: payload.figuresWithImages ?? null,
-      gapPlaceholders: payload.gapPlaceholders ?? null,
-      sources: payload.sources ?? [],
-      error: payload.error ?? null,
-    };
+      payload,
+      error: null,
+    });
   } catch (error) {
-    return {
-      paperId: paper.id,
-      title: paper.title,
-      identity: identityString(paper),
+    return buildRunResult({
+      paper,
       startedAt,
-      finishedAt: new Date().toISOString(),
-      durationMs: Date.now() - started,
+      started,
       httpStatus: null,
-      ok: false,
-      persistErrors: null,
-      totalFigures: null,
-      figuresWithImages: null,
-      gapPlaceholders: null,
-      sources: [],
+      payload: null,
       error: error instanceof Error ? error.message : String(error),
-    };
+    });
   }
 }
 
 async function main() {
   const opts = parseArgs(process.argv);
-  const dbPath = resolveDbPath(process.argv);
+  const dbPath = opts.dbPath ? path.resolve(opts.dbPath) : resolveDbPath(process.argv);
   const db = new Database(dbPath, { readonly: true });
   const papers = selectPapers(db, opts);
   const completed = loadCompletedIds(opts.resumePath);
@@ -243,7 +283,9 @@ async function main() {
   }
 
   const session = createSessionToken(dbPath);
-  let okCount = 0;
+  let successCount = 0;
+  let partialCount = 0;
+  let conflictCount = 0;
   let failCount = 0;
   let totalFigures = 0;
   let totalImages = 0;
@@ -256,19 +298,28 @@ async function main() {
       const result = await runOne(opts.base, session.token, paper, opts.maxPages);
       fs.appendFileSync(logPath, `${JSON.stringify(result)}\n`);
 
-      if (result.ok) {
-        okCount += 1;
+      if (isSuccessfulExtractionStatus(result.extractionStatus)) {
+        successCount += 1;
         totalFigures += result.totalFigures || 0;
         totalImages += result.figuresWithImages || 0;
         totalGaps += result.gapPlaceholders || 0;
-        const sources = (result.sources || [])
-          .filter((src) => src.attempted && src.figuresFound > 0)
-          .map((src) => `${src.method}=${src.figuresFound}`)
-          .join(", ") || "none";
+        const sources = summarizeSources(result.sources);
         console.log(`  OK ${result.totalFigures} figures (${result.figuresWithImages} images, ${result.gapPlaceholders} gaps) from ${sources}`);
+      } else if (result.extractionStatus === "partial") {
+        partialCount += 1;
+        console.log(
+          `  PARTIAL status=${result.httpStatus ?? "n/a"} ` +
+            `${result.totalFigures ?? 0} figures (${result.figuresWithImages ?? 0} images, ${result.gapPlaceholders ?? 0} gaps) ` +
+            `error=${result.error || "unknown"}`,
+        );
+      } else if (result.extractionStatus === "conflict") {
+        conflictCount += 1;
+        console.log(`  CONFLICT status=${result.httpStatus ?? "n/a"} error=${result.error || "unknown"}`);
       } else {
         failCount += 1;
-        console.log(`  FAIL status=${result.httpStatus ?? "n/a"} error=${result.error || "unknown"}`);
+        console.log(
+          `  FAIL status=${result.httpStatus ?? "n/a"} routeStatus=${result.extractionStatus} error=${result.error || "unknown"}`,
+        );
       }
       if (result.persistErrors && result.persistErrors > 0) {
         console.log(`  WARN persistErrors=${result.persistErrors}`);
@@ -281,11 +332,24 @@ async function main() {
   }
 
   console.log("─".repeat(60));
-  console.log(`Completed: ${okCount} ok, ${failCount} failed`);
+  console.log(
+    `Completed: ${successCount} success, ${partialCount} partial, ${conflictCount} conflicts, ${failCount} failed`,
+  );
   console.log(`Totals: ${totalFigures} figures, ${totalImages} with images, ${totalGaps} gaps`);
 }
 
-main().catch((error) => {
-  console.error(error);
-  process.exit(1);
-});
+module.exports = {
+  buildRunResult,
+  isSuccessfulExtractionStatus,
+  loadCompletedIds,
+  normalizeExtractionStatus,
+  parseArgs,
+  summarizeSources,
+};
+
+if (require.main === module) {
+  main().catch((error) => {
+    console.error(error);
+    process.exit(1);
+  });
+}
