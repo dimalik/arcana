@@ -49,6 +49,11 @@ describe("createCitationMentions", () => {
     ], "v1");
 
     expect(result).toEqual({ created: 1, unmatched: 0 });
+    expect(prisma.citationMention.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        excerpt: "The transformer (Vaswani et al., 2017) changed NLP.",
+      }),
+    });
   });
 
   it("matches directly by referenceIndex when provided", async () => {
@@ -103,8 +108,22 @@ describe("createCitationMentions", () => {
       "paper-1",
       [
         {
-          citationText: "Vaswani et al., 2017",
-          excerpt: "The transformer (Vaswani et al., 2017) changed NLP.",
+          citationText: "[LLLL23]",
+          excerpt:
+            "We adopted the evaluation setting used in Llava-1.5 [LLLL23], without any specific prompt.",
+          referenceIndex: 1,
+        },
+        {
+          citationText: "[1, 3, 7]",
+          excerpt:
+            "Our notation keeps [x_i], [0, 1], and [sic] intact while following prior work [1, 3, 7].",
+          referenceIndex: 1,
+        },
+        {
+          citationText: "[LLLL23]",
+          excerpt:
+            "We adopted the evaluation setting used in Llava-1.5 [LLLL23], without any specific prompt.",
+          referenceIndex: 1,
         },
       ],
       "v1",
@@ -117,8 +136,15 @@ describe("createCitationMentions", () => {
       where: { paperId: "paper-1" },
       data: { citationContext: null },
     });
+    expect(prisma.reference.update).toHaveBeenCalledWith({
+      where: { id: "legacy-1" },
+      data: {
+        citationContext:
+          "We adopted the evaluation setting used in Llava-1.5, without any specific prompt.; Our notation keeps [x_i], [0, 1], and [sic] intact while following prior work.",
+      },
+    });
     expect(result).toEqual({
-      created: 1,
+      created: 3,
       unmatched: 0,
       legacyUpdated: 1,
     });

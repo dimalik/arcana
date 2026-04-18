@@ -1,5 +1,6 @@
 import { prisma } from "../prisma";
 import { matchCitationToReference } from "../references/match-citation";
+import { buildNormalizedCitationContext } from "../references/citation-context-normalization";
 
 export interface CitationMentionInput {
   citationText: string;
@@ -108,9 +109,14 @@ export async function applyLegacyCitationContexts(
   let updated = 0;
 
   for (const [refId, ctxList] of Array.from(contextsByRef.entries())) {
+    const citationContext = buildNormalizedCitationContext(ctxList);
+    if (!citationContext) {
+      continue;
+    }
+
     await prisma.reference.update({
       where: { id: refId },
-      data: { citationContext: ctxList.join("; ") },
+      data: { citationContext },
     });
     updated += 1;
   }
@@ -149,8 +155,8 @@ export async function replaceCitationMentionsWithLegacyProjection(
 function buildLegacyCitationContexts(
   mentions: CitationMentionInput[],
   references: LegacyReferenceContextRecord[],
-): Map<string, string[]> {
-  const contextsByRef = new Map<string, string[]>();
+): Map<string, CitationMentionInput[]> {
+  const contextsByRef = new Map<string, CitationMentionInput[]>();
   const referenceIdByIndex = new Map<number, string>();
 
   for (const reference of references) {
@@ -171,8 +177,14 @@ function buildLegacyCitationContexts(
     if (!refId) continue;
 
     const existing = contextsByRef.get(refId) || [];
-    if (!existing.includes(mention.excerpt)) {
-      existing.push(mention.excerpt);
+    if (
+      !existing.some(
+        (current) =>
+          current.excerpt === mention.excerpt
+          && current.citationText === mention.citationText,
+      )
+    ) {
+      existing.push(mention);
     }
     contextsByRef.set(refId, existing);
   }
