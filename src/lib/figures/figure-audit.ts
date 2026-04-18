@@ -1,5 +1,8 @@
 import { prisma } from "../prisma";
 
+// Audit helpers summarize the published compatibility cache and the rollout
+// state behind it. Keep these outputs aligned with the product read contract.
+
 export interface FigureRolloutSelection {
   bucket?: "structured" | "arxiv" | "doi" | "all";
   paperIds?: string[];

@@ -2,6 +2,13 @@
 /**
  * Figure operator and override CLI.
  *
+ * Product contract:
+ * - GET /api/papers/[id]/figures serves the published PaperFigure compatibility cache.
+ * - POST /api/papers/[id]/figures performs a full-source rebuild-and-publish inline.
+ *
+ * This CLI intentionally drives the lower-level operator phases directly.
+ * It is not a substitute for the product route contract.
+ *
  * Usage examples:
  *   npm run figures:ops -- refresh-capability <paper-id>
  *   npm run figures:ops -- extract-evidence <paper-id> [--max-pages 20] [--skip-pdf]

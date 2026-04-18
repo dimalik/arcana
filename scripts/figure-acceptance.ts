@@ -14,6 +14,7 @@
 
 import { prisma } from "../src/lib/prisma";
 import { normalizeLabel } from "../src/lib/figures/label-utils";
+import { resetPublishedFiguresForPaper } from "../src/lib/figures/reset-published-figures";
 import fixture from "./figure-acceptance.json";
 
 // ── Types ────────────────────────────────────────────────────────────
@@ -297,7 +298,7 @@ async function main() {
 
     if (doExtract) {
       const { extractAllFigures } = await import("../src/lib/figures/extract-all-figures");
-      await prisma.paperFigure.deleteMany({ where: { paperId: resolved.id } });
+      await resetPublishedFiguresForPaper(resolved.id, { context: "acceptance-script-reset" });
       const report = await extractAllFigures(resolved.id, { context: "acceptance-script", maxPages: 20 });
       if (report.status !== "success") {
         throw new Error(
