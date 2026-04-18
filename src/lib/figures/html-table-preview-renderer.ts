@@ -90,6 +90,25 @@ function buildHtml(tableContent: string): string {
 </body></html>`;
 }
 
+function hasRenderableStructuredTableContent(
+  tableContent: string | null | undefined,
+): tableContent is string {
+  return typeof tableContent === "string" && tableContent.trim().length > 0;
+}
+
+function buildTablePreviewFilename(
+  figureLabel: string | null,
+  projectionFigureId: string,
+): string {
+  const safeLabel = (figureLabel || "table")
+    .replace(/[^a-zA-Z0-9]/g, "_")
+    .toLowerCase();
+  const safeProjectionFigureId = projectionFigureId
+    .replace(/[^a-zA-Z0-9]/g, "_")
+    .toLowerCase();
+  return `table-preview-${safeLabel}-${safeProjectionFigureId}.png`;
+}
+
 interface RenderResult {
   success: boolean;
   imagePath?: string;
@@ -149,8 +168,8 @@ export interface TablePreviewResult {
  * Post-pass: render previews for active structured tables with no selected preview.
  *
  * Queries the active preview-selection snapshot for rows matching:
- *   selectedPreviewSource=none, type=table,
- *   gapReason=structured_content_no_preview, structuredContent.length > 100
+ *   selectedPreviewSource!=rendered, type=table,
+ *   gapReason=structured_content_no_preview, structuredContent is non-empty
  *
  * On success: writes rendered preview assets and publishes a new enrichment
  * preview-selection snapshot for the active projection.
@@ -178,7 +197,7 @@ export async function renderTablePreviews(
   const candidates = await prisma.previewSelectionFigure.findMany({
     where: {
       previewSelectionRunId: activePreviewSelectionRunId,
-      selectedPreviewSource: "none",
+      selectedPreviewSource: { not: "rendered" },
       projectionFigure: {
         projectionRunId: activeProjectionRunId,
         type: "table",
@@ -197,8 +216,7 @@ export async function renderTablePreviews(
   });
 
   const eligible = candidates.filter(
-    (candidate) => candidate.projectionFigure.structuredContent
-      && candidate.projectionFigure.structuredContent.length > 100,
+    (candidate) => hasRenderableStructuredTableContent(candidate.projectionFigure.structuredContent),
   );
   if (eligible.length === 0) {
     return { rendered: 0, failed: 0, skipped: candidates.length };
@@ -243,7 +261,11 @@ export async function renderTablePreviews(
       },
     });
     console.warn(`[table-preview] Failed to launch browser: ${(err as Error).message}`);
-    return { rendered: 0, failed: eligible.length, skipped: 0 };
+    return {
+      rendered: 0,
+      failed: eligible.length,
+      skipped: candidates.length - eligible.length,
+    };
   }
 
   await prisma.renderRun.update({
@@ -267,10 +289,10 @@ export async function renderTablePreviews(
 
   try {
     for (const row of eligible) {
-      const safeLabel = (row.projectionFigure.figureLabel || "table")
-        .replace(/[^a-zA-Z0-9]/g, "_")
-        .toLowerCase();
-      const filename = `table-preview-${safeLabel}.png`;
+      const filename = buildTablePreviewFilename(
+        row.projectionFigure.figureLabel,
+        row.projectionFigureId,
+      );
       const outPath = path.join(figDir, filename);
 
       const result = await renderTableHtml(
@@ -393,3 +415,8 @@ export async function renderTablePreviews(
 
   return { rendered, failed, skipped: candidates.length - eligible.length };
 }
+
+export const tablePreviewRendererInternals = {
+  hasRenderableStructuredTableContent,
+  buildTablePreviewFilename,
+};
