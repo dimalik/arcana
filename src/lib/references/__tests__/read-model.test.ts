@@ -120,6 +120,94 @@ describe("mapReferenceEntryToView", () => {
     expect(view.linkState).toBe("import_dedup_only_reusable");
     expect(view.importReusablePaperId).toBe("paper-3");
   });
+
+  it("sanitizes polluted author lists derived from citation-key-prefixed raw citations", () => {
+    const view = mapReferenceEntryToView(
+      {
+        id: "entry-3",
+        legacyReferenceId: "legacy-3",
+        title: "Program synthesis with large language models",
+        authors: JSON.stringify([
+          "Augustus Aon + 21] Jacob Austin",
+          "Maxwell Odena",
+          "Maarten Nye",
+        ]),
+        year: 2021,
+        venue: "arXiv",
+        doi: null,
+        rawCitation:
+          "AON + 21] Jacob Austin, Augustus Odena, Maxwell Nye, Maarten Bosma, Henryk Michalewski, David Dohan, Ellen Jiang, Carrie Cai, Michael Terry, Quoc Le, and Charles Sutton. Program synthesis with large language models. arXiv preprint arXiv:2108.07732, 2021.",
+        referenceIndex: 3,
+        semanticScholarId: null,
+        arxivId: "2108.07732",
+        externalUrl: null,
+        resolvedEntityId: null,
+        resolveConfidence: null,
+        resolveSource: null,
+        createdAt: new Date("2026-04-18T10:00:00Z"),
+        citationMentions: [],
+      },
+      new Map(),
+      new Map(),
+    );
+
+    expect(view.title).toBe("Program synthesis with large language models");
+    expect(JSON.parse(view.authors ?? "[]")).toEqual(
+      expect.arrayContaining(["Jacob Austin", "Augustus Odena", "Charles Sutton"]),
+    );
+    expect(view.rawCitation.startsWith("AON + 21]")).toBe(false);
+  });
+
+  it("derives a clean display title when the stored title is the full raw citation", () => {
+    const view = mapReferenceEntryToView(
+      {
+        id: "entry-4",
+        legacyReferenceId: "legacy-4",
+        title:
+          "JSM + 23] Albert Q. Jiang, Alexandre Sablayrolles, Arthur Mensch, Chris Bamford, Devendra Singh Chaplot, Diego de las Casas, Florian Bressand, Gianna Lengyel, Guillaume Lample, Lucile Saulnier, Lélio Renard Lavaud, Marie-Anne Lachaux, Pierre Stock, Teven Le Scao, Thibaut Lavril, Thomas Wang, Timothée Lacroix, and William El Sayed. Mistral 7b, 2023.",
+        authors: JSON.stringify([
+          "Q Jsm + 23] Albert",
+          "Alexandre Jiang",
+          "Arthur Sablayrolles",
+        ]),
+        year: 2023,
+        venue: null,
+        doi: null,
+        rawCitation:
+          "JSM + 23] Albert Q. Jiang, Alexandre Sablayrolles, Arthur Mensch, Chris Bamford, Devendra Singh Chaplot, Diego de las Casas, Florian Bressand, Gianna Lengyel, Guillaume Lample, Lucile Saulnier, Lélio Renard Lavaud, Marie-Anne Lachaux, Pierre Stock, Teven Le Scao, Thibaut Lavril, Thomas Wang, Timothée Lacroix, and William El Sayed. Mistral 7b, 2023.",
+        referenceIndex: 4,
+        semanticScholarId: null,
+        arxivId: null,
+        externalUrl: null,
+        resolvedEntityId: null,
+        resolveConfidence: null,
+        resolveSource: null,
+        createdAt: new Date("2026-04-18T10:00:00Z"),
+        citationMentions: [],
+      },
+      new Map(),
+      new Map([
+        [
+          "mistral 7b",
+          {
+            id: "paper-4",
+            entityId: null,
+            title: "Mistral 7b",
+            year: 2023,
+            authors: null,
+            createdAt: new Date("2026-04-17T10:00:00Z"),
+          },
+        ],
+      ]),
+    );
+
+    expect(view.title).toBe("Mistral 7b");
+    expect(JSON.parse(view.authors ?? "[]")).toEqual(
+      expect.arrayContaining(["Albert Q. Jiang", "Alexandre Sablayrolles", "William El Sayed"]),
+    );
+    expect(view.linkState).toBe("unresolved");
+    expect(view.importReusablePaperId).toBeNull();
+  });
 });
 
 describe("listPaperReferenceViews", () => {

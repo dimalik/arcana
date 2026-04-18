@@ -13,7 +13,7 @@ interface ArxivMetadata {
   pdfUrl: string;
 }
 
-export interface ArxivSearchResult extends ArxivMetadata {}
+export type ArxivSearchResult = ArxivMetadata;
 
 export function parseArxivId(input: string): string | null {
   // Handle full URLs: https://arxiv.org/abs/2301.12345 or https://arxiv.org/pdf/2301.12345

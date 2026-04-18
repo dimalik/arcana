@@ -63,6 +63,128 @@ interface ReferenceEntryRecord {
   }>;
 }
 
+const LEADING_CITATION_MARKER_RE = /^[A-Z][A-Z0-9]{1,12}\s*\+\s*\d+\]\s*/;
+const STANDALONE_YEAR_RE = /^\(?\d{4}[a-z]?\)?$/i;
+const TRAILING_YEAR_RE = /[\s,.;:()-]*\b\d{4}[a-z]?\)?\.?$/i;
+
+function cleanReferenceText(value: string | null | undefined): string {
+  return (value ?? "")
+    .replace(LEADING_CITATION_MARKER_RE, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function splitCitationSentences(rawCitation: string): string[] {
+  return cleanReferenceText(rawCitation)
+    .split(/\.\s+/)
+    .map((part) => part.trim().replace(/\.+$/, ""))
+    .filter(Boolean);
+}
+
+function looksLikePollutedTitle(title: string): boolean {
+  if (!title) return false;
+  if (LEADING_CITATION_MARKER_RE.test(title)) return true;
+  const commaCount = (title.match(/,/g) ?? []).length;
+  return commaCount >= 3 || /\bet al\b/i.test(title);
+}
+
+function cleanDerivedTitle(title: string): string {
+  return cleanReferenceText(title)
+    .replace(TRAILING_YEAR_RE, "")
+    .trim()
+    .replace(/[.,;:]+$/, "")
+    .trim();
+}
+
+function deriveTitleFromRawCitation(rawCitation: string): string | null {
+  const cleaned = cleanReferenceText(rawCitation);
+  const authorRemainder =
+    cleaned.match(/\band\s+[^.]+?\.\s+(.+)$/i)?.[1]
+    ?? cleaned.match(/\bet al\.\s+(.+)$/i)?.[1]
+    ?? null;
+
+  const remainder = authorRemainder
+    ? authorRemainder.replace(/^\(?\d{4}[a-z]?\)?\.\s+/i, "").trim()
+    : null;
+
+  if (remainder) {
+    const dotted = remainder.match(/^([^.;]+?)\.\s+/)?.[1];
+    const commaYear = remainder.match(/^([^.;]+?),\s*\d{4}[a-z]?\.?$/i)?.[1];
+    const derived = cleanDerivedTitle(dotted ?? commaYear ?? remainder);
+    if (derived) return derived;
+  }
+
+  const parts = splitCitationSentences(rawCitation);
+  if (parts.length >= 3 && STANDALONE_YEAR_RE.test(parts[1] ?? "")) {
+    return cleanDerivedTitle(parts[2] ?? "") || null;
+  }
+  if (parts.length >= 2) {
+    return cleanDerivedTitle(parts[1] ?? "") || null;
+  }
+  return null;
+}
+
+function parseAuthorsJson(authors: string | null): string[] | null {
+  if (!authors) return null;
+  try {
+    const parsed = JSON.parse(authors) as unknown;
+    if (!Array.isArray(parsed)) return null;
+    return parsed
+      .map((value) => (typeof value === "string" ? cleanReferenceText(value) : ""))
+      .filter(Boolean);
+  } catch {
+    return null;
+  }
+}
+
+function looksLikePollutedAuthors(authors: string[]): boolean {
+  return authors.some((author) => author.includes("]") || /\s\+\s\d+\]/.test(author));
+}
+
+function deriveAuthorsFromRawCitation(rawCitation: string, title: string): string[] | null {
+  const cleaned = cleanReferenceText(rawCitation);
+  const titleIndex = title
+    ? cleaned.toLowerCase().indexOf(title.toLowerCase())
+    : -1;
+  const authorBlock = titleIndex > 0
+    ? cleaned.slice(0, titleIndex)
+    : splitCitationSentences(rawCitation)[0] ?? cleaned;
+
+  const normalized = authorBlock
+    .replace(/\(?\d{4}[a-z]?\)?\.?\s*$/i, "")
+    .replace(/[.;:\s]+$/g, "")
+    .replace(/\bet al\b\.?/gi, "")
+    .replace(/\band\b/gi, ",")
+    .split(",")
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+  return normalized.length > 0 ? normalized : null;
+}
+
+function sanitizeReferenceEntryDisplay(entry: ReferenceEntryRecord): {
+  title: string;
+  authors: string | null;
+  rawCitation: string;
+} {
+  const cleanedTitle = cleanReferenceText(entry.title);
+  const derivedTitle = deriveTitleFromRawCitation(entry.rawCitation);
+  const title = looksLikePollutedTitle(cleanedTitle)
+    ? (derivedTitle ?? cleanedTitle)
+    : cleanedTitle;
+
+  const parsedAuthors = parseAuthorsJson(entry.authors);
+  const displayAuthors = !parsedAuthors || looksLikePollutedAuthors(parsedAuthors)
+    ? deriveAuthorsFromRawCitation(entry.rawCitation, title || derivedTitle || "")
+    : parsedAuthors;
+
+  return {
+    title: title || cleanedTitle || cleanReferenceText(entry.rawCitation),
+    authors: displayAuthors ? JSON.stringify(displayAuthors) : entry.authors,
+    rawCitation: cleanReferenceText(entry.rawCitation),
+  };
+}
+
 function buildCitationContext(
   mentions: Array<{ excerpt: string; createdAt: Date }>,
 ): string | null {
@@ -94,12 +216,13 @@ export function mapReferenceEntryToView(
   localPaperByEntityId: Map<string, LocalPaperCandidate>,
   localPaperByNormalizedTitle: Map<string, LocalPaperCandidate>,
 ): PaperReferenceView {
+  const display = sanitizeReferenceEntryDisplay(entry);
   const matchedPaper = entry.resolvedEntityId
     ? localPaperByEntityId.get(entry.resolvedEntityId) ?? null
     : null;
   const importReusablePaper = matchedPaper
     ? null
-    : getImportReusablePaper(entry.title, localPaperByNormalizedTitle);
+    : getImportReusablePaper(display.title, localPaperByNormalizedTitle);
   const linkState = matchedPaper
     ? "canonical_entity_linked"
     : importReusablePaper
@@ -110,12 +233,12 @@ export function mapReferenceEntryToView(
     id: entry.legacyReferenceId ?? entry.id,
     referenceEntryId: entry.id,
     legacyReferenceId: entry.legacyReferenceId,
-    title: entry.title,
-    authors: entry.authors,
+    title: display.title,
+    authors: display.authors,
     year: entry.year,
     venue: entry.venue,
     doi: entry.doi,
-    rawCitation: entry.rawCitation,
+    rawCitation: display.rawCitation,
     referenceIndex: entry.referenceIndex,
     matchedPaperId: matchedPaper?.id ?? null,
     matchConfidence: matchedPaper ? (entry.resolveConfidence ?? 1.0) : null,

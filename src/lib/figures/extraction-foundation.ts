@@ -1,4 +1,3 @@
-import { stat } from "fs/promises";
 import path from "path";
 import { Prisma } from "@prisma/client";
 import type { FigureCandidateCreateManyInput } from "@/generated/prisma/models/FigureCandidate";
@@ -94,13 +93,13 @@ async function ensureAsset(
   const cacheKey = `${paperId}:${fig.assetHash}`;
   if (cache.has(cacheKey)) return cache.get(cacheKey)!;
 
-  const absolutePath = path.isAbsolute(fig.imagePath)
-    ? fig.imagePath
-    : path.join(process.cwd(), fig.imagePath);
-
   let byteSize: number | null = null;
   try {
-    const fileStat = await stat(absolutePath);
+    // Dynamic imports avoid Turbopack TP1004 path-analysis warnings for fs access.
+    const fs = await import("fs/promises");
+    const pathModule = await import("path");
+    const absolutePath = pathModule.resolve(process.cwd(), fig.imagePath);
+    const fileStat = await fs.stat(absolutePath);
     byteSize = Math.min(fileStat.size, 2_147_483_647);
   } catch {
     byteSize = null;

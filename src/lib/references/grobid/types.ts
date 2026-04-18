@@ -41,11 +41,9 @@ export interface GrobidProcessReferencesResponse {
   durationMs: number;
 }
 
-export interface GrobidProcessFulltextRequest
-  extends GrobidProcessReferencesRequest {}
+export type GrobidProcessFulltextRequest = GrobidProcessReferencesRequest;
 
-export interface GrobidProcessFulltextResponse
-  extends GrobidProcessReferencesResponse {}
+export type GrobidProcessFulltextResponse = GrobidProcessReferencesResponse;
 
 export class GrobidUnavailableError extends Error {
   constructor(reason: string) {

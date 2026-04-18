@@ -372,9 +372,9 @@ function computeFigureRegion(
     .sort((a, b) => a.y0 - b.y0);
 
   let regionTop = captionBlock.y0 / layout.height;
-  let regionBottom = captionBlock.y1 / layout.height;
-  let regionLeft = column.leftRatio;
-  let regionRight = column.rightRatio;
+  const regionBottom = captionBlock.y1 / layout.height;
+  const regionLeft = column.leftRatio;
+  const regionRight = column.rightRatio;
 
   for (const block of [...sortedBlocks].reverse()) {
     if (block.y1 > captionBlock.y0 - 2 || block.y1 < minY) {

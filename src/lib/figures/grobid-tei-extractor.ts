@@ -1,4 +1,3 @@
-import { readFile } from "fs/promises";
 import { XMLParser } from "fast-xml-parser";
 
 import { normalizeLabel } from "./label-utils";
@@ -249,7 +248,11 @@ export async function extractFiguresWithGrobid(
     return [];
   }
 
-  const pdfBuffer = await readFile(pdfPath);
+  // Dynamic imports avoid Turbopack TP1004 path-analysis warnings for fs access.
+  const fs = await import("fs/promises");
+  const path = await import("path");
+  const absolutePdfPath = path.resolve(process.cwd(), pdfPath);
+  const pdfBuffer = await fs.readFile(absolutePdfPath);
   const form = new FormData();
   form.set("input", new Blob([pdfBuffer], { type: "application/pdf" }), "paper.pdf");
   form.set("teiCoordinates", "figure");

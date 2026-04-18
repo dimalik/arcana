@@ -50,13 +50,18 @@ describe("ProcessingQueue recoverStalled", () => {
     });
 
     const queue = new ProcessingQueue();
-    (queue as any).batchPending = ["paper-1"];
-    (queue as any).fillSlots = vi.fn();
+    const queuePrivate = queue as unknown as {
+      batchPending: string[];
+      queue: string[];
+      fillSlots: ReturnType<typeof vi.fn>;
+    };
+    queuePrivate.batchPending = ["paper-1"];
+    queuePrivate.fillSlots = vi.fn();
 
     await queue.recoverStalled();
 
-    expect((queue as any).queue).toEqual([]);
-    expect((queue as any).batchPending).toEqual(["paper-1"]);
-    expect((queue as any).fillSlots).toHaveBeenCalledTimes(1);
+    expect(queuePrivate.queue).toEqual([]);
+    expect(queuePrivate.batchPending).toEqual(["paper-1"]);
+    expect(queuePrivate.fillSlots).toHaveBeenCalledTimes(1);
   });
 });
