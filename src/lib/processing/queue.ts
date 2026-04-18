@@ -14,7 +14,7 @@ export class CancelledError extends Error {
   }
 }
 
-class ProcessingQueue {
+export class ProcessingQueue {
   private queue: string[] = [];
   private processing = new Map<string, AbortController>();
   private initialized = false;
@@ -345,7 +345,11 @@ class ProcessingQueue {
           },
         });
 
-        if (!this.queue.includes(paper.id) && !this.processing.has(paper.id)) {
+        if (
+          !this.queue.includes(paper.id)
+          && !this.processing.has(paper.id)
+          && !this.batchPending.includes(paper.id)
+        ) {
           this.queue.push(paper.id);
         }
       }
