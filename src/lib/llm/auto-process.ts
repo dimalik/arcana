@@ -1,6 +1,12 @@
 import { prisma } from "@/lib/prisma";
-import { generateLLMResponse, truncateText, MAX_PAPER_CHARS, withLlmContext } from "./provider";
-import { buildPrompt, buildDistillPrompt, cleanJsonResponse } from "./prompts";
+import {
+  generateLLMResponse,
+  generateStructuredObject,
+  truncateText,
+  MAX_PAPER_CHARS,
+  withLlmContext,
+} from "./provider";
+import { buildPrompt, buildDistillPrompt } from "./prompts";
 import type { LLMProvider } from "./models";
 import type { ProxyConfig } from "./proxy-settings";
 import { getProxyConfig } from "./proxy-settings";
@@ -19,6 +25,7 @@ import {
 } from "@/lib/citations/citation-mention-service";
 import { createRelationAssertion } from "@/lib/assertions/relation-assertion-service";
 import { projectLegacyRelation } from "@/lib/assertions/legacy-projection";
+import type { ZodTypeAny } from "zod";
 import {
   clearProcessingStep,
   createProcessingRun,
@@ -26,6 +33,14 @@ import {
   setProcessingProjection,
   startProcessingStep,
 } from "@/lib/processing/runtime-ledger";
+import {
+  categorizeRuntimeOutputSchema,
+  detectContradictionsRuntimeOutputSchema,
+  distillRuntimeOutputSchema,
+  extractCitationContextsRuntimeOutputSchema,
+  extractRuntimeOutputSchema,
+  linkPapersRuntimeOutputSchema,
+} from "./runtime-output-schemas";
 
 
 type ProcessingStep = "extracting_text" | "metadata" | "summarize" | "categorize" | "linking" | "contradictions" | "references" | "contexts" | "distill";
@@ -96,6 +111,47 @@ async function runProcessingLlmCall(
       },
     },
     () => generateLLMResponse(params),
+  );
+}
+
+async function runProcessingStructuredCall<TSchema extends ZodTypeAny>(
+  context: {
+    paperId: string;
+    userId?: string | null;
+    step:
+      | "extract"
+      | "categorize"
+      | "linkPapers"
+      | "detectContradictions"
+      | "extractCitationContexts"
+      | "distill";
+    processingRunId?: string;
+    metadata?: Record<string, unknown>;
+  },
+  params: Omit<
+    Parameters<typeof generateStructuredObject<TSchema>>[0],
+    "schemaName" | "schema"
+  > & {
+    schemaName: Parameters<typeof generateStructuredObject<TSchema>>[0]["schemaName"];
+    schema: TSchema;
+  },
+): Promise<{ object: TSchema["_output"]; resultText: string }> {
+  return withLlmContext(
+    {
+      operation: `processing_${context.step}`,
+      userId: context.userId ?? undefined,
+      metadata: {
+        runtime: "processing",
+        source: "auto_process",
+        paperId: context.paperId,
+        step: context.step,
+        ...(context.processingRunId
+          ? { processingRunId: context.processingRunId }
+          : {}),
+        ...context.metadata,
+      },
+    },
+    () => generateStructuredObject(params),
   );
 }
 
@@ -616,9 +672,18 @@ export async function runAutoProcessPipeline(opts: {
       });
       console.log("[auto-process] Extracting metadata for", paperId);
       const { system, prompt } = buildPrompt("extract", truncated);
-      const result = await runProcessingLlmCall(
+      const { object: parsed, resultText } = await runProcessingStructuredCall(
         { paperId, userId: paper.userId, step: "extract", processingRunId },
-        { provider, modelId, system, prompt, maxTokens: 2000, proxyConfig },
+        {
+          provider,
+          modelId,
+          system,
+          prompt,
+          schemaName: "extract",
+          schema: extractRuntimeOutputSchema,
+          maxTokens: 2000,
+          proxyConfig,
+        },
       );
 
       await prisma.promptResult.create({
@@ -626,39 +691,32 @@ export async function runAutoProcessPipeline(opts: {
           paperId,
           promptType: "extract",
           prompt: "Auto-extract metadata",
-          result,
+          result: resultText,
           provider,
           model: modelId,
         },
       });
 
-      // Try to update paper fields from extracted metadata
-      try {
-        const cleaned = cleanJsonResponse(result);
-        const parsed = JSON.parse(cleaned);
-        const updateData: Record<string, unknown> = {};
-        if (parsed.title) updateData.title = parsed.title;
-        if (parsed.authors) updateData.authors = JSON.stringify(parsed.authors);
-        if (parsed.year) updateData.year = parsed.year;
-        if (parsed.venue) updateData.venue = parsed.venue;
-        if (parsed.doi && !paper.doi) updateData.doi = parsed.doi;
-        if (parsed.arxivId && !paper.arxivId) updateData.arxivId = parsed.arxivId;
-        if (parsed.abstract) updateData.abstract = parsed.abstract;
-        if (parsed.keyFindings)
-          updateData.keyFindings = JSON.stringify(parsed.keyFindings);
+      const updateData: Record<string, unknown> = {};
+      if (parsed.title) updateData.title = parsed.title;
+      if (parsed.authors) updateData.authors = JSON.stringify(parsed.authors);
+      if (parsed.year) updateData.year = parsed.year;
+      if (parsed.venue) updateData.venue = parsed.venue;
+      if (parsed.doi && !paper.doi) updateData.doi = parsed.doi;
+      if (parsed.arxivId && !paper.arxivId) updateData.arxivId = parsed.arxivId;
+      if (parsed.abstract) updateData.abstract = parsed.abstract;
+      if (parsed.keyFindings)
+        updateData.keyFindings = JSON.stringify(parsed.keyFindings);
 
-        if (Object.keys(updateData).length > 0) {
-          await prisma.paper.update({
-            where: { id: paperId },
-            data: updateData,
-          });
-          paper = (await prisma.paper.findUnique({
-            where: { id: paperId },
-            select: paperSelect,
-          })) ?? paper;
-        }
-      } catch {
-        // JSON parse failed — raw result still saved
+      if (Object.keys(updateData).length > 0) {
+        await prisma.paper.update({
+          where: { id: paperId },
+          data: updateData,
+        });
+        paper = (await prisma.paper.findUnique({
+          where: { id: paperId },
+          select: paperSelect,
+        })) ?? paper;
       }
     } catch (e) {
       console.error("[auto-process] Extract failed for", paperId, ":", e instanceof Error ? e.message : e);
@@ -730,9 +788,18 @@ export async function runAutoProcessPipeline(opts: {
         existingTags: goodTags.length > 0 ? goodTags : existingTags,
         overusedTags,
       });
-      const result = await runProcessingLlmCall(
+      const { object: parsed, resultText } = await runProcessingStructuredCall(
         { paperId, userId: paper.userId, step: "categorize", processingRunId },
-        { provider, modelId, system, prompt, maxTokens: 1000, proxyConfig },
+        {
+          provider,
+          modelId,
+          system,
+          prompt,
+          schemaName: "categorize",
+          schema: categorizeRuntimeOutputSchema,
+          maxTokens: 1000,
+          proxyConfig,
+        },
       );
 
     await prisma.promptResult.create({
@@ -740,21 +807,14 @@ export async function runAutoProcessPipeline(opts: {
         paperId,
         promptType: "categorize",
         prompt: "Auto-categorize paper",
-        result,
+        result: resultText,
         provider,
         model: modelId,
       },
     });
 
-    // Auto-tag with fuzzy matching against existing tags
-    try {
-      const cleaned = cleanJsonResponse(result);
-      const parsed = JSON.parse(cleaned);
-      const tagNames = (parsed.tags || []) as string[];
-      await resolveAndAssignTags(paperId, tagNames);
-    } catch {
-      // JSON parse failed
-    }
+    const tagNames = (parsed.tags || []) as string[];
+    await resolveAndAssignTags(paperId, tagNames);
 
     // Refresh scores after new tags are assigned
     try {
@@ -850,73 +910,70 @@ export async function runAutoProcessPipeline(opts: {
       const linkPrompt = `NEW PAPER:\n${newPaperInfo}\n\n---\n\nEXISTING PAPERS IN LIBRARY:\n${existingList}`;
 
       const { system } = buildPrompt("linkPapers", "");
-      const result = await runProcessingLlmCall(
+      const { object: relations } = await runProcessingStructuredCall(
         { paperId, userId: paper.userId, step: "linkPapers", processingRunId },
-        { provider, modelId, system, prompt: linkPrompt, maxTokens: 2000, proxyConfig },
+        {
+          provider,
+          modelId,
+          system,
+          prompt: linkPrompt,
+          schemaName: "linkPapers",
+          schema: linkPapersRuntimeOutputSchema,
+          maxTokens: 2000,
+          proxyConfig,
+        },
       );
 
-      try {
-        const cleaned = cleanJsonResponse(result);
-        const relations = JSON.parse(cleaned) as Array<{
-          targetPaperId: string;
-          relationType: string;
-          description?: string;
-          confidence: number;
-        }>;
+      const validIds = new Set(otherPapers.map((p) => p.id));
+      let created = 0;
 
-        const validIds = new Set(otherPapers.map((p) => p.id));
-        let created = 0;
+      for (const rel of relations.slice(0, 20)) {
+        if (!validIds.has(rel.targetPaperId)) continue;
 
-        for (const rel of relations.slice(0, 20)) {
-          if (!validIds.has(rel.targetPaperId)) continue;
+        const targetPaper = otherPapers.find((candidate) => candidate.id === rel.targetPaperId);
+        const clampedConfidence = Math.min(1, Math.max(0, rel.confidence || 0));
 
-          const targetPaper = otherPapers.find((candidate) => candidate.id === rel.targetPaperId);
-          const clampedConfidence = Math.min(1, Math.max(0, rel.confidence || 0));
+        await prisma.paperRelation.create({
+          data: {
+            sourcePaperId: paperId,
+            targetPaperId: rel.targetPaperId,
+            relationType: rel.relationType,
+            description: rel.description || null,
+            confidence: clampedConfidence,
+            isAutoGenerated: true,
+          },
+        }).catch(() => {});
 
-          await prisma.paperRelation.create({
-            data: {
+        if (paper.entityId && targetPaper?.entityId) {
+          try {
+            await createRelationAssertion({
+              sourceEntityId: paper.entityId,
+              targetEntityId: targetPaper.entityId,
               sourcePaperId: paperId,
-              targetPaperId: rel.targetPaperId,
               relationType: rel.relationType,
               description: rel.description || null,
               confidence: clampedConfidence,
-              isAutoGenerated: true,
-            },
-          }).catch(() => {});
-
-          if (paper.entityId && targetPaper?.entityId) {
-            try {
-              await createRelationAssertion({
-                sourceEntityId: paper.entityId,
-                targetEntityId: targetPaper.entityId,
-                sourcePaperId: paperId,
-                relationType: rel.relationType,
-                description: rel.description || null,
-                confidence: clampedConfidence,
-                provenance: "llm_semantic",
-                extractorVersion: "v1",
-              });
-              await projectLegacyRelation(
-                paperId,
-                rel.targetPaperId,
-                paper.entityId,
-                targetPaper.entityId
-              );
-            } catch {
-              // Non-fatal
-            }
+              provenance: "llm_semantic",
+              extractorVersion: "v1",
+            });
+            await projectLegacyRelation(
+              paperId,
+              rel.targetPaperId,
+              paper.entityId,
+              targetPaper.entityId
+            );
+          } catch {
+            // Non-fatal
           }
-
-          created++;
         }
 
-        console.log(
-          `[auto-process] Created ${created} paper relations for`,
-          paperId
-        );
-      } catch {
-        // JSON parse failed
+        created++;
       }
+
+      console.log(
+        `[auto-process] Created ${created} paper relations for`,
+        paperId
+      );
     }
   } catch (e) {
     console.error("[auto-process] Link related papers failed:", e);
@@ -968,14 +1025,23 @@ export async function runAutoProcessPipeline(opts: {
 
       const contradictionPrompt = `NEW PAPER:\n${newPaperInfo}\n\n---\n\nRELATED PAPERS:\n${relatedList}`;
       const { system } = buildPrompt("detectContradictions", "");
-      const result = await runProcessingLlmCall(
+      const { resultText } = await runProcessingStructuredCall(
         {
           paperId,
           userId: paper.userId,
           step: "detectContradictions",
           processingRunId,
         },
-        { provider, modelId, system, prompt: contradictionPrompt, maxTokens: 3000, proxyConfig },
+        {
+          provider,
+          modelId,
+          system,
+          prompt: contradictionPrompt,
+          schemaName: "detectContradictions",
+          schema: detectContradictionsRuntimeOutputSchema,
+          maxTokens: 3000,
+          proxyConfig,
+        },
       );
 
       await prisma.promptResult.create({
@@ -983,7 +1049,7 @@ export async function runAutoProcessPipeline(opts: {
           paperId,
           promptType: "detectContradictions",
           prompt: "Auto-detect contradictions",
-          result,
+          result: resultText,
           provider,
           model: modelId,
         },
@@ -1020,7 +1086,7 @@ export async function runAutoProcessPipeline(opts: {
           extractReferenceCandidates({
             paperId,
             filePath: paper.filePath ?? null,
-            fullText: paper.fullText,
+            fullText: paper.fullText ?? "",
             provider,
             modelId,
             proxyConfig,
@@ -1134,7 +1200,7 @@ export async function runAutoProcessPipeline(opts: {
           if (bodyText) {
             const { system } = buildPrompt("extractCitationContexts", "");
             const ctxPrompt = `Here is the body text of the paper:\n\n${bodyText}`;
-            const ctxResult = await runProcessingLlmCall(
+            const { object: contexts } = await runProcessingStructuredCall(
               {
                 paperId,
                 userId: paper.userId,
@@ -1146,27 +1212,20 @@ export async function runAutoProcessPipeline(opts: {
                 modelId,
                 system,
                 prompt: ctxPrompt,
+                schemaName: "extractCitationContexts",
+                schema: extractCitationContextsRuntimeOutputSchema,
                 maxTokens: 4000,
                 proxyConfig,
               },
             );
 
-            try {
-              const cleaned = cleanJsonResponse(ctxResult);
-              const contexts = JSON.parse(cleaned) as Array<{
-                citation: string;
-                context: string;
-              }>;
-              if (Array.isArray(contexts) && contexts.length > 0) {
-                mentionInputs = contexts
-                  .filter((ctx) => ctx.citation && ctx.context)
-                  .map((ctx) => ({
-                    citationText: ctx.citation,
-                    excerpt: ctx.context,
-                  }));
-              }
-            } catch {
-              // JSON parse failed
+            if (Array.isArray(contexts) && contexts.length > 0) {
+              mentionInputs = contexts
+                .filter((ctx) => ctx.citation && ctx.context)
+                .map((ctx) => ({
+                  citationText: ctx.citation,
+                  excerpt: ctx.context,
+                }));
             }
           }
         }
@@ -1209,13 +1268,16 @@ export async function runAutoProcessPipeline(opts: {
     const roomNames = existingRooms.map((r) => r.name);
 
     const { system: distillSystem, prompt: distillPrompt } = buildDistillPrompt(truncated, roomNames);
-    const distillResult = await runProcessingLlmCall(
+    const { object: parsed, resultText: distillResult } =
+      await runProcessingStructuredCall(
       { paperId, userId: paper.userId, step: "distill", processingRunId },
       {
         provider,
         modelId,
         system: distillSystem,
         prompt: distillPrompt,
+        schemaName: "distill",
+        schema: distillRuntimeOutputSchema,
         maxTokens: 4000,
         proxyConfig,
       },
@@ -1232,48 +1294,34 @@ export async function runAutoProcessPipeline(opts: {
       },
     });
 
-    try {
-      const cleaned = cleanJsonResponse(distillResult);
-      const parsed = JSON.parse(cleaned) as {
-        insights: Array<{
-          learning: string;
-          significance: string;
-          applications?: string;
-          roomSuggestion: string;
-        }>;
-      };
+    if (Array.isArray(parsed.insights)) {
+      let created = 0;
+      for (const insight of parsed.insights.slice(0, 10)) {
+        if (!insight.learning || !insight.significance) continue;
 
-      if (Array.isArray(parsed.insights)) {
-        let created = 0;
-        for (const insight of parsed.insights.slice(0, 10)) {
-          if (!insight.learning || !insight.significance) continue;
-
-          const roomName = insight.roomSuggestion || "General";
-          let room = await prisma.mindPalaceRoom.findUnique({
-            where: { name: roomName },
+        const roomName = insight.roomSuggestion || "General";
+        let room = await prisma.mindPalaceRoom.findUnique({
+          where: { name: roomName },
+        });
+        if (!room) {
+          room = await prisma.mindPalaceRoom.create({
+            data: { name: roomName, isAutoGenerated: true },
           });
-          if (!room) {
-            room = await prisma.mindPalaceRoom.create({
-              data: { name: roomName, isAutoGenerated: true },
-            });
-          }
-
-          await prisma.insight.create({
-            data: {
-              roomId: room.id,
-              paperId,
-              learning: insight.learning,
-              significance: insight.significance,
-              applications: insight.applications || null,
-              isAutoGenerated: true,
-            },
-          });
-          created++;
         }
-        console.log(`[auto-process] Created ${created} insights for`, paperId);
+
+        await prisma.insight.create({
+          data: {
+            roomId: room.id,
+            paperId,
+            learning: insight.learning,
+            significance: insight.significance,
+            applications: insight.applications || null,
+            isAutoGenerated: true,
+          },
+        });
+        created++;
       }
-    } catch {
-      // JSON parse failed — raw result still saved
+      console.log(`[auto-process] Created ${created} insights for`, paperId);
     }
   } catch (e) {
     console.error("[auto-process] Distill insights failed:", e);

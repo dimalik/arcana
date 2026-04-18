@@ -1,11 +1,20 @@
 import { AsyncLocalStorage } from "node:async_hooks";
-import { streamText, LanguageModel } from "ai";
+import {
+  JSONParseError,
+  NoObjectGeneratedError,
+  TypeValidationError,
+  generateObject as aiGenerateObject,
+  streamText,
+  LanguageModel,
+} from "ai";
 import { createOpenAI } from "@ai-sdk/openai";
 import { createAnthropic } from "@ai-sdk/anthropic";
+import type { ZodTypeAny } from "zod";
 import { getModelInfo, type LLMProvider } from "./models";
 import { resolveEndpointForModel, type ProxyConfig } from "./proxy-settings";
 import { logLlmUsage } from "../usage";
 import { logger } from "../logger";
+import type { ProcessingRuntimeStructuredPromptType } from "./runtime-output-schemas";
 
 // Cache resolved API keys for the lifetime of the process to avoid
 // hitting the DB on every single LLM call. Cleared on save.
@@ -64,6 +73,67 @@ export function getLegacyLlmContextFallbackCountForTests() {
 }
 
 type LanguageModelUsage = "single-shot" | "tool-loop";
+
+export class StructuredLlmOutputError extends Error {
+  readonly code:
+    | "json_parse_failed"
+    | "schema_validation_failed"
+    | "object_generation_failed";
+  readonly schemaName: string;
+  readonly provider: LLMProvider;
+  readonly modelId: string;
+
+  constructor(options: {
+    code:
+      | "json_parse_failed"
+      | "schema_validation_failed"
+      | "object_generation_failed";
+    schemaName: string;
+    provider: LLMProvider;
+    modelId: string;
+    cause?: unknown;
+  }) {
+    const reason =
+      options.code === "json_parse_failed"
+        ? "did not return valid JSON"
+        : options.code === "schema_validation_failed"
+          ? "returned JSON that did not match the frozen schema"
+          : "failed before a validated object was produced";
+    super(
+      `Structured LLM output for ${options.schemaName} ${reason}`,
+      options.cause ? { cause: options.cause } : undefined,
+    );
+    this.name = "StructuredLlmOutputError";
+    this.code = options.code;
+    this.schemaName = options.schemaName;
+    this.provider = options.provider;
+    this.modelId = options.modelId;
+  }
+}
+
+function classifyStructuredObjectError(
+  error: unknown,
+): StructuredLlmOutputError["code"] {
+  if (error instanceof JSONParseError) {
+    return "json_parse_failed";
+  }
+
+  if (error instanceof TypeValidationError) {
+    return "schema_validation_failed";
+  }
+
+  if (NoObjectGeneratedError.isInstance(error)) {
+    const cause = error.cause;
+    if (cause instanceof JSONParseError) {
+      return "json_parse_failed";
+    }
+    if (cause instanceof TypeValidationError) {
+      return "schema_validation_failed";
+    }
+  }
+
+  return "object_generation_failed";
+}
 
 async function getResolvedApiKey(provider: "openai" | "anthropic"): Promise<string | undefined> {
   if (provider === "openai") {
@@ -357,6 +427,125 @@ export async function generateLLMResponse(params: {
       throw err;
     }
   }
+  throw lastErr;
+}
+
+export async function generateStructuredObject<TSchema extends ZodTypeAny>(params: {
+  provider: LLMProvider;
+  modelId: string;
+  system: string;
+  prompt: string;
+  schema: TSchema;
+  schemaName: ProcessingRuntimeStructuredPromptType;
+  maxTokens?: number;
+  proxyConfig?: ProxyConfig;
+}): Promise<{ object: TSchema["_output"]; resultText: string }> {
+  const model = await getModel(params.provider, params.modelId, params.proxyConfig);
+  const startMs = Date.now();
+  const activeContext = getActiveLlmContext();
+
+  console.log(
+    `[llm] generateObject: model=${params.modelId} op=${activeContext.operation} schema=${params.schemaName} system=${params.system.length}chars prompt=${params.prompt.length}chars maxTokens=${params.maxTokens ?? "unset"}`,
+  );
+
+  let lastErr: unknown;
+  for (let attempt = 0; attempt <= LLM_MAX_RETRIES; attempt++) {
+    try {
+      const result = await aiGenerateObject({
+        model,
+        schema: params.schema,
+        system: params.system,
+        prompt: params.prompt,
+        ...(params.maxTokens ? { maxOutputTokens: params.maxTokens } : {}),
+        maxRetries: 0,
+      });
+
+      const durationMs = Date.now() - startMs;
+      const context = getActiveLlmContext();
+      const resultText = JSON.stringify(params.schema.parse(result.object));
+
+      console.log(
+        `[llm] generateObject OK: schema=${params.schemaName}, ${resultText.length} chars, ${result.usage.totalTokens} tokens, ${durationMs}ms`,
+      );
+
+      logLlmUsage({
+        userId: context.userId,
+        provider: params.provider,
+        modelId: params.modelId,
+        operation: context.operation,
+        inputTokens: result.usage.inputTokens ?? 0,
+        outputTokens: result.usage.outputTokens ?? 0,
+        totalTokens: result.usage.totalTokens ?? 0,
+        durationMs,
+        success: true,
+        metadata: context.metadata,
+      });
+
+      return {
+        object: result.object as TSchema["_output"],
+        resultText,
+      };
+    } catch (err) {
+      lastErr = err;
+      const msg = err instanceof Error ? err.message : String(err);
+      const status = (err as Record<string, unknown>)?.statusCode ?? (err as Record<string, unknown>)?.status ?? "?";
+
+      if (attempt < LLM_MAX_RETRIES && isLLMRetryable(err)) {
+        const backoff = LLM_BASE_DELAY_MS * Math.pow(2, attempt);
+        console.warn(
+          `[llm] generateObject attempt ${attempt + 1}/${LLM_MAX_RETRIES + 1} failed (status=${status}), retrying in ${backoff}ms: ${msg.slice(0, 200)}`,
+        );
+        await new Promise((r) => setTimeout(r, backoff));
+        continue;
+      }
+
+      const durationMs = Date.now() - startMs;
+      const context = getActiveLlmContext();
+      const structuredError = new StructuredLlmOutputError({
+        code: classifyStructuredObjectError(err),
+        schemaName: params.schemaName,
+        provider: params.provider,
+        modelId: params.modelId,
+        cause: err,
+      });
+
+      console.error(
+        `[llm] generateObject FAILED: schema=${params.schemaName} status=${status} error=${msg.slice(0, 500)}`,
+      );
+
+      logLlmUsage({
+        userId: context.userId,
+        provider: params.provider,
+        modelId: params.modelId,
+        operation: context.operation,
+        inputTokens: 0,
+        outputTokens: 0,
+        totalTokens: 0,
+        durationMs,
+        success: false,
+        error: structuredError.message.slice(0, 2000),
+        metadata: context.metadata,
+      });
+
+      logger.error(`Structured LLM call failed: ${context.operation}`, {
+        category: "llm",
+        userId: context.userId,
+        error: structuredError,
+        metadata: {
+          provider: params.provider,
+          modelId: params.modelId,
+          operation: context.operation,
+          status,
+          attempt: attempt + 1,
+          schemaName: params.schemaName,
+          ...context.metadata,
+        },
+      });
+
+      throw structuredError;
+    }
+  }
+
   throw lastErr;
 }
 

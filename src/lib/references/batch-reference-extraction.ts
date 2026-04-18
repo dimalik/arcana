@@ -56,7 +56,7 @@ export async function runHybridReferenceExtractionForPapers(
           extractReferenceCandidates({
             paperId: paper.id,
             filePath: paper.filePath,
-            fullText: paper.fullText,
+            fullText: paper.fullText ?? "",
             provider: "proxy",
             modelId,
             proxyConfig,

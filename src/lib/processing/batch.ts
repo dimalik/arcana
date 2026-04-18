@@ -21,6 +21,10 @@ import {
   withLlmContext,
 } from "@/lib/llm/provider";
 import { buildPrompt, buildDistillPrompt, cleanJsonResponse } from "@/lib/llm/prompts";
+import {
+  parseStructuredRuntimeOutputText,
+  serializeStructuredRuntimeOutput,
+} from "../llm/runtime-output-schemas";
 import { getUserContext, buildUserContextPreamble } from "@/lib/llm/user-context";
 import { getBodyTextForContextExtraction } from "@/lib/references/extract-section";
 import { runHybridReferenceExtractionForPapers } from "@/lib/references/batch-reference-extraction";
@@ -544,13 +548,20 @@ function getResultText(result: BatchResult): string | null {
 }
 
 async function processExtractResult(paperId: string, text: string, modelId: string) {
-  await prisma.promptResult.create({
-    data: { paperId, promptType: "extract", prompt: "Auto-extract metadata (batch)", result: text, provider: "proxy", model: modelId },
-  });
-
   try {
-    const cleaned = cleanJsonResponse(text);
-    const parsed = JSON.parse(cleaned);
+    const parsed = parseStructuredRuntimeOutputText("extract", text, "batch");
+    const normalized = serializeStructuredRuntimeOutput("extract", parsed);
+    await prisma.promptResult.create({
+      data: {
+        paperId,
+        promptType: "extract",
+        prompt: "Auto-extract metadata (batch)",
+        result: normalized,
+        provider: "proxy",
+        model: modelId,
+      },
+    });
+
     const updateData: Record<string, unknown> = {};
     if (parsed.title) updateData.title = parsed.title;
     if (parsed.authors) updateData.authors = JSON.stringify(parsed.authors);
@@ -561,7 +572,12 @@ async function processExtractResult(paperId: string, text: string, modelId: stri
     if (Object.keys(updateData).length > 0) {
       await prisma.paper.update({ where: { id: paperId }, data: updateData });
     }
-  } catch { /* JSON parse failed */ }
+  } catch (error) {
+    console.error(
+      `[batch] Structured extract result failed for ${paperId}:`,
+      error instanceof Error ? error.message : error,
+    );
+  }
 }
 
 async function processSummarizeResult(paperId: string, text: string, modelId: string) {
@@ -605,24 +621,36 @@ async function processExtractReferencesResult(paperId: string, text: string, mod
 }
 
 async function processCategorizeResult(paperId: string, text: string, modelId: string) {
-  await prisma.promptResult.create({
-    data: { paperId, promptType: "categorize", prompt: "Auto-categorize (batch)", result: text, provider: "proxy", model: modelId },
-  });
-
   try {
-    const cleaned = cleanJsonResponse(text);
-    const parsed = JSON.parse(cleaned);
+    const parsed = parseStructuredRuntimeOutputText("categorize", text, "batch");
+    const normalized = serializeStructuredRuntimeOutput("categorize", parsed);
+    await prisma.promptResult.create({
+      data: {
+        paperId,
+        promptType: "categorize",
+        prompt: "Auto-categorize (batch)",
+        result: normalized,
+        provider: "proxy",
+        model: modelId,
+      },
+    });
     const tagNames = (parsed.tags || []) as string[];
     await resolveAndAssignTags(paperId, tagNames);
-  } catch { /* JSON parse failed */ }
+  } catch (error) {
+    console.error(
+      `[batch] Structured categorize result failed for ${paperId}:`,
+      error instanceof Error ? error.message : error,
+    );
+  }
 }
 
 async function processLinkingResult(paperId: string, text: string, modelId: string) {
   try {
-    const cleaned = cleanJsonResponse(text);
-    const relations = JSON.parse(cleaned) as Array<{
-      targetPaperId: string; relationType: string; description?: string; confidence: number;
-    }>;
+    const relations = parseStructuredRuntimeOutputText(
+      "linkPapers",
+      text,
+      "batch",
+    );
 
     // Validate target IDs exist
     const targetIds = relations.map(r => r.targetPaperId);
@@ -643,7 +671,12 @@ async function processLinkingResult(paperId: string, text: string, modelId: stri
         },
       }).catch(() => {});
     }
-  } catch { /* JSON parse failed */ }
+  } catch (error) {
+    console.error(
+      `[batch] Structured linkPapers result failed for ${paperId}:`,
+      error instanceof Error ? error.message : error,
+    );
+  }
 }
 
 interface ProcessCitationContextsDeps {
@@ -718,11 +751,11 @@ export async function processCitationContextsResult(
       if (!text.trim()) {
         return { method: "none", mentionCount: 0 };
       }
-      const cleaned = cleanJsonResponse(text);
-      const contexts = JSON.parse(cleaned) as Array<{
-        citation: string;
-        context: string;
-      }>;
+      const contexts = parseStructuredRuntimeOutputText(
+        "extractCitationContexts",
+        text,
+        "batch",
+      );
       if (!Array.isArray(contexts) || contexts.length === 0) {
         return { method: "none", mentionCount: 0 };
       }
@@ -840,15 +873,19 @@ export async function runCitationContextSidecarForPapers(
 }
 
 async function processDistillResult(paperId: string, text: string, modelId: string) {
-  await prisma.promptResult.create({
-    data: { paperId, promptType: "distill", prompt: "Auto-distill insights (batch)", result: text, provider: "proxy", model: modelId },
-  });
-
   try {
-    const cleaned = cleanJsonResponse(text);
-    const parsed = JSON.parse(cleaned) as {
-      insights: Array<{ learning: string; significance: string; applications?: string; roomSuggestion: string }>;
-    };
+    const parsed = parseStructuredRuntimeOutputText("distill", text, "batch");
+    const normalized = serializeStructuredRuntimeOutput("distill", parsed);
+    await prisma.promptResult.create({
+      data: {
+        paperId,
+        promptType: "distill",
+        prompt: "Auto-distill insights (batch)",
+        result: normalized,
+        provider: "proxy",
+        model: modelId,
+      },
+    });
 
     if (!Array.isArray(parsed.insights)) return;
 
@@ -867,13 +904,41 @@ async function processDistillResult(paperId: string, text: string, modelId: stri
         },
       });
     }
-  } catch { /* JSON parse failed */ }
+  } catch (error) {
+    console.error(
+      `[batch] Structured distill result failed for ${paperId}:`,
+      error instanceof Error ? error.message : error,
+    );
+  }
 }
 
 async function processContradictionsResult(paperId: string, text: string, modelId: string) {
-  await prisma.promptResult.create({
-    data: { paperId, promptType: "detectContradictions", prompt: "Auto-detect contradictions (batch)", result: text, provider: "proxy", model: modelId },
-  });
+  try {
+    const parsed = parseStructuredRuntimeOutputText(
+      "detectContradictions",
+      text,
+      "batch",
+    );
+    const normalized = serializeStructuredRuntimeOutput(
+      "detectContradictions",
+      parsed,
+    );
+    await prisma.promptResult.create({
+      data: {
+        paperId,
+        promptType: "detectContradictions",
+        prompt: "Auto-detect contradictions (batch)",
+        result: normalized,
+        provider: "proxy",
+        model: modelId,
+      },
+    });
+  } catch (error) {
+    console.error(
+      `[batch] Structured detectContradictions result failed for ${paperId}:`,
+      error instanceof Error ? error.message : error,
+    );
+  }
 }
 
 // ── Main Entry Points ──────────────────────────────────────────────

@@ -421,7 +421,7 @@ export async function reconcileProcessingRuntime(options?: {
   }
 
   if (!dryRun) {
-    for (const [paperId, processingStatus] of recovered.entries()) {
+    for (const [paperId, processingStatus] of Array.from(recovered.entries())) {
       await prisma.$transaction(async (tx) => {
         const activeRun = await getLatestActiveRunForPaper(paperId, tx);
         if (activeRun) {

@@ -1,7 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { categorizeRuntimeOutputSchema } from "../runtime-output-schemas";
 
 const hoisted = vi.hoisted(() => ({
   streamText: vi.fn(),
+  generateObject: vi.fn(),
   chatModel: vi.fn((modelId: string) => ({ kind: "chat-model", modelId })),
   responsesModel: vi.fn((modelId: string) => ({ kind: "responses-model", modelId })),
   anthropicModel: vi.fn((modelId: string) => ({ kind: "anthropic-model", modelId })),
@@ -10,6 +12,14 @@ const hoisted = vi.hoisted(() => ({
 }));
 
 vi.mock("ai", () => ({
+  JSONParseError: class JSONParseError extends Error {},
+  NoObjectGeneratedError: class NoObjectGeneratedError extends Error {
+    static isInstance(error: unknown) {
+      return error instanceof NoObjectGeneratedError;
+    }
+  },
+  TypeValidationError: class TypeValidationError extends Error {},
+  generateObject: hoisted.generateObject,
   streamText: hoisted.streamText,
 }));
 
@@ -214,6 +224,56 @@ describe("llm provider context isolation", () => {
         userId: "user-beta",
         operation: "processing_distill",
         metadata: expect.objectContaining({ paperId: "paper-beta", step: "distill" }),
+      }),
+    );
+  });
+
+  it("logs structured object usage with the active async context", async () => {
+    const provider = await import("../provider");
+    provider.resetLegacyLlmContextFallbackCountForTests();
+
+    hoisted.generateObject.mockResolvedValue({
+      object: { tags: ["retrieval", "rag", "evaluation"] },
+      usage: { inputTokens: 13, outputTokens: 5, totalTokens: 18 },
+    });
+
+    const result = await provider.withLlmContext(
+      {
+        operation: "processing_categorize",
+        userId: "user-structured",
+        metadata: {
+          runtime: "processing",
+          paperId: "paper-structured",
+          step: "categorize",
+        },
+      },
+      () =>
+        provider.generateStructuredObject({
+          provider: "proxy",
+          modelId: "gpt-4o-mini",
+          system: "categorize-system",
+          prompt: "categorize prompt",
+          schemaName: "categorize",
+          schema: categorizeRuntimeOutputSchema,
+          proxyConfig,
+        }),
+    );
+
+    expect(result.object).toEqual({
+      tags: ["retrieval", "rag", "evaluation"],
+    });
+    expect(result.resultText).toBe(
+      JSON.stringify({ tags: ["retrieval", "rag", "evaluation"] }),
+    );
+    expect(provider.getLegacyLlmContextFallbackCountForTests()).toBe(0);
+    expect(hoisted.logLlmUsage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: "user-structured",
+        operation: "processing_categorize",
+        metadata: expect.objectContaining({
+          paperId: "paper-structured",
+          step: "categorize",
+        }),
       }),
     );
   });

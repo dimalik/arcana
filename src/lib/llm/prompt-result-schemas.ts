@@ -21,8 +21,13 @@ const promptResultSchemaManifest = {
       "authors",
       "year",
       "venue",
+      "doi",
+      "arxivId",
       "abstract",
       "keyFindings",
+      "methodology",
+      "contributions",
+      "limitations",
     ],
   },
   summarize: {

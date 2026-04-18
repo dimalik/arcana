@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const hoisted = vi.hoisted(() => ({
   streamText: vi.fn(),
+  generateObject: vi.fn(),
   chatModel: vi.fn((modelId: string) => ({ kind: "chat-model", modelId })),
   responsesModel: vi.fn((modelId: string) => ({ kind: "responses-model", modelId })),
   anthropicModel: vi.fn((modelId: string) => ({ kind: "anthropic-model", modelId })),
@@ -61,6 +62,14 @@ const hoisted = vi.hoisted(() => ({
 }));
 
 vi.mock("ai", () => ({
+  JSONParseError: class JSONParseError extends Error {},
+  NoObjectGeneratedError: class NoObjectGeneratedError extends Error {
+    static isInstance(error: unknown) {
+      return error instanceof NoObjectGeneratedError;
+    }
+  },
+  TypeValidationError: class TypeValidationError extends Error {},
+  generateObject: hoisted.generateObject,
   streamText: hoisted.streamText,
 }));
 
@@ -226,6 +235,21 @@ describe("processing LLM context adoption", () => {
       ),
       usage: Promise.resolve({ inputTokens: 100, outputTokens: 20, totalTokens: 120 }),
     }));
+    hoisted.generateObject.mockImplementation(
+      ({ schema }: { schema?: { safeParse?: (value: unknown) => { success: boolean } } }) => {
+        if (schema?.safeParse?.({ tags: ["nlp"] }).success) {
+          return Promise.resolve({
+            object: { tags: ["nlp"] },
+            usage: { inputTokens: 100, outputTokens: 20, totalTokens: 120 },
+          });
+        }
+
+        return Promise.resolve({
+          object: { title: "Paper Auto" },
+          usage: { inputTokens: 100, outputTokens: 20, totalTokens: 120 },
+        });
+      },
+    );
   });
 
   it("keeps auto-process LLM calls on AsyncLocalStorage without legacy fallback", async () => {
