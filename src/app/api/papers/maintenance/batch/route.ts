@@ -2,6 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireUserId } from "@/lib/paper-auth";
 import {
+  countCompletedPapersNeedingFullReprocess,
+  findCompletedPapersNeedingFullReprocess,
+} from "@/lib/processing/maintenance-state";
+import {
   shouldUseBatch,
   createBatchJob,
   pollBatch,
@@ -43,19 +47,11 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    // Also count COMPLETED papers missing deferred steps
-    const completedMissing = await prisma.$queryRaw<{ count: number }[]>`
-      SELECT COUNT(*) as count FROM Paper p
-      WHERE p.userId = ${userId}
-      AND p.processingStatus = 'COMPLETED'
-      AND p.fullText IS NOT NULL
-      AND (
-        p.id NOT IN (SELECT paperId FROM PromptResult WHERE promptType = 'distillInsights')
-        OR p.id NOT IN (SELECT paperId FROM PromptResult WHERE promptType = 'extractCitationContexts')
-      )
-    `;
+    const completedMissing = await countCompletedPapersNeedingFullReprocess(
+      userId,
+    );
 
-    const totalPapers = needsFullReprocess + needsDeferred + Number(completedMissing[0]?.count ?? 0);
+    const totalPapers = needsFullReprocess + needsDeferred + completedMissing;
     const stepsPerPaper = needsFullReprocess > 0 ? 8 : 5; // Deferred-only needs fewer steps
     const { useBatch, estimatedSeqMins } = shouldUseBatch(totalPapers, stepsPerPaper);
 
@@ -63,7 +59,7 @@ export async function POST(request: NextRequest) {
       totalPapers,
       needsFullReprocess,
       needsDeferred,
-      completedMissing: Number(completedMissing[0]?.count ?? 0),
+      completedMissing,
       useBatch,
       estimatedSeqMins,
       estimatedBatchHours: "1-4",
@@ -86,39 +82,20 @@ export async function POST(request: NextRequest) {
         select: { id: true },
       });
 
-      // COMPLETED papers missing deferred steps
-      const completedMissing = await prisma.$queryRaw<{ id: string }[]>`
-        SELECT p.id FROM Paper p
-        WHERE p.userId = ${userId}
-        AND p.processingStatus = 'COMPLETED'
-        AND p.fullText IS NOT NULL
-        AND (
-          p.id NOT IN (SELECT paperId FROM PromptResult WHERE promptType = 'distillInsights')
-          OR p.id NOT IN (SELECT paperId FROM PromptResult WHERE promptType = 'extractCitationContexts')
-        )
-      `;
+      const completedMissing = await findCompletedPapersNeedingFullReprocess(
+        userId,
+      );
 
       // For completed papers missing analysis, reset to NEEDS_DEFERRED first
-      const missingKeyFindings = await prisma.paper.findMany({
-        where: {
-          userId,
-          processingStatus: "COMPLETED",
-          fullText: { not: null },
-          keyFindings: null,
-        },
-        select: { id: true },
-      });
-      const mkfIds = new Set(missingKeyFindings.map(p => p.id));
-
       for (const { id } of completedMissing) {
-        if (mkfIds.has(id)) {
-          // Needs full reprocess including extract
-          await prisma.paper.update({
-            where: { id },
-            data: { processingStatus: "TEXT_EXTRACTED", processingStep: null, processingStartedAt: null },
-          });
-        }
-        // Others will be handled by deferred steps in the batch
+        await prisma.paper.update({
+          where: { id },
+          data: {
+            processingStatus: "TEXT_EXTRACTED",
+            processingStep: null,
+            processingStartedAt: null,
+          },
+        });
       }
 
       paperIds = [

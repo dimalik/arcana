@@ -13,7 +13,6 @@ const updatePaperSchema = z.object({
   summary: z.string().optional(),
   keyFindings: z.array(z.string()).optional(),
   categories: z.array(z.string()).optional(),
-  processingStatus: z.string().optional(),
   citationCount: z.number().int().nullable().optional(),
 });
 

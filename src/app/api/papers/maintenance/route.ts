@@ -4,6 +4,10 @@ import { requireUserId } from "@/lib/paper-auth";
 import { processingQueue } from "@/lib/processing/queue";
 import { downloadArxivPdf } from "@/lib/import/arxiv";
 import { fetchDoiMetadata } from "@/lib/import/url";
+import {
+  countCompletedPapersNeedingFullReprocess,
+  findCompletedPapersNeedingFullReprocess,
+} from "@/lib/processing/maintenance-state";
 import { shouldUseBatch } from "@/lib/processing/batch";
 
 /**
@@ -12,7 +16,7 @@ import { shouldUseBatch } from "@/lib/processing/batch";
  * Operations:
  * - action=status        — Get counts of papers needing maintenance + batch recommendation
  * - action=fetch_missing — Attempt to fetch PDFs for PENDING papers via ArXiv/DOI
- * - action=run_deferred  — Queue COMPLETED papers missing analysis steps for reprocessing (sequential)
+ * - action=run_deferred  — Queue papers that still need explicit maintenance reprocessing (sequential)
  *
  * For batch processing, use /api/papers/maintenance/batch instead.
  */
@@ -46,24 +50,24 @@ async function getMaintenanceStatus(userId: string) {
     },
   });
 
-  // COMPLETED papers missing deferred steps (no keyFindings as proxy)
-  const completedMissingAnalysis = await prisma.$queryRaw<{ count: number }[]>`
-    SELECT COUNT(*) as count FROM Paper p
-    WHERE p.userId = ${userId}
-    AND p.processingStatus = 'COMPLETED'
-    AND p.fullText IS NOT NULL
-    AND (
-      p.id NOT IN (SELECT paperId FROM PromptResult WHERE promptType = 'distillInsights')
-      OR p.id NOT IN (SELECT paperId FROM PromptResult WHERE promptType = 'extractCitationContexts')
-    )
-  `;
+  // Historical maintenance gap we can prove today: papers marked COMPLETED
+  // but still missing keyFindings need a full reprocess.
+  const completedMissingAnalysis = await countCompletedPapersNeedingFullReprocess(
+    userId,
+  );
+
+  // Explicit deferred state is already trustworthy because it is a runtime status,
+  // not inferred from PromptResult presence.
+  const deferredCount = await prisma.paper.count({
+    where: { userId, processingStatus: "NEEDS_DEFERRED" },
+  });
 
   // FAILED papers
   const failedCount = await prisma.paper.count({
     where: { userId, processingStatus: "FAILED" },
   });
 
-  const totalNeedingProcessing = Number(completedMissingAnalysis[0]?.count ?? 0);
+  const totalNeedingProcessing = completedMissingAnalysis + deferredCount;
   const batchRecommendation = shouldUseBatch(totalNeedingProcessing);
 
   // Check for active batch jobs
@@ -73,7 +77,8 @@ async function getMaintenanceStatus(userId: string) {
 
   return {
     pendingNoContent,
-    completedMissingAnalysis: totalNeedingProcessing,
+    completedMissingAnalysis,
+    deferredCount,
     failedCount,
     batchRecommended: batchRecommendation.useBatch,
     estimatedSeqMins: batchRecommendation.estimatedSeqMins,
@@ -82,82 +87,49 @@ async function getMaintenanceStatus(userId: string) {
 }
 
 async function queueDeferredProcessing(userId: string) {
-  // Find COMPLETED papers that are missing deferred analysis steps
-  // Use distillInsights as the proxy — if that's missing, the deferred pipeline hasn't run
-  const papersNeedingDeferred = await prisma.$queryRaw<{ id: string }[]>`
-    SELECT p.id FROM Paper p
-    WHERE p.userId = ${userId}
-    AND p.processingStatus = 'COMPLETED'
-    AND p.fullText IS NOT NULL
-    AND (
-      p.id NOT IN (SELECT paperId FROM PromptResult WHERE promptType = 'distillInsights')
-      OR p.id NOT IN (SELECT paperId FROM PromptResult WHERE promptType = 'extractCitationContexts')
-    )
-  `;
+  const papersNeedingFullReprocess = await findCompletedPapersNeedingFullReprocess(
+    userId,
+  );
+  const deferredOnlyPapers = await prisma.paper.findMany({
+    where: { userId, processingStatus: "NEEDS_DEFERRED" },
+    select: { id: true },
+  });
 
-  if (papersNeedingDeferred.length === 0) {
+  if (
+    papersNeedingFullReprocess.length === 0 &&
+    deferredOnlyPapers.length === 0
+  ) {
     return { queued: 0, message: "All papers already have full analysis" };
   }
 
-  // Also find COMPLETED papers missing keyFindings (need extract step)
-  const missingKeyFindings = await prisma.paper.findMany({
-    where: {
-      userId,
-      processingStatus: "COMPLETED",
-      fullText: { not: null },
-      keyFindings: null,
-    },
-    select: { id: true },
-  });
-  const missingKfIds = new Set(missingKeyFindings.map((p) => p.id));
-
-  // Set papers to NEEDS_DEFERRED so the pipeline picks them up
-  // For papers also missing keyFindings, set to TEXT_EXTRACTED so they get the full pipeline
-  let deferredCount = 0;
   let fullReprocessCount = 0;
 
-  for (const { id } of papersNeedingDeferred) {
-    if (missingKfIds.has(id)) {
-      // Needs full reprocess (including extract for keyFindings)
-      await prisma.paper.update({
-        where: { id },
-        data: {
-          processingStatus: "TEXT_EXTRACTED",
-          processingStep: null,
-          processingStartedAt: null,
-        },
-      });
-      processingQueue.enqueue(id);
-      fullReprocessCount++;
-    } else {
-      // Just needs deferred steps
-      await prisma.paper.update({
-        where: { id },
-        data: {
-          processingStatus: "NEEDS_DEFERRED",
-          processingStep: null,
-          processingStartedAt: null,
-        },
-      });
-      deferredCount++;
-    }
+  for (const { id } of papersNeedingFullReprocess) {
+    await prisma.paper.update({
+      where: { id },
+      data: {
+        processingStatus: "TEXT_EXTRACTED",
+        processingStep: null,
+        processingStartedAt: null,
+      },
+    });
+    processingQueue.enqueue(id);
+    fullReprocessCount++;
   }
 
-  // Trigger deferred processing — the queue auto-runs deferred steps when it drains.
-  // If we only have deferred papers (no full reprocess), kick the queue to trigger it.
-  if (deferredCount > 0 && fullReprocessCount === 0) {
-    // Import and call runDeferredSteps directly since the queue won't auto-trigger
-    // without any papers flowing through the main pipeline
+  // Trigger deferred processing when explicit NEEDS_DEFERRED papers are present.
+  if (deferredOnlyPapers.length > 0) {
     const { runDeferredSteps } = await import("@/lib/llm/auto-process");
-    // Run async — don't block the response
-    runDeferredSteps().catch((e) => console.error("[maintenance] Deferred processing error:", e));
+    runDeferredSteps().catch((e) =>
+      console.error("[maintenance] Deferred processing error:", e),
+    );
   }
 
   return {
-    queued: papersNeedingDeferred.length,
+    queued: fullReprocessCount + deferredOnlyPapers.length,
     fullReprocess: fullReprocessCount,
-    deferredOnly: deferredCount,
-    message: `Queued ${fullReprocessCount} for full reprocessing (missing keyFindings) and ${deferredCount} for deferred analysis (linking, contradictions, citations, insights)`,
+    deferredOnly: deferredOnlyPapers.length,
+    message: `Queued ${fullReprocessCount} for full reprocessing (missing keyFindings) and ${deferredOnlyPapers.length} already-marked deferred papers for deferred analysis`,
   };
 }
 
