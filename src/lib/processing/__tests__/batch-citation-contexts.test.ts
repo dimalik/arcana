@@ -15,7 +15,7 @@ const hoisted = vi.hoisted(() => ({
   createMentions: vi.fn(),
   applyLegacyContexts: vi.fn(),
   generateLLMResponse: vi.fn(),
-  setLlmContext: vi.fn(),
+  withLlmContext: vi.fn((_: unknown, fn: () => unknown) => fn()),
   checkGrobidHealth: vi.fn(),
   loadGrobidConfig: vi.fn(),
 }));
@@ -38,7 +38,7 @@ vi.mock("@/lib/llm/provider", () => ({
   truncateText: vi.fn((text: string) => text),
   MAX_PAPER_CHARS: 30_000,
   generateLLMResponse: hoisted.generateLLMResponse,
-  setLlmContext: hoisted.setLlmContext,
+  withLlmContext: hoisted.withLlmContext,
 }));
 
 vi.mock("@/lib/llm/prompts", () => ({

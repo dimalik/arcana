@@ -53,6 +53,35 @@ export interface UsageEntry {
   metadata?: Record<string, unknown>;
 }
 
+export interface ParsedUsageMetadata {
+  runtime?: string;
+  source?: string;
+  paperId?: string;
+  step?: string;
+  batchGroupId?: string;
+  batchJobId?: string;
+  batchPhase?: number;
+  projectId?: string;
+  [key: string]: unknown;
+}
+
+export function parseUsageMetadata(raw: string | null | undefined): ParsedUsageMetadata | null {
+  if (!raw) return null;
+
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    return parsed && typeof parsed === "object" ? (parsed as ParsedUsageMetadata) : null;
+  } catch {
+    return null;
+  }
+}
+
+export function isProcessingUsageMetadata(
+  metadata: ParsedUsageMetadata | null,
+): metadata is ParsedUsageMetadata & { runtime: "processing"; paperId: string } {
+  return metadata?.runtime === "processing" && typeof metadata.paperId === "string" && metadata.paperId.length > 0;
+}
+
 export async function logLlmUsage(entry: UsageEntry): Promise<void> {
   try {
     const estimatedCostUsd = estimateCost(

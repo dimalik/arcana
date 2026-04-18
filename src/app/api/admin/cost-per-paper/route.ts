@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { isProcessingUsageMetadata, parseUsageMetadata } from "@/lib/usage";
 
 export const dynamic = "force-dynamic";
 
@@ -24,12 +25,14 @@ export async function GET(request: NextRequest) {
     },
   });
 
-  // Paper processing costs (operation = "unknown" or paper-specific ops)
-  const paperProcessingOps = new Set(["unknown", "figure-extraction"]);
-  const paperLogs = logs.filter((l) => paperProcessingOps.has(l.operation));
-  const processedPapers = await prisma.paper.count({
-    where: { processingStatus: "COMPLETED", updatedAt: { gte: since } },
+  // Paper processing costs are reconstructed from persisted runtime metadata,
+  // not operation-name heuristics.
+  const paperLogs = logs.flatMap((log) => {
+    const metadata = parseUsageMetadata(log.metadata);
+    if (!isProcessingUsageMetadata(metadata)) return [];
+    return [{ ...log, parsedMetadata: metadata }];
   });
+  const processedPapers = new Set(paperLogs.map((log) => log.parsedMetadata.paperId)).size;
 
   // Aggregate paper processing by model
   const paperByModel: Record<string, { cost: number; calls: number; inputTokens: number; outputTokens: number }> = {};
@@ -48,17 +51,14 @@ export async function GET(request: NextRequest) {
   // Research project costs (have projectId in metadata)
   const projectCosts: Record<string, Record<string, { cost: number; calls: number }>> = {};
   for (const l of logs) {
-    if (!l.metadata) continue;
-    try {
-      const meta = JSON.parse(l.metadata);
-      if (!meta.projectId) continue;
-      const pid = meta.projectId as string;
-      if (!projectCosts[pid]) projectCosts[pid] = {};
-      const m = projectCosts[pid][l.modelId] || { cost: 0, calls: 0 };
-      m.cost += l.estimatedCostUsd;
-      m.calls++;
-      projectCosts[pid][l.modelId] = m;
-    } catch { /* skip */ }
+    const metadata = parseUsageMetadata(l.metadata);
+    if (!metadata?.projectId || typeof metadata.projectId !== "string") continue;
+    const pid = metadata.projectId;
+    if (!projectCosts[pid]) projectCosts[pid] = {};
+    const m = projectCosts[pid][l.modelId] || { cost: 0, calls: 0 };
+    m.cost += l.estimatedCostUsd;
+    m.calls++;
+    projectCosts[pid][l.modelId] = m;
   }
 
   // Get project titles

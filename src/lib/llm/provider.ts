@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { streamText, LanguageModel } from "ai";
 import { createOpenAI } from "@ai-sdk/openai";
 import { createAnthropic } from "@ai-sdk/anthropic";
@@ -10,10 +11,56 @@ import { logger } from "../logger";
 // hitting the DB on every single LLM call. Cleared on save.
 let _cachedOpenAIKey: string | null | undefined;
 let _cachedAnthropicKey: string | null | undefined;
+let _legacyContextFallbackCount = 0;
+
+export interface LlmContext {
+  operation: string;
+  userId?: string;
+  metadata?: Record<string, unknown>;
+}
+
+const llmContextStorage = new AsyncLocalStorage<LlmContext>();
 
 export function clearApiKeyCache() {
   _cachedOpenAIKey = undefined;
   _cachedAnthropicKey = undefined;
+}
+
+function getLegacyLlmContext(): LlmContext {
+  return {
+    operation: _currentOperation,
+    userId: _currentUserId,
+    metadata: _currentMetadata,
+  };
+}
+
+function getActiveLlmContext(): LlmContext {
+  const context = llmContextStorage.getStore();
+  if (context) {
+    return context;
+  }
+
+  _legacyContextFallbackCount += 1;
+  return getLegacyLlmContext();
+}
+
+export function withLlmContext<T>(context: LlmContext, fn: () => T): T {
+  return llmContextStorage.run(
+    {
+      operation: context.operation,
+      userId: context.userId,
+      metadata: context.metadata ? { ...context.metadata } : undefined,
+    },
+    fn,
+  );
+}
+
+export function resetLegacyLlmContextFallbackCountForTests() {
+  _legacyContextFallbackCount = 0;
+}
+
+export function getLegacyLlmContextFallbackCountForTests() {
+  return _legacyContextFallbackCount;
 }
 
 type LanguageModelUsage = "single-shot" | "tool-loop";
@@ -222,8 +269,9 @@ export async function generateLLMResponse(params: {
 }): Promise<string> {
   const model = await getModel(params.provider, params.modelId, params.proxyConfig);
   const startMs = Date.now();
+  const activeContext = getActiveLlmContext();
 
-  console.log(`[llm] generateText: model=${params.modelId} op=${_currentOperation} system=${params.system.length}chars prompt=${params.prompt.length}chars maxTokens=${params.maxTokens ?? "unset"}`);
+  console.log(`[llm] generateText: model=${params.modelId} op=${activeContext.operation} system=${params.system.length}chars prompt=${params.prompt.length}chars maxTokens=${params.maxTokens ?? "unset"}`);
 
   let lastErr: unknown;
   for (let attempt = 0; attempt <= LLM_MAX_RETRIES; attempt++) {
@@ -242,21 +290,22 @@ export async function generateLLMResponse(params: {
       const text = await result.text;
       const usage = await result.usage;
       const durationMs = Date.now() - startMs;
+      const context = getActiveLlmContext();
 
       console.log(`[llm] generateText OK: ${text.length} chars, ${usage.totalTokens} tokens, ${durationMs}ms`);
 
       // Log usage asynchronously — don't block response
       logLlmUsage({
-        userId: _currentUserId,
+        userId: context.userId,
         provider: params.provider,
         modelId: params.modelId,
-        operation: _currentOperation,
+        operation: context.operation,
         inputTokens: usage.inputTokens ?? 0,
         outputTokens: usage.outputTokens ?? 0,
         totalTokens: usage.totalTokens ?? 0,
         durationMs,
         success: true,
-        metadata: _currentMetadata,
+        metadata: context.metadata,
       });
 
       return text;
@@ -273,34 +322,35 @@ export async function generateLLMResponse(params: {
       }
 
       const durationMs = Date.now() - startMs;
+      const context = getActiveLlmContext();
       console.error(`[llm] generateText FAILED: status=${status} error=${msg.slice(0, 500)}`);
 
       // Log failure
       logLlmUsage({
-        userId: _currentUserId,
+        userId: context.userId,
         provider: params.provider,
         modelId: params.modelId,
-        operation: _currentOperation,
+        operation: context.operation,
         inputTokens: 0,
         outputTokens: 0,
         totalTokens: 0,
         durationMs,
         success: false,
         error: msg.slice(0, 2000),
-        metadata: _currentMetadata,
+        metadata: context.metadata,
       });
 
-      logger.error(`LLM call failed: ${_currentOperation}`, {
+      logger.error(`LLM call failed: ${context.operation}`, {
         category: "llm",
-        userId: _currentUserId,
+        userId: context.userId,
         error: err,
         metadata: {
           provider: params.provider,
           modelId: params.modelId,
-          operation: _currentOperation,
+          operation: context.operation,
           status,
           attempt: attempt + 1,
-          ..._currentMetadata,
+          ...context.metadata,
         },
       });
 
@@ -331,17 +381,18 @@ export async function streamLLMResponse(params: {
     messages,
     onFinish: ({ usage }) => {
       const durationMs = Date.now() - startMs;
+      const context = getActiveLlmContext();
       logLlmUsage({
-        userId: _currentUserId,
+        userId: context.userId,
         provider: params.provider,
         modelId: params.modelId,
-        operation: _currentOperation,
+        operation: context.operation,
         inputTokens: usage.inputTokens ?? 0,
         outputTokens: usage.outputTokens ?? 0,
         totalTokens: usage.totalTokens ?? 0,
         durationMs,
         success: true,
-        metadata: _currentMetadata,
+        metadata: context.metadata,
       });
     },
   });

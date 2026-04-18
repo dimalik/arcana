@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { generateLLMResponse, truncateText, MAX_PAPER_CHARS } from "./provider";
+import { generateLLMResponse, truncateText, MAX_PAPER_CHARS, withLlmContext } from "./provider";
 import { buildPrompt, buildDistillPrompt, cleanJsonResponse } from "./prompts";
 import type { LLMProvider } from "./models";
 import type { ProxyConfig } from "./proxy-settings";
@@ -22,6 +22,15 @@ import { projectLegacyRelation } from "@/lib/assertions/legacy-projection";
 
 
 type ProcessingStep = "extracting_text" | "metadata" | "summarize" | "categorize" | "linking" | "contradictions" | "references" | "contexts" | "distill";
+type ProcessingLlmStep =
+  | "extract"
+  | "summarize"
+  | "categorize"
+  | "linkPapers"
+  | "detectContradictions"
+  | "extractReferences"
+  | "extractCitationContexts"
+  | "distill";
 
 /**
  * Update the current processing step and timestamp in the DB.
@@ -34,6 +43,31 @@ async function setStep(paperId: string, step: ProcessingStep | null) {
       processingStartedAt: step ? new Date() : null,
     },
   });
+}
+
+async function runProcessingLlmCall(
+  context: {
+    paperId: string;
+    userId?: string | null;
+    step: ProcessingLlmStep;
+    metadata?: Record<string, unknown>;
+  },
+  params: Parameters<typeof generateLLMResponse>[0],
+): Promise<string> {
+  return withLlmContext(
+    {
+      operation: `processing_${context.step}`,
+      userId: context.userId ?? undefined,
+      metadata: {
+        runtime: "processing",
+        source: "auto_process",
+        paperId: context.paperId,
+        step: context.step,
+        ...context.metadata,
+      },
+    },
+    () => generateLLMResponse(params),
+  );
 }
 
 async function tryAssignEntity(paper: {
@@ -221,6 +255,8 @@ export async function runTextExtraction(paperId: string): Promise<void> {
  * Reduce: synthesize all notes into the final structured review.
  */
 async function chunkedSummarize(params: {
+  paperId: string;
+  userId?: string | null;
   fullText: string;
   provider: LLMProvider;
   modelId: string;
@@ -228,14 +264,22 @@ async function chunkedSummarize(params: {
   signal?: AbortSignal;
   userContextPreamble?: string;
 }): Promise<string> {
-  const { fullText, provider, modelId, proxyConfig, signal, userContextPreamble } = params;
+  const { paperId, userId, fullText, provider, modelId, proxyConfig, signal, userContextPreamble } = params;
   const chunkSize = MAX_PAPER_CHARS;
   const overlap = 2000;
 
   // Small enough for a single call — use the normal path
   if (fullText.length <= chunkSize) {
     const { system, prompt } = buildPrompt("summarize", fullText, undefined, { userContextPreamble });
-    return generateLLMResponse({ provider, modelId, system, prompt, proxyConfig });
+    return runProcessingLlmCall(
+      {
+        paperId,
+        userId,
+        step: "summarize",
+        metadata: { substep: "single_pass" },
+      },
+      { provider, modelId, system, prompt, proxyConfig },
+    );
   }
 
   // Split into overlapping chunks
@@ -264,13 +308,26 @@ Be thorough and specific — include every number, model name, and dataset name 
     if (signal?.aborted) throw new Error("Cancelled");
 
     console.log(`[auto-process] Processing chunk ${i + 1}/${chunks.length} (${chunks[i].length} chars)`);
-    const notes = await generateLLMResponse({
-      provider, modelId,
-      system: MAP_SYSTEM,
-      prompt: `This is section ${i + 1} of ${chunks.length} from the paper:\n\n${chunks[i]}`,
-      maxTokens: 1500,
-      proxyConfig,
-    });
+    const notes = await runProcessingLlmCall(
+      {
+        paperId,
+        userId,
+        step: "summarize",
+        metadata: {
+          substep: "map",
+          chunkIndex: i + 1,
+          chunkCount: chunks.length,
+        },
+      },
+      {
+        provider,
+        modelId,
+        system: MAP_SYSTEM,
+        prompt: `This is section ${i + 1} of ${chunks.length} from the paper:\n\n${chunks[i]}`,
+        maxTokens: 1500,
+        proxyConfig,
+      },
+    );
     chunkNotes.push(`## Section ${i + 1} of ${chunks.length}\n\n${notes}`);
   }
 
@@ -283,13 +340,26 @@ Be thorough and specific — include every number, model name, and dataset name 
     for (let i = 0; i < chunkNotes.length; i += 3) {
       if (signal?.aborted) throw new Error("Cancelled");
       const batch = chunkNotes.slice(i, i + 3).join("\n\n---\n\n");
-      const summary = await generateLLMResponse({
-        provider, modelId,
-        system: "You are a research paper analyst. Condense these extracted notes into a shorter but complete summary. Keep ALL specific numbers, equations, model names, dataset names, and key findings. Remove redundancy but preserve detail.",
-        prompt: batch,
-        maxTokens: 1500,
-        proxyConfig,
-      });
+      const summary = await runProcessingLlmCall(
+        {
+          paperId,
+          userId,
+          step: "summarize",
+          metadata: {
+            substep: "condense",
+            chunkBatchStart: i + 1,
+            chunkBatchEnd: Math.min(i + 3, chunkNotes.length),
+          },
+        },
+        {
+          provider,
+          modelId,
+          system: "You are a research paper analyst. Condense these extracted notes into a shorter but complete summary. Keep ALL specific numbers, equations, model names, dataset names, and key findings. Remove redundancy but preserve detail.",
+          prompt: batch,
+          maxTokens: 1500,
+          proxyConfig,
+        },
+      );
       condensed.push(summary);
     }
     combined = condensed.join("\n\n---\n\n");
@@ -300,12 +370,21 @@ Be thorough and specific — include every number, model name, and dataset name 
   console.log(`[auto-process] Synthesizing final summary from ${combined.length} chars of notes`);
   const { system } = buildPrompt("summarize", "", undefined, { userContextPreamble });
 
-  return generateLLMResponse({
-    provider, modelId,
-    system,
-    prompt: `Below are detailed notes extracted from all sections of a research paper. Using these notes, produce your full structured review.\n\n${combined}`,
-    proxyConfig,
-  });
+  return runProcessingLlmCall(
+    {
+      paperId,
+      userId,
+      step: "summarize",
+      metadata: { substep: "synthesize" },
+    },
+    {
+      provider,
+      modelId,
+      system,
+      prompt: `Below are detailed notes extracted from all sections of a research paper. Using these notes, produce your full structured review.\n\n${combined}`,
+      proxyConfig,
+    },
+  );
 }
 
 /**
@@ -423,7 +502,10 @@ export async function runAutoProcessPipeline(opts: {
       await setStep(paperId, "metadata");
       console.log("[auto-process] Extracting metadata for", paperId);
       const { system, prompt } = buildPrompt("extract", truncated);
-      const result = await generateLLMResponse({ provider, modelId, system, prompt, maxTokens: 2000, proxyConfig });
+      const result = await runProcessingLlmCall(
+        { paperId, userId: paper.userId, step: "extract" },
+        { provider, modelId, system, prompt, maxTokens: 2000, proxyConfig },
+      );
 
       await prisma.promptResult.create({
         data: {
@@ -487,6 +569,8 @@ export async function runAutoProcessPipeline(opts: {
     await setStep(paperId, "summarize");
     console.log("[auto-process] Summarizing", paperId);
     const result = await chunkedSummarize({
+      paperId,
+      userId: paper.userId,
       fullText: text,
       provider,
       modelId,
@@ -525,7 +609,10 @@ export async function runAutoProcessPipeline(opts: {
       existingTags: goodTags.length > 0 ? goodTags : existingTags,
       overusedTags,
     });
-    const result = await generateLLMResponse({ provider, modelId, system, prompt, maxTokens: 1000, proxyConfig });
+    const result = await runProcessingLlmCall(
+      { paperId, userId: paper.userId, step: "categorize" },
+      { provider, modelId, system, prompt, maxTokens: 1000, proxyConfig },
+    );
 
     await prisma.promptResult.create({
       data: {
@@ -633,7 +720,10 @@ export async function runAutoProcessPipeline(opts: {
       const linkPrompt = `NEW PAPER:\n${newPaperInfo}\n\n---\n\nEXISTING PAPERS IN LIBRARY:\n${existingList}`;
 
       const { system } = buildPrompt("linkPapers", "");
-      const result = await generateLLMResponse({ provider, modelId, system, prompt: linkPrompt, maxTokens: 2000, proxyConfig });
+      const result = await runProcessingLlmCall(
+        { paperId, userId: paper.userId, step: "linkPapers" },
+        { provider, modelId, system, prompt: linkPrompt, maxTokens: 2000, proxyConfig },
+      );
 
       try {
         const cleaned = cleanJsonResponse(result);
@@ -745,7 +835,10 @@ export async function runAutoProcessPipeline(opts: {
 
       const contradictionPrompt = `NEW PAPER:\n${newPaperInfo}\n\n---\n\nRELATED PAPERS:\n${relatedList}`;
       const { system } = buildPrompt("detectContradictions", "");
-      const result = await generateLLMResponse({ provider, modelId, system, prompt: contradictionPrompt, maxTokens: 3000, proxyConfig });
+      const result = await runProcessingLlmCall(
+        { paperId, userId: paper.userId, step: "detectContradictions" },
+        { provider, modelId, system, prompt: contradictionPrompt, maxTokens: 3000, proxyConfig },
+      );
 
       await prisma.promptResult.create({
         data: {
@@ -770,14 +863,27 @@ export async function runAutoProcessPipeline(opts: {
       checkCancelled();
       await setStep(paperId, "references");
       console.log("[auto-process] Extracting references for", paperId);
-      const extractedReferences = await extractReferenceCandidates({
-        paperId,
-        filePath: paper.filePath ?? null,
-        fullText: paper.fullText,
-        provider,
-        modelId,
-        proxyConfig,
-      });
+      const extractedReferences = await withLlmContext(
+        {
+          operation: "processing_extractReferences",
+          userId: paper.userId ?? undefined,
+          metadata: {
+            runtime: "processing",
+            source: "auto_process",
+            paperId,
+            step: "extractReferences",
+          },
+        },
+        () =>
+          extractReferenceCandidates({
+            paperId,
+            filePath: paper.filePath ?? null,
+            fullText: paper.fullText,
+            provider,
+            modelId,
+            proxyConfig,
+          }),
+      );
 
       if (extractedReferences.llmRawResponse) {
         await prisma.promptResult.create({
@@ -883,14 +989,17 @@ export async function runAutoProcessPipeline(opts: {
           if (bodyText) {
             const { system } = buildPrompt("extractCitationContexts", "");
             const ctxPrompt = `Here is the body text of the paper:\n\n${bodyText}`;
-            const ctxResult = await generateLLMResponse({
-              provider,
-              modelId,
-              system,
-              prompt: ctxPrompt,
-              maxTokens: 4000,
-              proxyConfig,
-            });
+            const ctxResult = await runProcessingLlmCall(
+              { paperId, userId: paper.userId, step: "extractCitationContexts" },
+              {
+                provider,
+                modelId,
+                system,
+                prompt: ctxPrompt,
+                maxTokens: 4000,
+                proxyConfig,
+              },
+            );
 
             try {
               const cleaned = cleanJsonResponse(ctxResult);
@@ -947,13 +1056,17 @@ export async function runAutoProcessPipeline(opts: {
     const roomNames = existingRooms.map((r) => r.name);
 
     const { system: distillSystem, prompt: distillPrompt } = buildDistillPrompt(truncated, roomNames);
-    const distillResult = await generateLLMResponse({
-      provider, modelId,
-      system: distillSystem,
-      prompt: distillPrompt,
-      maxTokens: 4000,
-      proxyConfig,
-    });
+    const distillResult = await runProcessingLlmCall(
+      { paperId, userId: paper.userId, step: "distill" },
+      {
+        provider,
+        modelId,
+        system: distillSystem,
+        prompt: distillPrompt,
+        maxTokens: 4000,
+        proxyConfig,
+      },
+    );
 
     await prisma.promptResult.create({
       data: {

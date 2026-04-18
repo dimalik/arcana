@@ -17,8 +17,8 @@ import { getProxyConfig, type ProxyConfig } from "@/lib/llm/proxy-settings";
 import {
   generateLLMResponse,
   MAX_PAPER_CHARS,
-  setLlmContext,
   truncateText,
+  withLlmContext,
 } from "@/lib/llm/provider";
 import { buildPrompt, buildDistillPrompt, cleanJsonResponse } from "@/lib/llm/prompts";
 import { getUserContext, buildUserContextPreamble } from "@/lib/llm/user-context";
@@ -64,6 +64,31 @@ interface BatchResult {
 type StepType = "extract" | "summarize" | "extractReferences" |
   "categorize" | "linkPapers" | "extractCitationContexts" | "distillInsights" |
   "detectContradictions";
+
+async function runProcessingBatchLlmCall(
+  context: {
+    paperId: string;
+    userId?: string | null;
+    step: "extractCitationContexts";
+    metadata?: Record<string, unknown>;
+  },
+  params: Parameters<typeof generateLLMResponse>[0],
+): Promise<string> {
+  return withLlmContext(
+    {
+      operation: `processing_${context.step}`,
+      userId: context.userId ?? undefined,
+      metadata: {
+        runtime: "processing",
+        source: "batch",
+        paperId: context.paperId,
+        step: context.step,
+        ...context.metadata,
+      },
+    },
+    () => generateLLMResponse(params),
+  );
+}
 
 /**
  * Strip unpaired surrogates and other chars that break JSON serialization.
@@ -761,22 +786,25 @@ export async function runCitationContextSidecarForPapers(
     }
 
     try {
-      setLlmContext(
-        "batch_extractCitationContexts_fallback",
-        paper.userId ?? undefined,
+      const llmText = await runProcessingBatchLlmCall(
         {
           paperId: paper.id,
-          fallback: "grobid_sidecar",
+          userId: paper.userId ?? undefined,
+          step: "extractCitationContexts",
+          metadata: {
+            fallback: "grobid_sidecar",
+            mode: "batch_sidecar",
+          },
+        },
+        {
+          provider: "proxy",
+          modelId,
+          system,
+          prompt: bodyText,
+          maxTokens: 4000,
+          proxyConfig,
         },
       );
-      const llmText = await generateLLMResponse({
-        provider: "proxy",
-        modelId,
-        system,
-        prompt: bodyText,
-        maxTokens: 4000,
-        proxyConfig,
-      });
       const llmResult = await processCitationContextsResult(paper.id, llmText, {
         skipGrobid: true,
       });
