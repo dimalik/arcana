@@ -280,6 +280,7 @@ model Paper {
   processingStatus    String    @default("PENDING") // PENDING, EXTRACTING_TEXT, TEXT_EXTRACTED, COMPLETED, FAILED
   processingStep      String? // Current step: "extracting_text", "metadata", "summarize", "categorize", "linking", "references", "contexts"
   processingStartedAt DateTime? // When current processing began — for stall detection
+  referenceState      String    @default("pending") // available | pending | extraction_failed | unavailable_no_pdf
   citationCount       Int?
   isLiked             Boolean   @default(false)
   isResearchOnly      Boolean   @default(false) // true = imported by research agent, hidden from main library

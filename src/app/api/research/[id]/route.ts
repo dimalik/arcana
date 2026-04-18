@@ -60,6 +60,8 @@ export async function GET(_request: NextRequest, { params }: Params) {
                     summary: true,
                     abstract: true,
                     processingStatus: true,
+                    processingStep: true,
+                    referenceState: true,
                   },
                 },
               },

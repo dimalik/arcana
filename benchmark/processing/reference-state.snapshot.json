@@ -1,0 +1,12 @@
+{
+  "generatedAt": "2026-04-18T16:39:03.772Z",
+  "apply": true,
+  "totalPapers": 2425,
+  "counts": {
+    "available": 2391,
+    "pending": 6,
+    "extraction_failed": 28,
+    "unavailable_no_pdf": 0
+  },
+  "availableNoPdfWithReferences": 0
+}

@@ -4,6 +4,7 @@ import { processingQueue } from "@/lib/processing/queue";
 import { requireUserId } from "@/lib/paper-auth";
 import { z } from "zod";
 import { handleDuplicatePaperError, resolveEntityForImport } from "@/lib/canonical/import-dedup";
+import { buildInitialReferenceState } from "@/lib/references/reference-state";
 
 const createPaperSchema = z.object({
   title: z.string().min(1),
@@ -158,6 +159,11 @@ export async function POST(request: NextRequest) {
           userId,
           authors: data.authors ? JSON.stringify(data.authors) : null,
           processingStatus: data.fullText ? "TEXT_EXTRACTED" : "PENDING",
+          referenceState: buildInitialReferenceState({
+            filePath: data.filePath,
+            fullText: data.fullText,
+            processingStatus: data.fullText ? "TEXT_EXTRACTED" : "PENDING",
+          }),
           entityId: resolved.entityId,
         },
       });

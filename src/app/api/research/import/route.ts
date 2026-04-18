@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireUserId } from "@/lib/paper-auth";
+import { buildInitialReferenceState } from "@/lib/references/reference-state";
 import { writeFile, mkdir } from "fs/promises";
 import path from "path";
 
@@ -67,6 +68,10 @@ export async function POST(request: NextRequest) {
               doi: p.doi,
               fullText: p.fullText,
               processingStatus: p.fullText ? "COMPLETED" : "PENDING",
+              referenceState: buildInitialReferenceState({
+                fullText: p.fullText,
+                processingStatus: p.fullText ? "COMPLETED" : "PENDING",
+              }),
             },
           });
           paperId = created.id;

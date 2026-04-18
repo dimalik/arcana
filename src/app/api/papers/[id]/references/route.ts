@@ -15,7 +15,10 @@ export async function GET(
 
   const references = await listPaperReferenceViews(id, paper.userId);
 
-  return NextResponse.json(references);
+  return NextResponse.json({
+    referenceState: paper.referenceState,
+    references,
+  });
 }
 
 export async function DELETE(

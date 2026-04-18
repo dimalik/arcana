@@ -5,6 +5,7 @@ import Link from "next/link";
 import { FileText, Search, Loader2, Sparkles } from "lucide-react";
 import { StepCard } from "./step-card";
 import { useStepActions } from "./use-step-actions";
+import { getProcessingStatusDisplay } from "@/lib/processing/status-display";
 
 interface Paper {
   id: string;
@@ -13,6 +14,8 @@ interface Paper {
   year: number | null;
   summary: string | null;
   processingStatus: string | null;
+  processingStep?: string | null;
+  referenceState?: string | null;
 }
 
 interface Step {
@@ -31,15 +34,6 @@ interface LiteraturePhaseProps {
   onRefresh: () => void;
 }
 
-const PROCESSING_LABELS: Record<string, string> = {
-  PENDING: "Queued",
-  DOWNLOADING: "Downloading PDF",
-  EXTRACTING_TEXT: "Extracting text",
-  SUMMARIZING: "Generating summary",
-  COMPLETED: "",
-  FAILED: "Processing failed",
-};
-
 export function LiteraturePhase({ projectId, papers, steps, onRefresh }: LiteraturePhaseProps) {
   const {
     loadingStep, autoRunning, handleAutoRun, handleSkip,
@@ -48,7 +42,12 @@ export function LiteraturePhase({ projectId, papers, steps, onRefresh }: Literat
 
   // Auto-poll while any paper is still processing
   const processingCount = papers.filter(
-    (p) => p.processingStatus && !["COMPLETED", "FAILED"].includes(p.processingStatus)
+    (p) =>
+      getProcessingStatusDisplay({
+        processingStatus: p.processingStatus,
+        processingStep: p.processingStep,
+        referenceState: p.referenceState,
+      }).showSpinner
   ).length;
 
   useEffect(() => {
@@ -145,9 +144,13 @@ export function LiteraturePhase({ projectId, papers, steps, onRefresh }: Literat
         ) : (
           <div className="space-y-1">
             {papers.map((p) => {
-              const isProcessing = p.processingStatus && !["COMPLETED", "FAILED"].includes(p.processingStatus);
-              const isFailed = p.processingStatus === "FAILED";
-              const statusLabel = PROCESSING_LABELS[p.processingStatus || ""] || p.processingStatus;
+              const statusDisplay = getProcessingStatusDisplay({
+                processingStatus: p.processingStatus,
+                processingStep: p.processingStep,
+                referenceState: p.referenceState,
+              });
+              const isProcessing = statusDisplay.showSpinner;
+              const isFailed = statusDisplay.tone === "danger";
 
               return (
                 <Link
@@ -169,14 +172,25 @@ export function LiteraturePhase({ projectId, papers, steps, onRefresh }: Literat
                           {(() => { try { return JSON.parse(p.authors).slice(0, 2).join(", "); } catch { return p.authors; } })()}
                         </span>
                       )}
-                      {isProcessing && statusLabel && (
-                        <span className="text-blue-400 flex items-center gap-1">
-                          <span className="inline-block w-1 h-1 rounded-full bg-blue-400 animate-pulse" />
-                          {statusLabel}
+                      {statusDisplay.label && (
+                        <span className="flex items-center gap-1">
+                          {isProcessing && (
+                            <span className="inline-block w-1 h-1 rounded-full bg-blue-400 animate-pulse" />
+                          )}
+                          <span
+                            className={
+                              statusDisplay.tone === "danger"
+                                ? "text-destructive/70"
+                                : statusDisplay.tone === "warning"
+                                  ? "text-amber-500"
+                                  : statusDisplay.tone === "info"
+                                    ? "text-blue-400"
+                                    : "text-muted-foreground/70"
+                            }
+                          >
+                            {statusDisplay.label}
+                          </span>
                         </span>
-                      )}
-                      {isFailed && (
-                        <span className="text-destructive/70">{statusLabel}</span>
                       )}
                     </div>
                     {p.summary && (

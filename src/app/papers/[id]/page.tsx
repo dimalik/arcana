@@ -63,6 +63,7 @@ import { RightPanel } from "@/components/paper-detail/right-panel";
 import { PdfViewer } from "@/components/paper-detail/pdf-viewer";
 import { SectionRewriter } from "@/components/paper-detail/section-rewriter";
 import { MetadataDialog } from "@/components/paper-detail/metadata-dialog";
+import { getProcessingStatusDisplay } from "@/lib/processing/status-display";
 
 interface Tag {
   id: string;
@@ -100,39 +101,13 @@ interface Paper {
   processingStatus: string;
   processingStep: string | null;
   processingStartedAt: string | null;
+  referenceState: string;
   isLiked: boolean;
   engagementScore: number;
   createdAt: string;
   updatedAt: string;
   tags: { tag: Tag }[];
   promptResults: PromptResult[];
-}
-
-const STEP_LABELS: Record<string, string> = {
-  extracting_text: "Extracting text...",
-  metadata: "Extracting metadata...",
-  summarize: "Summarizing...",
-  categorize: "Categorizing...",
-  linking: "Finding related papers...",
-  contradictions: "Detecting contradictions...",
-  references: "Extracting references...",
-  contexts: "Analyzing citations...",
-  distill: "Distilling insights...",
-};
-
-const STATUS_LABELS: Record<string, string> = {
-  PENDING: "Queued for processing...",
-  EXTRACTING_TEXT: "Extracting text...",
-  TEXT_EXTRACTED: "Waiting to process...",
-  NO_PDF: "No PDF available",
-  BATCH_PROCESSING: "Batch processing...",
-};
-
-function getProcessingLabel(paper: Paper): string {
-  if (paper.processingStep && STEP_LABELS[paper.processingStep]) {
-    return STEP_LABELS[paper.processingStep];
-  }
-  return STATUS_LABELS[paper.processingStatus] || paper.processingStatus;
 }
 
 type ViewTab =
@@ -188,6 +163,13 @@ export default function PaperDetailPage() {
   const [relatedPaperMap, setRelatedPaperMap] = useState<Record<string, string>>({});
   const [pdfVisible, setPdfVisible] = useState(false);
   const [splitRatio, setSplitRatio] = useState(50);
+  const processingDisplay = paper
+    ? getProcessingStatusDisplay({
+        processingStatus: paper.processingStatus,
+        processingStep: paper.processingStep,
+        referenceState: paper.referenceState,
+      })
+    : null;
   const editForm = {
     title: paper?.title || "",
     abstract: paper?.abstract || "",
@@ -483,17 +465,21 @@ export default function PaperDetailPage() {
             </div>
           )}
           {/* Processing status — minimal inline */}
-          {paper.processingStatus !== "COMPLETED" && paper.processingStatus !== "FAILED" && paper.processingStatus !== "NO_PDF" && (
-            <span className="ml-1 flex items-center gap-1 text-xs text-muted-foreground">
-              <Loader2 className="h-3 w-3 animate-spin" />
-              {getProcessingLabel(paper)}
+          {processingDisplay?.label && (
+            <span
+              className={`ml-1 flex items-center gap-1 text-xs ${
+                processingDisplay.tone === "danger"
+                  ? "text-destructive"
+                  : processingDisplay.tone === "warning"
+                    ? "text-amber-500"
+                    : "text-muted-foreground"
+              }`}
+            >
+              {processingDisplay.showSpinner && (
+                <Loader2 className="h-3 w-3 animate-spin" />
+              )}
+              {processingDisplay.label}
             </span>
-          )}
-          {paper.processingStatus === "FAILED" && (
-            <span className="ml-1 text-xs text-destructive">Failed</span>
-          )}
-          {paper.processingStatus === "NO_PDF" && (
-            <span className="ml-1 text-xs text-amber-500">No PDF</span>
           )}
         </div>
       ),
@@ -610,7 +596,7 @@ export default function PaperDetailPage() {
         style={{ marginRight: chatOpen ? chatWidth : 0 }}
       >
         {/* ── Missing PDF banner ── */}
-        {!paper.filePath && (paper.processingStatus === "COMPLETED" || paper.processingStatus === "PENDING") && (
+        {paper.referenceState === "unavailable_no_pdf" && (
           <div className="flex items-center gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 dark:border-amber-800 dark:bg-amber-950/30">
             <FileText className="h-5 w-5 shrink-0 text-amber-600" />
             <div className="flex-1">

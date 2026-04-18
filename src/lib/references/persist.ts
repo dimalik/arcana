@@ -6,6 +6,7 @@ import {
   resolveReferenceEntity,
 } from "../citations/reference-entry-service";
 import { prisma } from "../prisma";
+import { syncPaperReferenceState } from "./reference-state";
 import { findBestMatch } from "./match";
 import { isPromotableResolution } from "./resolve";
 import type { ReferenceExtractionCandidate } from "./types";
@@ -198,6 +199,8 @@ export async function persistExtractedReferences(
 
     storedReferences += 1;
   }
+
+  await syncPaperReferenceState(params.paperId);
 
   return {
     storedReferences,

@@ -32,6 +32,8 @@ interface Paper {
   summary: string | null;
   abstract: string | null;
   processingStatus: string | null;
+  processingStep?: string | null;
+  referenceState?: string | null;
 }
 
 interface Step {
@@ -460,7 +462,15 @@ export default function ResearchWorkspacePage({ params }: { params: { id: string
       <div className="flex-1 min-h-0 overflow-hidden">
         <ResearchDashboard
           project={project}
-          papers={papers.map(p => ({ id: p.id, title: p.title, authors: p.authors, year: p.year, processingStatus: p.processingStatus }))}
+          papers={papers.map((p) => ({
+            id: p.id,
+            title: p.title,
+            authors: p.authors,
+            year: p.year,
+            processingStatus: p.processingStatus,
+            processingStep: p.processingStep,
+            referenceState: p.referenceState,
+          }))}
           iteration={activeIteration ? {
             number: activeIteration.number,
             goal: activeIteration.goal,

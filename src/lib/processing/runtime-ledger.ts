@@ -1,5 +1,6 @@
 import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
+import { syncPaperReferenceState } from "@/lib/references/reference-state";
 
 export const PROCESSING_TERMINAL_STATUSES = new Set([
   "COMPLETED",
@@ -82,6 +83,7 @@ async function projectPaperProcessingState(
       processingStartedAt: state.processingStartedAt,
     },
   });
+  await syncPaperReferenceState(paperId, tx);
 }
 
 async function closeActiveSteps(

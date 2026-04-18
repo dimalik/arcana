@@ -25,6 +25,7 @@ import { ClaimLedgerPanel } from "./claim-ledger-panel";
 import { LineageAuditPanel } from "./lineage-audit-panel";
 import { MarkdownRenderer } from "@/components/ui/markdown-renderer";
 import { shouldHideResearchLogFromTimeline } from "@/lib/research/research-log-policy";
+import { getProcessingStatusDisplay } from "@/lib/processing/status-display";
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -114,7 +115,15 @@ export interface ResearchDashboardProps {
     hypothesesById?: Record<string, string>;
     gates?: Record<string, GateStatus>;
   };
-  papers: Array<{ id: string; title: string; authors?: string | null; year?: number | null; processingStatus?: string | null }>;
+  papers: Array<{
+    id: string;
+    title: string;
+    authors?: string | null;
+    year?: number | null;
+    processingStatus?: string | null;
+    processingStep?: string | null;
+    referenceState?: string | null;
+  }>;
   iteration: {
     number: number;
     goal: string;
@@ -287,7 +296,15 @@ function ScrollFadePanel({ children, className }: { children: React.ReactNode; c
 function PapersPopover({
   papers,
 }: {
-  papers: Array<{ id: string; title: string; authors?: string | null; year?: number | null; processingStatus?: string | null }>;
+  papers: Array<{
+    id: string;
+    title: string;
+    authors?: string | null;
+    year?: number | null;
+    processingStatus?: string | null;
+    processingStep?: string | null;
+    referenceState?: string | null;
+  }>;
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -1235,16 +1252,11 @@ export function ResearchDashboard({
                       try { authors = JSON.parse(p.authors).slice(0, 3).join(", "); } catch { authors = p.authors; }
                       if (authors.length > 60) authors = authors.slice(0, 60) + "...";
                     }
-                    const status = p.processingStatus;
-                    const hasIssue = status && !["COMPLETED", "NEEDS_DEFERRED"].includes(status);
-                    const statusLabel: Record<string, { text: string; cls: string }> = {
-                      PENDING: { text: "queued", cls: "text-muted-foreground/50" },
-                      EXTRACTING_TEXT: { text: "extracting...", cls: "text-blue-500" },
-                      FAILED: { text: "failed", cls: "text-red-500" },
-                      NO_PDF: { text: "no PDF", cls: "text-amber-500" },
-                      BATCH_PROCESSING: { text: "processing...", cls: "text-blue-500" },
-                    };
-                    const sl = status ? statusLabel[status] : null;
+                    const statusDisplay = getProcessingStatusDisplay({
+                      processingStatus: p.processingStatus,
+                      processingStep: p.processingStep,
+                      referenceState: p.referenceState,
+                    });
                     return (
                       <Link key={p.id} href={`/papers/${p.id}`}
                         className="block px-4 py-2.5 hover:bg-muted/50 transition-colors border-b border-border/10">
@@ -1257,8 +1269,20 @@ export function ResearchDashboard({
                               </p>
                             )}
                           </div>
-                          {hasIssue && sl && (
-                            <span className={`text-[11px] shrink-0 mt-0.5 ${sl.cls}`}>{sl.text}</span>
+                          {statusDisplay.label && (
+                            <span
+                              className={`text-[11px] shrink-0 mt-0.5 ${
+                                statusDisplay.tone === "danger"
+                                  ? "text-red-500"
+                                  : statusDisplay.tone === "warning"
+                                    ? "text-amber-500"
+                                    : statusDisplay.tone === "info"
+                                      ? "text-blue-500"
+                                      : "text-muted-foreground/50"
+                              }`}
+                            >
+                              {statusDisplay.label.toLowerCase()}
+                            </span>
                           )}
                         </div>
                       </Link>

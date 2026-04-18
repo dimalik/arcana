@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { saveUploadedFile } from "@/lib/upload";
 import { processingQueue } from "@/lib/processing/queue";
 import { requireUserId } from "@/lib/paper-auth";
+import { buildInitialReferenceState } from "@/lib/references/reference-state";
 
 export async function POST(request: NextRequest) {
   try {
@@ -46,6 +47,10 @@ export async function POST(request: NextRequest) {
         sourceUrl,
         filePath,
         processingStatus: "EXTRACTING_TEXT",
+        referenceState: buildInitialReferenceState({
+          filePath,
+          processingStatus: "EXTRACTING_TEXT",
+        }),
       },
     });
 

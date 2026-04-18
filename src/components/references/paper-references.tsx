@@ -29,6 +29,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import Link from "next/link";
+import { getReferenceStateEmptyMessage } from "@/lib/processing/status-display";
 
 interface MatchedPaper {
   id: string;
@@ -62,8 +63,20 @@ interface Reference {
   resolveSource: string | null;
 }
 
+type ReferenceState =
+  | "available"
+  | "pending"
+  | "extraction_failed"
+  | "unavailable_no_pdf";
+
+interface ReferencesResponse {
+  referenceState: ReferenceState;
+  references: Reference[];
+}
+
 export function PaperReferences({ paperId }: { paperId: string }) {
   const [references, setReferences] = useState<Reference[]>([]);
+  const [referenceState, setReferenceState] = useState<ReferenceState>("pending");
   const [loading, setLoading] = useState(true);
   const [extracting, setExtracting] = useState(false);
   const [enriching, setEnriching] = useState(false);
@@ -103,7 +116,9 @@ export function PaperReferences({ paperId }: { paperId: string }) {
     try {
       const res = await fetch(`/api/papers/${paperId}/references`);
       if (res.ok) {
-        setReferences(await res.json());
+        const data = (await res.json()) as ReferencesResponse;
+        setReferences(data.references);
+        setReferenceState(data.referenceState);
       }
     } catch {
       toast.error("Failed to load references");
@@ -123,7 +138,7 @@ export function PaperReferences({ paperId }: { paperId: string }) {
         { method: "DELETE" }
       );
       if (res.ok) {
-        setReferences((prev) => prev.filter((r) => r.id !== referenceId));
+        await fetchReferences();
         toast.success("Reference removed");
       }
     } catch {
@@ -296,7 +311,7 @@ export function PaperReferences({ paperId }: { paperId: string }) {
     return (
       <Card>
         <CardContent className="py-8 text-center text-muted-foreground">
-          No references extracted
+          {getReferenceStateEmptyMessage(referenceState)}
         </CardContent>
       </Card>
     );

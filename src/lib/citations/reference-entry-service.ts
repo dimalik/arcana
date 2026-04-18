@@ -2,6 +2,7 @@ import { prisma } from "../prisma";
 import { normalizeIdentifier } from "../canonical/normalize";
 import { resolveOrCreateEntity } from "../canonical/entity-service";
 import { resolveReferenceOnline } from "../references/resolve";
+import { syncPaperReferenceState } from "../references/reference-state";
 import type { ResolutionMethod } from "../references/types";
 import type { S2Result, SearchSource } from "../import/semantic-scholar";
 
@@ -365,6 +366,8 @@ export async function deleteReferenceEntryWithLegacyProjection(
     await tx.referenceEntry.delete({
       where: { id: referenceEntry.id },
     });
+
+    await syncPaperReferenceState(paperId, tx);
   });
 
   return {

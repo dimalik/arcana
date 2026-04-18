@@ -9,6 +9,7 @@ import { processingQueue } from "@/lib/processing/queue";
 import { findAndDownloadPdf } from "@/lib/import/pdf-finder";
 import { requireUserId } from "@/lib/paper-auth";
 import { z } from "zod";
+import { buildInitialReferenceState } from "@/lib/references/reference-state";
 
 const importSchema = z.object({
   url: z.string().url(),
@@ -68,6 +69,10 @@ export async function POST(request: NextRequest) {
             sourceUrl: url,
             filePath: pdfResult?.filePath,
             processingStatus: pdfResult?.filePath ? "EXTRACTING_TEXT" : "TEXT_EXTRACTED",
+            referenceState: buildInitialReferenceState({
+              filePath: pdfResult?.filePath,
+              processingStatus: pdfResult?.filePath ? "EXTRACTING_TEXT" : "TEXT_EXTRACTED",
+            }),
           },
         });
 
@@ -115,6 +120,11 @@ export async function POST(request: NextRequest) {
         fullText: content.content || undefined,
         filePath: pdfResult?.filePath,
         processingStatus: pdfResult?.filePath ? "EXTRACTING_TEXT" : "TEXT_EXTRACTED",
+        referenceState: buildInitialReferenceState({
+          filePath: pdfResult?.filePath,
+          fullText: content.content || null,
+          processingStatus: pdfResult?.filePath ? "EXTRACTING_TEXT" : "TEXT_EXTRACTED",
+        }),
       },
     });
 
