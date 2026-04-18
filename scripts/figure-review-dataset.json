@@ -208,6 +208,7 @@
         "expectedPrimaryFigures": 14,
         "expectedFiguresWithImages": 14,
         "maxGapFigures": 0,
+        "firstPublishPreviewRequired": true,
         "requiredLabels": [
           "Figure 1",
           "Figure 2",
@@ -256,6 +257,13 @@
         "expectedPrimaryFigures": 31,
         "expectedFiguresWithImages": 31,
         "maxGapFigures": 0,
+        "firstPublishPreviewRequired": true,
+        "requiredParentGroupRows": [
+          {
+            "label": "Figure 1",
+            "mustHavePreview": true
+          }
+        ],
         "requiredLabels": [
           "Figure 1",
           "Figure 2",
@@ -633,6 +641,7 @@
         "expectedPrimaryFigures": 22,
         "expectedFiguresWithImages": 22,
         "maxGapFigures": 0,
+        "firstPublishPreviewRequired": true,
         "requiredLabels": [
           "Figure 1",
           "Figure 7",

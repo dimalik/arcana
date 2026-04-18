@@ -83,6 +83,7 @@
       "title": "Zero-Shot Data Gen",
       "category": "ltx_tabular",
       "notes": "Tables 1-4 use ltx_tabular markup. Tables 5-8 use standard <table>.",
+      "firstPublishPreviewRequired": true,
       "expectedFigures": ["Figure 1", "Figure 2", "Figure 3", "Figure 4", "Figure 5", "Figure 6"],
       "expectedTables": ["Table 1", "Table 2", "Table 3", "Table 4", "Table 5", "Table 6", "Table 7", "Table 8"],
       "expectedSources": {
@@ -94,6 +95,59 @@
         "Table 1": { "expectsImage": true, "expectedImageSourceMethod": "html_table_render" },
         "Table 5": { "expectsImage": true, "expectedImageSourceMethod": "html_table_render" },
         "Figure 1": { "expectsImage": true }
+      }
+    },
+    {
+      "arxivId": "2402.08265",
+      "title": "Dense Reward View",
+      "category": "grouped_parent_figures",
+      "notes": "Grouped parent figures must survive first publish as first-class rows with previews, not be flattened into anonymous panel junk.",
+      "firstPublishPreviewRequired": true,
+      "requiredParentGroupRows": [
+        { "label": "Figure 1", "mustHavePreview": true }
+      ],
+      "expectedFigures": ["Figure 1", "Figure 2", "Figure 6", "Figure 7"],
+      "expectedTables": ["Table 1", "Table 2", "Table 3", "Table 4", "Table 5", "Table 6", "Table 7"],
+      "expectedSources": {
+        "Figure 1": "arxiv_html",
+        "Figure 2": "arxiv_html",
+        "Table 1": "arxiv_html"
+      },
+      "labelExpectations": {
+        "Figure 1": { "expectsImage": true },
+        "Figure 2": { "expectsImage": true },
+        "Figure 6": { "expectsImage": true },
+        "Figure 7": { "expectsImage": true },
+        "Table 1": { "expectsImage": true, "expectedImageSourceMethod": "html_table_render" },
+        "Table 2": { "expectsImage": true, "expectedImageSourceMethod": "html_table_render" },
+        "Table 3": { "expectsImage": true, "expectedImageSourceMethod": "html_table_render" },
+        "Table 4": { "expectsImage": true, "expectedImageSourceMethod": "html_table_render" },
+        "Table 5": { "expectsImage": true, "expectedImageSourceMethod": "html_table_render" },
+        "Table 6": { "expectsImage": true, "expectedImageSourceMethod": "html_table_render" },
+        "Table 7": { "expectsImage": true, "expectedImageSourceMethod": "html_table_render" }
+      }
+    },
+    {
+      "arxivId": "2507.02554",
+      "title": "MLE-bench Agents",
+      "category": "structured_tables_missing_previews",
+      "notes": "Structured HTML tables must publish real previews on first pass, not only after later enrichment.",
+      "firstPublishPreviewRequired": true,
+      "expectedFigures": ["Figure 1", "Figure 7", "Figure 17"],
+      "expectedTables": ["Table 1", "Table 2", "Table 3"],
+      "expectedSources": {
+        "Figure 1": "arxiv_html",
+        "Figure 7": "arxiv_html",
+        "Figure 17": "arxiv_html",
+        "Table 1": "arxiv_html"
+      },
+      "labelExpectations": {
+        "Figure 1": { "expectsImage": true },
+        "Figure 7": { "expectsImage": true },
+        "Figure 17": { "expectsImage": true },
+        "Table 1": { "expectsImage": true, "expectedImageSourceMethod": "html_table_render" },
+        "Table 2": { "expectsImage": true, "expectedImageSourceMethod": "html_table_render" },
+        "Table 3": { "expectsImage": true, "expectedImageSourceMethod": "html_table_render" }
       }
     }
   ]

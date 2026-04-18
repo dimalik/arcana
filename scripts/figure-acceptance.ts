@@ -13,51 +13,13 @@
  */
 
 import { prisma } from "../src/lib/prisma";
-import { normalizeLabel } from "../src/lib/figures/label-utils";
 import { resetPublishedFiguresForPaper } from "../src/lib/figures/reset-published-figures";
 import fixture from "./figure-acceptance.json";
-
-// ── Types ────────────────────────────────────────────────────────────
-
-interface FixturePaper {
-  arxivId?: string;
-  doi?: string;
-  fileBasename?: string;
-  title: string;
-  category: string;
-  notes?: string;
-  expectedFigures: string[];
-  expectedTables: string[];
-  expectedSources?: Record<string, string>;
-  labelExpectations?: Record<string, { expectsImage?: boolean; expectedGapReason?: string; expectedImageSourceMethod?: string }>;
-}
-
-interface PaperResult {
-  title: string;
-  category: string;
-  paperId: string | null;
-  resolved: boolean;
-  figureRecall: { expected: number; found: number; missing: string[] };
-  tableRecall: { expected: number; found: number; missing: string[] };
-  unexpected: string[];
-  sourceMismatches: string[];
-  labelViolations: string[];
-  highConfidence: number;
-  lowConfidence: number;
-  gaps: number;
-  structured: number;
-}
-
-// ── Fixture loading with normalization ───────────────────────────────
-
-function normalizeFixtureMap<T>(map: Record<string, T>): Map<string, T> {
-  const result = new Map<string, T>();
-  for (const [key, value] of Object.entries(map)) {
-    const norm = normalizeLabel(key);
-    if (norm) result.set(norm, value);
-  }
-  return result;
-}
+import {
+  evaluateAcceptancePaper,
+  type FixturePaper,
+  type PaperResult,
+} from "./lib/figure-acceptance-scoring";
 
 // ── Paper resolution ─────────────────────────────────────────────────
 
@@ -98,101 +60,25 @@ async function hasGapReasonColumn(): Promise<boolean> {
 
 // ── Per-paper evaluation ─────────────────────────────────────────────
 
-async function evaluatePaper(fp: FixturePaper, paperId: string, gapReasonExists: boolean): Promise<PaperResult> {
+async function evaluatePaper(
+  fp: FixturePaper,
+  paperId: string,
+  gapReasonExists: boolean,
+  enforceFirstPublishPreviewRules: boolean,
+): Promise<PaperResult> {
   const figures = await prisma.paperFigure.findMany({
     where: { paperId, isPrimaryExtraction: true },
     orderBy: [{ pdfPage: "asc" }, { figureIndex: "asc" }],
   });
 
-  // Normalize expected labels
-  const expectedFigNorm = new Set(fp.expectedFigures.map(l => normalizeLabel(l)).filter(Boolean) as string[]);
-  const expectedTabNorm = new Set(fp.expectedTables.map(l => normalizeLabel(l)).filter(Boolean) as string[]);
-  const allExpected = new Set(Array.from(expectedFigNorm).concat(Array.from(expectedTabNorm)));
-
-  // Normalize actual labels
-  const actualLabels = new Map<string, typeof figures[0]>();
-  for (const f of figures) {
-    const norm = normalizeLabel(f.figureLabel);
-    if (norm) actualLabels.set(norm, f);
-  }
-
-  // Figure recall
-  const missingFigs: string[] = [];
-  for (const norm of Array.from(expectedFigNorm)) {
-    if (!actualLabels.has(norm)) missingFigs.push(norm);
-  }
-
-  // Table recall
-  const missingTabs: string[] = [];
-  for (const norm of Array.from(expectedTabNorm)) {
-    if (!actualLabels.has(norm)) missingTabs.push(norm);
-  }
-
-  // Unexpected labels
-  const unexpected: string[] = [];
-  for (const [norm] of Array.from(actualLabels.entries())) {
-    if (!allExpected.has(norm) && !norm.startsWith("uncaptioned-")) {
-      unexpected.push(norm);
-    }
-  }
-
-  // Source expectations
-  const sourceMismatches: string[] = [];
-  if (fp.expectedSources) {
-    const normSources = normalizeFixtureMap(fp.expectedSources);
-    for (const [norm, expectedSource] of Array.from(normSources.entries())) {
-      const actual = actualLabels.get(norm);
-      if (actual && actual.sourceMethod !== expectedSource) {
-        sourceMismatches.push(`${norm}: expected ${expectedSource}, got ${actual.sourceMethod}`);
-      }
-    }
-  }
-
-  // Label expectations (image + gapReason)
-  const labelViolations: string[] = [];
-  if (fp.labelExpectations) {
-    const normExpectations = normalizeFixtureMap(fp.labelExpectations);
-    for (const [norm, exp] of Array.from(normExpectations.entries())) {
-      const actual = actualLabels.get(norm);
-      if (!actual) continue; // Missing labels already caught in recall
-
-      if (exp.expectsImage !== undefined) {
-        const hasImage = !!actual.imagePath;
-        if (exp.expectsImage && !hasImage) {
-          labelViolations.push(`${norm}: expected image but has none`);
-        } else if (!exp.expectsImage && hasImage) {
-          labelViolations.push(`${norm}: expected no image but has ${actual.imagePath?.split("/").pop()}`);
-        }
-      }
-
-      if (exp.expectedImageSourceMethod) {
-        if (actual.imageSourceMethod !== exp.expectedImageSourceMethod) {
-          labelViolations.push(`${norm}: expected imageSourceMethod=${exp.expectedImageSourceMethod}, got ${actual.imageSourceMethod || "null"}`);
-        }
-      }
-
-      if (exp.expectedGapReason && gapReasonExists) {
-        if (actual.gapReason !== exp.expectedGapReason) {
-          labelViolations.push(`${norm}: expected gapReason=${exp.expectedGapReason}, got ${actual.gapReason || "null"}`);
-        }
-      }
-    }
-  }
-
   return {
-    title: fp.title,
-    category: fp.category,
+    ...evaluateAcceptancePaper({
+      fixturePaper: fp,
+      figures,
+      gapReasonExists,
+      enforceFirstPublishPreviewRules,
+    }),
     paperId,
-    resolved: true,
-    figureRecall: { expected: expectedFigNorm.size, found: expectedFigNorm.size - missingFigs.length, missing: missingFigs },
-    tableRecall: { expected: expectedTabNorm.size, found: expectedTabNorm.size - missingTabs.length, missing: missingTabs },
-    unexpected,
-    sourceMismatches,
-    labelViolations,
-    highConfidence: figures.filter(f => f.confidence === "high").length,
-    lowConfidence: figures.filter(f => f.confidence === "low").length,
-    gaps: figures.filter(f => !f.imagePath).length,
-    structured: figures.filter(f => f.description && f.description.length > 100).length,
   };
 }
 
@@ -307,7 +193,7 @@ async function main() {
       }
     }
 
-    const result = await evaluatePaper(fp, resolved.id, gapReasonExists);
+    const result = await evaluatePaper(fp, resolved.id, gapReasonExists, doExtract);
     results.push(result);
   }
 
