@@ -6,6 +6,7 @@ import { saveUploadedFile } from "@/lib/upload";
 import { processingQueue } from "@/lib/processing/queue";
 import { trackEngagement } from "@/lib/engagement/track";
 import { requireUserId } from "@/lib/paper-auth";
+import { setProcessingProjection } from "@/lib/processing/runtime-ledger";
 
 export async function GET(
   _request: NextRequest,
@@ -81,12 +82,20 @@ export async function POST(
 
   const { filePath } = await saveUploadedFile(file);
 
-  await prisma.paper.update({
-    where: { id: paper.id },
-    data: {
-      filePath,
-      processingStatus: "EXTRACTING_TEXT",
-    },
+  await prisma.$transaction(async (tx) => {
+    await tx.paper.update({
+      where: { id: paper.id },
+      data: { filePath },
+    });
+    await setProcessingProjection(
+      paper.id,
+      {
+        processingStatus: "EXTRACTING_TEXT",
+        processingStep: null,
+        processingStartedAt: null,
+      },
+      tx,
+    );
   });
 
   processingQueue.enqueue(paper.id);

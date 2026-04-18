@@ -1,6 +1,13 @@
 import { prisma } from "@/lib/prisma";
 import { runTextExtraction, runAutoProcessPipeline, runDeferredSteps } from "@/lib/llm/auto-process";
 import { notifyPaperProcessed, maybeRunTagMaintenance } from "@/lib/tags/maintenance";
+import {
+  createProcessingRun,
+  finishProcessingRun,
+  getLatestActiveRunForPaper,
+  reconcileProcessingRuntime,
+  setProcessingProjection,
+} from "@/lib/processing/runtime-ledger";
 
 const STALL_THRESHOLD_MS = 5 * 60 * 1000; // 5 minutes
 const MAX_CONCURRENT = 3; // Process up to N papers simultaneously
@@ -17,22 +24,30 @@ export class CancelledError extends Error {
 export class ProcessingQueue {
   private queue: string[] = [];
   private processing = new Map<string, AbortController>();
-  private initialized = false;
+  private initializationPromise: Promise<void> | null = null;
   private runningDeferred = false;
   private batchFlushTimer: ReturnType<typeof setTimeout> | null = null;
   private batchPending: string[] = []; // Papers waiting to be flushed to batch API
+
+  async ensureInitialized(): Promise<void> {
+    if (!this.initializationPromise) {
+      this.initializationPromise = this.recoverStalled().catch((error) => {
+        this.initializationPromise = null;
+        throw error;
+      });
+    }
+
+    return this.initializationPromise;
+  }
 
   /**
    * Add a paper to the processing queue (deduped).
    * When many papers arrive in a burst, auto-routes to the Batch API (50% cheaper).
    */
   enqueue(paperId: string): void {
-    if (!this.initialized) {
-      this.initialized = true;
-      this.recoverStalled().catch((e) =>
+    this.ensureInitialized().catch((e) =>
         console.error("[queue] Stall recovery failed:", e)
       );
-    }
 
     // Dedupe: don't add if already queued or currently processing
     if (this.processing.has(paperId) || this.queue.includes(paperId) || this.batchPending.includes(paperId)) {
@@ -121,13 +136,10 @@ export class ProcessingQueue {
     if (idx !== -1) {
       this.queue.splice(idx, 1);
       console.log(`[queue] Removed ${paperId} from queue`);
-      await prisma.paper.update({
-        where: { id: paperId },
-        data: {
-          processingStatus: "FAILED",
-          processingStep: null,
-          processingStartedAt: null,
-        },
+      await setProcessingProjection(paperId, {
+        processingStatus: "FAILED",
+        processingStep: null,
+        processingStartedAt: null,
       });
       return true;
     }
@@ -188,6 +200,7 @@ export class ProcessingQueue {
   }
 
   private async processPaper(paperId: string, signal: AbortSignal): Promise<void> {
+    let processingRunId: string | null = null;
     try {
       if (signal.aborted) throw new CancelledError(paperId);
 
@@ -201,21 +214,35 @@ export class ProcessingQueue {
         return;
       }
 
+      const requiresTextExtraction = Boolean(paper.filePath && !paper.fullText);
+      const run = await createProcessingRun({
+        paperId,
+        trigger: "queue",
+        processingStatus: requiresTextExtraction
+          ? "EXTRACTING_TEXT"
+          : paper.processingStatus,
+        processingStep: requiresTextExtraction ? "extracting_text" : null,
+        metadata: {
+          source: "queue",
+        },
+      });
+      processingRunId = run.id;
+
       // Step 1: Extract text if needed (has file but no fullText)
-      if (paper.filePath && !paper.fullText) {
+      if (requiresTextExtraction) {
         if (signal.aborted) throw new CancelledError(paperId);
         try {
-          await runTextExtraction(paperId);
+          await runTextExtraction(paperId, { processingRunId });
         } catch (e) {
           if (signal.aborted) throw new CancelledError(paperId);
           console.error(`[queue] Text extraction failed for ${paperId}:`, e);
-          await prisma.paper.update({
-            where: { id: paperId },
-            data: {
-              processingStatus: "FAILED",
-              processingStep: null,
-              processingStartedAt: null,
-            },
+          await finishProcessingRun({
+            paperId,
+            processingRunId,
+            processingStatus: "FAILED",
+            runStatus: "FAILED",
+            activeStepStatus: "FAILED",
+            error: e instanceof Error ? e.message : String(e),
           });
           return;
         }
@@ -231,13 +258,12 @@ export class ProcessingQueue {
 
       if (!updated?.fullText && !updated?.abstract) {
         console.error(`[queue] No text available for ${paperId}, skipping LLM pipeline`);
-        await prisma.paper.update({
-          where: { id: paperId },
-          data: {
-            processingStatus: "FAILED",
-            processingStep: null,
-            processingStartedAt: null,
-          },
+        await finishProcessingRun({
+          paperId,
+          processingRunId,
+          processingStatus: "FAILED",
+          runStatus: "FAILED",
+          error: "No text available for processing",
         });
         return;
       }
@@ -251,7 +277,14 @@ export class ProcessingQueue {
       if (essentialOnly) {
         console.log(`[queue] Large backlog (${backlogSize}), running essential-only for ${paperId}`);
       }
-      await runAutoProcessPipeline({ paperId, skipExtract, signal, essentialOnly });
+      await runAutoProcessPipeline({
+        paperId,
+        skipExtract,
+        signal,
+        essentialOnly,
+        processingRunId,
+        trigger: "queue",
+      });
       notifyPaperProcessed();
 
       // Non-blocking: extract figures from all available sources
@@ -275,13 +308,29 @@ export class ProcessingQueue {
         console.error(`[queue] Pipeline failed for ${paperId}:`, e);
       }
       try {
-        await prisma.paper.update({
-          where: { id: paperId },
-          data: {
-            processingStatus: "FAILED",
-            processingStep: null,
-            processingStartedAt: null,
-          },
+        if (processingRunId) {
+          const activeRun = await getLatestActiveRunForPaper(paperId);
+          if (activeRun?.id === processingRunId) {
+            await finishProcessingRun({
+              paperId,
+              processingRunId,
+              processingStatus: "FAILED",
+              runStatus: cancelled ? "CANCELLED" : "FAILED",
+              activeStepStatus: cancelled ? "CANCELLED" : "FAILED",
+              error: cancelled
+                ? `Processing cancelled for ${paperId}`
+                : e instanceof Error
+                  ? e.message
+                  : String(e),
+            });
+            return;
+          }
+        }
+
+        await setProcessingProjection(paperId, {
+          processingStatus: "FAILED",
+          processingStep: null,
+          processingStartedAt: null,
         });
       } catch {
         // Paper may have been deleted
@@ -290,78 +339,35 @@ export class ProcessingQueue {
   }
 
   /**
-   * Find papers stuck in a non-terminal status with stale processingStartedAt
-   * and re-enqueue them. Called automatically on first enqueue().
+   * Reconcile persisted runtime state after restart and re-enqueue any recovered papers.
+   * Called automatically on first enqueue and on the persisted status route.
    */
   async recoverStalled(): Promise<void> {
-    const stallCutoff = new Date(Date.now() - STALL_THRESHOLD_MS);
-
-    const stalledPapers = await prisma.paper.findMany({
-      where: {
-        processingStatus: {
-          notIn: ["COMPLETED", "FAILED", "PENDING", "NEEDS_DEFERRED", "NO_PDF", "BATCH_PROCESSING"],
-        },
-        processingStartedAt: {
-          lt: stallCutoff,
-        },
-      },
-      select: { id: true, processingStatus: true, processingStep: true },
+    const recovery = await reconcileProcessingRuntime({
+      stallThresholdMs: STALL_THRESHOLD_MS,
     });
 
-    const legacyStuck = await prisma.paper.findMany({
-      where: {
-        processingStatus: {
-          notIn: ["COMPLETED", "FAILED", "PENDING", "NEEDS_DEFERRED", "NO_PDF", "BATCH_PROCESSING"],
-        },
-        processingStartedAt: null,
-      },
-      select: { id: true, processingStatus: true, processingStep: true },
-    });
-
-    // Also recover PENDING papers that have an abstract but were never enqueued
-    // (e.g., PDF download failed silently before the enqueue-on-abstract fix)
-    const abandonedPending = await prisma.paper.findMany({
-      where: {
-        processingStatus: "PENDING",
-        abstract: { not: null },
-      },
-      select: { id: true },
-      take: 200, // Process in chunks to avoid overwhelming the queue
-    });
-
-    const allStalled = [...stalledPapers, ...legacyStuck];
-
-    if (allStalled.length > 0) {
+    if (recovery.recoveredPaperIds.length > 0) {
       console.log(
-        `[queue] Recovering ${allStalled.length} stalled papers`,
+        `[queue] Recovering ${recovery.recoveredPaperIds.length} stalled papers`,
       );
 
-      for (const paper of allStalled) {
-        await prisma.paper.update({
-          where: { id: paper.id },
-          data: {
-            processingStep: null,
-            processingStartedAt: null,
-          },
-        });
-
+      for (const paperId of recovery.recoveredPaperIds) {
         if (
-          !this.queue.includes(paper.id)
-          && !this.processing.has(paper.id)
-          && !this.batchPending.includes(paper.id)
+          !this.queue.includes(paperId)
+          && !this.processing.has(paperId)
+          && !this.batchPending.includes(paperId)
         ) {
-          this.queue.push(paper.id);
+          this.queue.push(paperId);
         }
       }
 
-      // Kick off processing for recovered papers
       this.fillSlots();
     }
 
-    // Recover abandoned PENDING papers (have abstract, never enqueued)
-    if (abandonedPending.length > 0) {
-      console.log(`[queue] Found ${abandonedPending.length} abandoned PENDING papers with abstracts, routing to batch`);
-      const ids = abandonedPending.map(p => p.id);
+    if (recovery.abandonedPendingIds.length > 0) {
+      console.log(`[queue] Found ${recovery.abandonedPendingIds.length} abandoned PENDING papers with abstracts, routing to batch`);
+      const ids = recovery.abandonedPendingIds;
       // Chunk into batches of 100 papers to avoid memory/API limits
       const CHUNK_SIZE = 100;
       for (let i = 0; i < ids.length; i += CHUNK_SIZE) {

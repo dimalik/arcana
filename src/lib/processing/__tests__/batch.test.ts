@@ -29,6 +29,19 @@ vi.mock("../../references/persist", () => ({
   persistExtractedReferences: vi.fn(),
 }));
 
+vi.mock("../../llm/provider", () => ({
+  withLlmContext: vi.fn((_: unknown, fn: () => unknown) => fn()),
+}));
+
+vi.mock("../../processing/runtime-ledger", () => ({
+  getLatestActiveRunsForPapers: vi.fn().mockResolvedValue(
+    new Map([
+      ["paper-1", "run-paper-1"],
+      ["paper-2", "run-paper-2"],
+    ]),
+  ),
+}));
+
 import { prisma } from "../../prisma";
 import { extractReferenceCandidates } from "../../references/extraction";
 import { persistExtractedReferences } from "../../references/persist";

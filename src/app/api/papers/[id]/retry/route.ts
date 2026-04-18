@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { processingQueue } from "@/lib/processing/queue";
 import { requireUserId } from "@/lib/paper-auth";
+import { setProcessingProjection } from "@/lib/processing/runtime-ledger";
 
 export async function POST(
   _request: NextRequest,
@@ -16,16 +17,15 @@ export async function POST(
   }
 
   // Clear stale step tracking and re-enqueue from current state
-  await prisma.paper.update({
-    where: { id },
-    data: {
-      processingStep: null,
-      processingStartedAt: null,
-      // If FAILED, reset to allow reprocessing; otherwise keep current status
-      ...(paper.processingStatus === "FAILED"
-        ? { processingStatus: paper.fullText ? "TEXT_EXTRACTED" : "EXTRACTING_TEXT" }
-        : {}),
-    },
+  await setProcessingProjection(id, {
+    processingStatus:
+      paper.processingStatus === "FAILED"
+        ? paper.fullText
+          ? "TEXT_EXTRACTED"
+          : "EXTRACTING_TEXT"
+        : paper.processingStatus,
+    processingStep: null,
+    processingStartedAt: null,
   });
 
   processingQueue.enqueue(id);

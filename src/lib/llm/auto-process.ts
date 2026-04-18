@@ -19,6 +19,13 @@ import {
 } from "@/lib/citations/citation-mention-service";
 import { createRelationAssertion } from "@/lib/assertions/relation-assertion-service";
 import { projectLegacyRelation } from "@/lib/assertions/legacy-projection";
+import {
+  clearProcessingStep,
+  createProcessingRun,
+  finishProcessingRun,
+  setProcessingProjection,
+  startProcessingStep,
+} from "@/lib/processing/runtime-ledger";
 
 
 type ProcessingStep = "extracting_text" | "metadata" | "summarize" | "categorize" | "linking" | "contradictions" | "references" | "contexts" | "distill";
@@ -35,13 +42,31 @@ type ProcessingLlmStep =
 /**
  * Update the current processing step and timestamp in the DB.
  */
-async function setStep(paperId: string, step: ProcessingStep | null) {
-  await prisma.paper.update({
-    where: { id: paperId },
-    data: {
-      processingStep: step,
-      processingStartedAt: step ? new Date() : null,
-    },
+async function setStep(
+  paperId: string,
+  step: ProcessingStep | null,
+  options?: {
+    processingStatus: string;
+    processingRunId?: string;
+  },
+) {
+  if (options?.processingRunId && step) {
+    await startProcessingStep({
+      paperId,
+      processingRunId: options.processingRunId,
+      step,
+      processingStatus: options.processingStatus,
+      metadata: {
+        source: "auto_process",
+      },
+    });
+    return;
+  }
+
+  await setProcessingProjection(paperId, {
+    processingStatus: options?.processingStatus ?? "PENDING",
+    processingStep: step,
+    processingStartedAt: step ? new Date() : null,
   });
 }
 
@@ -50,6 +75,7 @@ async function runProcessingLlmCall(
     paperId: string;
     userId?: string | null;
     step: ProcessingLlmStep;
+    processingRunId?: string;
     metadata?: Record<string, unknown>;
   },
   params: Parameters<typeof generateLLMResponse>[0],
@@ -63,6 +89,9 @@ async function runProcessingLlmCall(
         source: "auto_process",
         paperId: context.paperId,
         step: context.step,
+        ...(context.processingRunId
+          ? { processingRunId: context.processingRunId }
+          : {}),
         ...context.metadata,
       },
     },
@@ -218,7 +247,10 @@ export async function resolveModelConfig(body: { provider?: string; modelId?: st
  * Extract text from a PDF file and update the paper record.
  * Consolidates duplicated logic from import routes.
  */
-export async function runTextExtraction(paperId: string): Promise<void> {
+export async function runTextExtraction(
+  paperId: string,
+  options?: { processingRunId?: string },
+): Promise<void> {
   const paper = await prisma.paper.findUnique({
     where: { id: paperId },
     select: { filePath: true, fullText: true },
@@ -228,11 +260,11 @@ export async function runTextExtraction(paperId: string): Promise<void> {
   if (paper.fullText) return; // Already has text
   if (!paper.filePath) throw new Error(`No file path for paper: ${paperId}`);
 
-  await setStep(paperId, "extracting_text");
-  await prisma.paper.update({
-    where: { id: paperId },
-    data: { processingStatus: "EXTRACTING_TEXT" },
-  });
+  if (!options?.processingRunId) {
+    await setStep(paperId, "extracting_text", {
+      processingStatus: "EXTRACTING_TEXT",
+    });
+  }
 
   const { extractTextFromPdf } = await import("@/lib/pdf/parser");
   const text = await extractTextFromPdf(paper.filePath);
@@ -241,8 +273,22 @@ export async function runTextExtraction(paperId: string): Promise<void> {
     where: { id: paperId },
     data: {
       fullText: text,
-      processingStatus: "TEXT_EXTRACTED",
     },
+  });
+
+  if (options?.processingRunId) {
+    await clearProcessingStep({
+      paperId,
+      processingRunId: options.processingRunId,
+      processingStatus: "TEXT_EXTRACTED",
+    });
+    return;
+  }
+
+  await setProcessingProjection(paperId, {
+    processingStatus: "TEXT_EXTRACTED",
+    processingStep: null,
+    processingStartedAt: null,
   });
 }
 
@@ -263,8 +309,19 @@ async function chunkedSummarize(params: {
   proxyConfig?: ProxyConfig;
   signal?: AbortSignal;
   userContextPreamble?: string;
+  processingRunId?: string;
 }): Promise<string> {
-  const { paperId, userId, fullText, provider, modelId, proxyConfig, signal, userContextPreamble } = params;
+  const {
+    paperId,
+    userId,
+    fullText,
+    provider,
+    modelId,
+    proxyConfig,
+    signal,
+    userContextPreamble,
+    processingRunId,
+  } = params;
   const chunkSize = MAX_PAPER_CHARS;
   const overlap = 2000;
 
@@ -276,6 +333,7 @@ async function chunkedSummarize(params: {
         paperId,
         userId,
         step: "summarize",
+        processingRunId,
         metadata: { substep: "single_pass" },
       },
       { provider, modelId, system, prompt, proxyConfig },
@@ -313,6 +371,7 @@ Be thorough and specific — include every number, model name, and dataset name 
         paperId,
         userId,
         step: "summarize",
+        processingRunId,
         metadata: {
           substep: "map",
           chunkIndex: i + 1,
@@ -345,6 +404,7 @@ Be thorough and specific — include every number, model name, and dataset name 
           paperId,
           userId,
           step: "summarize",
+          processingRunId,
           metadata: {
             substep: "condense",
             chunkBatchStart: i + 1,
@@ -375,6 +435,7 @@ Be thorough and specific — include every number, model name, and dataset name 
       paperId,
       userId,
       step: "summarize",
+      processingRunId,
       metadata: { substep: "synthesize" },
     },
     {
@@ -410,8 +471,18 @@ export async function runAutoProcessPipeline(opts: {
   /** When true, skip essential steps and only run deferred steps (linking, contradictions,
    *  references, contexts, distill). Used when picking up NEEDS_DEFERRED papers. */
   deferredOnly?: boolean;
+  processingRunId?: string;
+  trigger?: string;
 }) {
-  const { paperId, skipExtract, signal, essentialOnly, deferredOnly } = opts;
+  const {
+    paperId,
+    skipExtract,
+    signal,
+    essentialOnly,
+    deferredOnly,
+    trigger,
+  } = opts;
+  let { processingRunId } = opts;
 
   function checkCancelled() {
     if (signal?.aborted) {
@@ -424,10 +495,22 @@ export async function runAutoProcessPipeline(opts: {
     defaultModel = await getDefaultModel();
   } catch (e) {
     console.error("[auto-process] No LLM provider available, skipping:", e);
-    await prisma.paper.update({
-      where: { id: paperId },
-      data: { processingStatus: "FAILED", processingStep: null, processingStartedAt: null },
-    });
+    if (processingRunId) {
+      await finishProcessingRun({
+        paperId,
+        processingRunId,
+        processingStatus: "FAILED",
+        runStatus: "FAILED",
+        activeStepStatus: "FAILED",
+        error: e instanceof Error ? e.message : String(e),
+      }).catch(() => {});
+    } else {
+      await setProcessingProjection(paperId, {
+        processingStatus: "FAILED",
+        processingStep: null,
+        processingStartedAt: null,
+      });
+    }
     throw e;
   }
 
@@ -446,6 +529,7 @@ export async function runAutoProcessPipeline(opts: {
     filePath: true,
     fullText: true,
     entityId: true,
+    processingStatus: true,
   } as const;
 
   const initialPaper = await prisma.paper.findUnique({
@@ -457,13 +541,40 @@ export async function runAutoProcessPipeline(opts: {
   }
   let paper = initialPaper;
 
+  const ownsRunLifecycle = !processingRunId;
+  if (ownsRunLifecycle) {
+    const createdRun = await createProcessingRun({
+      paperId,
+      trigger: trigger ?? (deferredOnly ? "deferred" : "direct"),
+      processingStatus: paper.processingStatus,
+      metadata: {
+        source: deferredOnly ? "deferred" : "auto_process",
+      },
+    });
+    processingRunId = createdRun.id;
+  }
+
+  const baseProcessingStatus = paper.processingStatus;
+
   const text = paper.fullText || paper.abstract || "";
   if (!text) {
     console.error("[auto-process] No text available for paper:", paperId);
-    await prisma.paper.update({
-      where: { id: paperId },
-      data: { processingStatus: "FAILED", processingStep: null, processingStartedAt: null },
-    });
+    if (processingRunId) {
+      await finishProcessingRun({
+        paperId,
+        processingRunId,
+        processingStatus: "FAILED",
+        runStatus: "FAILED",
+        activeStepStatus: "FAILED",
+        error: "No text available for paper",
+      }).catch(() => {});
+    } else {
+      await setProcessingProjection(paperId, {
+        processingStatus: "FAILED",
+        processingStep: null,
+        processingStartedAt: null,
+      });
+    }
     throw new Error(`No text available for paper: ${paperId}`);
   }
 
@@ -499,11 +610,14 @@ export async function runAutoProcessPipeline(opts: {
   if (!skipExtract && !deferredOnly) {
     try {
       checkCancelled();
-      await setStep(paperId, "metadata");
+      await setStep(paperId, "metadata", {
+        processingStatus: baseProcessingStatus,
+        processingRunId,
+      });
       console.log("[auto-process] Extracting metadata for", paperId);
       const { system, prompt } = buildPrompt("extract", truncated);
       const result = await runProcessingLlmCall(
-        { paperId, userId: paper.userId, step: "extract" },
+        { paperId, userId: paper.userId, step: "extract", processingRunId },
         { provider, modelId, system, prompt, maxTokens: 2000, proxyConfig },
       );
 
@@ -566,7 +680,10 @@ export async function runAutoProcessPipeline(opts: {
   // Step 2: Summarize (uses chunked map-reduce for long papers)
   if (!deferredOnly) try {
     checkCancelled();
-    await setStep(paperId, "summarize");
+    await setStep(paperId, "summarize", {
+      processingStatus: baseProcessingStatus,
+      processingRunId,
+    });
     console.log("[auto-process] Summarizing", paperId);
     const result = await chunkedSummarize({
       paperId,
@@ -577,6 +694,7 @@ export async function runAutoProcessPipeline(opts: {
       proxyConfig,
       signal,
       userContextPreamble,
+      processingRunId,
     });
 
     await prisma.promptResult.create({
@@ -601,18 +719,21 @@ export async function runAutoProcessPipeline(opts: {
   // Step 3: Categorize + auto-tag (with duplicate prevention + score-aware hints)
   if (!deferredOnly) try {
     checkCancelled();
-    await setStep(paperId, "categorize");
+    await setStep(paperId, "categorize", {
+      processingStatus: baseProcessingStatus,
+      processingRunId,
+    });
     console.log("[auto-process] Categorizing", paperId);
     const existingTags = await getExistingTagNames();
     const { goodTags, overusedTags } = await getScoredTagHints();
-    const { system, prompt } = buildPrompt("categorize", truncated, undefined, {
-      existingTags: goodTags.length > 0 ? goodTags : existingTags,
-      overusedTags,
-    });
-    const result = await runProcessingLlmCall(
-      { paperId, userId: paper.userId, step: "categorize" },
-      { provider, modelId, system, prompt, maxTokens: 1000, proxyConfig },
-    );
+      const { system, prompt } = buildPrompt("categorize", truncated, undefined, {
+        existingTags: goodTags.length > 0 ? goodTags : existingTags,
+        overusedTags,
+      });
+      const result = await runProcessingLlmCall(
+        { paperId, userId: paper.userId, step: "categorize", processingRunId },
+        { provider, modelId, system, prompt, maxTokens: 1000, proxyConfig },
+      );
 
     await prisma.promptResult.create({
       data: {
@@ -649,16 +770,22 @@ export async function runAutoProcessPipeline(opts: {
   // Deferred steps (linking, contradictions, references, contexts, distill) run later
   // when the queue drains via runDeferredSteps().
   if (essentialOnly) {
-    await prisma.paper.update({
-      where: { id: paperId },
-      data: {
+    if (processingRunId) {
+      await finishProcessingRun({
+        paperId,
+        processingRunId,
+        processingStatus: "NEEDS_DEFERRED",
+        runStatus: "COMPLETED",
+      });
+    } else {
+      await setProcessingProjection(paperId, {
         processingStatus: "NEEDS_DEFERRED",
         processingStep: null,
         processingStartedAt: null,
-      },
-    });
+      });
+    }
     console.log("[auto-process] Essential pipeline completed for", paperId, "(deferred steps pending)");
-    return;
+    return { finalProcessingStatus: "NEEDS_DEFERRED" as const };
   }
 
   // Step 4: Link related papers
@@ -680,7 +807,10 @@ export async function runAutoProcessPipeline(opts: {
 
     if (otherPapers.length > 0) {
       checkCancelled();
-      await setStep(paperId, "linking");
+      await setStep(paperId, "linking", {
+        processingStatus: baseProcessingStatus,
+        processingRunId,
+      });
       console.log("[auto-process] Linking related papers for", paperId);
 
       // Re-fetch paper to get summary/categories from prior steps
@@ -721,7 +851,7 @@ export async function runAutoProcessPipeline(opts: {
 
       const { system } = buildPrompt("linkPapers", "");
       const result = await runProcessingLlmCall(
-        { paperId, userId: paper.userId, step: "linkPapers" },
+        { paperId, userId: paper.userId, step: "linkPapers", processingRunId },
         { provider, modelId, system, prompt: linkPrompt, maxTokens: 2000, proxyConfig },
       );
 
@@ -803,7 +933,10 @@ export async function runAutoProcessPipeline(opts: {
 
     if (relations.length > 0) {
       checkCancelled();
-      await setStep(paperId, "contradictions");
+      await setStep(paperId, "contradictions", {
+        processingStatus: baseProcessingStatus,
+        processingRunId,
+      });
       console.log("[auto-process] Detecting contradictions for", paperId);
 
       const relatedPaperIds = relations.map((r) => r.targetPaperId);
@@ -836,7 +969,12 @@ export async function runAutoProcessPipeline(opts: {
       const contradictionPrompt = `NEW PAPER:\n${newPaperInfo}\n\n---\n\nRELATED PAPERS:\n${relatedList}`;
       const { system } = buildPrompt("detectContradictions", "");
       const result = await runProcessingLlmCall(
-        { paperId, userId: paper.userId, step: "detectContradictions" },
+        {
+          paperId,
+          userId: paper.userId,
+          step: "detectContradictions",
+          processingRunId,
+        },
         { provider, modelId, system, prompt: contradictionPrompt, maxTokens: 3000, proxyConfig },
       );
 
@@ -861,7 +999,10 @@ export async function runAutoProcessPipeline(opts: {
   if (paper.fullText) {
     try {
       checkCancelled();
-      await setStep(paperId, "references");
+      await setStep(paperId, "references", {
+        processingStatus: baseProcessingStatus,
+        processingRunId,
+      });
       console.log("[auto-process] Extracting references for", paperId);
       const extractedReferences = await withLlmContext(
         {
@@ -872,6 +1013,7 @@ export async function runAutoProcessPipeline(opts: {
             source: "auto_process",
             paperId,
             step: "extractReferences",
+            ...(processingRunId ? { processingRunId } : {}),
           },
         },
         () =>
@@ -953,7 +1095,10 @@ export async function runAutoProcessPipeline(opts: {
 
       if (existingRefs.length > 0) {
         checkCancelled();
-        await setStep(paperId, "contexts");
+        await setStep(paperId, "contexts", {
+          processingStatus: baseProcessingStatus,
+          processingRunId,
+        });
         console.log("[auto-process] Extracting citation contexts for", paperId);
 
         let mentionInputs: CitationMentionInput[] = [];
@@ -990,7 +1135,12 @@ export async function runAutoProcessPipeline(opts: {
             const { system } = buildPrompt("extractCitationContexts", "");
             const ctxPrompt = `Here is the body text of the paper:\n\n${bodyText}`;
             const ctxResult = await runProcessingLlmCall(
-              { paperId, userId: paper.userId, step: "extractCitationContexts" },
+              {
+                paperId,
+                userId: paper.userId,
+                step: "extractCitationContexts",
+                processingRunId,
+              },
               {
                 provider,
                 modelId,
@@ -1047,7 +1197,10 @@ export async function runAutoProcessPipeline(opts: {
   // Step: Distill insights for Mind Palace
   try {
     checkCancelled();
-    await setStep(paperId, "distill");
+    await setStep(paperId, "distill", {
+      processingStatus: baseProcessingStatus,
+      processingRunId,
+    });
     console.log("[auto-process] Distilling insights for", paperId);
 
     const existingRooms = await prisma.mindPalaceRoom.findMany({
@@ -1057,7 +1210,7 @@ export async function runAutoProcessPipeline(opts: {
 
     const { system: distillSystem, prompt: distillPrompt } = buildDistillPrompt(truncated, roomNames);
     const distillResult = await runProcessingLlmCall(
-      { paperId, userId: paper.userId, step: "distill" },
+      { paperId, userId: paper.userId, step: "distill", processingRunId },
       {
         provider,
         modelId,
@@ -1126,17 +1279,23 @@ export async function runAutoProcessPipeline(opts: {
     console.error("[auto-process] Distill insights failed:", e);
   }
 
-  // Mark completed — clear step tracking
-  await prisma.paper.update({
-    where: { id: paperId },
-    data: {
+  if (processingRunId) {
+    await finishProcessingRun({
+      paperId,
+      processingRunId,
+      processingStatus: "COMPLETED",
+      runStatus: "COMPLETED",
+    });
+  } else {
+    await setProcessingProjection(paperId, {
       processingStatus: "COMPLETED",
       processingStep: null,
       processingStartedAt: null,
-    },
-  });
+    });
+  }
 
   console.log("[auto-process] Pipeline completed for", paperId);
+  return { finalProcessingStatus: "COMPLETED" as const };
 }
 
 /**
@@ -1162,19 +1321,50 @@ export async function runDeferredSteps(): Promise<number> {
     for (const paper of papers) {
       try {
         const skipExtract = paper.sourceType === "ARXIV" || paper.sourceType === "OPENREVIEW";
+        const run = await createProcessingRun({
+          paperId: paper.id,
+          trigger: "deferred",
+          processingStatus: "NEEDS_DEFERRED",
+          metadata: {
+            source: "deferred",
+          },
+        });
         await runAutoProcessPipeline({
           paperId: paper.id,
           skipExtract,
           deferredOnly: true,
+          processingRunId: run.id,
+          trigger: "deferred",
         });
         totalCompleted++;
       } catch (e) {
         console.error(`[auto-process] Deferred processing failed for ${paper.id}:`, e);
         // Mark as failed so we don't loop forever
-        await prisma.paper.update({
-          where: { id: paper.id },
-          data: { processingStatus: "FAILED", processingStep: null, processingStartedAt: null },
-        }).catch(() => {});
+        const activeRun = await prisma.processingRun.findFirst({
+          where: {
+            paperId: paper.id,
+            status: "RUNNING",
+          },
+          orderBy: { startedAt: "desc" },
+          select: { id: true },
+        }).catch(() => null);
+
+        if (activeRun) {
+          await finishProcessingRun({
+            paperId: paper.id,
+            processingRunId: activeRun.id,
+            processingStatus: "FAILED",
+            runStatus: "FAILED",
+            activeStepStatus: "FAILED",
+            error: e instanceof Error ? e.message : String(e),
+          }).catch(() => {});
+        } else {
+          await setProcessingProjection(paper.id, {
+            processingStatus: "FAILED",
+            processingStep: null,
+            processingStartedAt: null,
+          }).catch(() => {});
+        }
       }
     }
   }

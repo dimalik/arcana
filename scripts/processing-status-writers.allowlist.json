@@ -12,6 +12,7 @@
       "src/app/api/papers/import/arxiv/route.ts",
       "src/app/api/papers/import/openreview/route.ts",
       "src/app/api/papers/import/url/route.ts",
+      "src/app/api/papers/[id]/references/import/route.ts",
       "src/app/api/papers/route.ts",
       "src/app/api/research/import/route.ts",
       "src/app/api/search/import/route.ts",
@@ -20,18 +21,7 @@
       "src/lib/research/step-executor.ts"
     ],
     "state_transition_writers": [
-      "src/app/api/papers/[id]/cancel/route.ts",
-      "src/app/api/papers/[id]/file/route.ts",
-      "src/app/api/papers/[id]/llm/summarize/route.ts",
-      "src/app/api/papers/[id]/locate-pdf/route.ts",
-      "src/app/api/papers/[id]/references/import/route.ts",
-      "src/app/api/papers/[id]/reprocess/route.ts",
-      "src/app/api/papers/[id]/retry/route.ts",
-      "src/app/api/papers/maintenance/batch/route.ts",
-      "src/app/api/papers/maintenance/route.ts",
-      "src/lib/llm/auto-process.ts",
-      "src/lib/processing/batch.ts",
-      "src/lib/processing/queue.ts"
+      "src/lib/processing/runtime-ledger.ts"
     ],
     "repair_and_recovery_scripts": [
       "scripts/recover-papers-from-uploads.ts"

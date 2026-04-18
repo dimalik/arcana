@@ -52,6 +52,12 @@ const hoisted = vi.hoisted(() => ({
   loadGrobidConfig: vi.fn(() => ({ serverUrl: "http://127.0.0.1:8070" })),
   checkGrobidHealth: vi.fn(),
   cleanJsonResponse: vi.fn((text: string) => text),
+  createProcessingRun: vi.fn().mockResolvedValue({ id: "run-auto" }),
+  finishProcessingRun: vi.fn(),
+  setProcessingProjection: vi.fn(),
+  startProcessingStep: vi.fn(),
+  clearProcessingStep: vi.fn(),
+  getLatestActiveRunsForPapers: vi.fn().mockResolvedValue(new Map([["paper-batch", "run-batch"]])),
 }));
 
 vi.mock("ai", () => ({
@@ -175,6 +181,15 @@ vi.mock("@/lib/assertions/relation-assertion-service", () => ({
 
 vi.mock("@/lib/assertions/legacy-projection", () => ({
   projectLegacyRelation: hoisted.projectLegacyRelation,
+}));
+
+vi.mock("@/lib/processing/runtime-ledger", () => ({
+  createProcessingRun: hoisted.createProcessingRun,
+  finishProcessingRun: hoisted.finishProcessingRun,
+  setProcessingProjection: hoisted.setProcessingProjection,
+  startProcessingStep: hoisted.startProcessingStep,
+  clearProcessingStep: hoisted.clearProcessingStep,
+  getLatestActiveRunsForPapers: hoisted.getLatestActiveRunsForPapers,
 }));
 
 import { runAutoProcessPipeline } from "../../llm/auto-process";

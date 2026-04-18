@@ -329,6 +329,8 @@ model Paper {
   referenceEntries   ReferenceEntry[]    @relation("ReferenceEntries")
   citationMentions   CitationMention[]   @relation("CitationMentions")
   derivedAssertions  RelationAssertion[] @relation("DerivedAssertions")
+  processingRuns     ProcessingRun[]
+  processingStepRuns ProcessingStepRun[]
 
   @@unique([userId, entityId])
 }
@@ -1857,6 +1859,43 @@ model AgentMemory {
 }
 
 // ── Batch Processing ───────────────────────────────────────────────
+
+model ProcessingRun {
+  id           String   @id @default(uuid())
+  paperId      String
+  trigger      String
+  status       String   @default("RUNNING") // RUNNING | COMPLETED | FAILED | CANCELLED
+  metadata     String?
+  startedAt    DateTime @default(now())
+  completedAt  DateTime?
+  error        String?
+  reconciledAt DateTime?
+
+  paper  Paper              @relation(fields: [paperId], references: [id], onDelete: Cascade)
+  steps  ProcessingStepRun[]
+
+  @@index([paperId, status])
+  @@index([startedAt])
+}
+
+model ProcessingStepRun {
+  id              String   @id @default(uuid())
+  processingRunId String
+  paperId         String
+  step            String
+  status          String   @default("RUNNING") // RUNNING | COMPLETED | FAILED | CANCELLED
+  metadata        String?
+  startedAt       DateTime @default(now())
+  completedAt     DateTime?
+  error           String?
+
+  processingRun ProcessingRun @relation(fields: [processingRunId], references: [id], onDelete: Cascade)
+  paper         Paper         @relation(fields: [paperId], references: [id], onDelete: Cascade)
+
+  @@index([processingRunId, status])
+  @@index([processingRunId, step])
+  @@index([paperId, status])
+}
 
 model ProcessingBatch {
   id               String    @id @default(uuid())

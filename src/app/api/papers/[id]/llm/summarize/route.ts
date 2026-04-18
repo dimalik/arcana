@@ -5,6 +5,7 @@ import { buildPrompt, cleanJsonResponse } from "@/lib/llm/prompts";
 import { resolveModelConfig, getDefaultModel } from "@/lib/llm/auto-process";
 import { requireUserId } from "@/lib/paper-auth";
 import { getUserContext, buildUserContextPreamble } from "@/lib/llm/user-context";
+import { setProcessingProjection } from "@/lib/processing/runtime-ledger";
 
 export async function POST(
   request: NextRequest,
@@ -58,9 +59,20 @@ export async function POST(
     });
 
     // Also update paper summary
-    await prisma.paper.update({
-      where: { id },
-      data: { summary: result, processingStatus: "COMPLETED" },
+    await prisma.$transaction(async (tx) => {
+      await tx.paper.update({
+        where: { id },
+        data: { summary: result },
+      });
+      await setProcessingProjection(
+        id,
+        {
+          processingStatus: "COMPLETED",
+          processingStep: null,
+          processingStartedAt: null,
+        },
+        tx,
+      );
     });
 
     // Fire-and-forget: auto-categorize + tag after manual summarize

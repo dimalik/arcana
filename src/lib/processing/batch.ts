@@ -36,6 +36,12 @@ import {
 } from "@/lib/citations/citation-mention-service";
 import { resolveAndAssignTags, getExistingTagNames, getScoredTagHints } from "@/lib/tags/auto-tag";
 import { refreshTagScores } from "@/lib/tags/cleanup";
+import {
+  advanceBatchPhase,
+  completeBatchRuns,
+  createBatchProcessingRuns,
+  getLatestActiveRunsForPapers,
+} from "@/lib/processing/runtime-ledger";
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -70,6 +76,7 @@ async function runProcessingBatchLlmCall(
     paperId: string;
     userId?: string | null;
     step: "extractCitationContexts";
+    processingRunId?: string;
     metadata?: Record<string, unknown>;
   },
   params: Parameters<typeof generateLLMResponse>[0],
@@ -83,6 +90,9 @@ async function runProcessingBatchLlmCall(
         source: "batch",
         paperId: context.paperId,
         step: context.step,
+        ...(context.processingRunId
+          ? { processingRunId: context.processingRunId }
+          : {}),
         ...context.metadata,
       },
     },
@@ -760,6 +770,9 @@ export async function runCitationContextSidecarForPapers(
       userId: true,
     },
   });
+  const activeRunIds = await getLatestActiveRunsForPapers(
+    papers.map((paper) => paper.id),
+  );
 
   if (papers.length === 0) {
     return { grobidPapers: 0, llmFallbackPapers: 0, failedPapers: 0 };
@@ -791,6 +804,7 @@ export async function runCitationContextSidecarForPapers(
           paperId: paper.id,
           userId: paper.userId ?? undefined,
           step: "extractCitationContexts",
+          processingRunId: activeRunIds.get(paper.id),
           metadata: {
             fallback: "grobid_sidecar",
             mode: "batch_sidecar",
@@ -879,6 +893,9 @@ export async function createBatchJob(paperIds: string[]): Promise<{
 
   // Build Phase 1 requests
   const { requests, skippedForChunking } = await buildPhase1Requests(paperIds, config.modelId, config.proxyConfig);
+  const batchedPaperIds = paperIds.filter(
+    (paperId) => !skippedForChunking.includes(paperId),
+  );
 
   if (requests.length === 0) {
     throw new Error("No batch requests to submit — papers may already be processed or have no text");
@@ -891,23 +908,28 @@ export async function createBatchJob(paperIds: string[]): Promise<{
 
   // Record in DB
   const stepTypes = Array.from(new Set(requests.map(r => r.custom_id.split("--")[1])));
-  await prisma.processingBatch.create({
-    data: {
-      groupId,
-      anthropicBatchId,
-      phase: 1,
-      status: "SUBMITTED",
-      modelId: config.modelId,
-      paperIds: JSON.stringify(paperIds),
-      stepTypes: JSON.stringify(stepTypes),
-      requestCount: requests.length,
-    },
-  });
-
-  // Mark papers as batch-processing
-  await prisma.paper.updateMany({
-    where: { id: { in: paperIds } },
-    data: { processingStatus: "BATCH_PROCESSING", processingStep: "batch-phase-1" },
+  await prisma.$transaction(async (tx) => {
+    await tx.processingBatch.create({
+      data: {
+        groupId,
+        anthropicBatchId,
+        phase: 1,
+        status: "SUBMITTED",
+        modelId: config.modelId,
+        paperIds: JSON.stringify(batchedPaperIds),
+        stepTypes: JSON.stringify(stepTypes),
+        requestCount: requests.length,
+      },
+    });
+    await createBatchProcessingRuns(
+      batchedPaperIds,
+      {
+        groupId,
+        phase: 1,
+        modelId: config.modelId,
+      },
+      tx,
+    );
   });
 
   return { groupId, phase1BatchId: anthropicBatchId, requestCount: requests.length, skippedForChunking };
@@ -1042,10 +1064,7 @@ export async function pollBatch(batchDbId: string): Promise<{
       }
     } else {
       // All phases done — mark papers as COMPLETED
-      await prisma.paper.updateMany({
-        where: { id: { in: paperIds } },
-        data: { processingStatus: "COMPLETED", processingStep: null, processingStartedAt: null },
-      });
+      await completeBatchRuns(paperIds);
       console.log(`[batch] All phases complete for group ${batch.groupId}. ${paperIds.length} papers marked COMPLETED.`);
     }
 
@@ -1089,10 +1108,7 @@ export async function submitNextPhase(groupId: string, phase: number, paperIds: 
     if (phase === 2) {
       await submitNextPhase(groupId, 3, paperIds, modelId);
     } else {
-      await prisma.paper.updateMany({
-        where: { id: { in: paperIds } },
-        data: { processingStatus: "COMPLETED", processingStep: null, processingStartedAt: null },
-      });
+      await completeBatchRuns(paperIds);
     }
     return;
   }
@@ -1131,10 +1147,16 @@ export async function submitNextPhase(groupId: string, phase: number, paperIds: 
     console.log(`[batch] Phase ${phase} chunk ${ci + 1}/${chunks.length}: ${anthropicBatchId} (${chunk.length} requests)`);
   }
 
-  // Update paper step indicator
-  await prisma.paper.updateMany({
-    where: { id: { in: paperIds } },
-    data: { processingStep: `batch-phase-${phase}` },
+  await prisma.$transaction(async (tx) => {
+    await advanceBatchPhase(
+      paperIds,
+      {
+        groupId,
+        phase,
+        modelId,
+      },
+      tx,
+    );
   });
 }
 

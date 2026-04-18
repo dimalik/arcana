@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { findAndDownloadPdf } from "@/lib/import/pdf-finder";
 import { processingQueue } from "@/lib/processing/queue";
 import { requireUserId } from "@/lib/paper-auth";
+import { setProcessingProjection } from "@/lib/processing/runtime-ledger";
 
 /**
  * POST /api/papers/[id]/locate-pdf
@@ -56,13 +57,28 @@ export async function POST(
   // — the existing text is likely more reliable than PDF extraction
   const shouldProcess = !skipProcessing && !paper.fullText;
 
-  await prisma.paper.update({
-    where: { id: paper.id },
-    data: {
-      filePath: result.filePath,
-      ...(shouldProcess ? { processingStatus: "EXTRACTING_TEXT" } : {}),
-    },
-  });
+  if (shouldProcess) {
+    await prisma.$transaction(async (tx) => {
+      await tx.paper.update({
+        where: { id: paper.id },
+        data: { filePath: result.filePath },
+      });
+      await setProcessingProjection(
+        paper.id,
+        {
+          processingStatus: "EXTRACTING_TEXT",
+          processingStep: null,
+          processingStartedAt: null,
+        },
+        tx,
+      );
+    });
+  } else {
+    await prisma.paper.update({
+      where: { id: paper.id },
+      data: { filePath: result.filePath },
+    });
+  }
 
   if (shouldProcess) {
     processingQueue.enqueue(paper.id);

@@ -1,5 +1,7 @@
 import { getProxyConfig } from "../llm/proxy-settings";
+import { withLlmContext } from "../llm/provider";
 import { prisma } from "../prisma";
+import { getLatestActiveRunsForPapers } from "../processing/runtime-ledger";
 import { extractReferenceCandidates } from "./extraction";
 import { persistExtractedReferences } from "./persist";
 
@@ -23,6 +25,9 @@ export async function runHybridReferenceExtractionForPapers(
       fullText: true,
     },
   });
+  const activeRunIds = await getLatestActiveRunsForPapers(
+    papers.map((paper) => paper.id),
+  );
 
   let persistedPapers = 0;
   let grobidPapers = 0;
@@ -33,14 +38,30 @@ export async function runHybridReferenceExtractionForPapers(
     if (!paper.fullText) continue;
 
     try {
-      const extracted = await extractReferenceCandidates({
-        paperId: paper.id,
-        filePath: paper.filePath,
-        fullText: paper.fullText,
-        provider: "proxy",
-        modelId,
-        proxyConfig,
-      });
+      const extracted = await withLlmContext(
+        {
+          operation: "processing_extractReferences",
+          userId: paper.userId ?? undefined,
+          metadata: {
+            runtime: "processing",
+            source: "batch",
+            paperId: paper.id,
+            step: "extractReferences",
+            ...(activeRunIds.get(paper.id)
+              ? { processingRunId: activeRunIds.get(paper.id) }
+              : {}),
+          },
+        },
+        () =>
+          extractReferenceCandidates({
+            paperId: paper.id,
+            filePath: paper.filePath,
+            fullText: paper.fullText,
+            provider: "proxy",
+            modelId,
+            proxyConfig,
+          }),
+      );
       const attemptSummary = extracted.attempts
         .map((attempt) => {
           const parts = [

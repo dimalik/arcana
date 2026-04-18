@@ -18,6 +18,7 @@ const hoisted = vi.hoisted(() => ({
   withLlmContext: vi.fn((_: unknown, fn: () => unknown) => fn()),
   checkGrobidHealth: vi.fn(),
   loadGrobidConfig: vi.fn(),
+  getLatestActiveRunsForPapers: vi.fn().mockResolvedValue(new Map([["paper-3", "run-batch-3"]])),
 }));
 
 vi.mock("@/lib/prisma", () => ({
@@ -95,6 +96,13 @@ vi.mock("@/lib/tags/auto-tag", () => ({
 
 vi.mock("@/lib/tags/cleanup", () => ({
   refreshTagScores: vi.fn(),
+}));
+
+vi.mock("@/lib/processing/runtime-ledger", () => ({
+  advanceBatchPhase: vi.fn(),
+  completeBatchRuns: vi.fn(),
+  createBatchProcessingRuns: vi.fn(),
+  getLatestActiveRunsForPapers: hoisted.getLatestActiveRunsForPapers,
 }));
 
 import { prisma } from "@/lib/prisma";

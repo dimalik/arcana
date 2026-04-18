@@ -1,12 +1,16 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("@/lib/prisma", () => ({
+const hoisted = vi.hoisted(() => ({
   prisma: {
     paper: {
-      findMany: vi.fn(),
-      update: vi.fn(),
+      findUnique: vi.fn(),
     },
   },
+  reconcileProcessingRuntime: vi.fn(),
+}));
+
+vi.mock("@/lib/prisma", () => ({
+  prisma: hoisted.prisma,
 }));
 
 vi.mock("@/lib/llm/auto-process", () => ({
@@ -24,7 +28,14 @@ vi.mock("@/lib/processing/batch", () => ({
   pollAllActiveBatches: vi.fn().mockResolvedValue({ completed: 0 }),
 }));
 
-import { prisma } from "@/lib/prisma";
+vi.mock("@/lib/processing/runtime-ledger", () => ({
+  createProcessingRun: vi.fn(),
+  finishProcessingRun: vi.fn(),
+  getLatestActiveRunForPaper: vi.fn(),
+  reconcileProcessingRuntime: hoisted.reconcileProcessingRuntime,
+  setProcessingProjection: vi.fn(),
+}));
+
 import { ProcessingQueue } from "../queue";
 
 describe("ProcessingQueue recoverStalled", () => {
@@ -33,13 +44,10 @@ describe("ProcessingQueue recoverStalled", () => {
   });
 
   it("does not duplicate a paper that is already batch-pending", async () => {
-    vi.mocked(prisma.paper.findMany)
-      .mockResolvedValueOnce([
-        { id: "paper-1", processingStatus: "TEXT_EXTRACTED", processingStep: null },
-      ] as never)
-      .mockResolvedValueOnce([] as never)
-      .mockResolvedValueOnce([] as never);
-    vi.mocked(prisma.paper.update).mockResolvedValue({} as never);
+    hoisted.reconcileProcessingRuntime.mockResolvedValue({
+      recoveredPaperIds: ["paper-1"],
+      abandonedPendingIds: [],
+    });
 
     const queue = new ProcessingQueue();
     (queue as any).batchPending = ["paper-1"];
@@ -49,7 +57,6 @@ describe("ProcessingQueue recoverStalled", () => {
 
     expect((queue as any).queue).toEqual([]);
     expect((queue as any).batchPending).toEqual(["paper-1"]);
-    expect(prisma.paper.update).toHaveBeenCalledTimes(1);
     expect((queue as any).fillSlots).toHaveBeenCalledTimes(1);
   });
 });

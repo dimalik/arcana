@@ -14,6 +14,7 @@ import {
   getBatchGroup,
   submitNextPhase,
 } from "@/lib/processing/batch";
+import { setProcessingProjection } from "@/lib/processing/runtime-ledger";
 
 /**
  * POST /api/papers/maintenance/batch
@@ -86,15 +87,12 @@ export async function POST(request: NextRequest) {
         userId,
       );
 
-      // For completed papers missing analysis, reset to NEEDS_DEFERRED first
+      // For completed papers missing analysis, reset to TEXT_EXTRACTED first.
       for (const { id } of completedMissing) {
-        await prisma.paper.update({
-          where: { id },
-          data: {
-            processingStatus: "TEXT_EXTRACTED",
-            processingStep: null,
-            processingStartedAt: null,
-          },
+        await setProcessingProjection(id, {
+          processingStatus: "TEXT_EXTRACTED",
+          processingStep: null,
+          processingStartedAt: null,
         });
       }
 

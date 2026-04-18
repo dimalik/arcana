@@ -9,6 +9,7 @@ import {
   findCompletedPapersNeedingFullReprocess,
 } from "@/lib/processing/maintenance-state";
 import { shouldUseBatch } from "@/lib/processing/batch";
+import { setProcessingProjection } from "@/lib/processing/runtime-ledger";
 
 /**
  * POST /api/papers/maintenance
@@ -105,13 +106,10 @@ async function queueDeferredProcessing(userId: string) {
   let fullReprocessCount = 0;
 
   for (const { id } of papersNeedingFullReprocess) {
-    await prisma.paper.update({
-      where: { id },
-      data: {
-        processingStatus: "TEXT_EXTRACTED",
-        processingStep: null,
-        processingStartedAt: null,
-      },
+    await setProcessingProjection(id, {
+      processingStatus: "TEXT_EXTRACTED",
+      processingStep: null,
+      processingStartedAt: null,
     });
     processingQueue.enqueue(id);
     fullReprocessCount++;
@@ -158,9 +156,20 @@ async function fetchMissingPdfs(userId: string) {
     if (paper.arxivId) {
       try {
         const filePath = await downloadArxivPdf(paper.arxivId);
-        await prisma.paper.update({
-          where: { id: paper.id },
-          data: { filePath, processingStatus: "EXTRACTING_TEXT" },
+        await prisma.$transaction(async (tx) => {
+          await tx.paper.update({
+            where: { id: paper.id },
+            data: { filePath },
+          });
+          await setProcessingProjection(
+            paper.id,
+            {
+              processingStatus: "EXTRACTING_TEXT",
+              processingStep: null,
+              processingStartedAt: null,
+            },
+            tx,
+          );
         });
         processingQueue.enqueue(paper.id);
         fetched++;
@@ -188,13 +197,23 @@ async function fetchMissingPdfs(userId: string) {
             const filename = `doi-${paper.doi.replace(/[/.]/g, "-").slice(0, 40)}-${paper.id.slice(0, 8)}.pdf`;
             const filePath = path.join(uploadDir, filename);
             await writeFile(filePath, buf);
-            await prisma.paper.update({
-              where: { id: paper.id },
-              data: {
-                filePath: `uploads/${filename}`,
-                processingStatus: "EXTRACTING_TEXT",
-                abstract: meta.abstract || paper.sourceUrl ? undefined : meta.abstract,
-              },
+            await prisma.$transaction(async (tx) => {
+              await tx.paper.update({
+                where: { id: paper.id },
+                data: {
+                  filePath: `uploads/${filename}`,
+                  abstract: meta.abstract || paper.sourceUrl ? undefined : meta.abstract,
+                },
+              });
+              await setProcessingProjection(
+                paper.id,
+                {
+                  processingStatus: "EXTRACTING_TEXT",
+                  processingStep: null,
+                  processingStartedAt: null,
+                },
+                tx,
+              );
             });
             processingQueue.enqueue(paper.id);
             fetched++;
@@ -202,9 +221,10 @@ async function fetchMissingPdfs(userId: string) {
           }
         }
         // No OA PDF available — mark as unfetchable
-        await prisma.paper.update({
-          where: { id: paper.id },
-          data: { processingStatus: "NO_PDF" },
+        await setProcessingProjection(paper.id, {
+          processingStatus: "NO_PDF",
+          processingStep: null,
+          processingStartedAt: null,
         });
         unfetchable++;
       } catch (e) {
@@ -215,9 +235,10 @@ async function fetchMissingPdfs(userId: string) {
     }
 
     // No ArXiv ID and no DOI — can't fetch
-    await prisma.paper.update({
-      where: { id: paper.id },
-      data: { processingStatus: "NO_PDF" },
+    await setProcessingProjection(paper.id, {
+      processingStatus: "NO_PDF",
+      processingStep: null,
+      processingStartedAt: null,
     });
     unfetchable++;
   }
