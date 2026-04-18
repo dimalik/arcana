@@ -47,6 +47,7 @@ export async function POST(
 
     return Response.json({
       reference: view,
+      mergeSummary: updated.mergeSummary,
       externalLinks: {
         openAlex: result.semanticScholarId,
         doi: result.doi ? `https://doi.org/${result.doi}` : null,
