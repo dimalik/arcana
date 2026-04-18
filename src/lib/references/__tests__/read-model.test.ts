@@ -41,14 +41,17 @@ describe("mapReferenceEntryToView", () => {
           {
             excerpt: "We follow Vaswani et al. for the base architecture.",
             createdAt: new Date("2026-04-17T10:01:00Z"),
+            citationText: "[Vaswani et al., 2017]",
           },
           {
             excerpt: "We follow Vaswani et al. for the base architecture.",
             createdAt: new Date("2026-04-17T10:02:00Z"),
+            citationText: "[Vaswani et al., 2017]",
           },
           {
             excerpt: "The attention stack is identical to the original transformer.",
             createdAt: new Date("2026-04-17T10:03:00Z"),
+            citationText: "[Vaswani et al., 2017]",
           },
         ],
       },
@@ -207,6 +210,152 @@ describe("mapReferenceEntryToView", () => {
     );
     expect(view.linkState).toBe("unresolved");
     expect(view.importReusablePaperId).toBeNull();
+  });
+
+  it("suppresses polluted venue badges that are really citation keys", () => {
+    const view = mapReferenceEntryToView(
+      {
+        id: "entry-5",
+        legacyReferenceId: "legacy-5",
+        title: "Video-mme: The first-ever comprehensive evaluation benchmark of multi-modal llms in video analysis",
+        authors: JSON.stringify(["Chaoyou Fu", "Yuhan Dai"]),
+        year: 2024,
+        venue: "FDL + 24",
+        doi: null,
+        rawCitation:
+          "FDL + 24] Chaoyou Fu, Yuhan Dai, Yondong Luo, Lei Li, Shuhuai Ren, Renrui Zhang, Zihan Wang, Chenyu Zhou, Yunhang Shen, Mengdan Zhang, et al. Video-mme: The first-ever comprehensive evaluation benchmark of multi-modal llms in video analysis. arXiv preprint arXiv:2405.21075, 2024.",
+        referenceIndex: 5,
+        semanticScholarId: null,
+        arxivId: "2405.21075",
+        externalUrl: null,
+        resolvedEntityId: null,
+        resolveConfidence: null,
+        resolveSource: null,
+        createdAt: new Date("2026-04-18T10:00:00Z"),
+        citationMentions: [],
+      },
+      new Map(),
+      new Map(),
+    );
+
+    expect(view.venue).toBeNull();
+  });
+
+  it("removes citation-key markers from displayed citation contexts", () => {
+    const view = mapReferenceEntryToView(
+      {
+        id: "entry-6",
+        legacyReferenceId: "legacy-6",
+        title: "LLaVA",
+        authors: JSON.stringify(["Haotian Liu"]),
+        year: 2023,
+        venue: null,
+        doi: null,
+        rawCitation: "LLaVA",
+        referenceIndex: 6,
+        semanticScholarId: null,
+        arxivId: null,
+        externalUrl: null,
+        resolvedEntityId: null,
+        resolveConfidence: null,
+        resolveSource: null,
+        createdAt: new Date("2026-04-18T10:00:00Z"),
+        citationMentions: [
+          {
+            citationText: "[LLLL23]",
+            excerpt:
+              "We adopted the evaluation setting used in Llava-1.5 [LLLL23], without any specific prompt.",
+            createdAt: new Date("2026-04-18T10:01:00Z"),
+          },
+          {
+            citationText: "[LLL + 24]",
+            excerpt:
+              "We juxtapose these results with those of other open-source models such as Llava-1.6 [LLL + 24] and GPT4-V [Ope23].",
+            createdAt: new Date("2026-04-18T10:02:00Z"),
+          },
+        ],
+      },
+      new Map(),
+      new Map(),
+    );
+
+    expect(view.citationContext).toBe(
+      "We adopted the evaluation setting used in Llava-1.5, without any specific prompt.; We juxtapose these results with those of other open-source models such as Llava-1.6 and GPT4-V [Ope23].",
+    );
+  });
+
+  it("preserves non-citation bracketed content while removing exact numeric citation markers", () => {
+    const view = mapReferenceEntryToView(
+      {
+        id: "entry-7",
+        legacyReferenceId: "legacy-7",
+        title: "Adversarial Contexts",
+        authors: null,
+        year: 2024,
+        venue: null,
+        doi: null,
+        rawCitation: "Adversarial Contexts",
+        referenceIndex: 7,
+        semanticScholarId: null,
+        arxivId: null,
+        externalUrl: null,
+        resolvedEntityId: null,
+        resolveConfidence: null,
+        resolveSource: null,
+        createdAt: new Date("2026-04-18T10:00:00Z"),
+        citationMentions: [
+          {
+            citationText: "[1, 3, 7]",
+            excerpt:
+              "Our notation keeps [x_i], [0, 1], and [sic] intact while following prior work [1, 3, 7].",
+            createdAt: new Date("2026-04-18T10:01:00Z"),
+          },
+        ],
+      },
+      new Map(),
+      new Map(),
+    );
+
+    expect(view.citationContext).toBe(
+      "Our notation keeps [x_i], [0, 1], and [sic] intact while following prior work.",
+    );
+  });
+
+  it("repairs newline hyphenation but preserves normal hyphenated terms", () => {
+    const view = mapReferenceEntryToView(
+      {
+        id: "entry-8",
+        legacyReferenceId: "legacy-8",
+        title: "Hyphenation",
+        authors: null,
+        year: 2024,
+        venue: null,
+        doi: null,
+        rawCitation: "Hyphenation",
+        referenceIndex: 8,
+        semanticScholarId: null,
+        arxivId: null,
+        externalUrl: null,
+        resolvedEntityId: null,
+        resolveConfidence: null,
+        resolveSource: null,
+        createdAt: new Date("2026-04-18T10:00:00Z"),
+        citationMentions: [
+          {
+            citationText: "(Smith et al., 2023)",
+            excerpt:
+              "This normaliz-\nation step mirrors the multi-modal baseline (Smith et al., 2023).",
+            createdAt: new Date("2026-04-18T10:01:00Z"),
+          },
+        ],
+      },
+      new Map(),
+      new Map(),
+    );
+
+    expect(view.citationContext).toBe(
+      "This normalization step mirrors the multi-modal baseline.",
+    );
   });
 });
 

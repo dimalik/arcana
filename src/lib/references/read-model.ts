@@ -58,17 +58,23 @@ interface ReferenceEntryRecord {
   resolveSource: string | null;
   createdAt: Date;
   citationMentions: Array<{
+    citationText: string | null;
     excerpt: string;
     createdAt: Date;
   }>;
 }
 
 const LEADING_CITATION_MARKER_RE = /^[A-Z][A-Z0-9]{1,12}\s*\+\s*\d+\]\s*/;
+const VENUE_CITATION_MARKER_RE = /^[A-Z][A-Z0-9]{1,12}\s*\+\s*\d{2,4}$/;
 const STANDALONE_YEAR_RE = /^\(?\d{4}[a-z]?\)?$/i;
 const TRAILING_YEAR_RE = /[\s,.;:()-]*\b\d{4}[a-z]?\)?\.?$/i;
+const NUMERIC_CITATION_MARKER_RE = /^\[\d+(?:\s*[-,]\s*\d+)*\]$/;
+const AUTHOR_KEY_CITATION_MARKER_RE = /^\[[A-Z][A-Za-z0-9]*(?:\s*\+\s*\d{2,4}|\d{2,4})(?:\s*,\s*[A-Z][A-Za-z0-9]*(?:\s*\+\s*\d{2,4}|\d{2,4}))*\]$/;
+const AUTHOR_YEAR_PAREN_CITATION_MARKER_RE = /^\([A-Z][^()]{0,120}?\bet al\.,\s*\d{4}[a-z]?\)$/;
 
 function cleanReferenceText(value: string | null | undefined): string {
   return (value ?? "")
+    .replace(/([a-z]{2,})-\s*\n\s*([a-z]{2,})/g, "$1$2")
     .replace(LEADING_CITATION_MARKER_RE, "")
     .replace(/\s+/g, " ")
     .trim();
@@ -165,6 +171,7 @@ function deriveAuthorsFromRawCitation(rawCitation: string, title: string): strin
 function sanitizeReferenceEntryDisplay(entry: ReferenceEntryRecord): {
   title: string;
   authors: string | null;
+  venue: string | null;
   rawCitation: string;
 } {
   const cleanedTitle = cleanReferenceText(entry.title);
@@ -177,29 +184,74 @@ function sanitizeReferenceEntryDisplay(entry: ReferenceEntryRecord): {
   const displayAuthors = !parsedAuthors || looksLikePollutedAuthors(parsedAuthors)
     ? deriveAuthorsFromRawCitation(entry.rawCitation, title || derivedTitle || "")
     : parsedAuthors;
+  const cleanedVenue = cleanReferenceText(entry.venue);
+  const venue = looksLikePollutedVenue(cleanedVenue) ? null : cleanedVenue || null;
 
   return {
     title: title || cleanedTitle || cleanReferenceText(entry.rawCitation),
     authors: displayAuthors ? JSON.stringify(displayAuthors) : entry.authors,
+    venue,
     rawCitation: cleanReferenceText(entry.rawCitation),
   };
 }
 
 function buildCitationContext(
-  mentions: Array<{ excerpt: string; createdAt: Date }>,
+  mentions: Array<{ citationText: string | null; excerpt: string; createdAt: Date }>,
 ): string | null {
   if (mentions.length === 0) return null;
 
   const seen = new Set<string>();
   const excerpts: string[] = [];
   for (const mention of [...mentions].sort((left, right) => left.createdAt.getTime() - right.createdAt.getTime())) {
-    const excerpt = mention.excerpt.trim();
+    const excerpt = normalizeCitationContext(mention.excerpt, mention.citationText);
     if (!excerpt || seen.has(excerpt)) continue;
     seen.add(excerpt);
     excerpts.push(excerpt);
   }
 
   return excerpts.length > 0 ? excerpts.join("; ") : null;
+}
+
+function looksLikePollutedVenue(venue: string): boolean {
+  return VENUE_CITATION_MARKER_RE.test(venue);
+}
+
+function normalizeCitationContext(
+  excerpt: string | null | undefined,
+  citationText: string | null | undefined,
+): string {
+  let value = (excerpt ?? "")
+    .replace(/([a-z]{2,})-\s*\n\s*([a-z]{2,})/g, "$1$2")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!value) return "";
+
+  const marker = normalizeCitationMarker(citationText);
+  if (marker) {
+    const markerPattern = escapeRegex(marker).replace(/\s+/g, "\\s+");
+    value = value.replace(new RegExp(markerPattern, "g"), " ");
+  }
+
+  return value
+    .replace(/\s+([,.;:!?])/g, "$1")
+    .replace(/([(])\s+/g, "$1")
+    .replace(/\s+([)])/g, "$1")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
+function normalizeCitationMarker(citationText: string | null | undefined): string | null {
+  const marker = (citationText ?? "").trim().replace(/\s+/g, " ");
+  if (!marker) return null;
+  if (NUMERIC_CITATION_MARKER_RE.test(marker)) return marker;
+  if (AUTHOR_KEY_CITATION_MARKER_RE.test(marker)) return marker;
+  if (AUTHOR_YEAR_PAREN_CITATION_MARKER_RE.test(marker)) return marker;
+  return null;
+}
+
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function getImportReusablePaper(
@@ -236,7 +288,7 @@ export function mapReferenceEntryToView(
     title: display.title,
     authors: display.authors,
     year: entry.year,
-    venue: entry.venue,
+    venue: display.venue,
     doi: entry.doi,
     rawCitation: display.rawCitation,
     referenceIndex: entry.referenceIndex,
@@ -290,6 +342,7 @@ export async function listPaperReferenceViews(
       citationMentions: {
         select: {
           excerpt: true,
+          citationText: true,
           createdAt: true,
         },
         orderBy: { createdAt: "asc" },
@@ -332,6 +385,7 @@ export async function getPaperReferenceViewById(
         citationMentions: {
           select: {
             excerpt: true,
+            citationText: true,
             createdAt: true,
           },
           orderBy: { createdAt: "asc" },
