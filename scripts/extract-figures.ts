@@ -95,15 +95,20 @@ async function main() {
     }
 
     try {
-      const report = await extractAllFigures(p.id, { maxPages: 20 });
+      const report = await extractAllFigures(p.id, { context: "operator-script", maxPages: 20 });
       const sources = report.sources
         .filter(s => s.attempted && s.figuresFound > 0)
         .map(s => `${s.method}=${s.figuresFound}`)
         .join(", ") || "none";
 
-      console.log(`  ${report.totalFigures} figures (${report.figuresWithImages} images, ${report.gapPlaceholders} gaps) from ${sources}`);
+      console.log(
+        `  ${report.totalFigures} figures (${report.figuresWithImages} images, ${report.gapPlaceholders} gaps) from ${sources} [status=${report.status}]`,
+      );
       if (report.persistErrors > 0) {
         console.log(`  ⚠ ${report.persistErrors} persist errors`);
+      }
+      if (report.error) {
+        console.log(`  ⚠ ${report.error}`);
       }
 
       totalFigures += report.totalFigures;

@@ -256,7 +256,15 @@ class ProcessingQueue {
 
       // Non-blocking: extract figures from all available sources
       import("@/lib/figures/extract-all-figures")
-        .then(({ extractAllFigures }) => extractAllFigures(paperId))
+        .then(async ({ extractAllFigures }) => {
+          const report = await extractAllFigures(paperId, { context: "queue" });
+          if (report.status !== "success") {
+            console.warn(
+              `[queue] Figure extraction ${report.status} for ${paperId}:`,
+              report.error ?? `persistErrors=${report.persistErrors}`,
+            );
+          }
+        })
         .catch((err) => console.warn(`[queue] Figure extraction failed for ${paperId}:`, (err as Error).message));
 
     } catch (e) {

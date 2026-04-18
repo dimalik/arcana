@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requireUserId } from "@/lib/paper-auth";
+import { requirePaperAccess } from "@/lib/paper-auth";
 import { extractAllFigures } from "@/lib/figures/extract-all-figures";
 import {
   FIGURE_VIEW_SELECT,
@@ -17,8 +17,11 @@ export async function GET(
   request: NextRequest,
   { params }: { params: { id: string } },
 ) {
-  await requireUserId();
   const { id } = params;
+  const paper = await requirePaperAccess(id);
+  if (!paper) {
+    return NextResponse.json({ error: "Paper not found" }, { status: 404 });
+  }
   const showAll = request.nextUrl.searchParams.get("all") === "true";
 
   const figures = await prisma.paperFigure.findMany({
@@ -44,27 +47,28 @@ export async function POST(
   request: NextRequest,
   { params }: { params: { id: string } },
 ) {
-  await requireUserId();
   const { id } = params;
-
-  const paper = await prisma.paper.findUnique({
-    where: { id },
-    select: { id: true, filePath: true, title: true },
-  });
+  const paper = await requirePaperAccess(id);
 
   if (!paper) {
     return NextResponse.json({ error: "Paper not found" }, { status: 404 });
   }
 
-  const body = await request.json().catch(() => ({}));
-  const maxPages = body.maxPages || 30;
+  const body = await request.json().catch(() => ({} as Record<string, unknown>));
+  const maxPages = typeof body.maxPages === "number" ? body.maxPages : undefined;
 
   try {
-    const report = await extractAllFigures(id, { maxPages });
+    const report = await extractAllFigures(id, { context: "route", maxPages });
+    const status =
+      report.status === "conflict"
+        ? 409
+        : report.status === "partial"
+          ? 207
+          : 200;
 
     return NextResponse.json(
-      { ok: report.persistErrors === 0, ...report },
-      { status: report.persistErrors > 0 ? 207 : 200 },
+      { ok: report.status === "success", ...report },
+      { status },
     );
   } catch (err) {
     console.error("[figures] Extraction error:", err);

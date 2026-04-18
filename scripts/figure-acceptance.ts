@@ -298,7 +298,12 @@ async function main() {
     if (doExtract) {
       const { extractAllFigures } = await import("../src/lib/figures/extract-all-figures");
       await prisma.paperFigure.deleteMany({ where: { paperId: resolved.id } });
-      await extractAllFigures(resolved.id, { maxPages: 20 });
+      const report = await extractAllFigures(resolved.id, { context: "acceptance-script", maxPages: 20 });
+      if (report.status !== "success") {
+        throw new Error(
+          `figure acceptance extraction failed for ${resolved.id}: ${report.status}${report.error ? ` (${report.error})` : ""}`,
+        );
+      }
     }
 
     const result = await evaluatePaper(fp, resolved.id, gapReasonExists);

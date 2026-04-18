@@ -34,6 +34,7 @@ import {
 } from "./projection-publication";
 import {
   acquirePaperWorkLease,
+  FigurePublicationGuardConflictError,
   releasePaperWorkLease,
 } from "./publication-guards";
 import { mergeFigureSources, type MergeableFigure } from "./source-merger";
@@ -46,6 +47,8 @@ const BROWSER_HEADERS = {
 
 export interface ExtractionReport {
   paperId: string;
+  context: FigureExtractionContext;
+  status: FigureExtractionStatus;
   sources: {
     method: string;
     attempted: boolean;
@@ -57,6 +60,48 @@ export interface ExtractionReport {
   gapPlaceholders: number;
   /** Number of merged figures that failed to persist to DB. */
   persistErrors: number;
+  error: string | null;
+}
+
+export type FigureExtractionContext =
+  | "route"
+  | "queue"
+  | "operator-script"
+  | "acceptance-script";
+
+export type FigureExtractionStatus =
+  | "success"
+  | "partial"
+  | "conflict";
+
+export interface ExtractAllFiguresOptions {
+  context: FigureExtractionContext;
+  maxPages?: number;
+  skipPdf?: boolean;
+}
+
+const DEFAULT_FIGURE_EXTRACTION_MAX_PAGES = 50;
+const MAX_FIGURE_EXTRACTION_MAX_PAGES = 100;
+
+function normalizeExtractAllFiguresOptions(
+  opts?: ExtractAllFiguresOptions,
+): Required<ExtractAllFiguresOptions> {
+  if (!opts?.context) {
+    throw new Error("extractAllFigures requires a caller context");
+  }
+
+  const maxPages = opts.maxPages ?? DEFAULT_FIGURE_EXTRACTION_MAX_PAGES;
+  if (!Number.isInteger(maxPages) || maxPages < 1 || maxPages > MAX_FIGURE_EXTRACTION_MAX_PAGES) {
+    throw new Error(
+      `extractAllFigures maxPages must be an integer between 1 and ${MAX_FIGURE_EXTRACTION_MAX_PAGES}`,
+    );
+  }
+
+  return {
+    context: opts.context,
+    maxPages,
+    skipPdf: opts.skipPdf ?? false,
+  };
 }
 
 export interface FigureExtractionPaperInput {
@@ -240,8 +285,9 @@ function toMergeable(rec: {
  */
 export async function extractAllFigures(
   paperId: string,
-  opts?: { maxPages?: number; skipPdf?: boolean },
+  opts?: ExtractAllFiguresOptions,
 ): Promise<ExtractionReport> {
+  const normalized = normalizeExtractAllFiguresOptions(opts);
   const paper = await prisma.paper.findUnique({
     where: { id: paperId },
     select: {
@@ -258,11 +304,14 @@ export async function extractAllFigures(
 
   const report: ExtractionReport = {
     paperId,
+    context: normalized.context,
+    status: "success",
     sources: [],
     totalFigures: 0,
     figuresWithImages: 0,
     gapPlaceholders: 0,
     persistErrors: 0,
+    error: null,
   };
 
   const capabilitySnapshot = await prisma.$transaction((tx) => prepareCapabilitySnapshotForExtraction(tx, {
@@ -305,8 +354,8 @@ export async function extractAllFigures(
           coverageClass: capabilitySnapshot.coverageClass,
           mergedCount: merged.length,
           sourceReport: report.sources,
-          skipPdf: opts?.skipPdf ?? false,
-          maxPages: opts?.maxPages || 50,
+          skipPdf: normalized.skipPdf,
+          maxPages: normalized.maxPages,
           },
         );
         const identityResolutionId = await createIdentityResolutionSnapshot(tx, {
@@ -321,17 +370,25 @@ export async function extractAllFigures(
       }
     });
   } catch (err) {
-    // Transaction rolled back — DB unchanged from pre-merge state.
-    // Use Math.max(1, ...) so a failure during stale-row reconciliation
-    // with zero merged figures still reports as a persist error.
-    persistErrors = Math.max(1, merged.length);
-    console.error(`[extract-all] Persist transaction failed, rolled back:`, (err as Error).message);
+    if (err instanceof FigurePublicationGuardConflictError) {
+      report.status = "conflict";
+      report.error = err.message;
+      console.warn(`[extract-all] Publication conflict for ${paperId}: ${err.message}`);
+    } else {
+      // Transaction rolled back — DB unchanged from pre-merge state.
+      // Use Math.max(1, ...) so a failure during stale-row reconciliation
+      // with zero merged figures still reports as a persist error.
+      persistErrors = Math.max(1, merged.length);
+      report.status = "partial";
+      report.error = err instanceof Error ? err.message : "unknown persist failure";
+      console.error(`[extract-all] Persist transaction failed, rolled back:`, report.error);
+    }
   }
 
   report.persistErrors = persistErrors;
 
   // ── Post-pass: render HTML table previews (best-effort, non-transactional) ──
-  if (persistErrors === 0) {
+  if (persistErrors === 0 && report.status !== "conflict") {
     try {
       const { renderTablePreviews } = await import("./html-table-preview-renderer");
       const previewResult = await renderTablePreviews(paperId);
@@ -362,11 +419,12 @@ export async function extractAllFigures(
   }
 
   const summary =
-    `[extract-all] ${paper.title}: ${report.totalFigures} figures ` +
+    `[extract-all] ${paper.title} [${report.context}/${report.status}]: ${report.totalFigures} figures ` +
     `(${report.figuresWithImages} with images, ${report.gapPlaceholders} gaps` +
-    `${persistErrors > 0 ? `, ${persistErrors} persist errors` : ""})` +
+    `${persistErrors > 0 ? `, ${persistErrors} persist errors` : ""}` +
+    `${report.error ? `, error=${report.error}` : ""})` +
     ` from ${report.sources.filter(s => s.attempted && s.figuresFound > 0).map(s => s.method).join(", ") || "none"}`;
-  if (persistErrors > 0) {
+  if (report.status !== "success") {
     console.warn(summary);
   } else {
     console.log(summary);

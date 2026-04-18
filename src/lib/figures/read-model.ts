@@ -1,5 +1,3 @@
-import type { Prisma } from "@prisma/client";
-
 export const FIGURE_VIEW_SELECT = {
   id: true,
   paperId: true,
@@ -26,11 +24,7 @@ export const FIGURE_VIEW_SELECT = {
   gapReason: true,
   imageSourceMethod: true,
   createdAt: true,
-} satisfies Prisma.PaperFigureSelect;
-
-type PaperFigureViewRecord = Prisma.PaperFigureGetPayload<{
-  select: typeof FIGURE_VIEW_SELECT;
-}>;
+} as const;
 
 export interface PaperFigureView {
   id: string;
@@ -59,6 +53,8 @@ export interface PaperFigureView {
   imageSourceMethod: string | null;
   createdAt: Date;
 }
+
+type PaperFigureViewRecord = PaperFigureView;
 
 export function mapPaperFigureToView(row: PaperFigureViewRecord): PaperFigureView {
   return {

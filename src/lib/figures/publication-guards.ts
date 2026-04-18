@@ -3,6 +3,13 @@ import { Prisma } from "@prisma/client";
 
 type FigurePublicationTx = Prisma.TransactionClient;
 
+export class FigurePublicationGuardConflictError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "FigurePublicationGuardConflictError";
+  }
+}
+
 interface RenderedPreviewCompatibilityInput {
   currentProjectionFigureId: string;
   currentIdentityKey: string;
@@ -64,7 +71,7 @@ export async function acquirePaperWorkLease(
   });
 
   if (existing && existing.expiresAt > now && existing.holder !== holder) {
-    throw new Error(`paper ${paperId} is already leased by ${existing.holder}`);
+    throw new FigurePublicationGuardConflictError(`paper ${paperId} is already leased by ${existing.holder}`);
   }
 
   await tx.paperWorkLease.upsert({
@@ -99,13 +106,13 @@ export async function assertPaperWorkLease(
   });
 
   if (!lease) {
-    throw new Error(`paper ${paperId} has no active work lease`);
+    throw new FigurePublicationGuardConflictError(`paper ${paperId} has no active work lease`);
   }
   if (lease.leaseToken !== leaseToken) {
-    throw new Error(`paper ${paperId} lease token mismatch`);
+    throw new FigurePublicationGuardConflictError(`paper ${paperId} lease token mismatch`);
   }
   if (lease.expiresAt <= new Date()) {
-    throw new Error(`paper ${paperId} work lease expired`);
+    throw new FigurePublicationGuardConflictError(`paper ${paperId} work lease expired`);
   }
 }
 
@@ -199,7 +206,7 @@ export async function validateProjectionRunForPublication(
     projectionRun.comparisonStatus !== "safe_to_replace"
     && projectionRun.publicationMode !== "forced"
   ) {
-    throw new Error(
+    throw new FigurePublicationGuardConflictError(
       `projection run ${input.projectionRunId} is not safe to publish (${projectionRun.comparisonStatus})`,
     );
   }
@@ -366,7 +373,7 @@ export async function validatePreviewSelectionRunForPublication(
     previewSelectionRun.comparisonStatus !== "safe_to_replace"
     && previewSelectionRun.publicationMode !== "forced"
   ) {
-    throw new Error(
+    throw new FigurePublicationGuardConflictError(
       `preview selection run ${input.previewSelectionRunId} is not safe to publish (${previewSelectionRun.comparisonStatus})`,
     );
   }
