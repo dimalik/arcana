@@ -617,12 +617,7 @@ export function extractFiguresFromHtml(html: string, baseUrl: string): FigureCan
     }
 
     if (hasNestedFigures) {
-      const descendantHasLabeledFigure = descendantFigures.some((child) => {
-        const childCaption = getCaptionText(child);
-        return !!parseFigureLabel(childCaption);
-      });
-
-      if (figureLabel && !descendantHasLabeledFigure) {
+      if (figureLabel) {
         const semanticOnlyKey = sourceUrl || `${effectiveBase}#semantic-${figures.length}`;
         if (seenUrls.has(semanticOnlyKey)) continue;
         seenUrls.add(semanticOnlyKey);

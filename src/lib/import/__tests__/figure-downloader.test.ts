@@ -234,6 +234,29 @@ describe("extractFiguresFromHtml", () => {
       expect(results[0].sourceUrl).toBe("https://arxiv.org/html/2510.21391v1/#S3.F1");
     });
 
+    it("preserves a labeled parent even when nested child figures are also labeled", () => {
+      const html = `
+        <figure class="ltx_figure" id="S5.F1">
+          <div class="ltx_flex_figure">
+            <figure class="ltx_figure ltx_figure_panel" id="S5.F1.sf1">
+              <img src="child-a.png" />
+              <figcaption>Figure 1a: First labeled panel.</figcaption>
+            </figure>
+            <figure class="ltx_figure ltx_figure_panel" id="S5.F1.sf2">
+              <img src="child-b.png" />
+              <figcaption>Figure 1b: Second labeled panel.</figcaption>
+            </figure>
+          </div>
+          <figcaption>Figure 1: Parent grouped figure caption.</figcaption>
+        </figure>
+      `;
+
+      const results = extractFiguresFromHtml(html, baseUrl);
+      expect(results.map((result) => result.figureLabel)).toEqual(["Figure 1", "Figure 1a", "Figure 1b"]);
+      expect(results[0].url).toBe("https://arxiv.org/html/2510.21391v1/child-a.png");
+      expect(results[0].sourceUrl).toBe("https://arxiv.org/html/2510.21391v1/#S5.F1");
+    });
+
     it("uses a top-level grouped-panel image before falling back to nested child panels", () => {
       const html = `
         <figure class="ltx_figure" id="S4.F7.11">

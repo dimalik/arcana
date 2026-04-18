@@ -106,7 +106,7 @@
       "requiredParentGroupRows": [
         { "label": "Figure 1", "mustHavePreview": true }
       ],
-      "expectedFigures": ["Figure 1", "Figure 2", "Figure 6", "Figure 7"],
+      "expectedFigures": ["Figure 1", "Figure 2", "Figure 3", "Figure 4", "Figure 5", "Figure 6", "Figure 7", "Figure 8", "Figure 9", "Figure 10", "Figure 11", "Figure 12", "Figure 13", "Figure 14", "Figure 15", "Figure 16", "Figure 17", "Figure 18", "Figure 19", "Figure 20", "Figure 21", "Figure 22", "Figure 23", "Figure 24"],
       "expectedTables": ["Table 1", "Table 2", "Table 3", "Table 4", "Table 5", "Table 6", "Table 7"],
       "expectedSources": {
         "Figure 1": "arxiv_html",
@@ -133,7 +133,7 @@
       "category": "structured_tables_missing_previews",
       "notes": "Structured HTML tables must publish real previews on first pass, not only after later enrichment.",
       "firstPublishPreviewRequired": true,
-      "expectedFigures": ["Figure 1", "Figure 7", "Figure 17"],
+      "expectedFigures": ["Figure 1", "Figure 2", "Figure 3", "Figure 4", "Figure 5", "Figure 6", "Figure 7", "Figure 8", "Figure 9", "Figure 10", "Figure 11", "Figure 12", "Figure 13", "Figure 14", "Figure 15", "Figure 16", "Figure 17"],
       "expectedTables": ["Table 1", "Table 2", "Table 3"],
       "expectedSources": {
         "Figure 1": "arxiv_html",
