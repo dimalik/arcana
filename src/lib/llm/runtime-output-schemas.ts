@@ -26,6 +26,20 @@ export const categorizeRuntimeOutputSchema = z
   })
   .passthrough();
 
+export const extractReferencesRuntimeOutputSchema = z.array(
+  z
+    .object({
+      index: z.coerce.number().int().optional(),
+      title: z.string(),
+      authors: z.array(z.string()).nullable().optional(),
+      year: z.coerce.number().int().nullable().optional(),
+      venue: z.string().nullable().optional(),
+      doi: z.string().nullable().optional(),
+      rawCitation: z.string(),
+    })
+    .passthrough(),
+);
+
 export const linkPapersRuntimeOutputSchema = z.array(
   z
     .object({
@@ -81,6 +95,7 @@ export const distillRuntimeOutputSchema = z
 export const PROCESSING_RUNTIME_OUTPUT_SCHEMAS = {
   extract: extractRuntimeOutputSchema,
   categorize: categorizeRuntimeOutputSchema,
+  extractReferences: extractReferencesRuntimeOutputSchema,
   linkPapers: linkPapersRuntimeOutputSchema,
   detectContradictions: detectContradictionsRuntimeOutputSchema,
   extractCitationContexts: extractCitationContextsRuntimeOutputSchema,
@@ -93,6 +108,9 @@ export type ProcessingRuntimeStructuredPromptType =
 export type ExtractRuntimeOutput = z.infer<typeof extractRuntimeOutputSchema>;
 export type CategorizeRuntimeOutput = z.infer<
   typeof categorizeRuntimeOutputSchema
+>;
+export type ExtractReferencesRuntimeOutput = z.infer<
+  typeof extractReferencesRuntimeOutputSchema
 >;
 export type LinkPapersRuntimeOutput = z.infer<
   typeof linkPapersRuntimeOutputSchema

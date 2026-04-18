@@ -1,6 +1,6 @@
 import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
-import { syncPaperReferenceState } from "@/lib/references/reference-state";
+import { syncPaperReferenceState } from "../references/reference-state";
 
 export const PROCESSING_TERMINAL_STATUSES = new Set([
   "COMPLETED",

@@ -37,6 +37,35 @@ describe("runtime output schemas", () => {
     );
   });
 
+  it("normalizes legacy extractReferences arrays under the frozen schema", () => {
+    const parsed = parseStructuredRuntimeOutputText(
+      "extractReferences",
+      JSON.stringify([
+        {
+          index: 1,
+          title: "Scaling Laws for Neural Language Models",
+          authors: ["Jared Kaplan"],
+          year: 2020,
+          venue: "arXiv",
+          doi: null,
+          rawCitation: "Kaplan et al. 2020. Scaling Laws for Neural Language Models.",
+        },
+      ]),
+      "batch",
+    );
+
+    expect(
+      JSON.parse(serializeStructuredRuntimeOutput("extractReferences", parsed)),
+    ).toEqual([
+      expect.objectContaining({
+        index: 1,
+        title: "Scaling Laws for Neural Language Models",
+        rawCitation:
+          "Kaplan et al. 2020. Scaling Laws for Neural Language Models.",
+      }),
+    ]);
+  });
+
   it("raises a typed JSON parse error for invalid batch output", () => {
     expect(() =>
       parseStructuredRuntimeOutputText("categorize", "not-json", "batch"),

@@ -15,7 +15,11 @@ const hoisted = vi.hoisted(() => ({
       findMany: vi.fn(),
     },
     paper: {
+      findUnique: vi.fn(),
       update: vi.fn(),
+    },
+    reference: {
+      count: vi.fn(),
     },
   },
 }));
@@ -37,7 +41,15 @@ describe("runtime ledger", () => {
     hoisted.prisma.processingStepRun.create.mockResolvedValue({ id: "step-1" });
     hoisted.prisma.processingStepRun.updateMany.mockResolvedValue({ count: 1 });
     hoisted.prisma.processingRun.update.mockResolvedValue({ id: "run-1" });
+    hoisted.prisma.paper.findUnique.mockResolvedValue({
+      id: "paper-1",
+      filePath: null,
+      fullText: null,
+      processingStatus: "PENDING",
+      referenceState: "pending",
+    });
     hoisted.prisma.paper.update.mockResolvedValue({ id: "paper-1" });
+    hoisted.prisma.reference.count.mockResolvedValue(0);
   });
 
   it("creates a processing run and projects the compatibility fields in one path", async () => {

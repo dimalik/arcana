@@ -58,10 +58,12 @@ const promptResultSchemaManifest = {
     ],
   },
   extractReferences: {
-    storage: "text",
+    storage: "json_array",
     description:
-      "Opaque raw reference-extraction transcript. Stored for audit/debug, not shape-validated by product code.",
+      "Structured reference-extraction payload persisted for audit/debug and compatibility history views.",
     consumers: ["src/app/papers/[id]/page.tsx"],
+    itemRequiredKeys: ["title", "rawCitation"],
+    itemOptionalKeys: ["index", "authors", "year", "venue", "doi"],
   },
   distill: {
     storage: "json_object",

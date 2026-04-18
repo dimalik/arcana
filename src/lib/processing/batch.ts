@@ -20,7 +20,7 @@ import {
   truncateText,
   withLlmContext,
 } from "@/lib/llm/provider";
-import { buildPrompt, buildDistillPrompt, cleanJsonResponse } from "@/lib/llm/prompts";
+import { buildPrompt, buildDistillPrompt } from "@/lib/llm/prompts";
 import {
   parseStructuredRuntimeOutputText,
   serializeStructuredRuntimeOutput,
@@ -591,16 +591,27 @@ async function processSummarizeResult(paperId: string, text: string, modelId: st
 // extractReferences requests. New Phase 1 batches run reference extraction as a
 // post-batch hybrid sidecar instead.
 async function processExtractReferencesResult(paperId: string, text: string, modelId: string) {
-  await prisma.promptResult.create({
-    data: { paperId, promptType: "extractReferences", prompt: "Auto-extract references (batch)", result: text, provider: "proxy", model: modelId },
-  });
-
   try {
-    const cleaned = cleanJsonResponse(text);
-    const refs = JSON.parse(cleaned) as Array<{
-      index?: number; title: string; authors?: string[] | null;
-      year?: number | null; venue?: string | null; doi?: string | null; rawCitation: string;
-    }>;
+    const refs = parseStructuredRuntimeOutputText(
+      "extractReferences",
+      text,
+      "batch",
+    );
+    const normalized = serializeStructuredRuntimeOutput(
+      "extractReferences",
+      refs,
+    );
+
+    await prisma.promptResult.create({
+      data: {
+        paperId,
+        promptType: "extractReferences",
+        prompt: "Auto-extract references (batch)",
+        result: normalized,
+        provider: "proxy",
+        model: modelId,
+      },
+    });
 
     if (!Array.isArray(refs) || refs.length === 0) return;
     const paper = await prisma.paper.findUnique({
@@ -617,7 +628,12 @@ async function processExtractReferencesResult(paperId: string, text: string, mod
       provenance: "llm_extraction",
       extractorVersion: "batch_v1",
     });
-  } catch { /* JSON parse failed */ }
+  } catch (error) {
+    console.error(
+      `[batch] Structured extractReferences result failed for ${paperId}:`,
+      error instanceof Error ? error.message : error,
+    );
+  }
 }
 
 async function processCategorizeResult(paperId: string, text: string, modelId: string) {
