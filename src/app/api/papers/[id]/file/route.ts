@@ -1,7 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { readFile } from "fs/promises";
-import path from "path";
 import { saveUploadedFile } from "@/lib/upload";
 import { processingQueue } from "@/lib/processing/queue";
 import { trackEngagement } from "@/lib/engagement/track";
@@ -26,12 +24,14 @@ export async function GET(
     return NextResponse.json({ error: "No PDF file available" }, { status: 404 });
   }
 
-  const absolutePath = path.isAbsolute(paper.filePath)
-    ? paper.filePath
-    : path.join(process.cwd(), paper.filePath);
-
   try {
-    const buffer = await readFile(absolutePath);
+    // Dynamic imports avoid Turbopack TP1004 path-analysis warnings for fs access.
+    const fs = await import("fs/promises");
+    const pathModule = await import("path");
+    const absolutePath = pathModule.isAbsolute(paper.filePath)
+      ? paper.filePath
+      : pathModule.join(process.cwd(), paper.filePath);
+    const buffer = await fs.readFile(absolutePath);
     const filename = `${paper.title?.replace(/[^a-zA-Z0-9-_ ]/g, "").slice(0, 100) || "paper"}.pdf`;
 
     trackEngagement(params.id, "pdf_open").catch(() => {});
