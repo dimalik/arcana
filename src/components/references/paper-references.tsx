@@ -30,6 +30,7 @@ import {
 import { toast } from "sonner";
 import Link from "next/link";
 import { getReferenceStateEmptyMessage } from "@/lib/processing/status-display";
+import { buildRawCitationFallbackText } from "@/lib/references/reference-quality";
 
 interface MatchedPaper {
   id: string;
@@ -404,6 +405,15 @@ export function PaperReferences({ paperId }: { paperId: string }) {
           // ignore
         }
 
+        const rawCitationFallback = buildRawCitationFallbackText({
+          title: ref.title,
+          authors: ref.authors,
+          year: ref.year,
+          venue: ref.venue,
+          rawCitation: ref.rawCitation,
+          citationContext: ref.citationContext,
+        });
+
         const isLookingUp = lookingUp.has(ref.id);
         const isImporting = importing.has(ref.id);
 
@@ -452,11 +462,9 @@ export function PaperReferences({ paperId }: { paperId: string }) {
                     </p>
                   </div>
                 )}
-                {!ref.citationContext &&
-                  ref.rawCitation &&
-                  ref.rawCitation !== ref.title && (
+                {rawCitationFallback && (
                     <p className="text-xs text-muted-foreground/70 mt-1 line-clamp-2">
-                      {ref.rawCitation}
+                      {rawCitationFallback}
                     </p>
                   )}
               </div>

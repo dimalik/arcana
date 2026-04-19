@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  buildRawCitationFallbackText,
   candidateAuthorsPassTrustCheck,
   cleanReferenceText,
   looksLikePollutedAuthors,
@@ -56,5 +57,51 @@ describe("citation key normalization", () => {
         JSON.stringify(["Fhl + 24 ; Xingyu", "Yushi Fu", "Bangzheng Hu"]),
       ),
     ).toBe(true);
+  });
+});
+
+describe("buildRawCitationFallbackText", () => {
+  it("suppresses fallback text when structured metadata is already present", () => {
+    expect(
+      buildRawCitationFallbackText({
+        title: "Longrope: Extending llm context window beyond 2 million tokens",
+        authors: JSON.stringify(["Yiran Ding", "Li Lyna Zhang"]),
+        year: 2024,
+        venue: null,
+        rawCitation:
+          "DZZ + 24a] Yiran Ding, Li Lyna Zhang, Chengruidong Zhang, Yuanyuan Xu, Ning Shang, Jiahang Xu, Fan Yang, and Mao Yang. Longrope: Extending llm context window beyond 2 million tokens, 2024.",
+        citationContext: null,
+      }),
+    ).toBeNull();
+  });
+
+  it("suppresses fallback text when a normalized citation context exists", () => {
+    expect(
+      buildRawCitationFallbackText({
+        title: "LLaVA",
+        authors: null,
+        year: null,
+        venue: null,
+        rawCitation: "LLaVA. Large language and vision assistant.",
+        citationContext:
+          "We adopted the evaluation setting used in Llava-1.5, without any specific prompt.",
+      }),
+    ).toBeNull();
+  });
+
+  it("keeps a cleaned fallback only when structured metadata is otherwise absent", () => {
+    expect(
+      buildRawCitationFallbackText({
+        title: "Unknown reference",
+        authors: null,
+        year: null,
+        venue: null,
+        rawCitation:
+          "DZZ + 24a] Yiran Ding, Li Lyna Zhang, Chengruidong Zhang. Longrope: Extending llm context window beyond 2 million tokens, 2024.",
+        citationContext: null,
+      }),
+    ).toBe(
+      "Yiran Ding, Li Lyna Zhang, Chengruidong Zhang. Longrope: Extending llm context window beyond 2 million tokens, 2024.",
+    );
   });
 });

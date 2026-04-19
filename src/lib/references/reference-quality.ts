@@ -12,6 +12,15 @@ export interface SanitizedReferenceMetadata {
   rawCitation: string;
 }
 
+export interface ReferenceRawCitationFallbackInput {
+  title: string;
+  authors: string | null;
+  year: number | null;
+  venue: string | null;
+  rawCitation: string;
+  citationContext?: string | null;
+}
+
 export interface PollutedMetadataField {
   field: "title" | "authors" | "venue";
   beforeValue: string | null;
@@ -243,4 +252,27 @@ export function sanitizeReferenceMetadataForDisplay(
     venue,
     rawCitation: cleanReferenceText(input.rawCitation),
   };
+}
+
+export function buildRawCitationFallbackText(
+  input: ReferenceRawCitationFallbackInput,
+): string | null {
+  if (input.citationContext?.trim()) return null;
+
+  const cleanedRawCitation = cleanReferenceText(input.rawCitation);
+  if (!cleanedRawCitation) return null;
+
+  const cleanedTitle = cleanReferenceText(input.title);
+  if (cleanedRawCitation === cleanedTitle) return null;
+
+  const hasStructuredMetadata =
+    Boolean(parseAuthorsJson(input.authors)?.length)
+    || input.year !== null
+    || Boolean(cleanReferenceText(input.venue));
+
+  if (hasStructuredMetadata) {
+    return null;
+  }
+
+  return cleanedRawCitation;
 }
