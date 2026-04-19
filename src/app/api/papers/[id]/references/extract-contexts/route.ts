@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { generateLLMResponse } from "@/lib/llm/provider";
+import {
+  PAPER_REFERENCE_ENRICHMENT_LLM_OPERATIONS,
+  withPaperLlmContext,
+} from "@/lib/llm/paper-llm-context";
 import { buildPrompt, cleanJsonResponse } from "@/lib/llm/prompts";
 import { resolveModelConfig } from "@/lib/llm/auto-process";
 import { getBodyTextForContextExtraction } from "@/lib/references/extract-section";
@@ -82,14 +86,24 @@ export async function POST(
     const { provider, modelId, proxyConfig } = modelConfig;
     const { system } = buildPrompt("extractCitationContexts", "");
 
-    const ctxResult = await generateLLMResponse({
-      provider,
-      modelId,
-      system,
-      prompt: `Here is the body text of the paper:\n\n${bodyText}`,
-      maxTokens: 4000,
-      proxyConfig,
-    });
+    const ctxResult = await withPaperLlmContext(
+      {
+        operation: PAPER_REFERENCE_ENRICHMENT_LLM_OPERATIONS.EXTRACT_CONTEXTS,
+        paperId: id,
+        userId,
+        runtime: "reference_enrichment",
+        source: "papers.references.extract_contexts",
+      },
+      () =>
+        generateLLMResponse({
+          provider,
+          modelId,
+          system,
+          prompt: `Here is the body text of the paper:\n\n${bodyText}`,
+          maxTokens: 4000,
+          proxyConfig,
+        }),
+    );
 
     const cleaned = cleanJsonResponse(ctxResult);
     let contexts: Array<{ citation: string; context: string }>;

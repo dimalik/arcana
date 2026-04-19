@@ -1,6 +1,10 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { streamLLMResponse, truncateText } from "@/lib/llm/provider";
+import {
+  PAPER_INTERACTIVE_LLM_OPERATIONS,
+  withPaperLlmContext,
+} from "@/lib/llm/paper-llm-context";
 import { SYSTEM_PROMPTS } from "@/lib/llm/prompts";
 import { resolveModelConfig } from "@/lib/llm/auto-process";
 import { requireUserId } from "@/lib/paper-auth";
@@ -11,7 +15,7 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const userId = await requireUserId();
-    const { id } = await params;
+  const { id } = await params;
   const body = await request.json();
   const { messages } = body;
   const { provider, modelId, proxyConfig } = await resolveModelConfig(body);
@@ -78,13 +82,23 @@ export async function POST(
     })
   );
 
-  const result = await streamLLMResponse({
-    provider,
-    modelId,
-    system: systemPrompt,
-    messages: normalizedMessages,
-    proxyConfig,
-  });
+  const result = await withPaperLlmContext(
+    {
+      operation: PAPER_INTERACTIVE_LLM_OPERATIONS.CHAT,
+      paperId: id,
+      userId,
+      runtime: "interactive",
+      source: "papers.llm.chat",
+    },
+    () =>
+      streamLLMResponse({
+        provider,
+        modelId,
+        system: systemPrompt,
+        messages: normalizedMessages,
+        proxyConfig,
+      }),
+  );
 
   // Save assistant message after streaming completes
   result.text.then(async (fullText) => {

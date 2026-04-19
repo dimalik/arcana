@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { generateLLMResponse, truncateText } from "@/lib/llm/provider";
+import {
+  PAPER_INTERACTIVE_LLM_OPERATIONS,
+  withPaperLlmContext,
+} from "@/lib/llm/paper-llm-context";
 import { resolveModelConfig } from "@/lib/llm/auto-process";
 import { parseSummarySections } from "@/lib/papers/parse-sections";
 import { z } from "zod";
@@ -72,13 +76,23 @@ export async function POST(
     const header = SECTION_HEADER[section];
     const prompt = `Here is the full paper text:\n\n${truncated}\n\n---\n\nHere is the CURRENT version of the section:\n\n${currentContent}\n\n---\n\n${instruction}\n\nIMPORTANT: Output ONLY the rewritten section content.${header ? ` Start with "${header}" as the heading.` : " Do NOT start with a ## Methodology or ## Results heading — this is the overview/review section that comes before those."}`;
 
-    const result = await generateLLMResponse({
-      provider,
-      modelId,
-      system,
-      prompt,
-      proxyConfig,
-    });
+    const result = await withPaperLlmContext(
+      {
+        operation: PAPER_INTERACTIVE_LLM_OPERATIONS.REWRITE_SECTION,
+        paperId: id,
+        userId,
+        runtime: "interactive",
+        source: "papers.llm.rewrite_section",
+      },
+      () =>
+        generateLLMResponse({
+          provider,
+          modelId,
+          system,
+          prompt,
+          proxyConfig,
+        }),
+    );
 
     // Splice the rewritten section back into the full summary
     const newSections = { ...sections };

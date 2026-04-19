@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { generateLLMResponse } from "@/lib/llm/provider";
+import {
+  PAPER_INTERACTIVE_LLM_OPERATIONS,
+  withPaperLlmContext,
+} from "@/lib/llm/paper-llm-context";
 import { buildPrompt } from "@/lib/llm/prompts";
 import { resolveModelConfig } from "@/lib/llm/auto-process";
 import { requireUserId } from "@/lib/paper-auth";
@@ -53,7 +57,24 @@ export async function POST(
 
     const gapPrompt = `PAPERS IN TOPIC CLUSTER:\n\n${papersContext}`;
     const { system } = buildPrompt("findGaps", "");
-    const result = await generateLLMResponse({ provider, modelId, system, prompt: gapPrompt, maxTokens: 3000, proxyConfig });
+    const result = await withPaperLlmContext(
+      {
+        operation: PAPER_INTERACTIVE_LLM_OPERATIONS.GAP_FINDER,
+        paperId: id,
+        userId,
+        runtime: "interactive",
+        source: "papers.llm.gap_finder",
+      },
+      () =>
+        generateLLMResponse({
+          provider,
+          modelId,
+          system,
+          prompt: gapPrompt,
+          maxTokens: 3000,
+          proxyConfig,
+        }),
+    );
 
     const promptResult = await prisma.promptResult.create({
       data: {

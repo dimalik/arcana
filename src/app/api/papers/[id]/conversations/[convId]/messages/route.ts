@@ -4,6 +4,10 @@ import {
   streamLLMResponse,
   truncateTextMultiPaper,
 } from "@/lib/llm/provider";
+import {
+  PAPER_INTERACTIVE_LLM_OPERATIONS,
+  withPaperLlmContext,
+} from "@/lib/llm/paper-llm-context";
 import { SYSTEM_PROMPTS } from "@/lib/llm/prompts";
 import { resolveModelConfig } from "@/lib/llm/auto-process";
 import { trackEngagement } from "@/lib/engagement/track";
@@ -37,7 +41,7 @@ export async function POST(
 
   // Fetch primary paper
   const userId = await requireUserId();
-    const paper = await prisma.paper.findFirst({ where: { id, userId } });
+  const paper = await prisma.paper.findFirst({ where: { id, userId } });
   if (!paper) {
     return new Response(JSON.stringify({ error: "Paper not found" }), {
       status: 404,
@@ -158,13 +162,24 @@ export async function POST(
     }
   );
 
-  const result = await streamLLMResponse({
-    provider,
-    modelId,
-    system: systemPrompt,
-    messages: normalizedMessages,
-    proxyConfig,
-  });
+  const result = await withPaperLlmContext(
+    {
+      operation: PAPER_INTERACTIVE_LLM_OPERATIONS.CONVERSATION_MESSAGE,
+      paperId: id,
+      userId,
+      runtime: "interactive",
+      source: "papers.conversations.message",
+      metadata: { conversationId: convId },
+    },
+    () =>
+      streamLLMResponse({
+        provider,
+        modelId,
+        system: systemPrompt,
+        messages: normalizedMessages,
+        proxyConfig,
+      }),
+  );
 
   // Save assistant message after streaming completes, auto-title conversation
   result.text.then(async (fullText) => {

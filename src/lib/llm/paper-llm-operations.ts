@@ -1,0 +1,36 @@
+export const PAPER_INTERACTIVE_LLM_OPERATIONS = {
+  CHAT: "paper_chat",
+  CONVERSATION_MESSAGE: "paper_conversation_message",
+  DISTILL: "paper_distill",
+  SUMMARIZE: "paper_summarize",
+  CATEGORIZE: "paper_categorize",
+  EXTRACT: "paper_extract",
+  CUSTOM: "paper_custom",
+  CODE: "paper_code",
+  REWRITE_SECTION: "paper_rewrite_section",
+  COMPARE_METHODOLOGIES: "paper_compare_methodologies",
+  GAP_FINDER: "paper_gap_finder",
+  TIMELINE: "paper_timeline",
+} as const;
+
+export const PAPER_REFERENCE_ENRICHMENT_LLM_OPERATIONS = {
+  EXTRACT_CONTEXTS: "paper_reference_extract_contexts",
+} as const;
+
+export const PAPER_INTERACTIVE_LLM_OPERATION_VALUES = Object.values(
+  PAPER_INTERACTIVE_LLM_OPERATIONS,
+);
+
+export const PAPER_REFERENCE_ENRICHMENT_LLM_OPERATION_VALUES = Object.values(
+  PAPER_REFERENCE_ENRICHMENT_LLM_OPERATIONS,
+);
+
+export type PaperInteractiveLlmOperation =
+  (typeof PAPER_INTERACTIVE_LLM_OPERATIONS)[keyof typeof PAPER_INTERACTIVE_LLM_OPERATIONS];
+
+export type PaperReferenceEnrichmentLlmOperation =
+  (typeof PAPER_REFERENCE_ENRICHMENT_LLM_OPERATIONS)[keyof typeof PAPER_REFERENCE_ENRICHMENT_LLM_OPERATIONS];
+
+export type PaperLlmOperation =
+  | PaperInteractiveLlmOperation
+  | PaperReferenceEnrichmentLlmOperation;

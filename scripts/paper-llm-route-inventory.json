@@ -1,0 +1,21 @@
+{
+  "targetRoutes": {
+    "src/app/api/papers/[id]/llm/extract/route.ts": 1,
+    "src/app/api/papers/[id]/llm/summarize/route.ts": 2,
+    "src/app/api/papers/[id]/llm/chat/route.ts": 1,
+    "src/app/api/papers/[id]/conversations/[convId]/messages/route.ts": 1,
+    "src/app/api/papers/[id]/references/extract-contexts/route.ts": 1,
+    "src/app/api/papers/[id]/llm/categorize/route.ts": 1,
+    "src/app/api/papers/[id]/llm/custom/route.ts": 1,
+    "src/app/api/papers/[id]/llm/code/route.ts": 1,
+    "src/app/api/papers/[id]/llm/rewrite-section/route.ts": 1,
+    "src/app/api/papers/[id]/distill/route.ts": 1,
+    "src/app/api/papers/[id]/llm/gap-finder/route.ts": 1,
+    "src/app/api/papers/[id]/llm/timeline/route.ts": 1,
+    "src/app/api/papers/[id]/llm/compare-methodologies/route.ts": 1
+  },
+  "excludedRoutes": {
+    "src/app/api/papers/[id]/concepts/route.ts": "Workstream D removes concepts; PR 2 does not entrench it.",
+    "src/app/api/papers/[id]/concepts/[conceptId]/expand/route.ts": "Workstream D removes concepts; PR 2 does not entrench it."
+  }
+}

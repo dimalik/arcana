@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { generateLLMResponse, truncateText } from "@/lib/llm/provider";
+import {
+  PAPER_INTERACTIVE_LLM_OPERATIONS,
+  withPaperLlmContext,
+} from "@/lib/llm/paper-llm-context";
 import { buildPrompt, cleanJsonResponse } from "@/lib/llm/prompts";
 import { resolveModelConfig, getDefaultModel } from "@/lib/llm/auto-process";
 import { requireUserId } from "@/lib/paper-auth";
@@ -38,13 +42,23 @@ export async function POST(
     const userContextPreamble = buildUserContextPreamble(userCtx);
     const { system, prompt } = buildPrompt("summarize", truncated, undefined, { userContextPreamble });
 
-    const result = await generateLLMResponse({
-      provider,
-      modelId,
-      system,
-      prompt,
-      proxyConfig,
-    });
+    const result = await withPaperLlmContext(
+      {
+        operation: PAPER_INTERACTIVE_LLM_OPERATIONS.SUMMARIZE,
+        paperId: id,
+        userId,
+        runtime: "interactive",
+        source: "papers.llm.summarize",
+      },
+      () =>
+        generateLLMResponse({
+          provider,
+          modelId,
+          system,
+          prompt,
+          proxyConfig,
+        }),
+    );
 
     // Save result
     const promptResult = await prisma.promptResult.create({
@@ -87,13 +101,23 @@ export async function POST(
           "categorize",
           autoTruncated
         );
-        const catResult = await generateLLMResponse({
-          provider: autoProvider,
-          modelId: autoModelId,
-          system: catSystem,
-          prompt: catPrompt,
-          proxyConfig: autoProxyConfig,
-        });
+        const catResult = await withPaperLlmContext(
+          {
+            operation: PAPER_INTERACTIVE_LLM_OPERATIONS.CATEGORIZE,
+            paperId: id,
+            userId,
+            runtime: "interactive",
+            source: "papers.llm.summarize.auto_categorize",
+          },
+          () =>
+            generateLLMResponse({
+              provider: autoProvider,
+              modelId: autoModelId,
+              system: catSystem,
+              prompt: catPrompt,
+              proxyConfig: autoProxyConfig,
+            }),
+        );
 
         await prisma.promptResult.create({
           data: {

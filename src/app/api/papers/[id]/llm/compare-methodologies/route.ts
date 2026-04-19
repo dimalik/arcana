@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { generateLLMResponse } from "@/lib/llm/provider";
+import {
+  PAPER_INTERACTIVE_LLM_OPERATIONS,
+  withPaperLlmContext,
+} from "@/lib/llm/paper-llm-context";
 import { buildPrompt } from "@/lib/llm/prompts";
 import { resolveModelConfig } from "@/lib/llm/auto-process";
 import { parseSummarySections } from "@/lib/papers/parse-sections";
@@ -84,14 +88,24 @@ export async function POST(
 
     const comparePrompt = `PAPERS TO COMPARE:\n\n${papersContext}`;
     const { system } = buildPrompt("compareMethodologies", "");
-    const result = await generateLLMResponse({
-      provider,
-      modelId,
-      system,
-      prompt: comparePrompt,
-      maxTokens: 4000,
-      proxyConfig,
-    });
+    const result = await withPaperLlmContext(
+      {
+        operation: PAPER_INTERACTIVE_LLM_OPERATIONS.COMPARE_METHODOLOGIES,
+        paperId: id,
+        userId,
+        runtime: "interactive",
+        source: "papers.llm.compare_methodologies",
+      },
+      () =>
+        generateLLMResponse({
+          provider,
+          modelId,
+          system,
+          prompt: comparePrompt,
+          maxTokens: 4000,
+          proxyConfig,
+        }),
+    );
 
     const promptResult = await prisma.promptResult.create({
       data: {

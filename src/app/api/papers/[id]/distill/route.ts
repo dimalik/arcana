@@ -2,6 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { resolveModelConfig } from "@/lib/llm/auto-process";
 import { generateLLMResponse, truncateText } from "@/lib/llm/provider";
+import {
+  PAPER_INTERACTIVE_LLM_OPERATIONS,
+  withPaperLlmContext,
+} from "@/lib/llm/paper-llm-context";
 import { buildDistillPrompt, cleanJsonResponse } from "@/lib/llm/prompts";
 import { requireUserId } from "@/lib/paper-auth";
 
@@ -44,14 +48,24 @@ export async function POST(
   const roomNames = existingRooms.map((r) => r.name);
 
   const { system, prompt } = buildDistillPrompt(truncated, roomNames);
-  const result = await generateLLMResponse({
-    provider,
-    modelId,
-    system,
-    prompt,
-    maxTokens: 4000,
-    proxyConfig,
-  });
+  const result = await withPaperLlmContext(
+    {
+      operation: PAPER_INTERACTIVE_LLM_OPERATIONS.DISTILL,
+      paperId,
+      userId,
+      runtime: "interactive",
+      source: "papers.distill",
+    },
+    () =>
+      generateLLMResponse({
+        provider,
+        modelId,
+        system,
+        prompt,
+        maxTokens: 4000,
+        proxyConfig,
+      }),
+  );
 
   // Save the prompt result
   await prisma.promptResult.create({

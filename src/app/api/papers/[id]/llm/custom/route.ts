@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { generateLLMResponse, truncateText } from "@/lib/llm/provider";
+import {
+  PAPER_INTERACTIVE_LLM_OPERATIONS,
+  withPaperLlmContext,
+} from "@/lib/llm/paper-llm-context";
 import { SYSTEM_PROMPTS } from "@/lib/llm/prompts";
 import { resolveModelConfig } from "@/lib/llm/auto-process";
 import { requireUserId } from "@/lib/paper-auth";
@@ -41,13 +45,23 @@ export async function POST(
 
     const truncated = truncateText(text, modelId, proxyConfig);
 
-    const result = await generateLLMResponse({
-      provider,
-      modelId,
-      system: SYSTEM_PROMPTS.custom,
-      prompt: `Here is the paper text:\n\n${truncated}\n\n---\n\nUser request: ${userPrompt}`,
-      proxyConfig,
-    });
+    const result = await withPaperLlmContext(
+      {
+        operation: PAPER_INTERACTIVE_LLM_OPERATIONS.CUSTOM,
+        paperId: id,
+        userId,
+        runtime: "interactive",
+        source: "papers.llm.custom",
+      },
+      () =>
+        generateLLMResponse({
+          provider,
+          modelId,
+          system: SYSTEM_PROMPTS.custom,
+          prompt: `Here is the paper text:\n\n${truncated}\n\n---\n\nUser request: ${userPrompt}`,
+          proxyConfig,
+        }),
+    );
 
     const promptResult = await prisma.promptResult.create({
       data: {

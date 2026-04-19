@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { generateLLMResponse, truncateText } from "@/lib/llm/provider";
+import {
+  PAPER_INTERACTIVE_LLM_OPERATIONS,
+  withPaperLlmContext,
+} from "@/lib/llm/paper-llm-context";
 import { buildPrompt, cleanJsonResponse } from "@/lib/llm/prompts";
 import { resolveModelConfig } from "@/lib/llm/auto-process";
 import { resolveAndAssignTags, getExistingTagNames } from "@/lib/tags/auto-tag";
@@ -37,13 +41,23 @@ export async function POST(
     const existingTags = await getExistingTagNames();
     const { system, prompt } = buildPrompt("categorize", truncated, undefined, { existingTags });
 
-    const result = await generateLLMResponse({
-      provider,
-      modelId,
-      system,
-      prompt,
-      proxyConfig,
-    });
+    const result = await withPaperLlmContext(
+      {
+        operation: PAPER_INTERACTIVE_LLM_OPERATIONS.CATEGORIZE,
+        paperId: id,
+        userId,
+        runtime: "interactive",
+        source: "papers.llm.categorize",
+      },
+      () =>
+        generateLLMResponse({
+          provider,
+          modelId,
+          system,
+          prompt,
+          proxyConfig,
+        }),
+    );
 
     const promptResult = await prisma.promptResult.create({
       data: {
