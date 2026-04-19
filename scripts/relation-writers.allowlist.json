@@ -5,9 +5,7 @@
       "src/lib/assertions/graph-relations.ts"
     ],
     "sanctioned_legacy_writers": [
-      "src/lib/references/persist.ts",
-      "src/lib/llm/auto-process.ts",
-      "src/lib/processing/batch.ts"
+      "src/lib/references/persist.ts"
     ]
   }
 }

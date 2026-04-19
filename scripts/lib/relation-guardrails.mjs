@@ -8,6 +8,7 @@ const PROVENANCE_KEYS = new Set([
   "reference_match",
   "citation_analysis",
   "discovery",
+  "deterministic_relatedness",
   "llm_semantic",
   "user_manual",
 ]);
@@ -140,4 +141,3 @@ export async function collectProvenancePriorityLiterals(rootDir) {
     })),
   );
 }
-

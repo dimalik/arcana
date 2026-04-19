@@ -190,8 +190,9 @@ const PROVENANCE_PRIORITY = {
   reference_match: 0,
   citation_analysis: 1,
   discovery: 2,
-  llm_semantic: 3,
-  user_manual: 4,
+  deterministic_relatedness: 3,
+  llm_semantic: 4,
+  user_manual: 5,
 };
 
 function listCurrentRouteRows(prepared, paper) {

@@ -23,9 +23,8 @@ import {
   createCitationMentions,
   type CitationMentionInput,
 } from "@/lib/citations/citation-mention-service";
-import { createRelationAssertion } from "@/lib/assertions/relation-assertion-service";
-import { projectLegacyRelation } from "@/lib/assertions/legacy-projection";
-import { listProjectedTargetPaperIds } from "@/lib/assertions/relation-reader";
+import { recomputeDeterministicRelatednessForPaper } from "../assertions/deterministic-relatedness";
+import { listProjectedTargetPaperIds } from "../assertions/relation-reader";
 import type { ZodTypeAny } from "zod";
 import {
   clearProcessingStep,
@@ -40,7 +39,6 @@ import {
   distillRuntimeOutputSchema,
   extractCitationContextsRuntimeOutputSchema,
   extractRuntimeOutputSchema,
-  linkPapersRuntimeOutputSchema,
 } from "./runtime-output-schemas";
 
 
@@ -49,7 +47,6 @@ type ProcessingLlmStep =
   | "extract"
   | "summarize"
   | "categorize"
-  | "linkPapers"
   | "detectContradictions"
   | "extractReferences"
   | "extractCitationContexts"
@@ -122,7 +119,6 @@ async function runProcessingStructuredCall<TSchema extends ZodTypeAny>(
     step:
       | "extract"
       | "categorize"
-      | "linkPapers"
       | "detectContradictions"
       | "extractCitationContexts"
       | "distill";
@@ -510,7 +506,7 @@ Be thorough and specific — include every number, model name, and dataset name 
  * 1. Extract metadata (skip for ArXiv papers that already have metadata)
  * 2. Summarize
  * 3. Categorize + auto-tag
- * 4. Link related papers
+ * 4. Compute deterministic related papers
  * 5. Extract references
  * 6. Extract citation contexts
  *
@@ -522,10 +518,10 @@ export async function runAutoProcessPipeline(opts: {
   skipExtract?: boolean;
   signal?: AbortSignal;
   /** When true, only run essential steps (metadata + summarize + categorize) and skip
-   *  cross-paper linking, references, contradictions, contexts, and distill.
+   *  deterministic relatedness, references, contradictions, contexts, and distill.
    *  The deferred steps run later via runDeferredSteps(). */
   essentialOnly?: boolean;
-  /** When true, skip essential steps and only run deferred steps (linking, contradictions,
+  /** When true, skip essential steps and only run deferred steps (deterministic relatedness, contradictions,
    *  references, contexts, distill). Used when picking up NEEDS_DEFERRED papers. */
   deferredOnly?: boolean;
   processingRunId?: string;
@@ -828,7 +824,7 @@ export async function runAutoProcessPipeline(opts: {
   }
 
   // If essentialOnly mode, mark as NEEDS_DEFERRED and stop here.
-  // Deferred steps (linking, contradictions, references, contexts, distill) run later
+  // Deferred steps (deterministic relatedness, contradictions, references, contexts, distill) run later
   // when the queue drains via runDeferredSteps().
   if (essentialOnly) {
     if (processingRunId) {
@@ -849,135 +845,29 @@ export async function runAutoProcessPipeline(opts: {
     return { finalProcessingStatus: "NEEDS_DEFERRED" as const };
   }
 
-  // Step 4: Link related papers
+  // Step 4: Compute deterministic related papers
   try {
-    const otherPapers = await prisma.paper.findMany({
-      where: {
-        id: { not: paperId },
-        ...(paper.userId ? { userId: paper.userId } : {}),
-      },
-      select: {
-        id: true,
-        title: true,
-        abstract: true,
-        summary: true,
-        categories: true,
-        entityId: true,
-      },
+    checkCancelled();
+    await setStep(paperId, "linking", {
+      processingStatus: baseProcessingStatus,
+      processingRunId,
     });
+    console.log("[auto-process] Computing deterministic related papers for", paperId);
 
-    if (otherPapers.length > 0) {
-      checkCancelled();
-      await setStep(paperId, "linking", {
-        processingStatus: baseProcessingStatus,
-        processingRunId,
-      });
-      console.log("[auto-process] Linking related papers for", paperId);
+    const relationResult = await recomputeDeterministicRelatednessForPaper(
+      paperId,
+    );
 
-      // Re-fetch paper to get summary/categories from prior steps
-      const updatedPaper = await prisma.paper.findUnique({
-        where: { id: paperId },
-        select: {
-          title: true,
-          abstract: true,
-          summary: true,
-          categories: true,
-        },
-      });
-
-      const newPaperInfo = [
-        `Title: ${updatedPaper?.title || paper.title}`,
-        updatedPaper?.abstract ? `Abstract: ${updatedPaper.abstract}` : "",
-        updatedPaper?.summary
-          ? `Summary: ${updatedPaper.summary.slice(0, 500)}`
-          : "",
-        updatedPaper?.categories
-          ? `Categories: ${updatedPaper.categories}`
-          : "",
-      ]
-        .filter(Boolean)
-        .join("\n");
-
-      const existingList = otherPapers
-        .map((p) => {
-          const parts = [`id: ${p.id}`, `title: ${p.title}`];
-          if (p.abstract) parts.push(`abstract: ${p.abstract.slice(0, 200)}`);
-          if (p.summary) parts.push(`summary: ${p.summary.slice(0, 200)}`);
-          if (p.categories) parts.push(`categories: ${p.categories}`);
-          return parts.join(" | ");
-        })
-        .join("\n");
-
-      const linkPrompt = `NEW PAPER:\n${newPaperInfo}\n\n---\n\nEXISTING PAPERS IN LIBRARY:\n${existingList}`;
-
-      const { system } = buildPrompt("linkPapers", "");
-      const { object: relations } = await runProcessingStructuredCall(
-        { paperId, userId: paper.userId, step: "linkPapers", processingRunId },
-        {
-          provider,
-          modelId,
-          system,
-          prompt: linkPrompt,
-          schemaName: "linkPapers",
-          schema: linkPapersRuntimeOutputSchema,
-          maxTokens: 2000,
-          proxyConfig,
-        },
-      );
-
-      const validIds = new Set(otherPapers.map((p) => p.id));
-      let created = 0;
-
-      for (const rel of relations.slice(0, 20)) {
-        if (!validIds.has(rel.targetPaperId)) continue;
-
-        const targetPaper = otherPapers.find((candidate) => candidate.id === rel.targetPaperId);
-        const clampedConfidence = Math.min(1, Math.max(0, rel.confidence || 0));
-
-        await prisma.paperRelation.create({
-          data: {
-            sourcePaperId: paperId,
-            targetPaperId: rel.targetPaperId,
-            relationType: rel.relationType,
-            description: rel.description || null,
-            confidence: clampedConfidence,
-            isAutoGenerated: true,
-          },
-        }).catch(() => {});
-
-        if (paper.entityId && targetPaper?.entityId) {
-          try {
-            await createRelationAssertion({
-              sourceEntityId: paper.entityId,
-              targetEntityId: targetPaper.entityId,
-              sourcePaperId: paperId,
-              relationType: rel.relationType,
-              description: rel.description || null,
-              confidence: clampedConfidence,
-              provenance: "llm_semantic",
-              extractorVersion: "v1",
-            });
-            await projectLegacyRelation(
-              paperId,
-              rel.targetPaperId,
-              paper.entityId,
-              targetPaper.entityId
-            );
-          } catch {
-            // Non-fatal
-          }
-        }
-
-        created++;
-      }
-
-      console.log(
-        `[auto-process] Created ${created} paper relations for`,
-        paperId
-      );
-    }
+    console.log("[auto-process] Deterministic relatedness result", {
+      paperId,
+      status: relationResult.status,
+      emittedCount: relationResult.emittedCount,
+      deletedLlmSemanticCount: relationResult.deletedLlmSemanticCount,
+      deletedStaleDeterministicCount:
+        relationResult.deletedStaleDeterministicCount,
+    });
   } catch (e) {
-    console.error("[auto-process] Link related papers failed:", e);
+    console.error("[auto-process] Deterministic relatedness failed:", e);
   }
 
   // Step 5: Detect contradictions with related papers
@@ -1345,7 +1235,7 @@ export async function runAutoProcessPipeline(opts: {
 
 /**
  * Find papers that completed essential-only processing (NEEDS_DEFERRED)
- * and run the remaining steps (linking, contradictions, references, distill).
+ * and run the remaining steps (deterministic relatedness, contradictions, references, distill).
  * Called automatically when the processing queue drains.
  */
 export async function runDeferredSteps(): Promise<number> {

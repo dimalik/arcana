@@ -8,11 +8,17 @@ vi.mock("../../prisma", () => ({
     },
     relationEvidence: {
       create: vi.fn(),
+      deleteMany: vi.fn(),
+      createMany: vi.fn(),
     },
   },
 }));
 
-import { addEvidence, createRelationAssertion } from "../relation-assertion-service";
+import {
+  addEvidence,
+  createRelationAssertion,
+  upsertAssertionWithEvidence,
+} from "../relation-assertion-service";
 
 describe("createRelationAssertion", () => {
   beforeEach(() => {
@@ -68,5 +74,81 @@ describe("addEvidence", () => {
     });
 
     expect(prisma.relationEvidence.create).toHaveBeenCalled();
+  });
+});
+
+describe("upsertAssertionWithEvidence", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("replaces prior evidence rows instead of appending", async () => {
+    const { prisma } = await import("../../prisma");
+    (prisma.relationAssertion.upsert as ReturnType<typeof vi.fn>).mockResolvedValue({
+      id: "assertion-3",
+    });
+    (prisma.relationEvidence.deleteMany as ReturnType<typeof vi.fn>).mockResolvedValue({
+      count: 2,
+    });
+    (prisma.relationEvidence.createMany as ReturnType<typeof vi.fn>).mockResolvedValue({
+      count: 1,
+    });
+
+    await upsertAssertionWithEvidence(
+      {
+        sourceEntityId: "entity-1",
+        targetEntityId: "entity-2",
+        sourcePaperId: "paper-1",
+        relationType: "related",
+        confidence: 0.6,
+        provenance: "deterministic_relatedness",
+      },
+      [
+        {
+          type: "deterministic_signal:direct_citation",
+          excerpt: '{"rawValue":1,"weight":0.4,"contribution":0.4}',
+          referenceEntryId: "ref-entry-1",
+        },
+      ],
+    );
+
+    expect(prisma.relationEvidence.deleteMany).toHaveBeenCalledWith({
+      where: { assertionId: "assertion-3" },
+    });
+    expect(prisma.relationEvidence.createMany).toHaveBeenCalledWith({
+      data: [
+        {
+          assertionId: "assertion-3",
+          type: "deterministic_signal:direct_citation",
+          excerpt: '{"rawValue":1,"weight":0.4,"contribution":0.4}',
+          citationMentionId: null,
+          referenceEntryId: "ref-entry-1",
+        },
+      ],
+    });
+  });
+
+  it("skips createMany when the replacement evidence set is empty", async () => {
+    const { prisma } = await import("../../prisma");
+    (prisma.relationAssertion.upsert as ReturnType<typeof vi.fn>).mockResolvedValue({
+      id: "assertion-4",
+    });
+    (prisma.relationEvidence.deleteMany as ReturnType<typeof vi.fn>).mockResolvedValue({
+      count: 1,
+    });
+
+    await upsertAssertionWithEvidence(
+      {
+        sourceEntityId: "entity-1",
+        targetEntityId: "entity-2",
+        sourcePaperId: "paper-1",
+        relationType: "related",
+        confidence: 0.4,
+        provenance: "deterministic_relatedness",
+      },
+      [],
+    );
+
+    expect(prisma.relationEvidence.createMany).not.toHaveBeenCalled();
   });
 });

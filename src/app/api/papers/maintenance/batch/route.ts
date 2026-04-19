@@ -53,7 +53,7 @@ export async function POST(request: NextRequest) {
     );
 
     const totalPapers = needsFullReprocess + needsDeferred + completedMissing;
-    const stepsPerPaper = needsFullReprocess > 0 ? 8 : 5; // Deferred-only needs fewer steps
+    const stepsPerPaper = needsFullReprocess > 0 ? 7 : 4; // Deferred-only needs fewer steps
     const { useBatch, estimatedSeqMins } = shouldUseBatch(totalPapers, stepsPerPaper);
 
     return NextResponse.json({

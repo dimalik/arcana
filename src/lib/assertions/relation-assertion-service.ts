@@ -98,3 +98,34 @@ export async function createAssertionWithEvidence(
   }
   return created;
 }
+
+type RelationEvidenceReplaceDb = Pick<
+  typeof prisma,
+  "relationAssertion" | "relationEvidence"
+>;
+
+export async function upsertAssertionWithEvidence(
+  assertion: CreateAssertionInput,
+  evidenceList: Omit<AddEvidenceInput, "assertionId">[],
+  db: RelationEvidenceReplaceDb = prisma,
+) {
+  const created = await createRelationAssertion(assertion, db);
+
+  await db.relationEvidence.deleteMany({
+    where: { assertionId: created.id },
+  });
+
+  if (evidenceList.length > 0) {
+    await db.relationEvidence.createMany({
+      data: evidenceList.map((evidence) => ({
+        assertionId: created.id,
+        type: evidence.type,
+        excerpt: evidence.excerpt ?? null,
+        citationMentionId: evidence.citationMentionId ?? null,
+        referenceEntryId: evidence.referenceEntryId ?? null,
+      })),
+    });
+  }
+
+  return created;
+}

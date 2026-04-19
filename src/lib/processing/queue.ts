@@ -270,7 +270,7 @@ export class ProcessingQueue {
 
       // Step 2: Run LLM pipeline
       // When backlog is large (>5 papers), run essential-only mode to get summaries fast.
-      // Deferred steps (linking, refs, distill) run later when queue drains.
+      // Deferred steps (deterministic relatedness, refs, distill) run later when queue drains.
       const skipExtract = updated.sourceType === "ARXIV" || updated.sourceType === "OPENREVIEW";
       const backlogSize = this.queue.length + this.processing.size;
       const essentialOnly = backlogSize > 5;

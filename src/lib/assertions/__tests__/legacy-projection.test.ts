@@ -24,6 +24,27 @@ describe("pickWinningAssertion", () => {
 
     expect(winner?.id).toBe("a2");
   });
+
+  it("keeps llm_semantic above deterministic_relatedness in the shared ladder", () => {
+    const winner = pickWinningAssertion([
+      {
+        id: "a1",
+        relationType: "related",
+        confidence: 0.95,
+        provenance: "llm_semantic",
+        description: "LLM relation",
+      },
+      {
+        id: "a2",
+        relationType: "related",
+        confidence: 0.4,
+        provenance: "deterministic_relatedness",
+        description: "Deterministic relation",
+      },
+    ]);
+
+    expect(winner?.id).toBe("a1");
+  });
 });
 
 describe("projectLegacyRelation", () => {

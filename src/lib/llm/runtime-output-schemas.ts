@@ -40,17 +40,6 @@ export const extractReferencesRuntimeOutputSchema = z.array(
     .passthrough(),
 );
 
-export const linkPapersRuntimeOutputSchema = z.array(
-  z
-    .object({
-      targetPaperId: z.string(),
-      relationType: z.string(),
-      description: z.string().optional().nullable(),
-      confidence: z.coerce.number(),
-    })
-    .passthrough(),
-);
-
 export const detectContradictionsRuntimeOutputSchema = z
   .object({
     contradictions: z.array(
@@ -96,7 +85,6 @@ export const PROCESSING_RUNTIME_OUTPUT_SCHEMAS = {
   extract: extractRuntimeOutputSchema,
   categorize: categorizeRuntimeOutputSchema,
   extractReferences: extractReferencesRuntimeOutputSchema,
-  linkPapers: linkPapersRuntimeOutputSchema,
   detectContradictions: detectContradictionsRuntimeOutputSchema,
   extractCitationContexts: extractCitationContextsRuntimeOutputSchema,
   distill: distillRuntimeOutputSchema,
@@ -111,9 +99,6 @@ export type CategorizeRuntimeOutput = z.infer<
 >;
 export type ExtractReferencesRuntimeOutput = z.infer<
   typeof extractReferencesRuntimeOutputSchema
->;
-export type LinkPapersRuntimeOutput = z.infer<
-  typeof linkPapersRuntimeOutputSchema
 >;
 export type DetectContradictionsRuntimeOutput = z.infer<
   typeof detectContradictionsRuntimeOutputSchema

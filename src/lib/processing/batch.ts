@@ -5,10 +5,11 @@
  * avoids rate limits. Results come back asynchronously (typically 1-4 hours).
  *
  * Phases handle step dependencies:
- *   Phase 1: extract + summarize in Anthropic batch, then hybrid reference extraction as a sidecar
- *   Phase 2: categorize + linking + distill in batch, plus citationContexts via
- *            GROBID sidecar for PDF-backed papers and LLM fallback where needed
- *   Phase 3: contradictions (needs linking results from Phase 2)
+ *   Phase 1: extract + summarize in Anthropic batch, then hybrid reference extraction
+ *            and deterministic relatedness recompute as sidecars
+ *   Phase 2: categorize + distill in batch, plus citationContexts via GROBID
+ *            sidecar for PDF-backed papers and LLM fallback where needed
+ *   Phase 3: contradictions (uses projected deterministic relatedness from Phase 1)
  */
 
 import { prisma } from "@/lib/prisma";
@@ -40,7 +41,8 @@ import {
 } from "@/lib/citations/citation-mention-service";
 import { resolveAndAssignTags, getExistingTagNames, getScoredTagHints } from "@/lib/tags/auto-tag";
 import { refreshTagScores } from "@/lib/tags/cleanup";
-import { listProjectedTargetPaperIds } from "@/lib/assertions/relation-reader";
+import { recomputeDeterministicRelatednessForPapers } from "../assertions/deterministic-relatedness";
+import { listProjectedTargetPaperIds } from "../assertions/relation-reader";
 import {
   advanceBatchPhase,
   completeBatchRuns,
@@ -73,7 +75,7 @@ interface BatchResult {
 }
 
 type StepType = "extract" | "summarize" | "extractReferences" |
-  "categorize" | "linkPapers" | "extractCitationContexts" | "distillInsights" |
+  "categorize" | "extractCitationContexts" | "distillInsights" |
   "detectContradictions";
 
 async function runProcessingBatchLlmCall(
@@ -130,7 +132,7 @@ const BATCH_THRESHOLD_SECS = 2 * 60 * 60; // 2 hours
  */
 export function shouldUseBatch(
   paperCount: number,
-  stepsPerPaper: number = 8,
+  stepsPerPaper: number = 7,
 ): { useBatch: boolean; estimatedSeqMins: number } {
   const totalCalls = paperCount * stepsPerPaper;
   const seqSeconds = (totalCalls * SECS_PER_CALL) / MAX_CONCURRENT;
@@ -292,20 +294,6 @@ function buildCategorizeRequest(paperId: string, truncatedText: string, modelId:
   };
 }
 
-function buildLinkingRequest(
-  paperId: string,
-  paperInfo: string,
-  existingPapersList: string,
-  modelId: string,
-): BatchRequest {
-  const { system } = buildPrompt("linkPapers", "");
-  const prompt = `NEW PAPER:\n${paperInfo}\n\n---\n\nEXISTING PAPERS IN LIBRARY:\n${existingPapersList}`;
-  return {
-    custom_id: `${paperId}--linkPapers`,
-    params: { model: modelId, max_tokens: 2000, system, messages: [{ role: "user", content: prompt }] },
-  };
-}
-
 function buildCitationContextsRequest(paperId: string, bodyText: string, modelId: string): BatchRequest {
   const { system } = buildPrompt("extractCitationContexts", "");
   return {
@@ -409,31 +397,6 @@ async function buildPhase2Requests(
   const { goodTags, overusedTags } = await getScoredTagHints();
   const tagsForPrompt = goodTags.length > 0 ? goodTags : existingTags;
 
-  // Shared context for linking — all papers in library
-  const allPapers = await prisma.paper.findMany({
-    where: { id: { notIn: paperIds } }, // Exclude batch papers from existing list
-    select: { id: true, title: true, abstract: true, summary: true, categories: true },
-  });
-
-  const existingPapersList = allPapers.map(p => {
-    const parts = [`id: ${p.id}`, `title: ${p.title}`];
-    if (p.abstract) parts.push(`abstract: ${p.abstract.slice(0, 200)}`);
-    if (p.summary) parts.push(`summary: ${p.summary.slice(0, 200)}`);
-    if (p.categories) parts.push(`categories: ${p.categories}`);
-    return parts.join(" | ");
-  }).join("\n");
-
-  // Also include batch papers (with their now-available summaries) in the linking context
-  const batchPapersForContext = papers.map(p => {
-    const parts = [`id: ${p.id}`, `title: ${p.title}`];
-    if (p.abstract) parts.push(`abstract: ${p.abstract?.slice(0, 200)}`);
-    if (p.summary) parts.push(`summary: ${p.summary?.slice(0, 200)}`);
-    if (p.categories) parts.push(`categories: ${p.categories}`);
-    return parts.join(" | ");
-  }).join("\n");
-
-  const fullExistingList = existingPapersList + "\n" + batchPapersForContext;
-
   // Existing Mind Palace rooms for distill
   const existingRooms = await prisma.mindPalaceRoom.findMany({ select: { name: true } });
   const roomNames = existingRooms.map(r => r.name);
@@ -445,15 +408,6 @@ async function buildPhase2Requests(
 
     // Categorize
     requests.push(buildCategorizeRequest(paper.id, truncated, modelId, tagsForPrompt, overusedTags));
-
-    // Linking
-    const paperInfo = [
-      `Title: ${paper.title}`,
-      paper.abstract ? `Abstract: ${paper.abstract}` : "",
-      paper.summary ? `Summary: ${paper.summary.slice(0, 500)}` : "",
-      paper.categories ? `Categories: ${paper.categories}` : "",
-    ].filter(Boolean).join("\n");
-    requests.push(buildLinkingRequest(paper.id, paperInfo, fullExistingList, modelId));
 
     // Citation contexts (needs references from Phase 1, and full text)
     if (paper.fullText) {
@@ -496,7 +450,7 @@ async function buildPhase3Requests(
   const requests: BatchRequest[] = [];
 
   for (const paperId of paperIds) {
-    // Get this paper's relations from Phase 2 linking
+    // Deterministic relatedness is projected after Phase 1 completes.
     const relatedPaperIds = await listProjectedTargetPaperIds(
       paperId,
       { excludeRelationTypes: ["cites"], limit: 10 },
@@ -651,41 +605,6 @@ async function processCategorizeResult(paperId: string, text: string, modelId: s
   } catch (error) {
     console.error(
       `[batch] Structured categorize result failed for ${paperId}:`,
-      error instanceof Error ? error.message : error,
-    );
-  }
-}
-
-async function processLinkingResult(paperId: string, text: string, modelId: string) {
-  try {
-    const relations = parseStructuredRuntimeOutputText(
-      "linkPapers",
-      text,
-      "batch",
-    );
-
-    // Validate target IDs exist
-    const targetIds = relations.map(r => r.targetPaperId);
-    const valid = await prisma.paper.findMany({
-      where: { id: { in: targetIds } },
-      select: { id: true },
-    });
-    const validIds = new Set(valid.map(p => p.id));
-
-    for (const rel of relations.slice(0, 20)) {
-      if (!validIds.has(rel.targetPaperId)) continue;
-      await prisma.paperRelation.create({
-        data: {
-          sourcePaperId: paperId, targetPaperId: rel.targetPaperId,
-          relationType: rel.relationType, description: rel.description || null,
-          confidence: Math.min(1, Math.max(0, rel.confidence || 0)),
-          isAutoGenerated: true,
-        },
-      }).catch(() => {});
-    }
-  } catch (error) {
-    console.error(
-      `[batch] Structured linkPapers result failed for ${paperId}:`,
       error instanceof Error ? error.message : error,
     );
   }
@@ -1072,10 +991,14 @@ export async function pollBatch(batchDbId: string): Promise<{
           case "summarize": await processSummarizeResult(paperId, text, batch.modelId); break;
           case "extractReferences": await processExtractReferencesResult(paperId, text, batch.modelId); break;
           case "categorize": await processCategorizeResult(paperId, text, batch.modelId); break;
-          case "linkPapers": await processLinkingResult(paperId, text, batch.modelId); break;
           case "extractCitationContexts": await processCitationContextsResult(paperId, text); break;
           case "distillInsights": await processDistillResult(paperId, text, batch.modelId); break;
           case "detectContradictions": await processContradictionsResult(paperId, text, batch.modelId); break;
+          default:
+            console.warn("[batch] Ignoring retired batch step", {
+              paperId,
+              stepType,
+            });
         }
         succeeded++;
       } catch (e) {
@@ -1095,6 +1018,16 @@ export async function pollBatch(batchDbId: string): Promise<{
         );
       } catch (e) {
         console.error("[batch] Hybrid reference extraction phase failed:", e);
+      }
+
+      try {
+        const deterministicRelations =
+          await recomputeDeterministicRelatednessForPapers(paperIds);
+        console.log(
+          `[batch] Phase 1 deterministic relatedness: ${deterministicRelations.updated} papers updated, ${deterministicRelations.emittedCount} relations emitted`,
+        );
+      } catch (e) {
+        console.error("[batch] Deterministic relatedness recompute failed:", e);
       }
     }
 

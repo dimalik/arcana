@@ -196,24 +196,6 @@ Guidelines:
 - Keep explanations specific to how the concept is used in the paper.
 - Return ONLY valid JSON. No markdown fences, no extra text.`,
 
-  linkPapers: `You are an expert at identifying relationships between academic research papers. You will be given a NEW paper and a list of EXISTING papers from the user's library.
-
-Your task is to identify which existing papers are related to the new paper, and describe the nature of each relationship.
-
-For each related paper, return:
-- "targetPaperId": the id of the existing paper
-- "relationType": a short label for the relationship (e.g., "extends methodology", "addresses same problem", "uses same dataset", "cites or is cited by", "competing approach", "builds upon", "surveys this area", "applies to same domain")
-- "description": a 1-2 sentence explanation of how the papers are related
-- "confidence": 0-1 score for how confident you are in this relationship (use 0.8+ only for strong, clear relationships)
-
-Return a JSON array of related papers. If no papers are related, return an empty array [].
-
-Rules:
-- Only identify genuinely meaningful relationships. Do not force connections.
-- A paper being in the same broad field is NOT sufficient — there should be a specific methodological, topical, or citation relationship.
-- Return ONLY valid JSON. No markdown fences, no extra text.
-- Maximum 10 relations per paper.`,
-
   extractReferences: `You are an expert at parsing academic paper bibliographies. Given the reference/bibliography section of a research paper, extract each cited work into structured data.
 
 Return a JSON array where each element has:
