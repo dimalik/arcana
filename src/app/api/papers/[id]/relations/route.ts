@@ -4,10 +4,12 @@ import { requireUserId } from "@/lib/paper-auth";
 import {
   createManualRelation,
   deleteManualRelation,
+} from "@/lib/assertions/graph-relations";
+import {
   GraphRelationError,
   listRelationsForPaper,
   toRouteRelationRow,
-} from "@/lib/assertions/graph-relations";
+} from "@/lib/assertions/relation-reader";
 
 const createRelationSchema = z.object({
   targetPaperId: z.string().uuid(),

@@ -1,4 +1,5 @@
 import { prisma } from "../prisma";
+import { getRelationProvenancePriority } from "./provenance";
 
 export interface AggregatedRelation {
   peerEntityId: string;
@@ -16,14 +17,6 @@ export interface AggregatedRelation {
 }
 
 type RelationAggregateDb = Pick<typeof prisma, "relationAssertion">;
-
-const PROVENANCE_PRIORITY: Record<string, number> = {
-  reference_match: 0,
-  citation_analysis: 1,
-  discovery: 2,
-  llm_semantic: 3,
-  user_manual: 4,
-};
 
 export async function getAggregatedRelationsForPaper(
   paperId: string,
@@ -64,7 +57,7 @@ export async function getAggregatedRelationsForPaper(
     const peerEntityId = isOutbound ? assertion.targetEntityId : assertion.sourceEntityId;
     const peerEntity = isOutbound ? assertion.targetEntity : assertion.sourceEntity;
     const key = `${peerEntityId}::${assertion.relationType}`;
-    const priority = PROVENANCE_PRIORITY[assertion.provenance] ?? 0;
+    const priority = getRelationProvenancePriority(assertion.provenance);
 
     const existing = groups.get(key);
     if (existing) {

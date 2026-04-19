@@ -1,0 +1,14 @@
+{
+  "readAllowlist": {
+    "shared_relation_reader": [
+      "src/lib/assertions/relation-reader.ts"
+    ],
+    "projection_and_write_support": [
+      "src/lib/assertions/legacy-projection.ts",
+      "src/lib/assertions/graph-relations.ts"
+    ],
+    "audits_and_backfills": [
+      "src/lib/assertions/backfill-assertions.ts"
+    ]
+  }
+}

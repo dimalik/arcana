@@ -21,6 +21,7 @@ import {
   buildCandidateFigures,
   FIGURE_NARRATIVE_PROMPT,
 } from "./figure-builder";
+import { listProjectedRelationEdgesWithinPaperIds } from "@/lib/assertions/relation-reader";
 import { findAndDownloadPdf } from "@/lib/import/pdf-finder";
 import { extractTextFromPdf } from "@/lib/pdf/parser";
 
@@ -815,21 +816,18 @@ export async function runPhase2(sessionId: string, signal: AbortSignal): Promise
     }));
     vizData.citationNetwork.edges = citationGraph.edges;
   } else {
-    const relations = await prisma.paperRelation.findMany({
-      where: {
-        sourcePaperId: { in: papers.map((p) => p.id) },
-        targetPaperId: { in: papers.map((p) => p.id) },
-      },
-    });
+    const relations = await listProjectedRelationEdgesWithinPaperIds(
+      papers.map((paper) => paper.id),
+    );
 
     vizData.citationNetwork.nodes = papers.map((p) => ({
       id: p.id,
       label: p.title.length > 40 ? p.title.slice(0, 40) + "..." : p.title,
       isCorpus: true,
     }));
-    vizData.citationNetwork.edges = relations.map((r) => ({
-      source: r.sourcePaperId,
-      target: r.targetPaperId,
+    vizData.citationNetwork.edges = relations.map((relation) => ({
+      source: relation.sourcePaperId,
+      target: relation.targetPaperId,
     }));
   }
 

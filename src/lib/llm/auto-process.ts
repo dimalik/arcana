@@ -25,6 +25,7 @@ import {
 } from "@/lib/citations/citation-mention-service";
 import { createRelationAssertion } from "@/lib/assertions/relation-assertion-service";
 import { projectLegacyRelation } from "@/lib/assertions/legacy-projection";
+import { listProjectedTargetPaperIds } from "@/lib/assertions/relation-reader";
 import type { ZodTypeAny } from "zod";
 import {
   clearProcessingStep,
@@ -981,22 +982,18 @@ export async function runAutoProcessPipeline(opts: {
 
   // Step 5: Detect contradictions with related papers
   try {
-    const relations = await prisma.paperRelation.findMany({
-      where: { sourcePaperId: paperId, relationType: { not: "cites" } },
-      orderBy: { confidence: "desc" },
-      take: 10,
-      select: { targetPaperId: true },
-    });
+    const relatedPaperIds = await listProjectedTargetPaperIds(
+      paperId,
+      { excludeRelationTypes: ["cites"], limit: 10 },
+    );
 
-    if (relations.length > 0) {
+    if (relatedPaperIds.length > 0) {
       checkCancelled();
       await setStep(paperId, "contradictions", {
         processingStatus: baseProcessingStatus,
         processingRunId,
       });
       console.log("[auto-process] Detecting contradictions for", paperId);
-
-      const relatedPaperIds = relations.map((r) => r.targetPaperId);
       const relatedPapers = await prisma.paper.findMany({
         where: { id: { in: relatedPaperIds } },
         select: { id: true, title: true, abstract: true, summary: true, keyFindings: true },

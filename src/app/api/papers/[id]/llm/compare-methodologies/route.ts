@@ -5,6 +5,7 @@ import { buildPrompt } from "@/lib/llm/prompts";
 import { resolveModelConfig } from "@/lib/llm/auto-process";
 import { parseSummarySections } from "@/lib/papers/parse-sections";
 import { requireUserId } from "@/lib/paper-auth";
+import { listProjectedTargetPaperIds } from "@/lib/assertions/relation-reader";
 
 export async function POST(
   request: NextRequest,
@@ -31,20 +32,17 @@ export async function POST(
     if (paperIds && paperIds.length > 0) {
       relatedPaperIds = paperIds.filter((pid) => pid !== id);
     } else {
-      const relations = await prisma.paperRelation.findMany({
-        where: { sourcePaperId: id, relationType: { not: "cites" } },
-        orderBy: { confidence: "desc" },
-        take: 8,
-        select: { targetPaperId: true },
-      });
+      relatedPaperIds = await listProjectedTargetPaperIds(
+        id,
+        { excludeRelationTypes: ["cites"], limit: 8 },
+      );
 
-      if (relations.length === 0) {
+      if (relatedPaperIds.length === 0) {
         return NextResponse.json(
           { error: "No related papers found. Run analysis first to link papers." },
           { status: 400 }
         );
       }
-      relatedPaperIds = relations.map((r) => r.targetPaperId);
     }
 
     const relatedPapers = await prisma.paper.findMany({

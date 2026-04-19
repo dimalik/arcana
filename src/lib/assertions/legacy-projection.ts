@@ -1,12 +1,5 @@
 import { prisma } from "../prisma";
-
-const PROVENANCE_PRIORITY: Record<string, number> = {
-  reference_match: 0,
-  citation_analysis: 1,
-  discovery: 2,
-  llm_semantic: 3,
-  user_manual: 4,
-};
+import { comparePrioritizedRelationAssertions } from "./provenance";
 
 export interface AssertionForProjection {
   id: string;
@@ -22,13 +15,9 @@ export function pickWinningAssertion(
   assertions: AssertionForProjection[]
 ): AssertionForProjection | null {
   if (assertions.length === 0) return null;
-  return assertions.reduce((best, current) => {
-    const bestPriority = PROVENANCE_PRIORITY[best.provenance] ?? 0;
-    const currentPriority = PROVENANCE_PRIORITY[current.provenance] ?? 0;
-    if (currentPriority > bestPriority) return current;
-    if (currentPriority === bestPriority && current.confidence > best.confidence) return current;
-    return best;
-  });
+  return assertions.reduce((best, current) =>
+    comparePrioritizedRelationAssertions(best, current),
+  );
 }
 
 export async function projectLegacyRelation(

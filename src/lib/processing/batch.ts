@@ -40,6 +40,7 @@ import {
 } from "@/lib/citations/citation-mention-service";
 import { resolveAndAssignTags, getExistingTagNames, getScoredTagHints } from "@/lib/tags/auto-tag";
 import { refreshTagScores } from "@/lib/tags/cleanup";
+import { listProjectedTargetPaperIds } from "@/lib/assertions/relation-reader";
 import {
   advanceBatchPhase,
   completeBatchRuns,
@@ -496,16 +497,11 @@ async function buildPhase3Requests(
 
   for (const paperId of paperIds) {
     // Get this paper's relations from Phase 2 linking
-    const relations = await prisma.paperRelation.findMany({
-      where: { sourcePaperId: paperId, relationType: { not: "cites" } },
-      orderBy: { confidence: "desc" },
-      take: 10,
-      select: { targetPaperId: true },
-    });
-
-    if (relations.length === 0) continue;
-
-    const relatedPaperIds = relations.map(r => r.targetPaperId);
+    const relatedPaperIds = await listProjectedTargetPaperIds(
+      paperId,
+      { excludeRelationTypes: ["cites"], limit: 10 },
+    );
+    if (relatedPaperIds.length === 0) continue;
     const relatedPapers = await prisma.paper.findMany({
       where: { id: { in: relatedPaperIds } },
       select: { id: true, title: true, abstract: true, summary: true, keyFindings: true },

@@ -5,6 +5,7 @@ vi.mock("../../prisma", () => ({
     reference: {
       deleteMany: vi.fn(),
       create: vi.fn(),
+      count: vi.fn(),
       update: vi.fn(),
     },
     citationMention: {
@@ -15,6 +16,8 @@ vi.mock("../../prisma", () => ({
     },
     paper: {
       findMany: vi.fn(),
+      findUnique: vi.fn(),
+      update: vi.fn(),
     },
     paperRelation: {
       create: vi.fn(),
@@ -48,10 +51,18 @@ describe("persistExtractedReferences", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(prisma.reference.deleteMany).mockResolvedValue({ count: 0 } as never);
+    vi.mocked(prisma.reference.count).mockResolvedValue(1 as never);
     vi.mocked(prisma.citationMention.deleteMany).mockResolvedValue({ count: 0 } as never);
     vi.mocked(prisma.referenceEntry.deleteMany).mockResolvedValue({ count: 0 } as never);
     vi.mocked(prisma.reference.create).mockResolvedValue({ id: "legacy-1" } as never);
     vi.mocked(prisma.reference.update).mockResolvedValue({ id: "legacy-1" } as never);
+    vi.mocked(prisma.paper.findUnique).mockResolvedValue({
+      id: "paper-1",
+      filePath: "/tmp/paper.pdf",
+      fullText: "text",
+      referenceState: "pending",
+    } as never);
+    vi.mocked(prisma.paper.update).mockResolvedValue({ id: "paper-1" } as never);
     vi.mocked(prisma.paperRelation.create).mockReturnValue({
       catch: vi.fn().mockResolvedValue(undefined),
     } as never);
@@ -172,7 +183,6 @@ describe("persistExtractedReferences", () => {
       "paper-2",
       "entity-1",
       "entity-2",
-      true,
     );
     expect(result.promotedPaperEdges).toBe(1);
     expect(result.promotedEntityAssertions).toBe(1);
@@ -224,6 +234,64 @@ describe("persistExtractedReferences", () => {
     expect(prisma.paperRelation.create).toHaveBeenCalled();
     expect(result.promotedPaperEdges).toBe(1);
     expect(result.promotedEntityAssertions).toBe(1);
+  });
+
+  it("preserves the legacy cites edge when the matched local paper lacks an entityId", async () => {
+    vi.mocked(prisma.paper.findMany).mockResolvedValue([
+      {
+        id: "paper-2",
+        title: "Entity-less local paper",
+        entityId: null,
+        doi: "10.1234/entityless",
+        arxivId: null,
+      },
+    ] as never);
+    vi.mocked(resolveReferenceEntity).mockResolvedValue({
+      resolvedEntityId: null,
+      resolveConfidence: null,
+      resolveSource: null,
+      matchedFieldCount: 0,
+      matchedIdentifiers: [],
+      evidence: [],
+      semanticScholarId: null,
+      externalUrl: null,
+    });
+
+    const result = await persistExtractedReferences({
+      paperId: "paper-1",
+      paperUserId: "user-1",
+      sourceEntityId: "entity-1",
+      provenance: "grobid_tei",
+      extractorVersion: "grobid_v1",
+      references: [
+        {
+          referenceIndex: 1,
+          rawCitation: "Entity-less local paper",
+          title: "Entity-less local paper",
+          authors: ["Jane Doe"],
+          year: 2020,
+          venue: "ACL",
+          doi: "10.1234/entityless",
+          arxivId: null,
+          extractionMethod: "grobid_tei",
+          extractionConfidence: 0.9,
+        },
+      ],
+    });
+
+    expect(prisma.paperRelation.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          sourcePaperId: "paper-1",
+          targetPaperId: "paper-2",
+          relationType: "cites",
+        }),
+      }),
+    );
+    expect(createRelationAssertion).not.toHaveBeenCalled();
+    expect(projectLegacyRelation).not.toHaveBeenCalled();
+    expect(result.promotedPaperEdges).toBe(1);
+    expect(result.promotedEntityAssertions).toBe(0);
   });
 
   it("does not promote low-confidence candidate resolutions into graph edges", async () => {
