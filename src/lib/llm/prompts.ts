@@ -174,28 +174,6 @@ Guidelines:
 
 If the user's request is ambiguous, make reasonable assumptions and state them clearly. Prioritize accuracy and specificity over generality.`,
 
-  concepts: `You are an expert at identifying the key concepts in academic research papers. Your task is to extract the 5-8 most important concepts from the provided paper.
-
-For each concept, provide:
-- "name": A concise name (2-5 words)
-- "explanation": A clear 1-2 sentence explanation of what this concept means in the context of the paper
-- "prerequisites": 1-2 prerequisite concepts that a reader would need to understand before grasping this concept
-
-Return a JSON array:
-[
-  {
-    "name": "Concept Name",
-    "explanation": "What this concept means and why it matters in this paper.",
-    "prerequisites": ["Prerequisite 1", "Prerequisite 2"]
-  }
-]
-
-Guidelines:
-- Focus on concepts central to the paper's contribution, not general background knowledge.
-- Prerequisites should be more foundational concepts that this concept builds upon.
-- Keep explanations specific to how the concept is used in the paper.
-- Return ONLY valid JSON. No markdown fences, no extra text.`,
-
   extractReferences: `You are an expert at parsing academic paper bibliographies. Given the reference/bibliography section of a research paper, extract each cited work into structured data.
 
 Return a JSON array where each element has:
@@ -237,26 +215,6 @@ Rules:
 - If the same work is cited multiple times for DIFFERENT reasons, include separate entries with different contexts.
 - If the same work is cited multiple times for the SAME reason, include only one entry.
 - Extract from body text ONLY. Do not invent citations or contexts.
-- Return ONLY valid JSON. No markdown fences, no extra text.`,
-
-  conceptExpand: `You are an expert at breaking down academic concepts into their prerequisite building blocks. Given a concept name and the context of a research paper, identify the 2-3 most important prerequisite sub-concepts that a reader would need to understand.
-
-For each prerequisite, provide:
-- "name": A concise name (2-5 words)
-- "explanation": A clear 1-2 sentence explanation
-
-Return a JSON array:
-[
-  {
-    "name": "Sub-concept Name",
-    "explanation": "What this sub-concept means and why it's needed to understand the parent concept."
-  }
-]
-
-Guidelines:
-- Return exactly 2-3 prerequisites. Focus on the most essential ones only.
-- Sub-concepts should be more foundational than the parent concept.
-- Keep explanations specific and practical.
 - Return ONLY valid JSON. No markdown fences, no extra text.`,
 
   detectContradictions: `You are an expert at identifying contradictions and conflicts between academic research papers. You will be given a NEW paper and a set of RELATED papers from the user's library.
@@ -439,15 +397,6 @@ export function cleanJsonResponse(text: string): string {
     .replace(/^```(?:json)?\s*\n?/i, "")
     .replace(/\n?```\s*$/i, "")
     .trim();
-}
-
-export function buildConceptExpandPrompt(
-  conceptName: string,
-  paperText: string
-): { system: string; prompt: string } {
-  const system = SYSTEM_PROMPTS.conceptExpand;
-  const prompt = `Here is the paper text for context:\n\n${paperText}\n\n---\n\nExpand the prerequisites for this concept: "${conceptName}"`;
-  return { system, prompt };
 }
 
 export function buildDistillPrompt(

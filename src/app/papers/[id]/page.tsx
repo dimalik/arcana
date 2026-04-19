@@ -19,7 +19,6 @@ import {
 import {
   Trash2,
   FileText,
-  Network,
   Link2,
   FlaskConical,
   BarChart3,
@@ -51,7 +50,6 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { toast } from "sonner";
 import { MarkdownRenderer } from "@/components/ui/markdown-renderer";
-import { ConceptMindmap } from "@/components/concepts/concept-mindmap";
 import { PaperConnections } from "@/components/connections/paper-connections";
 import { PaperChat } from "@/components/chat/paper-chat";
 import { SelectionHighlighter } from "@/components/chat/selection-highlighter";
@@ -115,8 +113,7 @@ type ViewTab =
   | "methodology"
   | "results"
   | "connections"
-  | "analyze"
-  | "concepts";
+  | "analyze";
 
 const viewTabs: { value: ViewTab; icon: typeof ClipboardCheck; label: string }[] = [
   { value: "review", icon: ClipboardCheck, label: "Review" },
@@ -124,7 +121,6 @@ const viewTabs: { value: ViewTab; icon: typeof ClipboardCheck; label: string }[]
   { value: "results", icon: BarChart3, label: "Results" },
   { value: "connections", icon: Link2, label: "Connections" },
   { value: "analyze", icon: Sparkles, label: "Analyze" },
-  { value: "concepts", icon: Network, label: "Concepts" },
 ];
 
 export default function PaperDetailPage() {
@@ -687,7 +683,7 @@ export default function PaperDetailPage() {
               className="min-h-0 overflow-y-auto relative py-4"
               style={{ width: `${splitRatio}%` }}
             >
-              <div ref={contentRef} className={activeView !== "concepts" ? "prose-readable" : ""}>
+              <div ref={contentRef} className="prose-readable">
                 {activeView === "review" && (
                   <>
                     {paper.summary ? (
@@ -784,13 +780,6 @@ export default function PaperDetailPage() {
                   />
                 )}
 
-                {activeView === "concepts" && (
-                  <ConceptMindmap
-                    paperId={paper.id}
-                    paperTitle={paper.title}
-                    hasText={!!(paper.fullText || paper.abstract)}
-                  />
-                )}
               </div>
             </div>
             {/* Draggable divider */}
@@ -807,7 +796,7 @@ export default function PaperDetailPage() {
           </div>
         ) : (
           <div ref={scrollContainerRef} className="flex-1 min-h-0 overflow-y-auto relative py-4">
-          <div ref={contentRef} className={activeView !== "concepts" ? "prose-readable" : ""}>
+          <div ref={contentRef} className="prose-readable">
             {activeView === "review" && (
               <>
                 {paper.summary ? (
@@ -901,14 +890,6 @@ export default function PaperDetailPage() {
                 promptResults={paper.promptResults}
                 onUpdate={fetchPaper}
                 relatedPapers={relatedPaperMap}
-              />
-            )}
-
-            {activeView === "concepts" && (
-              <ConceptMindmap
-                paperId={paper.id}
-                paperTitle={paper.title}
-                hasText={!!(paper.fullText || paper.abstract)}
               />
             )}
 

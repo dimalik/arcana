@@ -295,7 +295,6 @@ model Paper {
   collections        CollectionPaper[]
   chatMessages       ChatMessage[]
   promptResults      PromptResult[]
-  concepts           Concept[]
   sourceRelations    PaperRelation[]     @relation("SourceRelations")
   targetRelations    PaperRelation[]     @relation("TargetRelations")
   references         Reference[]
@@ -444,21 +443,6 @@ model PromptResult {
   paper Paper @relation(fields: [paperId], references: [id], onDelete: Cascade)
 }
 
-model Concept {
-  id          String   @id @default(uuid())
-  paperId     String
-  name        String
-  explanation String
-  parentId    String?
-  depth       Int      @default(0)
-  isExpanded  Boolean  @default(false)
-  createdAt   DateTime @default(now())
-
-  paper    Paper     @relation(fields: [paperId], references: [id], onDelete: Cascade)
-  parent   Concept?  @relation("ConceptTree", fields: [parentId], references: [id])
-  children Concept[] @relation("ConceptTree")
-}
-
 model PaperRelation {
   id              String   @id @default(uuid())
   sourcePaperId   String
@@ -599,7 +583,7 @@ model DiscoveryProposal {
 model PaperEngagement {
   id        String   @id @default(uuid())
   paperId   String
-  event     String // view, pdf_open, annotate, chat, concept_explore, discovery_seed, import
+  event     String // view, pdf_open, annotate, chat, discovery_seed, import; historical rows may include concept_explore
   createdAt DateTime @default(now())
 
   paper Paper @relation(fields: [paperId], references: [id], onDelete: Cascade)

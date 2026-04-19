@@ -6,7 +6,6 @@ import {
   BarChart3,
   Link2,
   Sparkles,
-  Network,
   MessageSquare,
   type LucideIcon,
 } from "lucide-react";
@@ -16,8 +15,7 @@ type ViewTab =
   | "methodology"
   | "results"
   | "connections"
-  | "analyze"
-  | "concepts";
+  | "analyze";
 
 const items: { value: ViewTab; icon: LucideIcon; label: string }[] = [
   { value: "review", icon: ClipboardCheck, label: "Review" },
@@ -25,7 +23,6 @@ const items: { value: ViewTab; icon: LucideIcon; label: string }[] = [
   { value: "results", icon: BarChart3, label: "Results" },
   { value: "connections", icon: Link2, label: "Connections" },
   { value: "analyze", icon: Sparkles, label: "Analyze" },
-  { value: "concepts", icon: Network, label: "Concepts" },
 ];
 
 interface Props {

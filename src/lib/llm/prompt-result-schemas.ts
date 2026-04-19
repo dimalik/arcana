@@ -106,13 +106,6 @@ const promptResultSchemaManifest = {
     consumers: ["src/components/analysis/methodology-comparator.tsx"],
     requiredKeys: ["comparison", "methodologicalDifferences", "verdict"],
   },
-  concepts: {
-    storage: "json_array",
-    description: "Concept hierarchy seed payload.",
-    consumers: ["src/app/api/papers/[id]/concepts/route.ts"],
-    itemRequiredKeys: ["name", "explanation"],
-    itemOptionalKeys: ["prerequisites"],
-  },
   code: {
     storage: "text",
     description: "Freeform code-generation response.",

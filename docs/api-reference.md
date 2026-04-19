@@ -44,13 +44,11 @@ All API routes live under `src/app/api/`. The application is designed for local 
 | DELETE | `/api/papers/[id]/conversations/[convId]` | Delete a conversation |
 | POST | `/api/papers/[id]/conversations/[convId]/chat` | Send a chat message (SSE stream) |
 
-### References & Concepts
+### References
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | GET | `/api/papers/[id]/references` | List extracted references |
 | POST | `/api/papers/[id]/references/extract` | Extract references from full text |
-| GET | `/api/papers/[id]/concepts` | List concept hierarchy |
-| POST | `/api/papers/[id]/concepts/[conceptId]/expand` | Expand a concept with LLM |
 
 ### Engagement
 | Method | Endpoint | Description |

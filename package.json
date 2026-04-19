@@ -24,6 +24,7 @@
     "check:prompt-result-manifest": "node --import tsx scripts/check-prompt-result-manifest.mjs",
     "check:paper-llm-contexts": "node --import tsx scripts/check-paper-llm-contexts.mjs",
     "check:paper-usage-segments": "node --import tsx scripts/check-paper-usage-segments.mjs",
+    "check:concepts-removed": "node --import tsx scripts/check-concepts-removed.mjs",
     "check:experiment-integrity": "node scripts/check-experiment-integrity.js",
     "trace": "node scripts/dump-agent-trace.js",
     "project:activity": "node scripts/show-project-activity.js",

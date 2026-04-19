@@ -11,7 +11,6 @@ import {
   FileText,
   MessageSquare,
   Highlighter,
-  Network,
   Compass,
   Download,
 } from "lucide-react";
@@ -50,7 +49,6 @@ const EVENT_ICONS: Record<string, typeof Eye> = {
   pdf_open: FileText,
   chat: MessageSquare,
   annotate: Highlighter,
-  concept_explore: Network,
   discovery_seed: Compass,
   import: Download,
 };
@@ -60,7 +58,6 @@ const EVENT_LABELS: Record<string, string> = {
   pdf_open: "PDF Opens",
   chat: "Chat Messages",
   annotate: "Annotations",
-  concept_explore: "Concepts Explored",
   discovery_seed: "Discovery Seeds",
   import: "Imports",
 };

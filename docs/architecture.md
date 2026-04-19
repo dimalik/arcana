@@ -28,7 +28,7 @@ src/
   app/                        # Next.js App Router
     (main)/                   # Main layout group
     api/
-      papers/[id]/            # Paper CRUD, LLM ops, references, concepts
+      papers/[id]/            # Paper CRUD, LLM ops, references
       research/[id]/          # Research projects, agent, steps, hypotheses, chat, figures
       mind-palace/            # Rooms, insights, review sessions
       synthesis/[id]/         # Multi-paper synthesis

@@ -9,7 +9,6 @@ const engageSchema = z.object({
     "pdf_open",
     "annotate",
     "chat",
-    "concept_explore",
     "discovery_seed",
     "import",
   ]),
