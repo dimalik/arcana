@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { synthesisQueue } from "@/lib/synthesis/queue";
 import { requireUserId } from "@/lib/paper-auth";
+import { mergePaperVisibilityWhere } from "@/lib/papers/visibility";
 
 // POST — Create + enqueue synthesis
 export async function POST(request: NextRequest) {
@@ -22,7 +23,7 @@ export async function POST(request: NextRequest) {
     if (Array.isArray(paperIds) && paperIds.length >= 2) {
       // Explicit paper selection
       papers = await prisma.paper.findMany({
-        where: { id: { in: paperIds }, userId },
+        where: mergePaperVisibilityWhere(userId, { id: { in: paperIds } }),
         select: { id: true, title: true },
       });
       if (papers.length !== paperIds.length) {
@@ -35,15 +36,14 @@ export async function POST(request: NextRequest) {
       // Auto-find papers matching the query
       const q = query.trim();
       papers = await prisma.paper.findMany({
-        where: {
-          userId,
+        where: mergePaperVisibilityWhere(userId, {
           OR: [
             { title: { contains: q } },
             { abstract: { contains: q } },
             { summary: { contains: q } },
             { tags: { some: { tag: { name: { contains: q } } } } },
           ],
-        },
+        }),
         select: { id: true, title: true },
         orderBy: { createdAt: "desc" },
         take: 50,

@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { requireUserId } from "@/lib/paper-auth";
+import {
+  jsonWithDuplicateState,
+  paperAccessErrorToResponse,
+  requirePaperAccess,
+} from "@/lib/paper-auth";
 import {
   createManualRelation,
   deleteManualRelation,
@@ -21,10 +25,13 @@ export async function GET(
   _request: NextRequest,
   { params }: { params: { id: string } }
 ) {
-  const userId = await requireUserId();
+  const access = await requirePaperAccess(params.id, { mode: "read" });
+  if (!access) {
+    return NextResponse.json({ error: "Paper not found" }, { status: 404 });
+  }
   try {
-    const result = await listRelationsForPaper(params.id, userId);
-    return NextResponse.json(result.rows.map(toRouteRelationRow));
+    const result = await listRelationsForPaper(params.id, access.userId);
+    return jsonWithDuplicateState(access, result.rows.map(toRouteRelationRow));
   } catch (error) {
     if (error instanceof GraphRelationError) {
       const status = typeof error.status === "number" ? error.status : 500;
@@ -38,16 +45,18 @@ export async function POST(
   request: NextRequest,
   { params }: { params: { id: string } }
 ) {
-  const paperId = params.id;
-  const userId = await requireUserId();
-
   try {
+    const paperId = params.id;
+    const access = await requirePaperAccess(paperId, { mode: "mutate" });
+    if (!access) {
+      return NextResponse.json({ error: "Paper not found" }, { status: 404 });
+    }
     const body = await request.json();
     const data = createRelationSchema.parse(body);
     const relation = await createManualRelation({
       paperId,
       targetPaperId: data.targetPaperId,
-      userId,
+      userId: access.userId,
       relationType: data.relationType,
       description: data.description ?? null,
     });
@@ -63,6 +72,8 @@ export async function POST(
     if (error instanceof GraphRelationError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
+    const response = paperAccessErrorToResponse(error);
+    if (response) return response;
     console.error("Create relation error:", error);
     return NextResponse.json(
       { error: "Failed to create relation" },
@@ -75,25 +86,30 @@ export async function DELETE(
   request: NextRequest,
   { params }: { params: { id: string } }
 ) {
-  const paperId = params.id;
-  const userId = await requireUserId();
-  const { searchParams } = new URL(request.url);
-  const relationId = searchParams.get("relationId");
-
-  if (!relationId) {
-    return NextResponse.json(
-      { error: "relationId query parameter is required" },
-      { status: 400 }
-    );
-  }
-
   try {
-    await deleteManualRelation({ paperId, userId, relationId });
+    const paperId = params.id;
+    const access = await requirePaperAccess(paperId, { mode: "mutate" });
+    if (!access) {
+      return NextResponse.json({ error: "Paper not found" }, { status: 404 });
+    }
+    const { searchParams } = new URL(request.url);
+    const relationId = searchParams.get("relationId");
+
+    if (!relationId) {
+      return NextResponse.json(
+        { error: "relationId query parameter is required" },
+        { status: 400 }
+      );
+    }
+
+    await deleteManualRelation({ paperId, userId: access.userId, relationId });
     return NextResponse.json({ success: true });
   } catch (error) {
     if (error instanceof GraphRelationError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
+    const response = paperAccessErrorToResponse(error);
+    if (response) return response;
     throw error;
   }
 }

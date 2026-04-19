@@ -3,20 +3,23 @@ import { prisma } from "@/lib/prisma";
 import { searchByTitle, isFigureOrSupplementDoi } from "@/lib/import/semantic-scholar";
 import { titleSimilarity } from "@/lib/references/match";
 import { logger } from "@/lib/logger";
-import { requireUserId } from "@/lib/paper-auth";
+import {
+  jsonWithDuplicateState,
+  paperAccessErrorToResponse,
+  requirePaperAccess,
+} from "@/lib/paper-auth";
 
 export async function POST(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const userId = await requireUserId();
     const { id } = await params;
-
-    const paper = await prisma.paper.findFirst({
-      where: { id, userId },
+    const access = await requirePaperAccess(id, {
+      mode: "mutate",
       select: { id: true, title: true, year: true },
     });
+    const paper = access?.paper;
 
     if (!paper) {
       return NextResponse.json({ error: "Paper not found" }, { status: 404 });
@@ -74,12 +77,14 @@ export async function POST(
       metadata: { paperId: id, source: result.source, fieldsUpdated: Object.keys(updateData), similarity },
     });
 
-    return NextResponse.json({
+    return jsonWithDuplicateState(access, {
       updated: Object.keys(updateData),
       source: result.source ?? "unknown",
       similarity,
     });
   } catch (error) {
+    const response = paperAccessErrorToResponse(error);
+    if (response) return response;
     logger.error("Failed to re-fetch metadata", {
       category: "api",
       error,

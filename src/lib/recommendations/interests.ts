@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { mergePaperVisibilityWhere } from "@/lib/papers/visibility";
 
 export interface ContentQuery {
   query: string;             // search phrase (title or key finding)
@@ -47,11 +48,9 @@ export async function extractInterests(userId: string, tagIds?: string[]): Promi
 
   const [engagedPapers, arxivPapers, yearAgg] = await Promise.all([
     prisma.paper.findMany({
-      where: {
-        userId,
+      where: mergePaperVisibilityWhere(userId, {
         processingStatus: "COMPLETED",
         ...tagScope,
-        // When tag-scoped, include ALL papers with those tags (not just engaged)
         ...(tagIds && tagIds.length > 0
           ? {}
           : {
@@ -60,7 +59,7 @@ export async function extractInterests(userId: string, tagIds?: string[]): Promi
                 { engagementScore: { gt: 0 } },
               ],
             }),
-      },
+      }),
       select: {
         title: true,
         keyFindings: true,
@@ -77,19 +76,21 @@ export async function extractInterests(userId: string, tagIds?: string[]): Promi
     }),
     // Fetch arXiv papers to extract category codes from their URLs/metadata
     prisma.paper.findMany({
-      where: {
-        userId,
+      where: mergePaperVisibilityWhere(userId, {
         sourceType: "ARXIV",
         processingStatus: "COMPLETED",
         ...tagScope,
-      },
+      }),
       select: {
         arxivId: true,
         sourceUrl: true,
       },
       take: 50,
     }),
-    prisma.paper.aggregate({ where: { userId, ...tagScope }, _max: { year: true } }),
+    prisma.paper.aggregate({
+      where: mergePaperVisibilityWhere(userId, tagScope),
+      _max: { year: true },
+    }),
   ]);
 
   // Compute normalized weights
@@ -131,12 +132,11 @@ export async function extractInterests(userId: string, tagIds?: string[]): Promi
   // but that's too many API calls. Instead, use the tags assigned to arXiv papers.
   if (categoryFreq.size === 0) {
     const arxivPapersWithTags = await prisma.paper.findMany({
-      where: {
-        userId,
+      where: mergePaperVisibilityWhere(userId, {
         sourceType: "ARXIV",
         processingStatus: "COMPLETED",
         ...tagScope,
-      },
+      }),
       select: {
         tags: { select: { tag: { select: { name: true } } } },
       },

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { trackEngagement, type EngagementEvent } from "@/lib/engagement/track";
 import { z } from "zod";
-import { requirePaperAccess } from "@/lib/paper-auth";
+import { paperAccessErrorToResponse, requirePaperAccess } from "@/lib/paper-auth";
 
 const engageSchema = z.object({
   event: z.enum([
@@ -20,8 +20,8 @@ export async function POST(
 ) {
   try {
     const paperId = params.id;
-    const paper = await requirePaperAccess(paperId);
-    if (!paper) {
+    const access = await requirePaperAccess(paperId, { mode: "mutate" });
+    if (!access) {
       return NextResponse.json({ error: "Paper not found" }, { status: 404 });
     }
 
@@ -32,6 +32,8 @@ export async function POST(
 
     return NextResponse.json({ success: true });
   } catch (error) {
+    const response = paperAccessErrorToResponse(error);
+    if (response) return response;
     if (error instanceof z.ZodError) {
       return NextResponse.json(
         { error: "Validation error", details: error.issues },

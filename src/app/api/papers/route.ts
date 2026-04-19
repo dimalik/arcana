@@ -1,10 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
+import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import { processingQueue } from "@/lib/processing/queue";
 import { requireUserId } from "@/lib/paper-auth";
 import { z } from "zod";
 import { handleDuplicatePaperError, resolveEntityForImport } from "@/lib/canonical/import-dedup";
 import { buildInitialReferenceState } from "@/lib/references/reference-state";
+import { mergePaperVisibilityWhere } from "@/lib/papers/visibility";
 
 const createPaperSchema = z.object({
   title: z.string().min(1),
@@ -34,11 +36,12 @@ export async function GET(request: NextRequest) {
   const limit = parseInt(searchParams.get("limit") || "20");
   const skip = (page - 1) * limit;
 
-  const where: Record<string, unknown> = { userId };
+  const where: Prisma.PaperWhereInput = mergePaperVisibilityWhere(userId);
 
   if (search) {
+    const existingAnd = Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : [];
     where.AND = [
-      { userId },
+      ...existingAnd,
       {
         OR: [
           { title: { contains: search } },
@@ -49,14 +52,17 @@ export async function GET(request: NextRequest) {
         ],
       },
     ];
-    delete where.userId;
   }
 
   if (tagIds) {
     const ids = tagIds.split(",").filter(Boolean);
     if (ids.length > 0) {
       // Intersection: paper must have ALL selected tags
-      where.AND = ids.map((id: string) => ({ tags: { some: { tagId: id } } }));
+      const existingAnd = Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : [];
+      where.AND = [
+        ...existingAnd,
+        ...ids.map((id: string) => ({ tags: { some: { tagId: id } } })),
+      ];
     }
   } else if (clusterId) {
     where.tags = { some: { tag: { clusterId } } };

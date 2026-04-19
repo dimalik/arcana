@@ -8,7 +8,7 @@ import {
 import { resolveModelConfig } from "@/lib/llm/auto-process";
 import { parseSummarySections } from "@/lib/papers/parse-sections";
 import { z } from "zod";
-import { requireUserId } from "@/lib/paper-auth";
+import { paperAccessErrorToResponse, requirePaperAccess } from "@/lib/paper-auth";
 
 const requestSchema = z.object({
   section: z.enum(["review", "methodology", "results"]),
@@ -33,16 +33,15 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const userId = await requireUserId();
     const { id } = await params;
+    const access = await requirePaperAccess(id, { mode: "mutate" });
+    if (!access) {
+      return NextResponse.json({ error: "Paper not found" }, { status: 404 });
+    }
     const body = await request.json();
     const { section, mode, topic } = requestSchema.parse(body);
     const { provider, modelId, proxyConfig } = await resolveModelConfig(body);
-
-    const paper = await prisma.paper.findFirst({ where: { id, userId } });
-    if (!paper) {
-      return NextResponse.json({ error: "Paper not found" }, { status: 404 });
-    }
+    const paper = access.paper;
 
     const text = paper.fullText || paper.abstract || "";
     if (!text) {
@@ -80,7 +79,7 @@ export async function POST(
       {
         operation: PAPER_INTERACTIVE_LLM_OPERATIONS.REWRITE_SECTION,
         paperId: id,
-        userId,
+        userId: access.userId,
         runtime: "interactive",
         source: "papers.llm.rewrite_section",
       },
@@ -128,6 +127,8 @@ export async function POST(
 
     return NextResponse.json({ section, result, summary: newSummary });
   } catch (error) {
+    const response = paperAccessErrorToResponse(error);
+    if (response) return response;
     if (error instanceof z.ZodError) {
       return NextResponse.json(
         { error: "Validation error", details: error.issues },

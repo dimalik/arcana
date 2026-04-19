@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requirePaperAccess } from "@/lib/paper-auth";
+import { jsonWithDuplicateState, requirePaperAccess } from "@/lib/paper-auth";
 
 function normalize(text: string): string {
   return text.replace(/\s+/g, " ").trim().toLowerCase();
@@ -13,8 +13,8 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  const paper = await requirePaperAccess(id);
-  if (!paper) {
+  const access = await requirePaperAccess(id, { mode: "read" });
+  if (!access) {
     return NextResponse.json({ error: "Paper not found" }, { status: 404 });
   }
   const text = request.nextUrl.searchParams.get("text");
@@ -84,5 +84,5 @@ export async function GET(
   const order: Record<MatchType, number> = { exact: 0, superset: 1, subset: 2 };
   matches.sort((a, b) => order[a.matchType] - order[b.matchType]);
 
-  return NextResponse.json(matches);
+  return jsonWithDuplicateState(access, matches);
 }

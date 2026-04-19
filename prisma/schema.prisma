@@ -39,6 +39,7 @@ model User {
   discoverySessions DiscoverySession[]
   agentCapabilities AgentCapability[]
   agentMemories     AgentMemory[]
+  paperDuplicateCandidates PaperDuplicateCandidate[]
 }
 
 model UserSession {
@@ -260,6 +261,31 @@ model RelationEvidence {
   @@index([citationMentionId])
 }
 
+enum PaperDuplicateState {
+  ACTIVE
+  HIDDEN
+  ARCHIVED
+  COLLAPSED
+}
+
+enum PaperDuplicateClass {
+  EXACT_IDENTIFIER
+  FUZZY
+}
+
+enum PaperDuplicateReviewStatus {
+  PENDING
+  ACCEPTED
+  DISMISSED
+  APPLIED
+}
+
+enum PaperDuplicateAction {
+  HIDE
+  ARCHIVE
+  COLLAPSE
+}
+
 model Paper {
   id                  String    @id @default(uuid())
   userId              String?
@@ -285,11 +311,15 @@ model Paper {
   isLiked             Boolean   @default(false)
   isResearchOnly      Boolean   @default(false) // true = imported by research agent, hidden from main library
   engagementScore     Float     @default(0)
+  duplicateState      PaperDuplicateState @default(ACTIVE)
+  collapsedIntoPaperId String?
   entityId            String?
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt
 
   owner              User?               @relation(fields: [userId], references: [id], onDelete: SetNull)
+  collapsedIntoPaper Paper?              @relation("PaperCollapse", fields: [collapsedIntoPaperId], references: [id], onDelete: SetNull)
+  collapsedPapers    Paper[]             @relation("PaperCollapse")
   entity             PaperEntity?        @relation(fields: [entityId], references: [id], onDelete: SetNull)
   tags               PaperTag[]
   collections        CollectionPaper[]
@@ -331,8 +361,39 @@ model Paper {
   derivedAssertions  RelationAssertion[] @relation("DerivedAssertions")
   processingRuns     ProcessingRun[]
   processingStepRuns ProcessingStepRun[]
+  wonDuplicateCandidates PaperDuplicateCandidate[] @relation("DuplicateCandidateWinner")
+  lostDuplicateCandidates PaperDuplicateCandidate[] @relation("DuplicateCandidateLoser")
 
   @@unique([userId, entityId])
+  @@index([userId, duplicateState])
+  @@index([collapsedIntoPaperId])
+}
+
+model PaperDuplicateCandidate {
+  id                       String                     @id @default(uuid())
+  userId                   String
+  winnerPaperId            String
+  loserPaperId             String
+  duplicateClass           PaperDuplicateClass
+  score                    Float
+  evidenceJson             String
+  reviewStatus             PaperDuplicateReviewStatus @default(PENDING)
+  chosenAction             PaperDuplicateAction?
+  autoSafeCollapse         Boolean                    @default(false)
+  canonicalEntityCollision Boolean                    @default(false)
+  reviewedAt               DateTime?
+  appliedAt                DateTime?
+  createdAt                DateTime                   @default(now())
+  updatedAt                DateTime                   @updatedAt
+
+  user        User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  winnerPaper Paper @relation("DuplicateCandidateWinner", fields: [winnerPaperId], references: [id], onDelete: Cascade)
+  loserPaper  Paper @relation("DuplicateCandidateLoser", fields: [loserPaperId], references: [id], onDelete: Cascade)
+
+  @@unique([winnerPaperId, loserPaperId])
+  @@index([userId, reviewStatus])
+  @@index([userId, duplicateClass])
+  @@index([loserPaperId])
 }
 
 model AgentSession {

@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requirePaperAccess } from "@/lib/paper-auth";
+import {
+  jsonWithDuplicateState,
+  paperAccessErrorToResponse,
+  requirePaperAccess,
+} from "@/lib/paper-auth";
 import { deleteReferenceEntryWithLegacyProjection } from "@/lib/citations/reference-entry-service";
 import { listPaperReferenceViews } from "@/lib/references/read-model";
 
@@ -8,14 +12,18 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  const paper = await requirePaperAccess(id);
-  if (!paper) {
+  const access = await requirePaperAccess(id, {
+    mode: "read",
+    select: { referenceState: true },
+  });
+  if (!access) {
     return NextResponse.json({ error: "Paper not found" }, { status: 404 });
   }
+  const paper = access.paper;
 
-  const references = await listPaperReferenceViews(id, paper.userId);
+  const references = await listPaperReferenceViews(id, access.userId);
 
-  return NextResponse.json({
+  return jsonWithDuplicateState(access, {
     referenceState: paper.referenceState,
     references,
   });
@@ -25,27 +33,33 @@ export async function DELETE(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { id } = await params;
-  const paper = await requirePaperAccess(id);
-  if (!paper) {
-    return NextResponse.json({ error: "Paper not found" }, { status: 404 });
-  }
-  const referenceId = req.nextUrl.searchParams.get("referenceId");
+  try {
+    const { id } = await params;
+    const access = await requirePaperAccess(id, { mode: "mutate" });
+    if (!access) {
+      return NextResponse.json({ error: "Paper not found" }, { status: 404 });
+    }
+    const referenceId = req.nextUrl.searchParams.get("referenceId");
 
-  if (!referenceId) {
-    return NextResponse.json(
-      { error: "referenceId query parameter is required" },
-      { status: 400 }
-    );
-  }
+    if (!referenceId) {
+      return NextResponse.json(
+        { error: "referenceId query parameter is required" },
+        { status: 400 }
+      );
+    }
 
-  const deleted = await deleteReferenceEntryWithLegacyProjection(id, referenceId);
-  if (!deleted) {
-    return NextResponse.json(
-      { error: "Reference not found" },
-      { status: 404 }
-    );
-  }
+    const deleted = await deleteReferenceEntryWithLegacyProjection(id, referenceId);
+    if (!deleted) {
+      return NextResponse.json(
+        { error: "Reference not found" },
+        { status: 404 }
+      );
+    }
 
-  return NextResponse.json({ success: true });
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    const response = paperAccessErrorToResponse(error);
+    if (response) return response;
+    throw error;
+  }
 }

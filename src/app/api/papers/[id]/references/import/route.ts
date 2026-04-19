@@ -6,7 +6,10 @@ import {
   downloadArxivPdf,
 } from "@/lib/import/arxiv";
 import { processingQueue } from "@/lib/processing/queue";
-import { requireUserId } from "@/lib/paper-auth";
+import {
+  paperAccessErrorToResponse,
+  requirePaperAccess,
+} from "@/lib/paper-auth";
 import { writeFile, mkdir } from "fs/promises";
 import path from "path";
 import { v4 as uuidv4 } from "uuid";
@@ -20,53 +23,57 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const userId = await requireUserId();
-  const { id } = await params;
-  const body = await req.json();
-  const { referenceId } = body;
+  try {
+    const { id } = await params;
+    const access = await requirePaperAccess(id, { mode: "mutate" });
+    if (!access) {
+      return Response.json({ error: "Paper not found" }, { status: 404 });
+    }
+    const userId = access.userId;
+    const body = await req.json();
+    const { referenceId } = body;
 
-  if (!referenceId) {
-    return Response.json(
-      { error: "referenceId is required" },
-      { status: 400 }
-    );
-  }
-
-  const reference = await findReferenceEntryForPaper(id, referenceId);
-
-  if (!reference) {
-    return Response.json({ error: "Reference not found" }, { status: 404 });
-  }
-
-  if (reference.resolvedEntityId) {
-    const linkedPaper = await prisma.paper.findFirst({
-      where: {
-        userId,
-        entityId: reference.resolvedEntityId,
-      },
-      select: {
-        id: true,
-        title: true,
-        year: true,
-        authors: true,
-      },
-    });
-    if (linkedPaper) {
+    if (!referenceId) {
       return Response.json(
-        { error: "Reference already linked to a library paper" },
-        { status: 409 }
+        { error: "referenceId is required" },
+        { status: 400 }
       );
     }
-  }
 
-  let authors: string[] = [];
-  try {
-    if (reference.authors) authors = JSON.parse(reference.authors);
-  } catch {
-    // ignore
-  }
+    const reference = await findReferenceEntryForPaper(id, referenceId);
 
-  try {
+    if (!reference) {
+      return Response.json({ error: "Reference not found" }, { status: 404 });
+    }
+
+    if (reference.resolvedEntityId) {
+      const linkedPaper = await prisma.paper.findFirst({
+        where: {
+          userId,
+          entityId: reference.resolvedEntityId,
+        },
+        select: {
+          id: true,
+          title: true,
+          year: true,
+          authors: true,
+        },
+      });
+      if (linkedPaper) {
+        return Response.json(
+          { error: "Reference already linked to a library paper" },
+          { status: 409 }
+        );
+      }
+    }
+
+    let authors: string[] = [];
+    try {
+      if (reference.authors) authors = JSON.parse(reference.authors);
+    } catch {
+      // ignore
+    }
+
     let paper: Paper;
 
     if (reference.arxivId) {
@@ -84,7 +91,7 @@ export async function POST(
           linkedPaperId: resolved.existingPaper.id,
           linkedPaperEntityId: resolved.entityId,
         });
-        return Response.json(resolved.existingPaper, { status: 200 });
+        return access.setDuplicateStateHeaders(Response.json(resolved.existingPaper, { status: 200 }));
       }
 
       // Download PDF synchronously
@@ -121,7 +128,7 @@ export async function POST(
             linkedPaperId: existing.id,
             linkedPaperEntityId: resolved.entityId,
           });
-          return Response.json(existing, { status: 200 });
+          return access.setDuplicateStateHeaders(Response.json(existing, { status: 200 }));
         }
         throw error;
       }
@@ -150,7 +157,7 @@ export async function POST(
           linkedPaperId: resolved.existingPaper.id,
           linkedPaperEntityId: resolved.entityId,
         });
-        return Response.json(resolved.existingPaper, { status: 200 });
+        return access.setDuplicateStateHeaders(Response.json(resolved.existingPaper, { status: 200 }));
       }
 
       // Try to download open access PDF
@@ -196,7 +203,7 @@ export async function POST(
             linkedPaperId: existing.id,
             linkedPaperEntityId: resolved.entityId,
           });
-          return Response.json(existing, { status: 200 });
+          return access.setDuplicateStateHeaders(Response.json(existing, { status: 200 }));
         }
         throw error;
       }
@@ -227,7 +234,7 @@ export async function POST(
           linkedPaperId: resolved.existingPaper.id,
           linkedPaperEntityId: resolved.entityId,
         });
-        return Response.json(resolved.existingPaper, { status: 200 });
+        return access.setDuplicateStateHeaders(Response.json(resolved.existingPaper, { status: 200 }));
       }
 
       // Create minimal paper record from reference metadata
@@ -257,7 +264,7 @@ export async function POST(
             linkedPaperId: existing.id,
             linkedPaperEntityId: resolved.entityId,
           });
-          return Response.json(existing, { status: 200 });
+          return access.setDuplicateStateHeaders(Response.json(existing, { status: 200 }));
         }
         throw error;
       }
@@ -269,8 +276,10 @@ export async function POST(
       });
     }
 
-    return Response.json(paper, { status: 201 });
+    return access.setDuplicateStateHeaders(Response.json(paper, { status: 201 }));
   } catch (err) {
+    const response = paperAccessErrorToResponse(err);
+    if (response) return response;
     console.error("Import failed:", err);
     return Response.json(
       { error: "Failed to import reference" },

@@ -7,25 +7,21 @@ import {
 } from "@/lib/llm/paper-llm-context";
 import { buildPrompt, cleanJsonResponse } from "@/lib/llm/prompts";
 import { resolveModelConfig } from "@/lib/llm/auto-process";
-import { requireUserId } from "@/lib/paper-auth";
+import { paperAccessErrorToResponse, requirePaperAccess } from "@/lib/paper-auth";
 
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const userId = await requireUserId();
     const { id } = await params;
-    const body = await request.json().catch(() => ({}));
-    const { provider, modelId, proxyConfig } = await resolveModelConfig(body);
-
-    const paper = await prisma.paper.findFirst({
-      where: { id, userId },
-    });
-
-    if (!paper) {
+    const access = await requirePaperAccess(id, { mode: "mutate" });
+    if (!access) {
       return NextResponse.json({ error: "Paper not found" }, { status: 404 });
     }
+    const body = await request.json().catch(() => ({}));
+    const { provider, modelId, proxyConfig } = await resolveModelConfig(body);
+    const paper = access.paper;
 
     const text = paper.fullText || paper.abstract || "";
     if (!text) {
@@ -42,7 +38,7 @@ export async function POST(
       {
         operation: PAPER_INTERACTIVE_LLM_OPERATIONS.EXTRACT,
         paperId: id,
-        userId,
+        userId: access.userId,
         runtime: "interactive",
         source: "papers.llm.extract",
       },
@@ -91,6 +87,8 @@ export async function POST(
 
     return NextResponse.json(promptResult);
   } catch (error) {
+    const response = paperAccessErrorToResponse(error);
+    if (response) return response;
     console.error("Extract error:", error);
     return NextResponse.json(
       { error: "Failed to extract info" },

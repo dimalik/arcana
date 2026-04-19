@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requirePaperAccess } from "@/lib/paper-auth";
+import { jsonWithDuplicateState, requirePaperAccess } from "@/lib/paper-auth";
 
 /**
  * GET /api/papers/[id]/discoveries
@@ -14,8 +14,8 @@ export async function GET(
 ) {
   const { id } = await params;
 
-  const paper = await requirePaperAccess(id);
-  if (!paper) {
+  const access = await requirePaperAccess(id, { mode: "read" });
+  if (!access) {
     return NextResponse.json({ error: "Paper not found" }, { status: 404 });
   }
 
@@ -26,7 +26,7 @@ export async function GET(
   });
 
   if (seeds.length === 0) {
-    return NextResponse.json([]);
+    return jsonWithDuplicateState(access, []);
   }
 
   const sessionIds = seeds.map((s) => s.sessionId);
@@ -82,5 +82,5 @@ export async function GET(
     })),
   }));
 
-  return NextResponse.json(result);
+  return jsonWithDuplicateState(access, result);
 }

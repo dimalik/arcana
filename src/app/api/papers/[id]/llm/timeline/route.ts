@@ -7,7 +7,7 @@ import {
 } from "@/lib/llm/paper-llm-context";
 import { buildPrompt } from "@/lib/llm/prompts";
 import { resolveModelConfig } from "@/lib/llm/auto-process";
-import { requireUserId } from "@/lib/paper-auth";
+import { paperAccessErrorToResponse, requirePaperAccess } from "@/lib/paper-auth";
 import { listProjectedTargetPaperIds } from "@/lib/assertions/relation-reader";
 
 export async function POST(
@@ -15,19 +15,17 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const userId = await requireUserId();
     const { id } = await params;
-    const body = await request.json();
-    const { provider, modelId, proxyConfig } = await resolveModelConfig(body);
-
-    const paper = await prisma.paper.findFirst({
-      where: { id, userId },
+    const access = await requirePaperAccess(id, {
+      mode: "mutate",
       select: { id: true, title: true, abstract: true, summary: true, keyFindings: true, year: true },
     });
-
-    if (!paper) {
+    if (!access) {
       return NextResponse.json({ error: "Paper not found" }, { status: 404 });
     }
+    const body = await request.json();
+    const { provider, modelId, proxyConfig } = await resolveModelConfig(body);
+    const paper = access.paper;
 
     // Fetch related papers via PaperRelation (exclude "cites" relations, cap at 10)
     const relatedPaperIds = await listProjectedTargetPaperIds(
@@ -64,7 +62,7 @@ export async function POST(
       {
         operation: PAPER_INTERACTIVE_LLM_OPERATIONS.TIMELINE,
         paperId: id,
-        userId,
+        userId: access.userId,
         runtime: "interactive",
         source: "papers.llm.timeline",
       },
@@ -92,6 +90,8 @@ export async function POST(
 
     return NextResponse.json(promptResult);
   } catch (error) {
+    const response = paperAccessErrorToResponse(error);
+    if (response) return response;
     console.error("Timeline builder error:", error);
     return NextResponse.json(
       { error: "Failed to build timeline" },

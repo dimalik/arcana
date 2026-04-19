@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requireUserId } from "@/lib/paper-auth";
+import {
+  jsonWithDuplicateState,
+  paperAccessErrorToResponse,
+  requirePaperAccess,
+} from "@/lib/paper-auth";
 import { z } from "zod";
 
 const updatePaperSchema = z.object({
@@ -20,9 +24,8 @@ export async function GET(
   _request: NextRequest,
   { params }: { params: { id: string } }
 ) {
-  const userId = await requireUserId();
-  const paper = await prisma.paper.findFirst({
-    where: { id: params.id, userId },
+  const access = await requirePaperAccess(params.id, {
+    mode: "read",
     include: {
       tags: { include: { tag: true } },
       collections: { include: { collection: true } },
@@ -44,9 +47,10 @@ export async function GET(
     },
   });
 
-  if (!paper) {
+  if (!access) {
     return NextResponse.json({ error: "Paper not found" }, { status: 404 });
   }
+  const paper = access.paper;
 
   // If paper is batch-processing, trigger a non-blocking poll to check if batch is done
   if (paper.processingStatus === "BATCH_PROCESSING") {
@@ -55,7 +59,7 @@ export async function GET(
     }).catch(() => {});
   }
 
-  return NextResponse.json(paper);
+  return jsonWithDuplicateState(access, paper, undefined, { includeBodyState: true });
 }
 
 export async function PATCH(
@@ -63,14 +67,8 @@ export async function PATCH(
   { params }: { params: { id: string } }
 ) {
   try {
-    const userId = await requireUserId();
-
-    // Verify ownership
-    const existing = await prisma.paper.findFirst({
-      where: { id: params.id, userId },
-      select: { id: true },
-    });
-    if (!existing) {
+    const access = await requirePaperAccess(params.id, { mode: "mutate" });
+    if (!access) {
       return NextResponse.json({ error: "Paper not found" }, { status: 404 });
     }
 
@@ -95,6 +93,9 @@ export async function PATCH(
 
     return NextResponse.json(paper);
   } catch (error) {
+    const response = paperAccessErrorToResponse(error);
+    if (response) return response;
+
     if (error instanceof z.ZodError) {
       return NextResponse.json(
         { error: "Validation error", details: error.issues },
@@ -114,19 +115,17 @@ export async function DELETE(
   { params }: { params: { id: string } }
 ) {
   try {
-    const userId = await requireUserId();
-
-    const existing = await prisma.paper.findFirst({
-      where: { id: params.id, userId },
-      select: { id: true },
-    });
-    if (!existing) {
+    const access = await requirePaperAccess(params.id, { mode: "mutate" });
+    if (!access) {
       return NextResponse.json({ error: "Paper not found" }, { status: 404 });
     }
 
     await prisma.paper.delete({ where: { id: params.id } });
     return NextResponse.json({ success: true });
-  } catch {
+  } catch (error) {
+    const response = paperAccessErrorToResponse(error);
+    if (response) return response;
+
     return NextResponse.json(
       { error: "Failed to delete paper" },
       { status: 500 }

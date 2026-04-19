@@ -1,14 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requirePaperAccess } from "@/lib/paper-auth";
+import {
+  jsonWithDuplicateState,
+  paperAccessErrorToResponse,
+  requirePaperAccess,
+} from "@/lib/paper-auth";
 
 export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  const paper = await requirePaperAccess(id);
-  if (!paper) {
+  const access = await requirePaperAccess(id, { mode: "read" });
+  if (!access) {
     return NextResponse.json({ error: "Paper not found" }, { status: 404 });
   }
 
@@ -28,34 +32,40 @@ export async function GET(
     },
   });
 
-  return NextResponse.json(conversations);
+  return jsonWithDuplicateState(access, conversations);
 }
 
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { id } = await params;
-  const paper = await requirePaperAccess(id);
-  if (!paper) {
-    return NextResponse.json({ error: "Paper not found" }, { status: 404 });
+  try {
+    const { id } = await params;
+    const access = await requirePaperAccess(id, { mode: "mutate" });
+    if (!access) {
+      return NextResponse.json({ error: "Paper not found" }, { status: 404 });
+    }
+    const body = await request.json().catch(() => ({}));
+    const title = body.title || null;
+    const selectedText = body.selectedText || null;
+    const mode = body.mode || null;
+
+    const conversation = await prisma.conversation.create({
+      data: {
+        paperId: id,
+        title,
+        selectedText,
+        mode,
+      },
+    });
+
+    return NextResponse.json(
+      { id: conversation.id, title: conversation.title },
+      { status: 201 }
+    );
+  } catch (error) {
+    const response = paperAccessErrorToResponse(error);
+    if (response) return response;
+    throw error;
   }
-  const body = await request.json().catch(() => ({}));
-  const title = body.title || null;
-  const selectedText = body.selectedText || null;
-  const mode = body.mode || null;
-
-  const conversation = await prisma.conversation.create({
-    data: {
-      paperId: id,
-      title,
-      selectedText,
-      mode,
-    },
-  });
-
-  return NextResponse.json(
-    { id: conversation.id, title: conversation.title },
-    { status: 201 }
-  );
 }

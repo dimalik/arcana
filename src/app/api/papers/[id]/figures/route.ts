@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requirePaperAccess } from "@/lib/paper-auth";
+import {
+  jsonWithDuplicateState,
+  paperAccessErrorToResponse,
+  requirePaperAccess,
+} from "@/lib/paper-auth";
 import { extractAllFigures } from "@/lib/figures/extract-all-figures";
 import {
   FIGURE_VIEW_SELECT,
@@ -18,8 +22,8 @@ export async function GET(
   { params }: { params: { id: string } },
 ) {
   const { id } = params;
-  const paper = await requirePaperAccess(id);
-  if (!paper) {
+  const access = await requirePaperAccess(id, { mode: "read" });
+  if (!access) {
     return NextResponse.json({ error: "Paper not found" }, { status: 404 });
   }
   const showAll = request.nextUrl.searchParams.get("all") === "true";
@@ -33,7 +37,7 @@ export async function GET(
     orderBy: [{ pdfPage: "asc" }, { figureIndex: "asc" }],
   });
 
-  return NextResponse.json(mapPaperFiguresToView(figures));
+  return jsonWithDuplicateState(access, mapPaperFiguresToView(figures));
 }
 
 /**
@@ -47,17 +51,16 @@ export async function POST(
   request: NextRequest,
   { params }: { params: { id: string } },
 ) {
-  const { id } = params;
-  const paper = await requirePaperAccess(id);
-
-  if (!paper) {
-    return NextResponse.json({ error: "Paper not found" }, { status: 404 });
-  }
-
-  const body = await request.json().catch(() => ({} as Record<string, unknown>));
-  const maxPages = typeof body.maxPages === "number" ? body.maxPages : undefined;
-
   try {
+    const { id } = params;
+    const access = await requirePaperAccess(id, { mode: "mutate" });
+    if (!access) {
+      return NextResponse.json({ error: "Paper not found" }, { status: 404 });
+    }
+
+    const body = await request.json().catch(() => ({} as Record<string, unknown>));
+    const maxPages = typeof body.maxPages === "number" ? body.maxPages : undefined;
+
     const report = await extractAllFigures(id, { context: "route", maxPages });
     const status =
       report.status === "conflict"
@@ -71,6 +74,8 @@ export async function POST(
       { status },
     );
   } catch (err) {
+    const response = paperAccessErrorToResponse(err);
+    if (response) return response;
     console.error("[figures] Extraction error:", err);
     return NextResponse.json(
       { error: `Extraction failed: ${err instanceof Error ? err.message : "unknown"}` },

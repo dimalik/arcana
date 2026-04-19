@@ -1,15 +1,15 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { formatBibtex, formatAPA } from "@/lib/references/citation";
-import { requirePaperAccess } from "@/lib/paper-auth";
+import { jsonWithDuplicateState, requirePaperAccess } from "@/lib/paper-auth";
 
 export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string; refId: string }> }
 ) {
   const { id, refId } = await params;
-  const paper = await requirePaperAccess(id);
-  if (!paper) {
+  const access = await requirePaperAccess(id, { mode: "read" });
+  if (!access) {
     return Response.json({ error: "Paper not found" }, { status: 404 });
   }
   const format = req.nextUrl.searchParams.get("format") || "bibtex";
@@ -44,5 +44,5 @@ export async function GET(
     citation = formatBibtex(citationData);
   }
 
-  return Response.json({ citation, format });
+  return jsonWithDuplicateState(access, { citation, format });
 }

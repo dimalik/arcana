@@ -6,6 +6,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Select,
   SelectContent,
@@ -50,6 +52,50 @@ interface DuplicateTag {
 
 type DuplicateGroup = DuplicateTag[];
 
+type PaperDuplicateState = "active" | "hidden" | "archived" | "collapsed";
+
+interface DuplicatePaperSummary {
+  id: string;
+  title: string;
+  authors: string | null;
+  year: number | null;
+  venue: string | null;
+  doi: string | null;
+  arxivId: string | null;
+  duplicateState: PaperDuplicateState;
+  collapsedIntoPaperId?: string | null;
+}
+
+interface PaperDuplicateCandidate {
+  id: string;
+  duplicateClass: "EXACT_IDENTIFIER" | "FUZZY";
+  score: number;
+  reviewStatus: "PENDING" | "ACCEPTED" | "DISMISSED" | "APPLIED";
+  chosenAction: "HIDE" | "ARCHIVE" | "COLLAPSE" | null;
+  autoSafeCollapse: boolean;
+  winnerPaper: DuplicatePaperSummary;
+  loserPaper: DuplicatePaperSummary;
+  evidence: {
+    reasons: string[];
+    normalizedDoi?: string | null;
+    normalizedArxivId?: string | null;
+    normalizedTitle?: string | null;
+    authorOverlap?: number;
+    yearDelta?: number | null;
+    safeAutoCollapse: boolean;
+  };
+}
+
+interface PaperDuplicateDashboard {
+  reviewCounts: Partial<Record<PaperDuplicateCandidate["reviewStatus"], number>>;
+  paperCounts: {
+    active: number;
+    hidden: number;
+    archived: number;
+    collapsed: number;
+  };
+}
+
 const TAG_COLORS = [
   "#EF4444", "#F59E0B", "#10B981", "#3B82F6",
   "#8B5CF6", "#EC4899", "#06B6D4", "#F97316",
@@ -65,10 +111,11 @@ const VENDOR_PRESETS: Record<ProxyVendor, { label: string; baseUrl: string; head
   gateway: { label: "Gateway (multi-provider)", baseUrl: "", headerName: "X-LLM-Proxy-Calling-Service", prefix: "" },
 };
 
-type Section = "general" | "llm" | "tags" | "remote" | "agent" | "insights";
+type Section = "general" | "papers" | "llm" | "tags" | "remote" | "agent" | "insights";
 
 const SECTIONS: { id: Section; label: string; icon: typeof Settings2 }[] = [
   { id: "general", label: "General", icon: Settings2 },
+  { id: "papers", label: "Papers", icon: Merge },
   { id: "llm", label: "LLM", icon: BrainCircuit },
   { id: "agent", label: "Agent", icon: Bot },
   { id: "tags", label: "Tags", icon: Tags },
@@ -123,6 +170,7 @@ function SettingsContent() {
       {/* Content */}
       <div className="flex-1 min-w-0 space-y-6 pb-12">
         {section === "general" && <GeneralSection />}
+        {section === "papers" && <PaperDuplicatesSection />}
         {section === "llm" && <LLMSection />}
         {section === "agent" && <AgentCapabilitiesSection />}
         {section === "tags" && <TagsSection />}
@@ -1062,6 +1110,238 @@ function ResearchModelTiers() {
         Save
       </Button>
     </div>
+  );
+}
+
+// ── Papers ─────────────────────────────────────────────────────────
+
+function formatDuplicateReason(reason: string): string {
+  switch (reason) {
+    case "exact_doi":
+      return "Exact DOI match";
+    case "exact_arxiv":
+      return "Exact arXiv match";
+    case "title_author_match":
+      return "Title + author match";
+    default:
+      return reason.replace(/_/g, " ");
+  }
+}
+
+function PaperDuplicatesSection() {
+  const [dashboard, setDashboard] = useState<PaperDuplicateDashboard | null>(null);
+  const [candidates, setCandidates] = useState<PaperDuplicateCandidate[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [scanning, setScanning] = useState(false);
+  const [applying, setApplying] = useState(false);
+  const [savingId, setSavingId] = useState<string | null>(null);
+  const [actionById, setActionById] = useState<Record<string, "HIDE" | "ARCHIVE" | "COLLAPSE">>({});
+
+  const loadDuplicates = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await fetch("/api/papers/duplicates");
+      if (!res.ok) throw new Error("Failed to load duplicates");
+      const data = await res.json();
+      setDashboard(data.dashboard);
+      setCandidates(data.candidates);
+      setActionById(
+        Object.fromEntries(
+          (data.candidates as PaperDuplicateCandidate[]).map((candidate) => [
+            candidate.id,
+            candidate.chosenAction ?? (candidate.duplicateClass === "EXACT_IDENTIFIER" ? "COLLAPSE" : "HIDE"),
+          ]),
+        ),
+      );
+    } catch {
+      toast.error("Failed to load paper duplicates");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadDuplicates();
+  }, [loadDuplicates]);
+
+  const scanDuplicates = async () => {
+    setScanning(true);
+    try {
+      const res = await fetch("/api/papers/duplicates", { method: "POST" });
+      if (!res.ok) throw new Error();
+      const summary = await res.json();
+      toast.success(
+        `Scan complete: ${summary.persistedCandidateCount} candidates, ${summary.safeAutoCollapseCount} safe auto-collapse`,
+      );
+      await loadDuplicates();
+    } catch {
+      toast.error("Failed to scan paper duplicates");
+    } finally {
+      setScanning(false);
+    }
+  };
+
+  const applyAccepted = async () => {
+    setApplying(true);
+    try {
+      const res = await fetch("/api/papers/duplicates/apply", { method: "POST" });
+      if (!res.ok) throw new Error();
+      const result = await res.json();
+      toast.success(`Applied ${result.applied} duplicate decisions`);
+      await loadDuplicates();
+    } catch {
+      toast.error("Failed to apply duplicate decisions");
+    } finally {
+      setApplying(false);
+    }
+  };
+
+  const reviewCandidate = async (
+    candidate: PaperDuplicateCandidate,
+    reviewStatus: "ACCEPTED" | "DISMISSED",
+  ) => {
+    setSavingId(candidate.id);
+    try {
+      const res = await fetch("/api/papers/duplicates", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          candidateId: candidate.id,
+          reviewStatus,
+          chosenAction: reviewStatus === "ACCEPTED" ? actionById[candidate.id] : null,
+        }),
+      });
+      if (!res.ok) throw new Error();
+      toast.success(reviewStatus === "ACCEPTED" ? "Decision saved" : "Candidate dismissed");
+      await loadDuplicates();
+    } catch {
+      toast.error("Failed to update duplicate candidate");
+    } finally {
+      setSavingId(null);
+    }
+  };
+
+  const pendingCandidates = candidates.filter((candidate) => candidate.reviewStatus === "PENDING");
+  const acceptedCandidates = candidates.filter((candidate) => candidate.reviewStatus === "ACCEPTED");
+
+  return (
+    <>
+      <SectionHeader
+        title="Paper Duplicates"
+        description="Scan for duplicate papers, review non-safe candidates, and apply hide/archive/collapse without destructive merge semantics."
+      />
+
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+        <Card><CardContent className="pt-4"><p className="text-xs text-muted-foreground">Active</p><p className="text-2xl font-semibold">{dashboard?.paperCounts.active ?? 0}</p></CardContent></Card>
+        <Card><CardContent className="pt-4"><p className="text-xs text-muted-foreground">Hidden</p><p className="text-2xl font-semibold">{dashboard?.paperCounts.hidden ?? 0}</p></CardContent></Card>
+        <Card><CardContent className="pt-4"><p className="text-xs text-muted-foreground">Archived</p><p className="text-2xl font-semibold">{dashboard?.paperCounts.archived ?? 0}</p></CardContent></Card>
+        <Card><CardContent className="pt-4"><p className="text-xs text-muted-foreground">Collapsed</p><p className="text-2xl font-semibold">{dashboard?.paperCounts.collapsed ?? 0}</p></CardContent></Card>
+      </div>
+
+      <div className="flex items-center gap-2">
+        <Button variant="outline" size="sm" onClick={scanDuplicates} disabled={scanning}>
+          {scanning ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Merge className="mr-1.5 h-3.5 w-3.5" />}
+          Scan library
+        </Button>
+        <Button size="sm" onClick={applyAccepted} disabled={applying || acceptedCandidates.length === 0}>
+          {applying ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Check className="mr-1.5 h-3.5 w-3.5" />}
+          Apply accepted
+        </Button>
+        <p className="text-xs text-muted-foreground">
+          Pending: {dashboard?.reviewCounts.PENDING ?? 0} · Accepted: {dashboard?.reviewCounts.ACCEPTED ?? 0} · Applied: {dashboard?.reviewCounts.APPLIED ?? 0}
+        </p>
+      </div>
+
+      {loading ? (
+        <div className="space-y-2">
+          <Skeleton className="h-24 w-full" />
+          <Skeleton className="h-24 w-full" />
+        </div>
+      ) : pendingCandidates.length === 0 && acceptedCandidates.length === 0 ? (
+        <div className="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">
+          No paper duplicate candidates yet. Run a scan to populate this review queue.
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {[...pendingCandidates, ...acceptedCandidates].map((candidate) => (
+            <div key={candidate.id} className="rounded-lg border p-4 space-y-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge variant={candidate.duplicateClass === "EXACT_IDENTIFIER" ? "default" : "secondary"}>
+                  {candidate.duplicateClass === "EXACT_IDENTIFIER" ? "Exact ID" : "Fuzzy"}
+                </Badge>
+                {candidate.autoSafeCollapse && <Badge variant="outline">Safe auto-collapse</Badge>}
+                <Badge variant="outline">{candidate.reviewStatus.toLowerCase()}</Badge>
+                <span className="text-xs text-muted-foreground">score {candidate.score.toFixed(2)}</span>
+              </div>
+
+              <div className="grid gap-3 md:grid-cols-2">
+                <div className="rounded-md bg-emerald-50/70 p-3 dark:bg-emerald-950/20">
+                  <p className="text-xs font-medium text-emerald-700 dark:text-emerald-300">Winner</p>
+                  <p className="text-sm font-medium">{candidate.winnerPaper.title}</p>
+                  <p className="text-xs text-muted-foreground">{candidate.winnerPaper.year ?? "Unknown year"}</p>
+                </div>
+                <div className="rounded-md bg-amber-50/70 p-3 dark:bg-amber-950/20">
+                  <p className="text-xs font-medium text-amber-700 dark:text-amber-300">Loser</p>
+                  <p className="text-sm font-medium">{candidate.loserPaper.title}</p>
+                  <p className="text-xs text-muted-foreground">{candidate.loserPaper.year ?? "Unknown year"}</p>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
+                {candidate.evidence.reasons.map((reason) => (
+                  <Badge key={reason} variant="outline">{formatDuplicateReason(reason)}</Badge>
+                ))}
+                {candidate.evidence.authorOverlap != null && (
+                  <span>author overlap {(candidate.evidence.authorOverlap * 100).toFixed(0)}%</span>
+                )}
+                {candidate.evidence.yearDelta != null && (
+                  <span>year delta {candidate.evidence.yearDelta}</span>
+                )}
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <Select
+                  value={actionById[candidate.id] ?? "HIDE"}
+                  onValueChange={(value) =>
+                    setActionById((prev) => ({
+                      ...prev,
+                      [candidate.id]: value as "HIDE" | "ARCHIVE" | "COLLAPSE",
+                    }))
+                  }
+                >
+                  <SelectTrigger className="h-8 w-[180px] text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="HIDE" className="text-xs">Hide loser</SelectItem>
+                    <SelectItem value="ARCHIVE" className="text-xs">Archive loser</SelectItem>
+                    <SelectItem value="COLLAPSE" className="text-xs">Collapse into winner</SelectItem>
+                  </SelectContent>
+                </Select>
+
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={savingId === candidate.id}
+                  onClick={() => reviewCandidate(candidate, "DISMISSED")}
+                >
+                  {savingId === candidate.id ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : null}
+                  Dismiss
+                </Button>
+                <Button
+                  size="sm"
+                  disabled={savingId === candidate.id}
+                  onClick={() => reviewCandidate(candidate, "ACCEPTED")}
+                >
+                  {savingId === candidate.id ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : null}
+                  Accept
+                </Button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </>
   );
 }
 

@@ -100,6 +100,8 @@ interface Paper {
   processingStep: string | null;
   processingStartedAt: string | null;
   referenceState: string;
+  duplicateState?: "active" | "hidden" | "archived" | "collapsed";
+  collapsedIntoPaperId?: string | null;
   isLiked: boolean;
   engagementScore: number;
   createdAt: string;
@@ -159,6 +161,7 @@ export default function PaperDetailPage() {
   const [relatedPaperMap, setRelatedPaperMap] = useState<Record<string, string>>({});
   const [pdfVisible, setPdfVisible] = useState(false);
   const [splitRatio, setSplitRatio] = useState(50);
+  const [duplicateBannerBusy, setDuplicateBannerBusy] = useState(false);
   const processingDisplay = paper
     ? getProcessingStatusDisplay({
         processingStatus: paper.processingStatus,
@@ -251,15 +254,35 @@ export default function PaperDetailPage() {
     document.addEventListener("mouseup", onMouseUp);
   };
 
-  const fetchPaper = async () => {
+  const fetchPaper = async (options?: { suppressMissingToast?: boolean }) => {
     const res = await fetch(`/api/papers/${id}`);
     if (!res.ok) {
-      toast.error("Paper not found");
+      if (!options?.suppressMissingToast) {
+        toast.error("Paper not found");
+      }
       router.push("/papers");
       return;
     }
     const data = await res.json();
-    setPaper(data);
+    const duplicateState =
+      res.headers.get("X-Paper-Duplicate-State")
+      || data.duplicateState
+      || "active";
+    const collapsedIntoPaperId =
+      res.headers.get("X-Paper-Collapsed-Into-Paper-Id")
+      || data.collapsedIntoPaperId
+      || null;
+
+    if (duplicateState === "collapsed" && collapsedIntoPaperId && collapsedIntoPaperId !== id) {
+      router.replace(`/papers/${collapsedIntoPaperId}`);
+      return;
+    }
+
+    setPaper({
+      ...data,
+      duplicateState,
+      collapsedIntoPaperId,
+    });
     setLoading(false);
   };
 
@@ -279,7 +302,23 @@ export default function PaperDetailPage() {
         const res = await fetch(`/api/papers/${id}`);
         if (!res.ok) return;
         const data = await res.json();
-        setPaper(data);
+        const duplicateState =
+          res.headers.get("X-Paper-Duplicate-State")
+          || data.duplicateState
+          || "active";
+        const collapsedIntoPaperId =
+          res.headers.get("X-Paper-Collapsed-Into-Paper-Id")
+          || data.collapsedIntoPaperId
+          || null;
+        if (duplicateState === "collapsed" && collapsedIntoPaperId && collapsedIntoPaperId !== id) {
+          router.replace(`/papers/${collapsedIntoPaperId}`);
+          return;
+        }
+        setPaper({
+          ...data,
+          duplicateState,
+          collapsedIntoPaperId,
+        });
       } catch {
         // Ignore fetch errors during polling
       }
@@ -591,6 +630,49 @@ export default function PaperDetailPage() {
         className="flex flex-col h-[calc(100vh-48px)] overflow-hidden transition-[margin-right] duration-200 -my-5"
         style={{ marginRight: chatOpen ? chatWidth : 0 }}
       >
+        {(paper.duplicateState === "hidden" || paper.duplicateState === "archived") && (
+          <div className="flex items-center gap-3 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-950/30">
+            <Info className="h-5 w-5 shrink-0 text-slate-600" />
+            <div className="flex-1">
+              <p className="text-sm font-medium text-slate-800 dark:text-slate-200">
+                This paper is {paper.duplicateState}
+              </p>
+              <p className="text-xs text-slate-600 dark:text-slate-400">
+                The paper remains readable, but it is hidden from active discovery surfaces until restored.
+              </p>
+            </div>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={duplicateBannerBusy}
+              onClick={async () => {
+                setDuplicateBannerBusy(true);
+                try {
+                  const res = await fetch(`/api/papers/${id}/duplicate-state`, {
+                    method: "PATCH",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ duplicateState: "ACTIVE" }),
+                  });
+                  if (!res.ok) {
+                    const data = await res.json().catch(() => ({}));
+                    toast.error(data.error || "Failed to restore paper");
+                    return;
+                  }
+                  toast.success("Paper restored");
+                  fetchPaper({ suppressMissingToast: true });
+                } catch {
+                  toast.error("Failed to restore paper");
+                } finally {
+                  setDuplicateBannerBusy(false);
+                }
+              }}
+            >
+              {duplicateBannerBusy ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : null}
+              Restore
+            </Button>
+          </div>
+        )}
+
         {/* ── Missing PDF banner ── */}
         {paper.referenceState === "unavailable_no_pdf" && (
           <div className="flex items-center gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 dark:border-amber-800 dark:bg-amber-950/30">

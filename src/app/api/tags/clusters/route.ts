@@ -1,9 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { generateTagClusters } from "@/lib/tags/clustering";
+import { requireUserId } from "@/lib/paper-auth";
+import { mergePaperVisibilityWhere } from "@/lib/papers/visibility";
 
 export async function GET(request: NextRequest) {
   try {
+    const userId = await requireUserId();
     const filterTagIds = request.nextUrl.searchParams.get("filterTagIds");
 
     const clusters = await prisma.tagCluster.findMany({
@@ -22,9 +25,9 @@ export async function GET(request: NextRequest) {
       if (selectedIds.length > 0) {
         // Find papers that have ALL selected tags (intersection)
         const matchingPapers = await prisma.paper.findMany({
-          where: {
+          where: mergePaperVisibilityWhere(userId, {
             AND: selectedIds.map((id) => ({ tags: { some: { tagId: id } } })),
-          },
+          }),
           select: {
             tags: { select: { tagId: true } },
           },

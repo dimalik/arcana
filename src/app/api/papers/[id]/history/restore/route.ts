@@ -2,35 +2,42 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { cleanJsonResponse } from "@/lib/llm/prompts";
 import { resolveAndAssignTags } from "@/lib/tags/auto-tag";
-import { requireUserId } from "@/lib/paper-auth";
+import {
+  jsonWithDuplicateState,
+  paperAccessErrorToResponse,
+  requirePaperAccess,
+} from "@/lib/paper-auth";
 
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const userId = await requireUserId();
-    const { id } = await params;
-  const { promptResultId } = await request.json();
-
-  if (!promptResultId) {
-    return NextResponse.json(
-      { error: "promptResultId is required" },
-      { status: 400 }
-    );
-  }
-
-  const promptResult = await prisma.promptResult.findUnique({
-    where: { id: promptResultId },
-  });
-
-  if (!promptResult || promptResult.paperId !== id) {
-    return NextResponse.json(
-      { error: "PromptResult not found for this paper" },
-      { status: 404 }
-    );
-  }
-
   try {
+    const { id } = await params;
+    const access = await requirePaperAccess(id, { mode: "mutate" });
+    if (!access) {
+      return NextResponse.json({ error: "Paper not found" }, { status: 404 });
+    }
+
+    const { promptResultId } = await request.json();
+    if (!promptResultId) {
+      return NextResponse.json(
+        { error: "promptResultId is required" },
+        { status: 400 }
+      );
+    }
+
+    const promptResult = await prisma.promptResult.findUnique({
+      where: { id: promptResultId },
+    });
+
+    if (!promptResult || promptResult.paperId !== id) {
+      return NextResponse.json(
+        { error: "PromptResult not found for this paper" },
+        { status: 404 }
+      );
+    }
+
     switch (promptResult.promptType) {
       case "summarize": {
         await prisma.paper.update({
@@ -88,15 +95,17 @@ export async function POST(
 
     // Return updated paper
     const paper = await prisma.paper.findFirst({
-      where: { id, userId },
+      where: { id, userId: access.userId },
       include: {
         tags: { include: { tag: true } },
         promptResults: { orderBy: { createdAt: "desc" } },
       },
     });
 
-    return NextResponse.json(paper);
+    return jsonWithDuplicateState(access, paper);
   } catch (error) {
+    const response = paperAccessErrorToResponse(error);
+    if (response) return response;
     console.error("Restore failed:", error);
     return NextResponse.json(
       { error: "Failed to restore analysis version" },

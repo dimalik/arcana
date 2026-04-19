@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { getS2Recommendations, searchAllSources, type S2Result } from "@/lib/import/semantic-scholar";
 import { searchArxivCategories } from "./arxiv-search";
 import { extractInterests, type UserInterests } from "./interests";
+import { mergePaperVisibilityWhere } from "@/lib/papers/visibility";
 
 
 export interface RecommendedPaper {
@@ -96,7 +97,7 @@ async function excludeLibraryPapers(
   if (titles.length > 0) conditions.push({ title: { in: titles } });
 
   const existing = await prisma.paper.findMany({
-    where: { userId, OR: conditions },
+    where: mergePaperVisibilityWhere(userId, { OR: conditions }),
     select: { doi: true, arxivId: true, title: true },
   });
 

@@ -7,15 +7,18 @@ import {
 } from "@/lib/llm/paper-llm-context";
 import { SYSTEM_PROMPTS } from "@/lib/llm/prompts";
 import { resolveModelConfig } from "@/lib/llm/auto-process";
-import { requireUserId } from "@/lib/paper-auth";
+import { paperAccessErrorToResponse, requirePaperAccess } from "@/lib/paper-auth";
 
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const userId = await requireUserId();
     const { id } = await params;
+    const access = await requirePaperAccess(id, { mode: "mutate" });
+    if (!access) {
+      return NextResponse.json({ error: "Paper not found" }, { status: 404 });
+    }
     const body = await request.json();
     const { provider, modelId, proxyConfig } = await resolveModelConfig(body);
     const userPrompt = body.prompt;
@@ -27,13 +30,7 @@ export async function POST(
       );
     }
 
-    const paper = await prisma.paper.findFirst({
-      where: { id, userId },
-    });
-
-    if (!paper) {
-      return NextResponse.json({ error: "Paper not found" }, { status: 404 });
-    }
+    const paper = access.paper;
 
     const text = paper.fullText || paper.abstract || "";
     if (!text) {
@@ -49,7 +46,7 @@ export async function POST(
       {
         operation: PAPER_INTERACTIVE_LLM_OPERATIONS.CUSTOM,
         paperId: id,
-        userId,
+        userId: access.userId,
         runtime: "interactive",
         source: "papers.llm.custom",
       },
@@ -76,6 +73,8 @@ export async function POST(
 
     return NextResponse.json(promptResult);
   } catch (error) {
+    const response = paperAccessErrorToResponse(error);
+    if (response) return response;
     console.error("Custom prompt error:", error);
     return NextResponse.json(
       { error: "Failed to process custom prompt" },
