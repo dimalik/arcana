@@ -6,6 +6,9 @@ const hoisted = vi.hoisted(() => ({
     llmUsageLog: {
       findMany: vi.fn(),
     },
+    agentSession: {
+      findMany: vi.fn(),
+    },
     researchProject: {
       findMany: vi.fn(),
     },
@@ -21,6 +24,11 @@ vi.mock("@/lib/usage", async () => {
   return actual;
 });
 
+vi.mock("@/lib/paper-costs", async () => {
+  const actual = await vi.importActual<typeof import("../../../../lib/paper-costs")>("../../../../lib/paper-costs");
+  return actual;
+});
+
 import { GET } from "./route";
 
 describe("GET /api/admin/cost-per-paper", () => {
@@ -28,10 +36,10 @@ describe("GET /api/admin/cost-per-paper", () => {
     vi.clearAllMocks();
   });
 
-  it("reconstructs processing cost from persisted runtime metadata instead of operation heuristics", async () => {
+  it("returns a reconciled union of provider-mediated and paper-agent cost", async () => {
     hoisted.prisma.llmUsageLog.findMany.mockResolvedValue([
       {
-        operation: "unknown",
+        operation: "processing_summarize",
         modelId: "gpt-4o-mini",
         estimatedCostUsd: 0.25,
         inputTokens: 1000,
@@ -54,17 +62,18 @@ describe("GET /api/admin/cost-per-paper", () => {
         }),
       },
       {
-        operation: "unknown",
+        operation: "paper_chat",
         modelId: "gpt-4o-mini",
         estimatedCostUsd: 0.40,
         inputTokens: 1200,
         outputTokens: 800,
         metadata: JSON.stringify({
           paperId: "paper-2",
+          runtime: "interactive",
         }),
       },
       {
-        operation: "processing_extract",
+        operation: "processing_extractCitationContexts",
         modelId: "claude-sonnet-4-6",
         estimatedCostUsd: 0.55,
         inputTokens: 2000,
@@ -76,6 +85,26 @@ describe("GET /api/admin/cost-per-paper", () => {
           step: "extractCitationContexts",
         }),
       },
+      {
+        operation: "mystery_paper_operation",
+        modelId: "gpt-4o",
+        estimatedCostUsd: 0.20,
+        inputTokens: 600,
+        outputTokens: 200,
+        metadata: JSON.stringify({
+          paperId: "paper-3",
+        }),
+      },
+    ]);
+    hoisted.prisma.agentSession.findMany.mockResolvedValue([
+      {
+        paperId: "paper-2",
+        costUsd: 1.2,
+      },
+      {
+        paperId: "paper-4",
+        costUsd: 0.8,
+      },
     ]);
     hoisted.prisma.researchProject.findMany.mockResolvedValue([
       { id: "project-1", title: "Project One" },
@@ -85,9 +114,9 @@ describe("GET /api/admin/cost-per-paper", () => {
     const body = await response.json();
 
     expect(body.paperProcessing).toEqual({
-      totalCost: 0.8,
-      processedPapers: 2,
-      avgCostPerPaper: 0.4,
+      totalCost: 0.25,
+      processedPapers: 1,
+      avgCostPerPaper: 0.25,
       byModel: {
         "gpt-4o-mini": {
           calls: 1,
@@ -95,11 +124,48 @@ describe("GET /api/admin/cost-per-paper", () => {
           inputTokens: 1000,
           outputTokens: 500,
         },
+      },
+    });
+    expect(body.paperCosts).toEqual({
+      totalCost: 3.4,
+      paperCount: 4,
+      avgCostPerPaper: 0.85,
+      byModel: {
+        "gpt-4o-mini": {
+          calls: 2,
+          cost: 0.65,
+          inputTokens: 2200,
+          outputTokens: 1300,
+        },
         "claude-sonnet-4-6": {
           calls: 1,
           cost: 0.55,
           inputTokens: 2000,
           outputTokens: 900,
+        },
+        "gpt-4o": {
+          calls: 1,
+          cost: 0.2,
+          inputTokens: 600,
+          outputTokens: 200,
+        },
+      },
+      bySegment: {
+        processing: { cost: 0.25, records: 1 },
+        interactive: { cost: 0.4, records: 1 },
+        reference_enrichment: { cost: 0.55, records: 1 },
+        agent: { cost: 2, records: 2 },
+        unclassified: { cost: 0.2, records: 1 },
+      },
+      sourceTotals: {
+        providerMediated: { cost: 1.4, records: 4 },
+        agent: { cost: 2, records: 2 },
+        combined: { cost: 3.4, paperCount: 4 },
+      },
+      unclassifiedOperations: {
+        mystery_paper_operation: {
+          cost: 0.2,
+          calls: 1,
         },
       },
     });

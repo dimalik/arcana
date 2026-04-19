@@ -1,6 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import type {
+  LegacyPaperProcessingCostSummary,
+  PaperCostSummary,
+} from "@/lib/paper-costs";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -52,12 +56,8 @@ interface UserInfo {
 }
 
 interface CostPerPaperData {
-  paperProcessing: {
-    totalCost: number;
-    processedPapers: number;
-    avgCostPerPaper: number;
-    byModel: Record<string, { cost: number; calls: number; inputTokens: number; outputTokens: number }>;
-  };
+  paperProcessing: LegacyPaperProcessingCostSummary;
+  paperCosts: PaperCostSummary;
   researchProjects: {
     id: string;
     title: string;
@@ -108,6 +108,14 @@ export default function AdminPage() {
   const [days, setDays] = useState(30);
   const [repairing, setRepairing] = useState(false);
   const [repairResult, setRepairResult] = useState<string | null>(null);
+
+  const segmentLabels = {
+    processing: "Processing",
+    interactive: "Interactive",
+    reference_enrichment: "Reference Enrichment",
+    agent: "Agent",
+    unclassified: "Unclassified",
+  } as const;
 
   const fetchBatches = () => {
     fetch("/api/admin/batches").then((r) => r.json()).then(setBatchData).catch(() => {});
@@ -293,21 +301,64 @@ export default function AdminPage() {
       {/* Cost per Paper / Project */}
       {costData && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Paper processing costs */}
+          {/* Paper costs */}
           <Card>
             <CardContent className="p-4">
-              <h3 className="text-sm font-medium mb-3">Cost per Paper (Processing)</h3>
+              <h3 className="text-sm font-medium mb-3">Cost per Paper</h3>
               <div className="space-y-3">
                 <div className="flex items-baseline gap-3">
-                  <span className="text-2xl font-bold">${costData.paperProcessing.avgCostPerPaper.toFixed(3)}</span>
+                  <span className="text-2xl font-bold">${costData.paperCosts.avgCostPerPaper.toFixed(3)}</span>
                   <span className="text-xs text-muted-foreground">avg per paper</span>
                 </div>
                 <div className="text-xs text-muted-foreground">
-                  {costData.paperProcessing.processedPapers} papers processed, ${costData.paperProcessing.totalCost.toFixed(2)} total
+                  {costData.paperCosts.paperCount} papers with cost, ${costData.paperCosts.totalCost.toFixed(2)} total
                 </div>
-                {Object.entries(costData.paperProcessing.byModel).length > 0 && (
+                <div className="grid grid-cols-2 gap-2 pt-2 border-t border-border/50">
+                  {Object.entries(costData.paperCosts.bySegment).map(([segment, data]) => (
+                    <div key={segment} className="rounded-md border border-border/50 px-3 py-2">
+                      <div className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                        {segmentLabels[segment as keyof typeof segmentLabels]}
+                      </div>
+                      <div className="mt-1 flex items-baseline justify-between gap-2">
+                        <span className="text-sm font-medium">${data.cost.toFixed(2)}</span>
+                        <span className="text-[10px] text-muted-foreground">
+                          {data.records} {segment === "agent" ? "sessions" : "records"}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div className="text-xs text-muted-foreground">
+                  Provider logs: ${costData.paperCosts.sourceTotals.providerMediated.cost.toFixed(2)} across {costData.paperCosts.sourceTotals.providerMediated.records} records.
+                  {" "}
+                  Agent sessions: ${costData.paperCosts.sourceTotals.agent.cost.toFixed(2)} across {costData.paperCosts.sourceTotals.agent.records} sessions.
+                </div>
+                {costData.paperCosts.bySegment.unclassified.cost > 0 && (
+                  <div className="rounded-md border border-amber-500/40 bg-amber-500/5 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
+                    <div className="flex items-center gap-2 font-medium">
+                      <AlertTriangle className="h-3.5 w-3.5" />
+                      Unclassified paper cost requires follow-up
+                    </div>
+                    <div className="mt-2 space-y-1">
+                      {Object.entries(costData.paperCosts.unclassifiedOperations)
+                        .sort(([, a], [, b]) => b.cost - a.cost)
+                        .map(([operation, data]) => (
+                          <div key={operation} className="flex items-center justify-between gap-3">
+                            <span className="font-mono">{operation}</span>
+                            <span>
+                              ${data.cost.toFixed(3)} across {data.calls} calls
+                            </span>
+                          </div>
+                        ))}
+                    </div>
+                  </div>
+                )}
+                {Object.entries(costData.paperCosts.byModel).length > 0 && (
                   <div className="space-y-1.5 pt-2 border-t border-border/50">
-                    {Object.entries(costData.paperProcessing.byModel)
+                    <div className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                      Provider-mediated by model
+                    </div>
+                    {Object.entries(costData.paperCosts.byModel)
                       .sort(([, a], [, b]) => b.cost - a.cost)
                       .map(([model, data]) => (
                         <div key={model} className="flex items-center justify-between text-xs">
@@ -317,10 +368,15 @@ export default function AdminPage() {
                           </div>
                           <div className="flex items-center gap-3 shrink-0">
                             <span className="text-muted-foreground">{Math.round(data.inputTokens / data.calls)} in / {Math.round(data.outputTokens / data.calls)} out avg</span>
-                            <span className="font-medium">${(data.cost / (costData.paperProcessing.processedPapers || 1)).toFixed(3)}/paper</span>
+                            <span className="font-medium">${data.cost.toFixed(3)}</span>
                           </div>
                         </div>
                       ))}
+                  </div>
+                )}
+                {costData.paperProcessing.processedPapers > 0 && (
+                  <div className="text-[11px] text-muted-foreground">
+                    Processing-only legacy view: {costData.paperProcessing.processedPapers} papers, ${costData.paperProcessing.totalCost.toFixed(2)} total.
                   </div>
                 )}
               </div>
