@@ -1,6 +1,7 @@
 import { prisma } from "../prisma";
 import { normalizeTitle } from "./match";
 import { buildNormalizedCitationContext } from "./citation-context-normalization";
+import { sanitizeReferenceMetadataForDisplay } from "./reference-quality";
 
 interface LocalPaperCandidate {
   id: string;
@@ -65,132 +66,13 @@ interface ReferenceEntryRecord {
   }>;
 }
 
-const LEADING_CITATION_MARKER_RE = /^[A-Z][A-Z0-9]{1,12}\s*\+\s*\d+\]\s*/;
-const VENUE_CITATION_MARKER_RE = /^[A-Z][A-Z0-9]{1,12}\s*\+\s*\d{2,4}$/;
-const STANDALONE_YEAR_RE = /^\(?\d{4}[a-z]?\)?$/i;
-const TRAILING_YEAR_RE = /[\s,.;:()-]*\b\d{4}[a-z]?\)?\.?$/i;
-
-function cleanReferenceText(value: string | null | undefined): string {
-  return (value ?? "")
-    .replace(/([a-z]{2,})-\s*\n\s*([a-z]{2,})/g, "$1$2")
-    .replace(LEADING_CITATION_MARKER_RE, "")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function splitCitationSentences(rawCitation: string): string[] {
-  return cleanReferenceText(rawCitation)
-    .split(/\.\s+/)
-    .map((part) => part.trim().replace(/\.+$/, ""))
-    .filter(Boolean);
-}
-
-function looksLikePollutedTitle(title: string): boolean {
-  if (!title) return false;
-  if (LEADING_CITATION_MARKER_RE.test(title)) return true;
-  const commaCount = (title.match(/,/g) ?? []).length;
-  return commaCount >= 3 || /\bet al\b/i.test(title);
-}
-
-function cleanDerivedTitle(title: string): string {
-  return cleanReferenceText(title)
-    .replace(TRAILING_YEAR_RE, "")
-    .trim()
-    .replace(/[.,;:]+$/, "")
-    .trim();
-}
-
-function deriveTitleFromRawCitation(rawCitation: string): string | null {
-  const cleaned = cleanReferenceText(rawCitation);
-  const authorRemainder =
-    cleaned.match(/\band\s+[^.]+?\.\s+(.+)$/i)?.[1]
-    ?? cleaned.match(/\bet al\.\s+(.+)$/i)?.[1]
-    ?? null;
-
-  const remainder = authorRemainder
-    ? authorRemainder.replace(/^\(?\d{4}[a-z]?\)?\.\s+/i, "").trim()
-    : null;
-
-  if (remainder) {
-    const dotted = remainder.match(/^([^.;]+?)\.\s+/)?.[1];
-    const commaYear = remainder.match(/^([^.;]+?),\s*\d{4}[a-z]?\.?$/i)?.[1];
-    const derived = cleanDerivedTitle(dotted ?? commaYear ?? remainder);
-    if (derived) return derived;
-  }
-
-  const parts = splitCitationSentences(rawCitation);
-  if (parts.length >= 3 && STANDALONE_YEAR_RE.test(parts[1] ?? "")) {
-    return cleanDerivedTitle(parts[2] ?? "") || null;
-  }
-  if (parts.length >= 2) {
-    return cleanDerivedTitle(parts[1] ?? "") || null;
-  }
-  return null;
-}
-
-function parseAuthorsJson(authors: string | null): string[] | null {
-  if (!authors) return null;
-  try {
-    const parsed = JSON.parse(authors) as unknown;
-    if (!Array.isArray(parsed)) return null;
-    return parsed
-      .map((value) => (typeof value === "string" ? cleanReferenceText(value) : ""))
-      .filter(Boolean);
-  } catch {
-    return null;
-  }
-}
-
-function looksLikePollutedAuthors(authors: string[]): boolean {
-  return authors.some((author) => author.includes("]") || /\s\+\s\d+\]/.test(author));
-}
-
-function deriveAuthorsFromRawCitation(rawCitation: string, title: string): string[] | null {
-  const cleaned = cleanReferenceText(rawCitation);
-  const titleIndex = title
-    ? cleaned.toLowerCase().indexOf(title.toLowerCase())
-    : -1;
-  const authorBlock = titleIndex > 0
-    ? cleaned.slice(0, titleIndex)
-    : splitCitationSentences(rawCitation)[0] ?? cleaned;
-
-  const normalized = authorBlock
-    .replace(/\(?\d{4}[a-z]?\)?\.?\s*$/i, "")
-    .replace(/[.;:\s]+$/g, "")
-    .replace(/\bet al\b\.?/gi, "")
-    .replace(/\band\b/gi, ",")
-    .split(",")
-    .map((part) => part.trim())
-    .filter(Boolean);
-
-  return normalized.length > 0 ? normalized : null;
-}
-
 function sanitizeReferenceEntryDisplay(entry: ReferenceEntryRecord): {
   title: string;
   authors: string | null;
   venue: string | null;
   rawCitation: string;
 } {
-  const cleanedTitle = cleanReferenceText(entry.title);
-  const derivedTitle = deriveTitleFromRawCitation(entry.rawCitation);
-  const title = looksLikePollutedTitle(cleanedTitle)
-    ? (derivedTitle ?? cleanedTitle)
-    : cleanedTitle;
-
-  const parsedAuthors = parseAuthorsJson(entry.authors);
-  const displayAuthors = !parsedAuthors || looksLikePollutedAuthors(parsedAuthors)
-    ? deriveAuthorsFromRawCitation(entry.rawCitation, title || derivedTitle || "")
-    : parsedAuthors;
-  const cleanedVenue = cleanReferenceText(entry.venue);
-  const venue = looksLikePollutedVenue(cleanedVenue) ? null : cleanedVenue || null;
-
-  return {
-    title: title || cleanedTitle || cleanReferenceText(entry.rawCitation),
-    authors: displayAuthors ? JSON.stringify(displayAuthors) : entry.authors,
-    venue,
-    rawCitation: cleanReferenceText(entry.rawCitation),
-  };
+  return sanitizeReferenceMetadataForDisplay(entry);
 }
 
 function buildCitationContext(
@@ -203,10 +85,6 @@ function buildCitationContext(
       (left, right) => left.createdAt.getTime() - right.createdAt.getTime(),
     ),
   );
-}
-
-function looksLikePollutedVenue(venue: string): boolean {
-  return VENUE_CITATION_MARKER_RE.test(venue);
 }
 
 function getImportReusablePaper(

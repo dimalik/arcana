@@ -38,6 +38,7 @@ import { prisma } from "../../prisma";
 import { resolveOrCreateEntity } from "../../canonical/entity-service";
 import { resolveReferenceOnline } from "../../references/resolve";
 import {
+  applyReviewedReferenceMetadataDecision,
   createReferenceEntry,
   deleteReferenceEntryWithLegacyProjection,
   enrichReferenceEntryFromCandidate,
@@ -403,7 +404,7 @@ describe("enrichReferenceEntryFromCandidate", () => {
     });
   });
 
-  it("replaces polluted metadata fields with trusted online candidate values", async () => {
+  it("repairs trusted fields while leaving overly truncated author candidates alone", async () => {
     vi.mocked(prisma.referenceEntry.findFirst).mockResolvedValue({
       id: "entry-2",
       paperId: "paper-1",
@@ -476,7 +477,7 @@ describe("enrichReferenceEntryFromCandidate", () => {
       data: expect.objectContaining({
         title:
           "Video-MME: The First-Ever Comprehensive Evaluation Benchmark of Multi-modal LLMs in Video Analysis",
-        authors: JSON.stringify(["Chaoyou Fu", "Yuhan Dai", "Yongdong Luo"]),
+        authors: JSON.stringify(["Chaoyou FDL + 24] Fu", "Yuhan Dai"]),
         venue: "CVPR",
         doi: "10.1109/CVPR.2025.12345",
         arxivId: "2405.21075",
@@ -494,13 +495,13 @@ describe("enrichReferenceEntryFromCandidate", () => {
       data: expect.objectContaining({
         title:
           "Video-MME: The First-Ever Comprehensive Evaluation Benchmark of Multi-modal LLMs in Video Analysis",
-        authors: JSON.stringify(["Chaoyou Fu", "Yuhan Dai", "Yongdong Luo"]),
+        authors: JSON.stringify(["Chaoyou FDL + 24] Fu", "Yuhan Dai"]),
         venue: "CVPR",
       }),
     });
     expect(result?.mergeSummary).toEqual({
       title: "replaced_polluted",
-      authors: "replaced_polluted",
+      authors: "no_trustworthy_upgrade",
       venue: "replaced_polluted",
       identifiersPersisted: true,
       resolutionUpdated: true,
@@ -679,6 +680,99 @@ describe("enrichReferenceEntryFromCandidate", () => {
       resolutionUpdated: false,
     });
   });
+
+  it("does not replace polluted authors with a truncated online candidate list", async () => {
+    const pollutedAuthors = JSON.stringify([
+      "Augustus Aon + 21] Jacob Austin",
+      "Maxwell Odena",
+      "Maarten Nye",
+    ]);
+
+    vi.mocked(prisma.referenceEntry.findFirst).mockResolvedValue({
+      id: "entry-6",
+      paperId: "paper-1",
+      legacyReferenceId: "legacy-6",
+      title: "Program synthesis with large language models",
+      authors: pollutedAuthors,
+      year: 2021,
+      venue: null,
+      doi: null,
+      rawCitation:
+        "AON + 21] Jacob Austin, Augustus Odena, Maxwell Nye, Maarten Bosma, Henryk Michalewski, David Dohan, Ellen Jiang, Carrie Cai, Michael Terry, Quoc Le, and Charles Sutton. Program synthesis with large language models. arXiv preprint arXiv:2108.07732, 2021.",
+      referenceIndex: 6,
+      semanticScholarId: null,
+      arxivId: null,
+      externalUrl: null,
+      resolvedEntityId: null,
+      resolveConfidence: null,
+      resolveSource: null,
+    } as never);
+    vi.mocked(resolveOrCreateEntity).mockResolvedValue({
+      entityId: "entity-6",
+      created: false,
+    });
+    vi.mocked(prisma.paper.findFirst).mockResolvedValue(null as never);
+    vi.mocked(prisma.$transaction).mockImplementation(async (callback) =>
+      (callback as (tx: unknown) => unknown)({
+        reference: {
+          create: prisma.reference.create,
+          update: prisma.reference.update,
+        },
+        referenceEntry: {
+          update: prisma.referenceEntry.update,
+        },
+        paper: {
+          findFirst: prisma.paper.findFirst,
+        },
+      }),
+    );
+    vi.mocked(prisma.referenceEntry.update).mockResolvedValue({
+      id: "entry-6",
+      legacyReferenceId: "legacy-6",
+    } as never);
+    vi.mocked(prisma.reference.update).mockResolvedValue({ id: "legacy-6" } as never);
+
+    const result = await enrichReferenceEntryFromCandidate({
+      paperId: "paper-1",
+      referenceId: "legacy-6",
+      userId: "user-1",
+      candidate: {
+        semanticScholarId: "https://openalex.org/W3195140297",
+        title: "Program Synthesis with Large Language Models",
+        abstract: null,
+        authors: ["Jacob Austin"],
+        year: 2021,
+        venue: "arXiv (Cornell University)",
+        doi: null,
+        arxivId: "2108.07732",
+        openReviewId: null,
+        externalUrl: "https://arxiv.org/abs/2108.07732",
+        citationCount: 28,
+        openAccessPdfUrl: null,
+        source: "openalex",
+      },
+    });
+
+    expect(prisma.referenceEntry.update).toHaveBeenCalledWith({
+      where: { id: "entry-6" },
+      data: expect.objectContaining({
+        title: "Program synthesis with large language models",
+        authors: pollutedAuthors,
+        venue: "arXiv (Cornell University)",
+      }),
+      select: {
+        id: true,
+        legacyReferenceId: true,
+      },
+    });
+    expect(result?.mergeSummary).toEqual({
+      title: "kept_trusted_local",
+      authors: "no_trustworthy_upgrade",
+      venue: "filled_missing",
+      identifiersPersisted: true,
+      resolutionUpdated: true,
+    });
+  });
 });
 
 describe("referenceEntryNeedsMetadataRepair", () => {
@@ -722,6 +816,146 @@ describe("referenceEntryNeedsMetadataRepair", () => {
         venue: "FDL + 24",
       }),
     ).toBe(true);
+  });
+});
+
+describe("applyReviewedReferenceMetadataDecision", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("applies text-only venue suppression without mutating identifiers or resolution state", async () => {
+    vi.mocked(prisma.referenceEntry.findFirst).mockResolvedValue({
+      id: "entry-5",
+      paperId: "paper-1",
+      legacyReferenceId: "legacy-5",
+      title: "Video-MME",
+      authors: JSON.stringify(["Chaoyou Fu", "Yuhan Dai"]),
+      year: 2024,
+      venue: "FDL + 24",
+      doi: "10.1000/example",
+      rawCitation: "FDL + 24] Video-MME",
+      referenceIndex: 5,
+      semanticScholarId: "https://openalex.org/W123",
+      arxivId: "2405.21075",
+      externalUrl: "https://doi.org/10.1000/example",
+      resolvedEntityId: "entity-video-mme",
+      resolveConfidence: 1,
+      resolveSource: "openalex_candidate",
+    } as never);
+    vi.mocked(prisma.paper.findFirst).mockResolvedValue({ id: "paper-linked" } as never);
+    vi.mocked(prisma.$transaction).mockImplementation(async (callback) =>
+      (callback as (tx: unknown) => unknown)({
+        reference: {
+          create: prisma.reference.create,
+          update: prisma.reference.update,
+        },
+        referenceEntry: {
+          update: prisma.referenceEntry.update,
+        },
+        paper: {
+          findFirst: prisma.paper.findFirst,
+        },
+      }),
+    );
+    vi.mocked(prisma.referenceEntry.update).mockResolvedValue({
+      id: "entry-5",
+      legacyReferenceId: "legacy-5",
+    } as never);
+    vi.mocked(prisma.reference.update).mockResolvedValue({ id: "legacy-5" } as never);
+
+    const result = await applyReviewedReferenceMetadataDecision({
+      paperId: "paper-1",
+      referenceId: "legacy-5",
+      userId: "user-1",
+      candidate: null,
+      fieldActions: { venue: "suppress" },
+      persistIdentifiers: false,
+    });
+
+    expect(resolveOrCreateEntity).not.toHaveBeenCalled();
+    expect(prisma.referenceEntry.update).toHaveBeenCalledWith({
+      where: { id: "entry-5" },
+      data: expect.objectContaining({
+        title: "Video-MME",
+        authors: JSON.stringify(["Chaoyou Fu", "Yuhan Dai"]),
+        venue: null,
+        doi: "10.1000/example",
+        semanticScholarId: "https://openalex.org/W123",
+        resolvedEntityId: "entity-video-mme",
+        resolveConfidence: 1,
+        resolveSource: "openalex_candidate",
+      }),
+      select: {
+        id: true,
+        legacyReferenceId: true,
+      },
+    });
+    expect(prisma.reference.update).toHaveBeenCalledWith({
+      where: { id: "legacy-5" },
+      data: expect.objectContaining({
+        venue: null,
+      }),
+    });
+    expect(result).toEqual({
+      referenceEntryId: "entry-5",
+      legacyReferenceId: "legacy-5",
+      linkedPaperId: "paper-linked",
+      identifiersPersisted: false,
+      resolutionUpdated: false,
+      fieldActions: { venue: "suppress" },
+    });
+  });
+
+  it("rejects reviewed author replacement when the candidate author list is clearly truncated", async () => {
+    vi.mocked(prisma.referenceEntry.findFirst).mockResolvedValue({
+      id: "entry-6",
+      paperId: "paper-1",
+      legacyReferenceId: "legacy-6",
+      title: "Program synthesis with large language models",
+      authors: JSON.stringify([
+        "Augustus Aon + 21] Jacob Austin",
+        "Maxwell Odena",
+        "Maarten Nye",
+      ]),
+      year: 2021,
+      venue: null,
+      doi: null,
+      rawCitation:
+        "AON + 21] Jacob Austin, Augustus Odena, Maxwell Nye, Maarten Bosma, Henryk Michalewski, David Dohan, Ellen Jiang, Carrie Cai, Michael Terry, Quoc Le, and Charles Sutton. Program synthesis with large language models. arXiv preprint arXiv:2108.07732, 2021.",
+      referenceIndex: 6,
+      semanticScholarId: null,
+      arxivId: null,
+      externalUrl: null,
+      resolvedEntityId: null,
+      resolveConfidence: null,
+      resolveSource: null,
+    } as never);
+
+    await expect(
+      applyReviewedReferenceMetadataDecision({
+        paperId: "paper-1",
+        referenceId: "legacy-6",
+        userId: "user-1",
+        candidate: {
+          semanticScholarId: "https://openalex.org/W3195140297",
+          title: "Program Synthesis with Large Language Models",
+          abstract: null,
+          authors: ["Jacob Austin"],
+          year: 2021,
+          venue: "arXiv (Cornell University)",
+          doi: null,
+          arxivId: "2108.07732",
+          openReviewId: null,
+          externalUrl: "https://arxiv.org/abs/2108.07732",
+          citationCount: 28,
+          openAccessPdfUrl: null,
+          source: "openalex",
+        },
+        fieldActions: { authors: "replace" },
+        persistIdentifiers: true,
+      }),
+    ).rejects.toThrow("Reviewed metadata replacement requires a trustworthy author candidate");
   });
 });
 

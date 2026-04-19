@@ -3,6 +3,18 @@ import { normalizeIdentifier } from "../canonical/normalize";
 import { resolveOrCreateEntity } from "../canonical/entity-service";
 import { resolveReferenceOnline } from "../references/resolve";
 import { syncPaperReferenceState } from "../references/reference-state";
+import {
+  candidateAuthorsPassTrustCheck,
+  cleanReferenceText,
+  looksLikePollutedAuthors,
+  looksLikePollutedTitle,
+  looksLikePollutedVenue,
+  referenceMetadataNeedsRepair,
+} from "../references/reference-quality";
+import type {
+  ReferenceMetadataFieldAction,
+  ReferenceMetadataFieldActions,
+} from "../references/reference-quality-manifest";
 import type { ResolutionMethod } from "../references/types";
 import type { S2Result, SearchSource } from "../import/semantic-scholar";
 
@@ -70,6 +82,15 @@ export interface EnrichReferenceEntryResult {
   mergeSummary: ReferenceMetadataMergeSummary;
 }
 
+export interface ApplyReviewedReferenceMetadataResult {
+  referenceEntryId: string;
+  legacyReferenceId: string | null;
+  linkedPaperId: string | null;
+  identifiersPersisted: boolean;
+  resolutionUpdated: boolean;
+  fieldActions: ReferenceMetadataFieldActions;
+}
+
 export type ReferenceMergeFieldOutcome =
   | "kept_trusted_local"
   | "filled_missing"
@@ -104,60 +125,6 @@ const REFERENCE_ENTRY_MUTATION_SELECT = {
 } as const;
 
 type LegacyProjectionTx = Pick<typeof prisma, "reference" | "referenceEntry" | "paper">;
-
-const LEADING_CITATION_MARKER_RE = /^[A-Z][A-Z0-9]{1,12}\s*\+\s*\d+\]\s*/;
-const VENUE_CITATION_MARKER_RE = /^[A-Z][A-Z0-9]{1,12}\s*\+\s*\d{2,4}$/;
-const PERSON_NAME_RE = "[A-Z][A-Za-z'`.-]+(?:\\s+(?:[A-Z]\\.|[A-Z][A-Za-z'`.-]+)){0,3}";
-const LEADING_AUTHOR_BLOB_RE = new RegExp(
-  `^${PERSON_NAME_RE},\\s+${PERSON_NAME_RE}\\.\\s+.+(?:,\\s*\\d{4}[a-z]?\\.?)?$`,
-);
-
-function cleanReferenceText(value: string | null | undefined): string {
-  return (value ?? "")
-    .replace(/([a-z]{2,})-\s*\n\s*([a-z]{2,})/g, "$1$2")
-    .replace(LEADING_CITATION_MARKER_RE, "")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function looksLikePollutedTitle(title: string | null | undefined): boolean {
-  if (!title) return false;
-  if (LEADING_CITATION_MARKER_RE.test(title)) return true;
-  const cleanedTitle = cleanReferenceText(title);
-  if (!cleanedTitle) return false;
-  const commaCount = (cleanedTitle.match(/,/g) ?? []).length;
-  return (
-    commaCount >= 3
-    || /\bet al\b/i.test(cleanedTitle)
-    || LEADING_AUTHOR_BLOB_RE.test(cleanedTitle)
-  );
-}
-
-function parseAuthorsJson(authors: string | null): string[] | null {
-  if (!authors) return null;
-  try {
-    const parsed = JSON.parse(authors) as unknown;
-    if (!Array.isArray(parsed)) return null;
-    return parsed
-      .map((value) => (typeof value === "string" ? cleanReferenceText(value) : ""))
-      .filter(Boolean);
-  } catch {
-    return null;
-  }
-}
-
-function looksLikePollutedAuthors(authors: string | null): boolean {
-  const parsedAuthors = parseAuthorsJson(authors);
-  if (!parsedAuthors || parsedAuthors.length === 0) return false;
-  return parsedAuthors.some(
-    (author) => author.includes("]") || /\s\+\s\d+\]/.test(author),
-  );
-}
-
-function looksLikePollutedVenue(venue: string | null | undefined): boolean {
-  const cleanedVenue = cleanReferenceText(venue);
-  return cleanedVenue.length > 0 && VENUE_CITATION_MARKER_RE.test(cleanedVenue);
-}
 
 function hasNonEmptyValue(value: string | null | undefined): value is string {
   return Boolean(value && value.trim().length > 0);
@@ -205,6 +172,16 @@ function normalizeCandidateAuthors(authors: string[]): string | null {
   return JSON.stringify(authors.map((author) => cleanReferenceText(author)).filter(Boolean));
 }
 
+function getTrustedCandidateAuthorsValue(params: {
+  rawCitation: string;
+  title: string;
+  candidateAuthors: string[];
+}): string | null {
+  return candidateAuthorsPassTrustCheck(params)
+    ? normalizeCandidateAuthors(params.candidateAuthors)
+    : null;
+}
+
 function hasNewIdentifier(
   currentValue: string | null,
   candidateValue: string | null,
@@ -212,16 +189,23 @@ function hasNewIdentifier(
   return hasNonEmptyValue(candidateValue) && candidateValue !== currentValue;
 }
 
+function hasReplaceAction(fieldActions: ReferenceMetadataFieldActions): boolean {
+  return Object.values(fieldActions).includes("replace");
+}
+
+function resolveFieldAction(
+  fieldActions: ReferenceMetadataFieldActions,
+  field: keyof ReferenceMetadataFieldActions,
+): ReferenceMetadataFieldAction {
+  return fieldActions[field] ?? "leave";
+}
+
 export function referenceEntryNeedsMetadataRepair(entry: {
   title: string;
   authors: string | null;
   venue: string | null;
 }): boolean {
-  return (
-    looksLikePollutedTitle(entry.title)
-    || looksLikePollutedAuthors(entry.authors)
-    || looksLikePollutedVenue(entry.venue)
-  );
+  return referenceMetadataNeedsRepair(entry);
 }
 
 export async function createReferenceEntry(input: CreateReferenceEntryInput) {
@@ -335,7 +319,11 @@ export async function enrichReferenceEntryFromCandidate(params: {
   });
   const mergedAuthors = mergeNormalizedField({
     localValue: target.authors,
-    candidateValue: normalizeCandidateAuthors(params.candidate.authors),
+    candidateValue: getTrustedCandidateAuthorsValue({
+      rawCitation: target.rawCitation,
+      title: params.candidate.title || target.title,
+      candidateAuthors: params.candidate.authors,
+    }),
     localPolluted: looksLikePollutedAuthors(target.authors),
   });
   const mergedVenue = mergeNormalizedField({
@@ -444,6 +432,171 @@ export async function enrichReferenceEntryFromCandidate(params: {
         identifiersPersisted,
         resolutionUpdated,
       },
+    };
+  });
+
+  return updated;
+}
+
+export async function applyReviewedReferenceMetadataDecision(params: {
+  paperId: string;
+  referenceId: string;
+  userId: string | null | undefined;
+  candidate: (Omit<S2Result, "source"> & { source?: SearchSource | "arxiv" }) | null;
+  fieldActions: ReferenceMetadataFieldActions;
+  persistIdentifiers: boolean;
+}): Promise<ApplyReviewedReferenceMetadataResult | null> {
+  const target = await findReferenceEntryForPaper(params.paperId, params.referenceId);
+  if (!target) {
+    return null;
+  }
+
+  const titleAction = resolveFieldAction(params.fieldActions, "title");
+  const authorsAction = resolveFieldAction(params.fieldActions, "authors");
+  const venueAction = resolveFieldAction(params.fieldActions, "venue");
+  const anyReplace = hasReplaceAction(params.fieldActions);
+
+  if (anyReplace && !params.candidate) {
+    throw new Error("Reviewed metadata replacement requires a candidate");
+  }
+
+  if (titleAction === "suppress" || authorsAction === "suppress") {
+    throw new Error("Only venue may be suppressed");
+  }
+
+  const trustedCandidateAuthors =
+    authorsAction === "replace"
+      ? getTrustedCandidateAuthorsValue({
+        rawCitation: target.rawCitation,
+        title: params.candidate?.title || target.title,
+        candidateAuthors: params.candidate?.authors ?? [],
+      })
+      : null;
+
+  if (authorsAction === "replace" && !trustedCandidateAuthors) {
+    throw new Error("Reviewed metadata replacement requires a trustworthy author candidate");
+  }
+
+  const title =
+    titleAction === "replace"
+      ? cleanReferenceText(params.candidate?.title ?? "")
+      : cleanReferenceText(target.title);
+  const authors =
+    authorsAction === "replace"
+      ? trustedCandidateAuthors
+      : target.authors;
+  const venue =
+    venueAction === "replace"
+      ? cleanReferenceText(params.candidate?.venue)
+      : venueAction === "suppress"
+        ? null
+        : cleanReferenceText(target.venue);
+  const year = target.year ?? params.candidate?.year ?? null;
+  const doi = params.persistIdentifiers
+    ? target.doi || params.candidate?.doi || null
+    : target.doi;
+  const arxivId = params.persistIdentifiers
+    ? target.arxivId || params.candidate?.arxivId || null
+    : target.arxivId;
+  const semanticScholarId = params.persistIdentifiers
+    ? target.semanticScholarId || params.candidate?.semanticScholarId || null
+    : target.semanticScholarId;
+  const externalUrl = params.persistIdentifiers
+    ? target.externalUrl || params.candidate?.externalUrl || null
+    : target.externalUrl;
+
+  const identifiers = params.candidate
+    ? buildIdentifierInputs({
+        ...params.candidate,
+        doi,
+        arxivId,
+        semanticScholarId,
+      })
+    : [];
+  let resolvedEntityId = target.resolvedEntityId;
+  let resolveConfidence = target.resolveConfidence;
+  let resolveSource = target.resolveSource;
+  let resolutionUpdated = false;
+  const identifiersPersisted =
+    params.persistIdentifiers
+    && (
+      hasNewIdentifier(target.doi, doi)
+      || hasNewIdentifier(target.arxivId, arxivId)
+      || hasNewIdentifier(target.semanticScholarId, semanticScholarId)
+    );
+
+  if (params.persistIdentifiers && anyReplace && identifiers.length > 0 && identifiersPersisted) {
+    const entity = await resolveOrCreateEntity({
+      title,
+      authors,
+      year,
+      venue,
+      abstract: params.candidate?.abstract ?? null,
+      identifiers,
+      source: mapEntitySource(params.candidate?.source),
+    });
+
+    resolvedEntityId = entity.entityId;
+    resolveConfidence = doi || arxivId ? 1.0 : 0.9;
+    resolveSource = mapCandidateResolutionMethod(params.candidate?.source);
+    resolutionUpdated = true;
+  }
+
+  const linkedPaper =
+    params.userId && resolvedEntityId
+      ? await prisma.paper.findFirst({
+          where: {
+            userId: params.userId,
+            entityId: resolvedEntityId,
+          },
+          select: { id: true },
+        })
+      : null;
+
+  const updated = await prisma.$transaction(async (tx) => {
+    const nextEntry = await tx.referenceEntry.update({
+      where: { id: target.id },
+      data: {
+        title,
+        authors,
+        year,
+        venue,
+        doi,
+        arxivId,
+        semanticScholarId,
+        externalUrl,
+        resolvedEntityId,
+        resolveConfidence,
+        resolveSource,
+      },
+      select: {
+        id: true,
+        legacyReferenceId: true,
+      },
+    });
+
+    const legacyReferenceId = await upsertLegacyReferenceProjection(tx, target, {
+      title,
+      authors,
+      year,
+      venue,
+      doi,
+      rawCitation: target.rawCitation,
+      referenceIndex: target.referenceIndex,
+      matchedPaperId: linkedPaper?.id ?? null,
+      matchConfidence: linkedPaper ? (resolveConfidence ?? 1.0) : null,
+      semanticScholarId,
+      arxivId,
+      externalUrl,
+    });
+
+    return {
+      referenceEntryId: nextEntry.id,
+      legacyReferenceId,
+      linkedPaperId: linkedPaper?.id ?? null,
+      identifiersPersisted,
+      resolutionUpdated,
+      fieldActions: params.fieldActions,
     };
   });
 

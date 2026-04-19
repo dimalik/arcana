@@ -1,0 +1,1483 @@
+{
+  "generatedAt": "2026-04-19T01:14:34.439Z",
+  "manifestPath": "/tmp/reference-quality-manifest.v2.jsonl",
+  "totalDecisions": 232,
+  "metadataApplied": 31,
+  "metadataSkipped": 13,
+  "legacyContextsUpdated": 75,
+  "mentionProjectionVerified": 108,
+  "logs": [
+    {
+      "manifestRowId": "0069fbeb75f66d61",
+      "kind": "citation_context",
+      "scope": "legacy_reference_context",
+      "outcome": "updated_legacy_context"
+    },
+    {
+      "manifestRowId": "00bf1f52f550db42",
+      "kind": "citation_context",
+      "scope": "mention_projection",
+      "outcome": "verified_projection_only"
+    },
+    {
+      "manifestRowId": "02430c753ae7993e",
+      "kind": "citation_context",
+      "scope": "legacy_reference_context",
+      "outcome": "updated_legacy_context"
+    },
+    {
+      "manifestRowId": "026e8fcedf3fe5b1",
+      "kind": "citation_context",
+      "scope": "legacy_reference_context",
+      "outcome": "updated_legacy_context"
+    },
+    {
+      "manifestRowId": "02ce48f9a1ccd968",
+      "kind": "citation_context",
+      "scope": "mention_projection",
+      "outcome": "verified_projection_only"
+    },
+    {
+      "manifestRowId": "03404134d945b9e4",
+      "kind": "citation_context",
+      "scope": "mention_projection",
+      "outcome": "verified_projection_only"
+    },
+    {
+      "manifestRowId": "0356f92875298f19",
+      "kind": "reference_metadata",
+      "outcome": "applied",
+      "referenceEntryId": "05e855a5-ba61-409e-9f85-0740303c3437",
+      "linkedPaperId": null,
+      "identifiersPersisted": true,
+      "resolutionUpdated": true
+    },
+    {
+      "manifestRowId": "0418451ac5baae05",
+      "kind": "citation_context",
+      "scope": "legacy_reference_context",
+      "outcome": "updated_legacy_context"
+    },
+    {
+      "manifestRowId": "0618c1da88c132cb",
+      "kind": "citation_context",
+      "scope": "legacy_reference_context",
+      "outcome": "updated_legacy_context"
+    },
+    {
+      "manifestRowId": "0713fe802d6d8305",
+      "kind": "citation_context",
+      "scope": "mention_projection",
+      "outcome": "verified_projection_only"
+    },
+    {
+      "manifestRowId": "07228fdb2a7758ed",
+      "kind": "citation_context",
+      "scope": "mention_projection",
+      "outcome": "verified_projection_only"
+    },
+    {
+      "manifestRowId": "0a0f31370d3331ec",
+      "kind": "citation_context",
+      "scope": "mention_projection",
+      "outcome": "verified_projection_only"
+    },
+    {
+      "manifestRowId": "0a175a625e9d7b4f",
+      "kind": "citation_context",
+      "scope": "mention_projection",
+      "outcome": "skipped"
+    },
+    {
+      "manifestRowId": "0ae89a5ef10382b6",
+      "kind": "citation_context",
+      "scope": "mention_projection",
+      "outcome": "verified_projection_only"
+    },
+    {
+      "manifestRowId": "0e26e63b6e541f15",
+      "kind": "citation_context",
+      "scope": "mention_projection",
+      "outcome": "verified_projection_only"
+    },
+    {
+      "manifestRowId": "0e7b6b878d3754db",
+      "kind": "citation_context",
+      "scope": "mention_projection",
+      "outcome": "verified_projection_only"
+    },
+    {
+      "manifestRowId": "0ec511bfbe3664c9",
+      "kind": "citation_context",
+      "scope": "legacy_reference_context",
+      "outcome": "updated_legacy_context"
+    },
+    {
+      "manifestRowId": "0fd75c7ce0b2e4b6",
+      "kind": "citation_context",
+      "scope": "mention_projection",
+      "outcome": "verified_projection_only"
+    },
+    {
+      "manifestRowId": "10d7d14342b4727d",
+      "kind": "citation_context",
+      "scope": "legacy_reference_context",
+      "outcome": "updated_legacy_context"
+    },
+    {
+      "manifestRowId": "118a9effedd2e505",
+      "kind": "citation_context",
+      "scope": "legacy_reference_context",
+      "outcome": "updated_legacy_context"
+    },
+    {
+      "manifestRowId": "1202180089974ef5",
+      "kind": "citation_context",
+      "scope": "mention_projection",
+      "outcome": "skipped"
+    },
+    {
+      "manifestRowId": "12cb119e170515bd",
+      "kind": "citation_context",
+      "scope": "legacy_reference_context",
+      "outcome": "updated_legacy_context"
+    },
+    {
+      "manifestRowId": "13994677bb6e7998",
+      "kind": "citation_context",
+      "scope": "mention_projection",
+      "outcome": "verified_projection_only"
+    },
+    {
+      "manifestRowId": "1607fb2e64a30f2d",
+      "kind": "reference_metadata",
+      "outcome": "skipped"
+    },
+    {
+      "manifestRowId": "16d990bfe49ec282",
+      "kind": "reference_metadata",
+      "outcome": "applied",
+      "referenceEntryId": "d07db5dc-a28f-4bee-9709-39b5cac04337",
+      "linkedPaperId": null,
+      "identifiersPersisted": true,
+      "resolutionUpdated": true
+    },
+    {
+      "manifestRowId": "1775375daa9145f4",
+      "kind": "reference_metadata",
+      "outcome": "skipped"
+    },
+    {
+      "manifestRowId": "17bc396e6aa8fbb8",
+      "kind": "citation_context",
+      "scope": "mention_projection",
+      "outcome": "verified_projection_only"
+    },
+    {
+      "manifestRowId": "1a3d06ebf0808a57",
+      "kind": "citation_context",
+      "scope": "legacy_reference_context",
+      "outcome": "updated_legacy_context"
+    },
+    {
+      "manifestRowId": "1a44de13863bec6d",
+      "kind": "citation_context",
+      "scope": "mention_projection",
+      "outcome": "verified_projection_only"
+    },
+    {
+      "manifestRowId": "1d97506eb9864c5d",
+      "kind": "citation_context",
+      "scope": "mention_projection",
+      "outcome": "verified_projection_only"
+    },
+    {
+      "manifestRowId": "1e93030d1b9bab23",
+      "kind": "reference_metadata",
+      "outcome": "skipped"
+    },
+    {
+      "manifestRowId": "20359e4d007ca25e",
+      "kind": "citation_context",
+      "scope": "mention_projection",
+      "outcome": "verified_projection_only"
+    },
+    {
+      "manifestRowId": "203a26a63a0b98df",
+      "kind": "citation_context",
+      "scope": "legacy_reference_context",
+      "outcome": "skipped"
+    },
+    {
+      "manifestRowId": "20a726db9bfa905e",
+      "kind": "citation_context",
+      "scope": "mention_projection",
+      "outcome": "verified_projection_only"
+    },
+    {
+      "manifestRowId": "255ff9a0bd49b4c8",
+      "kind": "citation_context",
+      "scope": "legacy_reference_context",
+      "outcome": "updated_legacy_context"
+    },
+    {
+      "manifestRowId": "257d59d3f31acc1e",
+      "kind": "citation_context",
+      "scope": "legacy_reference_context",
+      "outcome": "updated_legacy_context"
+    },
+    {
+      "manifestRowId": "27e33fce24bd456c",
+      "kind": "citation_context",
+      "scope": "mention_projection",
+      "outcome": "verified_projection_only"
+    },
+    {
+      "manifestRowId": "281031962919de00",
+      "kind": "citation_context",
+      "scope": "mention_projection",
+      "outcome": "verified_projection_only"
+    },
+    {
+      "manifestRowId": "28519d881dd37048",
+      "kind": "reference_metadata",
+      "outcome": "applied",
+      "referenceEntryId": "ddd319b9-2fa6-4e9d-b483-b9a9e68ed5c5",
+      "linkedPaperId": null,
+      "identifiersPersisted": true,
+      "resolutionUpdated": true
+    },
+    {
+      "manifestRowId": "2864788e4ba009d4",
+      "kind": "citation_context",
+      "scope": "mention_projection",
+      "outcome": "verified_projection_only"
+    },
+    {
+      "manifestRowId": "2940f6fa4a90e806",
+      "kind": "citation_context",
+      "scope": "legacy_reference_context",
+      "outcome": "updated_legacy_context"
+    },
+    {
+      "manifestRowId": "298264e93fda8de5",
+      "kind": "citation_context",
+      "scope": "legacy_reference_context",
+      "outcome": "updated_legacy_context"
+    },
+    {
+      "manifestRowId": "2a505831330cd5a0",
+      "kind": "citation_context",
+      "scope": "legacy_reference_context",
+      "outcome": "skipped"
+    },
+    {
+      "manifestRowId": "2ad9f34ec81f4a03",
+      "kind": "citation_context",
+      "scope": "legacy_reference_context",
+      "outcome": "updated_legacy_context"
+    },
+    {
+      "manifestRowId": "2d5a7ca4c4ca9c7d",
+      "kind": "citation_context",
+      "scope": "mention_projection",
+      "outcome": "verified_projection_only"
+    },
+    {
+      "manifestRowId": "2da4654c12070923",
+      "kind": "citation_context",
+      "scope": "mention_projection",
+      "outcome": "verified_projection_only"
+    },
+    {
+      "manifestRowId": "2dd07c82840d4fa0",
+      "kind": "citation_context",
+      "scope": "mention_projection",
+      "outcome": "verified_projection_only"
+    },
+    {
+      "manifestRowId": "2e999370444983bf",
+      "kind": "citation_context",
+      "scope": "legacy_reference_context",
+      "outcome": "updated_legacy_context"
+    },
+    {
+      "manifestRowId": "2ec5d1d7173a3025",
+      "kind": "citation_context",
+      "scope": "legacy_reference_context",
+      "outcome": "updated_legacy_context"
+    },
+    {
+      "manifestRowId": "2ed3aaf5a6e27569",
+      "kind": "citation_context",
+      "scope": "mention_projection",
+      "outcome": "verified_projection_only"
+    },
+    {
+      "manifestRowId": "30c2cc78432f5ed3",
+      "kind": "citation_context",
+      "scope": "mention_projection",
+      "outcome": "verified_projection_only"
+    },
+    {
+      "manifestRowId": "325cf6690f81655a",
+      "kind": "reference_metadata",
+      "outcome": "applied",
+      "referenceEntryId": "810a4793-1f5b-4d64-ae37-528f51046857",
+      "linkedPaperId": null,
+      "identifiersPersisted": true,
+      "resolutionUpdated": true
+    },
+    {
+      "manifestRowId": "34f096096bd4f016",
+      "kind": "citation_context",
+      "scope": "mention_projection",
+      "outcome": "verified_projection_only"
+    },
+    {
+      "manifestRowId": "3623d3d47b5502c7",
+      "kind": "citation_context",
+      "scope": "legacy_reference_context",
+      "outcome": "updated_legacy_context"
+    },
+    {
+      "manifestRowId": "3a010d40072b33e1",
+      "kind": "citation_context",
+      "scope": "legacy_reference_context",
+      "outcome": "updated_legacy_context"
+    },
+    {
+      "manifestRowId": "3a3e2a66fcbcec2b",
+      "kind": "citation_context",
+      "scope": "legacy_reference_context",
+      "outcome": "updated_legacy_context"
+    },
+    {
+      "manifestRowId": "3b6160bb933bba17",
+      "kind": "citation_context",
+      "scope": "mention_projection",
+      "outcome": "verified_projection_only"
+    },
+    {
+      "manifestRowId": "3d68a21a5413bb24",
+      "kind": "citation_context",
+      "scope": "mention_projection",
+      "outcome": "verified_projection_only"
+    },
+    {
+      "manifestRowId": "3e50f6a90ebcb776",
+      "kind": "reference_metadata",
+      "outcome": "applied",
+      "referenceEntryId": "cf565984-bd85-485d-b03b-40b81c8bacfb",
+      "linkedPaperId": null,
+      "identifiersPersisted": true,
+      "resolutionUpdated": true
+    },
+    {
+      "manifestRowId": "44f3dda1a5657c79",
+      "kind": "citation_context",
+      "scope": "legacy_reference_context",
+      "outcome": "updated_legacy_context"
+    },
+    {
+      "manifestRowId": "452579ab5e7ed448",
+      "kind": "citation_context",
+      "scope": "mention_projection",
+      "outcome": "verified_projection_only"
+    },
+    {
+      "manifestRowId": "458ed0ff2ed9b376",
+      "kind": "citation_context",
+      "scope": "mention_projection",
+      "outcome": "verified_projection_only"
+    },
+    {
+      "manifestRowId": "4654cbac341837f9",
+      "kind": "citation_context",
+      "scope": "legacy_reference_context",
+      "outcome": "updated_legacy_context"
+    },
+    {
+      "manifestRowId": "468c7022a036b594",
+      "kind": "citation_context",
+      "scope": "mention_projection",
+      "outcome": "verified_projection_only"
+    },
+    {
+      "manifestRowId": "46bf6428ca9517f8",
+      "kind": "citation_context",
+      "scope": "legacy_reference_context",
+      "outcome": "updated_legacy_context"
+    },
+    {
+      "manifestRowId": "489e9e20b75a7bc9",
+      "kind": "reference_metadata",
+      "outcome": "skipped"
+    },
+    {
+      "manifestRowId": "490d8f010e7240e5",
+      "kind": "citation_context",
+      "scope": "mention_projection",
+      "outcome": "verified_projection_only"
+    },
+    {
+      "manifestRowId": "4963046ad9db03b6",
+      "kind": "citation_context",
+      "scope": "mention_projection",
+      "outcome": "verified_projection_only"
+    },
+    {
+      "manifestRowId": "4ace0ac8f55a8a40",
+      "kind": "citation_context",
+      "scope": "legacy_reference_context",
+      "outcome": "updated_legacy_context"
+    },
+    {
+      "manifestRowId": "4d01a093f8143635",
+      "kind": "citation_context",
+      "scope": "mention_projection",
+      "outcome": "verified_projection_only"
+    },
+    {
+      "manifestRowId": "4da1da584226b075",
+      "kind": "reference_metadata",
+      "outcome": "skipped"
+    },
+    {
+      "manifestRowId": "4edb6a6d5693f7a9",
+      "kind": "citation_context",
+      "scope": "mention_projection",
+      "outcome": "verified_projection_only"
+    },
+    {
+      "manifestRowId": "4ee977a282441882",
+      "kind": "citation_context",
+      "scope": "legacy_reference_context",
+      "outcome": "updated_legacy_context"
+    },
+    {
+      "manifestRowId": "4f0054f952958c36",
+      "kind": "citation_context",
+      "scope": "legacy_reference_context",
+      "outcome": "updated_legacy_context"
+    },
+    {
+      "manifestRowId": "513d0e734defa55c",
+      "kind": "reference_metadata",
+      "outcome": "applied",
+      "referenceEntryId": "c98c1f44-f98c-4572-985f-5fd14b52a4ca",
+      "linkedPaperId": null,
+      "identifiersPersisted": true,
+      "resolutionUpdated": true
+    },
+    {
+      "manifestRowId": "514cb4cdc441312b",
+      "kind": "citation_context",
+      "scope": "legacy_reference_context",
+      "outcome": "updated_legacy_context"
+    },
+    {
+      "manifestRowId": "53957e36ff9f214c",
+      "kind": "reference_metadata",
+      "outcome": "skipped"
+    },
+    {
+      "manifestRowId": "56580c82f791257f",
+      "kind": "citation_context",
+      "scope": "mention_projection",
+      "outcome": "verified_projection_only"
+    },
+    {
+      "manifestRowId": "571acff2781ad7d4",
+      "kind": "citation_context",
+      "scope": "mention_projection",
+      "outcome": "verified_projection_only"
+    },
+    {
+      "manifestRowId": "5776911ebca0deea",
+      "kind": "reference_metadata",
+      "outcome": "skipped"
+    },
+    {
+      "manifestRowId": "59705f92ad8b9bdc",
+      "kind": "citation_context",
+      "scope": "mention_projection",
+      "outcome": "verified_projection_only"
+    },
+    {
+      "manifestRowId": "599679bead885b5d",
+      "kind": "citation_context",
+      "scope": "mention_projection",
+      "outcome": "verified_projection_only"
+    },
+    {
+      "manifestRowId": "59e2f2ffbf8d4f27",
+      "kind": "citation_context",
+      "scope": "mention_projection",
+      "outcome": "verified_projection_only"
+    },
+    {
+      "manifestRowId": "59e73e82c12a9246",
+      "kind": "reference_metadata",
+      "outcome": "skipped"
+    },
+    {
+      "manifestRowId": "5b3a1a72b323b778",
+      "kind": "reference_metadata",
+      "outcome": "applied",
+      "referenceEntryId": "8bdc5021-be29-4eec-913e-23627fc189b1",
+      "linkedPaperId": null,
+      "identifiersPersisted": true,
+      "resolutionUpdated": true
+    },
+    {
+      "manifestRowId": "5c478e705a6ebc68",
+      "kind": "citation_context",
+      "scope": "mention_projection",
+      "outcome": "verified_projection_only"
+    },
+    {
+      "manifestRowId": "5da036611808cf82",
+      "kind": "citation_context",
+      "scope": "mention_projection",
+      "outcome": "verified_projection_only"
+    },
+    {
+      "manifestRowId": "5df5c75461de54bf",
+      "kind": "reference_metadata",
+      "outcome": "applied",
+      "referenceEntryId": "a0e3f19e-7cac-412e-81ab-f17d37e70c19",
+      "linkedPaperId": null,
+      "identifiersPersisted": true,
+      "resolutionUpdated": true
+    },
+    {
+      "manifestRowId": "5f895c25172dacfa",
+      "kind": "citation_context",
+      "scope": "legacy_reference_context",
+      "outcome": "updated_legacy_context"
+    },
+    {
+      "manifestRowId": "5f915b4537e4553a",
+      "kind": "reference_metadata",
+      "outcome": "applied",
+      "referenceEntryId": "8560cd45-dd81-4497-84cd-64ff22a9374b",
+      "linkedPaperId": null,
+      "identifiersPersisted": true,
+      "resolutionUpdated": true
+    },
+    {
+      "manifestRowId": "603000430d10872f",
+      "kind": "citation_context",
+      "scope": "legacy_reference_context",
+      "outcome": "updated_legacy_context"
+    },
+    {
+      "manifestRowId": "605c40357f044012",
+      "kind": "reference_metadata",
+      "outcome": "applied",
+      "referenceEntryId": "8dd293cc-7c8e-4a41-82ec-e952d49d941e",
+      "linkedPaperId": null,
+      "identifiersPersisted": true,
+      "resolutionUpdated": true
+    },
+    {
+      "manifestRowId": "61ddf172ccb8d377",
+      "kind": "citation_context",
+      "scope": "mention_projection",
+      "outcome": "verified_projection_only"
+    },
+    {
+      "manifestRowId": "62ad3b0e311efd1d",
+      "kind": "citation_context",
+      "scope": "mention_projection",
+      "outcome": "verified_projection_only"
+    },
+    {
+      "manifestRowId": "62d7d18668f801f6",
+      "kind": "citation_context",
+      "scope": "mention_projection",
+      "outcome": "verified_projection_only"
+    },
+    {
+      "manifestRowId": "659e2a318b19735d",
+      "kind": "citation_context",
+      "scope": "legacy_reference_context",
+      "outcome": "updated_legacy_context"
+    },
+    {
+      "manifestRowId": "6733cceeaaa96dbc",
+      "kind": "citation_context",
+      "scope": "legacy_reference_context",
+      "outcome": "updated_legacy_context"
+    },
+    {
+      "manifestRowId": "678c59251137d9ea",
+      "kind": "citation_context",
+      "scope": "mention_projection",
+      "outcome": "verified_projection_only"
+    },
+    {
+      "manifestRowId": "683279f1838277f6",
+      "kind": "citation_context",
+      "scope": "mention_projection",
+      "outcome": "verified_projection_only"
+    },
+    {
+      "manifestRowId": "699c15049cd147a0",
+      "kind": "citation_context",
+      "scope": "legacy_reference_context",
+      "outcome": "updated_legacy_context"
+    },
+    {
+      "manifestRowId": "6a397c8796513558",
+      "kind": "citation_context",
+      "scope": "mention_projection",
+      "outcome": "verified_projection_only"
+    },
+    {
+      "manifestRowId": "6c5b1d81aa3b5db8",
+      "kind": "citation_context",
+      "scope": "mention_projection",
+      "outcome": "verified_projection_only"
+    },
+    {
+      "manifestRowId": "6c6c87a8543cd06e",
+      "kind": "citation_context",
+      "scope": "mention_projection",
+      "outcome": "verified_projection_only"
+    },
+    {
+      "manifestRowId": "6ed2ec06bb9ac7f8",
+      "kind": "reference_metadata",
+      "outcome": "applied",
+      "referenceEntryId": "0554c266-1bf5-4672-92f4-835f107b0862",
+      "linkedPaperId": null,
+      "identifiersPersisted": false,
+      "resolutionUpdated": false
+    },
+    {
+      "manifestRowId": "6fc274e5d26b10c7",
+      "kind": "citation_context",
+      "scope": "mention_projection",
+      "outcome": "verified_projection_only"
+    },
+    {
+      "manifestRowId": "6fc8aee64d503f52",
+      "kind": "citation_context",
+      "scope": "legacy_reference_context",
+      "outcome": "updated_legacy_context"
+    },
+    {
+      "manifestRowId": "70a766268b06e978",
+      "kind": "citation_context",
+      "scope": "mention_projection",
+      "outcome": "verified_projection_only"
+    },
+    {
+      "manifestRowId": "7114b80d495b5ba4",
+      "kind": "citation_context",
+      "scope": "mention_projection",
+      "outcome": "verified_projection_only"
+    },
+    {
+      "manifestRowId": "72b1a96431f34afa",
+      "kind": "citation_context",
+      "scope": "mention_projection",
+      "outcome": "verified_projection_only"
+    },
+    {
+      "manifestRowId": "74cffe5801546c77",
+      "kind": "reference_metadata",
+      "outcome": "applied",
+      "referenceEntryId": "a6ac5c12-a810-442b-9c15-74a6ca478324",
+      "linkedPaperId": null,
+      "identifiersPersisted": true,
+      "resolutionUpdated": true
+    },
+    {
+      "manifestRowId": "76740240128f3485",
+      "kind": "reference_metadata",
+      "outcome": "applied",
+      "referenceEntryId": "ea3e6f1b-de86-4ff6-934f-5c8445f0cc4b",
+      "linkedPaperId": null,
+      "identifiersPersisted": true,
+      "resolutionUpdated": true
+    },
+    {
+      "manifestRowId": "7791ef1bfd564c97",
+      "kind": "citation_context",
+      "scope": "mention_projection",
+      "outcome": "verified_projection_only"
+    },
+    {
+      "manifestRowId": "78f9cd2059d74185",
+      "kind": "citation_context",
+      "scope": "mention_projection",
+      "outcome": "verified_projection_only"
+    },
+    {
+      "manifestRowId": "792f62774b995cd7",
+      "kind": "citation_context",
+      "scope": "mention_projection",
+      "outcome": "verified_projection_only"
+    },
+    {
+      "manifestRowId": "79fa84c1f0405fbf",
+      "kind": "citation_context",
+      "scope": "mention_projection",
+      "outcome": "verified_projection_only"
+    },
+    {
+      "manifestRowId": "7b73c90554975078",
+      "kind": "citation_context",
+      "scope": "mention_projection",
+      "outcome": "verified_projection_only"
+    },
+    {
+      "manifestRowId": "7c16ac21e09c5bd6",
+      "kind": "citation_context",
+      "scope": "mention_projection",
+      "outcome": "verified_projection_only"
+    },
+    {
+      "manifestRowId": "7c4846692922a832",
+      "kind": "citation_context",
+      "scope": "legacy_reference_context",
+      "outcome": "updated_legacy_context"
+    },
+    {
+      "manifestRowId": "7c8ea2458e5d9e1c",
+      "kind": "citation_context",
+      "scope": "mention_projection",
+      "outcome": "verified_projection_only"
+    },
+    {
+      "manifestRowId": "7d091bb283dde697",
+      "kind": "citation_context",
+      "scope": "mention_projection",
+      "outcome": "verified_projection_only"
+    },
+    {
+      "manifestRowId": "7d47e8a44b9f40f9",
+      "kind": "reference_metadata",
+      "outcome": "applied",
+      "referenceEntryId": "c92f3f77-bb6e-434a-8d3b-305a18fa8d15",
+      "linkedPaperId": null,
+      "identifiersPersisted": true,
+      "resolutionUpdated": true
+    },
+    {
+      "manifestRowId": "7e8394b5c673a15a",
+      "kind": "reference_metadata",
+      "outcome": "applied",
+      "referenceEntryId": "f4c650c2-5b14-4b05-8cc7-37cdd7c10006",
+      "linkedPaperId": null,
+      "identifiersPersisted": true,
+      "resolutionUpdated": true
+    },
+    {
+      "manifestRowId": "811f1fba1c91fb3e",
+      "kind": "reference_metadata",
+      "outcome": "applied",
+      "referenceEntryId": "2f80f3dc-ed80-402f-a20a-93bed00a3425",
+      "linkedPaperId": null,
+      "identifiersPersisted": true,
+      "resolutionUpdated": true
+    },
+    {
+      "manifestRowId": "83050779d916ad7a",
+      "kind": "citation_context",
+      "scope": "mention_projection",
+      "outcome": "verified_projection_only"
+    },
+    {
+      "manifestRowId": "85db287485b064c0",
+      "kind": "citation_context",
+      "scope": "legacy_reference_context",
+      "outcome": "updated_legacy_context"
+    },
+    {
+      "manifestRowId": "876890bada083a7a",
+      "kind": "citation_context",
+      "scope": "legacy_reference_context",
+      "outcome": "updated_legacy_context"
+    },
+    {
+      "manifestRowId": "87c767d9420cb93f",
+      "kind": "citation_context",
+      "scope": "legacy_reference_context",
+      "outcome": "updated_legacy_context"
+    },
+    {
+      "manifestRowId": "8afcf4ef8bd53638",
+      "kind": "citation_context",
+      "scope": "legacy_reference_context",
+      "outcome": "updated_legacy_context"
+    },
+    {
+      "manifestRowId": "8b3eea64c67fe42f",
+      "kind": "reference_metadata",
+      "outcome": "applied",
+      "referenceEntryId": "53e82ccd-0cbf-40d6-acf0-70623447ccbf",
+      "linkedPaperId": null,
+      "identifiersPersisted": true,
+      "resolutionUpdated": true
+    },
+    {
+      "manifestRowId": "8b7148f53e7a16f1",
+      "kind": "citation_context",
+      "scope": "legacy_reference_context",
+      "outcome": "updated_legacy_context"
+    },
+    {
+      "manifestRowId": "8b765a482484af06",
+      "kind": "citation_context",
+      "scope": "mention_projection",
+      "outcome": "skipped"
+    },
+    {
+      "manifestRowId": "8c808371c2e739ea",
+      "kind": "citation_context",
+      "scope": "mention_projection",
+      "outcome": "verified_projection_only"
+    },
+    {
+      "manifestRowId": "8cb05ae6617a2b23",
+      "kind": "citation_context",
+      "scope": "mention_projection",
+      "outcome": "verified_projection_only"
+    },
+    {
+      "manifestRowId": "8cb46776f4f3598a",
+      "kind": "citation_context",
+      "scope": "mention_projection",
+      "outcome": "verified_projection_only"
+    },
+    {
+      "manifestRowId": "8d8f2ceede089982",
+      "kind": "citation_context",
+      "scope": "legacy_reference_context",
+      "outcome": "updated_legacy_context"
+    },
+    {
+      "manifestRowId": "8e50a3eed9e9a5b0",
+      "kind": "reference_metadata",
+      "outcome": "applied",
+      "referenceEntryId": "3e9b267a-469f-4113-9277-2fa3ddfcb590",
+      "linkedPaperId": null,
+      "identifiersPersisted": true,
+      "resolutionUpdated": true
+    },
+    {
+      "manifestRowId": "90dc25b82302efe8",
+      "kind": "citation_context",
+      "scope": "mention_projection",
+      "outcome": "verified_projection_only"
+    },
+    {
+      "manifestRowId": "913b5d6394e0afcb",
+      "kind": "citation_context",
+      "scope": "legacy_reference_context",
+      "outcome": "updated_legacy_context"
+    },
+    {
+      "manifestRowId": "91b1e180f6d0929a",
+      "kind": "citation_context",
+      "scope": "mention_projection",
+      "outcome": "verified_projection_only"
+    },
+    {
+      "manifestRowId": "91c2a9cefa360ef3",
+      "kind": "reference_metadata",
+      "outcome": "applied",
+      "referenceEntryId": "2ea83a16-ca49-4036-83c7-61f53f3d6a7d",
+      "linkedPaperId": null,
+      "identifiersPersisted": true,
+      "resolutionUpdated": true
+    },
+    {
+      "manifestRowId": "92b31945d34ead85",
+      "kind": "reference_metadata",
+      "outcome": "skipped"
+    },
+    {
+      "manifestRowId": "9681122895034ffa",
+      "kind": "citation_context",
+      "scope": "legacy_reference_context",
+      "outcome": "updated_legacy_context"
+    },
+    {
+      "manifestRowId": "9a6659cd1cb46797",
+      "kind": "citation_context",
+      "scope": "mention_projection",
+      "outcome": "verified_projection_only"
+    },
+    {
+      "manifestRowId": "9b7db0361e8311e9",
+      "kind": "citation_context",
+      "scope": "legacy_reference_context",
+      "outcome": "updated_legacy_context"
+    },
+    {
+      "manifestRowId": "9e60b9403fdd2f72",
+      "kind": "reference_metadata",
+      "outcome": "skipped"
+    },
+    {
+      "manifestRowId": "a2b2e76748dc07f1",
+      "kind": "citation_context",
+      "scope": "legacy_reference_context",
+      "outcome": "updated_legacy_context"
+    },
+    {
+      "manifestRowId": "a38a2b7cb37b6e8f",
+      "kind": "citation_context",
+      "scope": "legacy_reference_context",
+      "outcome": "updated_legacy_context"
+    },
+    {
+      "manifestRowId": "a4b9e7dbd0ef201d",
+      "kind": "citation_context",
+      "scope": "legacy_reference_context",
+      "outcome": "updated_legacy_context"
+    },
+    {
+      "manifestRowId": "a5ab2596455e206b",
+      "kind": "citation_context",
+      "scope": "legacy_reference_context",
+      "outcome": "updated_legacy_context"
+    },
+    {
+      "manifestRowId": "a5e5653d74611bf1",
+      "kind": "citation_context",
+      "scope": "legacy_reference_context",
+      "outcome": "updated_legacy_context"
+    },
+    {
+      "manifestRowId": "a76371cd06782151",
+      "kind": "citation_context",
+      "scope": "mention_projection",
+      "outcome": "verified_projection_only"
+    },
+    {
+      "manifestRowId": "a76562f2d26851a0",
+      "kind": "citation_context",
+      "scope": "mention_projection",
+      "outcome": "verified_projection_only"
+    },
+    {
+      "manifestRowId": "a7bf3c474359274a",
+      "kind": "reference_metadata",
+      "outcome": "applied",
+      "referenceEntryId": "8a9040e8-f571-4f07-9349-9cfe5214cc44",
+      "linkedPaperId": null,
+      "identifiersPersisted": true,
+      "resolutionUpdated": true
+    },
+    {
+      "manifestRowId": "a7df0af9ac41df17",
+      "kind": "citation_context",
+      "scope": "mention_projection",
+      "outcome": "verified_projection_only"
+    },
+    {
+      "manifestRowId": "a8d571126c468757",
+      "kind": "citation_context",
+      "scope": "mention_projection",
+      "outcome": "verified_projection_only"
+    },
+    {
+      "manifestRowId": "a9987450667c5306",
+      "kind": "citation_context",
+      "scope": "mention_projection",
+      "outcome": "verified_projection_only"
+    },
+    {
+      "manifestRowId": "ab4f47d213158f25",
+      "kind": "citation_context",
+      "scope": "mention_projection",
+      "outcome": "verified_projection_only"
+    },
+    {
+      "manifestRowId": "ab55bb3d4b6daa46",
+      "kind": "reference_metadata",
+      "outcome": "skipped"
+    },
+    {
+      "manifestRowId": "ad39c40816b0001e",
+      "kind": "citation_context",
+      "scope": "mention_projection",
+      "outcome": "verified_projection_only"
+    },
+    {
+      "manifestRowId": "ad737ca5fc954d50",
+      "kind": "reference_metadata",
+      "outcome": "skipped"
+    },
+    {
+      "manifestRowId": "ad83471f6a4c99df",
+      "kind": "citation_context",
+      "scope": "mention_projection",
+      "outcome": "verified_projection_only"
+    },
+    {
+      "manifestRowId": "b0e08ca56ede3c90",
+      "kind": "citation_context",
+      "scope": "legacy_reference_context",
+      "outcome": "updated_legacy_context"
+    },
+    {
+      "manifestRowId": "b3ad3e04d1a01042",
+      "kind": "citation_context",
+      "scope": "mention_projection",
+      "outcome": "verified_projection_only"
+    },
+    {
+      "manifestRowId": "b3e8dfd33603afbe",
+      "kind": "citation_context",
+      "scope": "mention_projection",
+      "outcome": "verified_projection_only"
+    },
+    {
+      "manifestRowId": "b3e9a874674201da",
+      "kind": "citation_context",
+      "scope": "mention_projection",
+      "outcome": "verified_projection_only"
+    },
+    {
+      "manifestRowId": "b4aab66fdbeaffda",
+      "kind": "citation_context",
+      "scope": "mention_projection",
+      "outcome": "verified_projection_only"
+    },
+    {
+      "manifestRowId": "b68bd497b234ac8e",
+      "kind": "citation_context",
+      "scope": "mention_projection",
+      "outcome": "verified_projection_only"
+    },
+    {
+      "manifestRowId": "b6abc5f7d6c8eba1",
+      "kind": "citation_context",
+      "scope": "mention_projection",
+      "outcome": "verified_projection_only"
+    },
+    {
+      "manifestRowId": "b8157f02387de0c4",
+      "kind": "citation_context",
+      "scope": "legacy_reference_context",
+      "outcome": "updated_legacy_context"
+    },
+    {
+      "manifestRowId": "b8822d2eb17480de",
+      "kind": "reference_metadata",
+      "outcome": "applied",
+      "referenceEntryId": "7935fa0e-80a2-40f2-a4d2-59ffbde04c2b",
+      "linkedPaperId": null,
+      "identifiersPersisted": true,
+      "resolutionUpdated": true
+    },
+    {
+      "manifestRowId": "b8f8636eee77a212",
+      "kind": "citation_context",
+      "scope": "mention_projection",
+      "outcome": "verified_projection_only"
+    },
+    {
+      "manifestRowId": "bbcb7387eff4e8fd",
+      "kind": "citation_context",
+      "scope": "legacy_reference_context",
+      "outcome": "updated_legacy_context"
+    },
+    {
+      "manifestRowId": "bd1a1268dc2395aa",
+      "kind": "citation_context",
+      "scope": "mention_projection",
+      "outcome": "verified_projection_only"
+    },
+    {
+      "manifestRowId": "bdb197fa64c962b0",
+      "kind": "reference_metadata",
+      "outcome": "applied",
+      "referenceEntryId": "be010982-d5d1-4d95-908c-5158d07eae20",
+      "linkedPaperId": null,
+      "identifiersPersisted": true,
+      "resolutionUpdated": true
+    },
+    {
+      "manifestRowId": "bf077d8583147e2e",
+      "kind": "citation_context",
+      "scope": "mention_projection",
+      "outcome": "verified_projection_only"
+    },
+    {
+      "manifestRowId": "c1bfb1d9c4d0ada2",
+      "kind": "reference_metadata",
+      "outcome": "applied",
+      "referenceEntryId": "461f7f62-0be3-4d2c-9f0c-f24a3fd4ee01",
+      "linkedPaperId": null,
+      "identifiersPersisted": true,
+      "resolutionUpdated": true
+    },
+    {
+      "manifestRowId": "c43b8127ba4340a0",
+      "kind": "citation_context",
+      "scope": "legacy_reference_context",
+      "outcome": "updated_legacy_context"
+    },
+    {
+      "manifestRowId": "c549330ecbf52f0b",
+      "kind": "citation_context",
+      "scope": "legacy_reference_context",
+      "outcome": "updated_legacy_context"
+    },
+    {
+      "manifestRowId": "caeeb93d32a0cd38",
+      "kind": "citation_context",
+      "scope": "mention_projection",
+      "outcome": "verified_projection_only"
+    },
+    {
+      "manifestRowId": "cb3bce8fe0633ade",
+      "kind": "citation_context",
+      "scope": "legacy_reference_context",
+      "outcome": "updated_legacy_context"
+    },
+    {
+      "manifestRowId": "cc094cd3c0e9247d",
+      "kind": "citation_context",
+      "scope": "legacy_reference_context",
+      "outcome": "updated_legacy_context"
+    },
+    {
+      "manifestRowId": "cdfef2c69c053698",
+      "kind": "reference_metadata",
+      "outcome": "skipped"
+    },
+    {
+      "manifestRowId": "ce5fdd94ae041dec",
+      "kind": "reference_metadata",
+      "outcome": "applied",
+      "referenceEntryId": "8b6a98f7-80a8-48d0-a8b0-8b119ed01bc1",
+      "linkedPaperId": "5a3a7d65-d3c6-4998-b209-854c56b42f72",
+      "identifiersPersisted": true,
+      "resolutionUpdated": true
+    },
+    {
+      "manifestRowId": "cf55b11d558f8b1a",
+      "kind": "reference_metadata",
+      "outcome": "applied",
+      "referenceEntryId": "1a9cbe66-7b53-4d43-8467-03860b90da4e",
+      "linkedPaperId": null,
+      "identifiersPersisted": false,
+      "resolutionUpdated": false
+    },
+    {
+      "manifestRowId": "d0a97df6efd243ce",
+      "kind": "citation_context",
+      "scope": "mention_projection",
+      "outcome": "verified_projection_only"
+    },
+    {
+      "manifestRowId": "d41186fb34d5318e",
+      "kind": "citation_context",
+      "scope": "mention_projection",
+      "outcome": "verified_projection_only"
+    },
+    {
+      "manifestRowId": "d611640118660a48",
+      "kind": "reference_metadata",
+      "outcome": "applied",
+      "referenceEntryId": "24cd7b70-dc38-4664-b385-f6aee38f67a1",
+      "linkedPaperId": null,
+      "identifiersPersisted": true,
+      "resolutionUpdated": true
+    },
+    {
+      "manifestRowId": "d76fe605dc2eb70f",
+      "kind": "citation_context",
+      "scope": "legacy_reference_context",
+      "outcome": "updated_legacy_context"
+    },
+    {
+      "manifestRowId": "d839a21c7ead1df1",
+      "kind": "citation_context",
+      "scope": "mention_projection",
+      "outcome": "verified_projection_only"
+    },
+    {
+      "manifestRowId": "da430e142b1edb1a",
+      "kind": "citation_context",
+      "scope": "legacy_reference_context",
+      "outcome": "updated_legacy_context"
+    },
+    {
+      "manifestRowId": "da600fe398de545a",
+      "kind": "citation_context",
+      "scope": "mention_projection",
+      "outcome": "verified_projection_only"
+    },
+    {
+      "manifestRowId": "dc007a7e6357c93b",
+      "kind": "citation_context",
+      "scope": "legacy_reference_context",
+      "outcome": "updated_legacy_context"
+    },
+    {
+      "manifestRowId": "dca029564208e75a",
+      "kind": "citation_context",
+      "scope": "mention_projection",
+      "outcome": "verified_projection_only"
+    },
+    {
+      "manifestRowId": "dcd56a9b17dd3264",
+      "kind": "citation_context",
+      "scope": "legacy_reference_context",
+      "outcome": "updated_legacy_context"
+    },
+    {
+      "manifestRowId": "ddc9d3511ac1f805",
+      "kind": "reference_metadata",
+      "outcome": "applied",
+      "referenceEntryId": "be06bef3-bf27-433b-9bb3-a2871bc0f063",
+      "linkedPaperId": null,
+      "identifiersPersisted": true,
+      "resolutionUpdated": true
+    },
+    {
+      "manifestRowId": "df4737a15de9aeda",
+      "kind": "reference_metadata",
+      "outcome": "applied",
+      "referenceEntryId": "000f4d02-34f5-44a8-8b4b-a2a289a301f6",
+      "linkedPaperId": null,
+      "identifiersPersisted": true,
+      "resolutionUpdated": true
+    },
+    {
+      "manifestRowId": "df90358d7e720092",
+      "kind": "reference_metadata",
+      "outcome": "applied",
+      "referenceEntryId": "b4558559-6025-4c94-9b91-0a708b414486",
+      "linkedPaperId": null,
+      "identifiersPersisted": true,
+      "resolutionUpdated": true
+    },
+    {
+      "manifestRowId": "e07df440ef707c46",
+      "kind": "citation_context",
+      "scope": "mention_projection",
+      "outcome": "verified_projection_only"
+    },
+    {
+      "manifestRowId": "e26fc2a483f735fd",
+      "kind": "citation_context",
+      "scope": "mention_projection",
+      "outcome": "verified_projection_only"
+    },
+    {
+      "manifestRowId": "e30584dc021fae19",
+      "kind": "citation_context",
+      "scope": "mention_projection",
+      "outcome": "verified_projection_only"
+    },
+    {
+      "manifestRowId": "e32f41749a72bc18",
+      "kind": "citation_context",
+      "scope": "mention_projection",
+      "outcome": "verified_projection_only"
+    },
+    {
+      "manifestRowId": "e4520793206a1613",
+      "kind": "citation_context",
+      "scope": "legacy_reference_context",
+      "outcome": "updated_legacy_context"
+    },
+    {
+      "manifestRowId": "e586c2dc0ee3a35e",
+      "kind": "citation_context",
+      "scope": "mention_projection",
+      "outcome": "verified_projection_only"
+    },
+    {
+      "manifestRowId": "e5e4a2d501de11f5",
+      "kind": "citation_context",
+      "scope": "legacy_reference_context",
+      "outcome": "updated_legacy_context"
+    },
+    {
+      "manifestRowId": "e63901e99b488182",
+      "kind": "citation_context",
+      "scope": "legacy_reference_context",
+      "outcome": "updated_legacy_context"
+    },
+    {
+      "manifestRowId": "e6d20537d1da5efa",
+      "kind": "citation_context",
+      "scope": "mention_projection",
+      "outcome": "verified_projection_only"
+    },
+    {
+      "manifestRowId": "e9895646bae93425",
+      "kind": "citation_context",
+      "scope": "mention_projection",
+      "outcome": "verified_projection_only"
+    },
+    {
+      "manifestRowId": "e9b29a23db8825e7",
+      "kind": "citation_context",
+      "scope": "mention_projection",
+      "outcome": "verified_projection_only"
+    },
+    {
+      "manifestRowId": "ea123c59356ea5d4",
+      "kind": "citation_context",
+      "scope": "legacy_reference_context",
+      "outcome": "updated_legacy_context"
+    },
+    {
+      "manifestRowId": "eaf700d1878c7358",
+      "kind": "citation_context",
+      "scope": "legacy_reference_context",
+      "outcome": "updated_legacy_context"
+    },
+    {
+      "manifestRowId": "eb96d7be4dd9cc0b",
+      "kind": "citation_context",
+      "scope": "mention_projection",
+      "outcome": "verified_projection_only"
+    },
+    {
+      "manifestRowId": "ed913e2c95a8cfee",
+      "kind": "citation_context",
+      "scope": "mention_projection",
+      "outcome": "verified_projection_only"
+    },
+    {
+      "manifestRowId": "f1a85f8956f20fc3",
+      "kind": "citation_context",
+      "scope": "mention_projection",
+      "outcome": "verified_projection_only"
+    },
+    {
+      "manifestRowId": "f2ad2c26827c1fec",
+      "kind": "citation_context",
+      "scope": "legacy_reference_context",
+      "outcome": "updated_legacy_context"
+    },
+    {
+      "manifestRowId": "f33722d80912e258",
+      "kind": "citation_context",
+      "scope": "mention_projection",
+      "outcome": "verified_projection_only"
+    },
+    {
+      "manifestRowId": "f3ce647ade68099f",
+      "kind": "citation_context",
+      "scope": "mention_projection",
+      "outcome": "verified_projection_only"
+    },
+    {
+      "manifestRowId": "f48ec3d54395c0ac",
+      "kind": "citation_context",
+      "scope": "legacy_reference_context",
+      "outcome": "updated_legacy_context"
+    },
+    {
+      "manifestRowId": "f4b5988e4cafac9c",
+      "kind": "citation_context",
+      "scope": "mention_projection",
+      "outcome": "verified_projection_only"
+    },
+    {
+      "manifestRowId": "f51ebb4863e79cc6",
+      "kind": "citation_context",
+      "scope": "mention_projection",
+      "outcome": "verified_projection_only"
+    },
+    {
+      "manifestRowId": "f5d8e44ac99c4c08",
+      "kind": "reference_metadata",
+      "outcome": "applied",
+      "referenceEntryId": "d1d881bb-fd74-4e61-985e-87af1790b241",
+      "linkedPaperId": null,
+      "identifiersPersisted": true,
+      "resolutionUpdated": true
+    },
+    {
+      "manifestRowId": "f676342a624440f4",
+      "kind": "citation_context",
+      "scope": "legacy_reference_context",
+      "outcome": "updated_legacy_context"
+    },
+    {
+      "manifestRowId": "f6abdfd50faea9b6",
+      "kind": "citation_context",
+      "scope": "legacy_reference_context",
+      "outcome": "updated_legacy_context"
+    },
+    {
+      "manifestRowId": "f6e70a14a2db9e3d",
+      "kind": "citation_context",
+      "scope": "legacy_reference_context",
+      "outcome": "updated_legacy_context"
+    },
+    {
+      "manifestRowId": "f864a10d83e21662",
+      "kind": "citation_context",
+      "scope": "mention_projection",
+      "outcome": "verified_projection_only"
+    },
+    {
+      "manifestRowId": "f88792d70130669e",
+      "kind": "citation_context",
+      "scope": "legacy_reference_context",
+      "outcome": "updated_legacy_context"
+    },
+    {
+      "manifestRowId": "f8d1d7556f6d15f8",
+      "kind": "citation_context",
+      "scope": "legacy_reference_context",
+      "outcome": "updated_legacy_context"
+    },
+    {
+      "manifestRowId": "f95c5ddb8ba098c3",
+      "kind": "reference_metadata",
+      "outcome": "applied",
+      "referenceEntryId": "6ebdea7d-8ef1-4ac3-9ee7-2a452a679597",
+      "linkedPaperId": null,
+      "identifiersPersisted": true,
+      "resolutionUpdated": true
+    },
+    {
+      "manifestRowId": "f9eb891d6cee3d37",
+      "kind": "citation_context",
+      "scope": "legacy_reference_context",
+      "outcome": "updated_legacy_context"
+    },
+    {
+      "manifestRowId": "fa35586433d9c01a",
+      "kind": "citation_context",
+      "scope": "mention_projection",
+      "outcome": "verified_projection_only"
+    },
+    {
+      "manifestRowId": "fe5226ef0a8ae4be",
+      "kind": "citation_context",
+      "scope": "legacy_reference_context",
+      "outcome": "updated_legacy_context"
+    },
+    {
+      "manifestRowId": "ff5467577e4cdba2",
+      "kind": "citation_context",
+      "scope": "legacy_reference_context",
+      "outcome": "updated_legacy_context"
+    },
+    {
+      "manifestRowId": "ffba2c040e21d704",
+      "kind": "citation_context",
+      "scope": "legacy_reference_context",
+      "outcome": "updated_legacy_context"
+    }
+  ]
+}
