@@ -241,6 +241,36 @@ describe("mapReferenceEntryToView", () => {
     expect(view.venue).toBeNull();
   });
 
+  it("strips citation-key suffix variants from raw citation fallback text", () => {
+    const view = mapReferenceEntryToView(
+      {
+        id: "entry-5b",
+        legacyReferenceId: "legacy-5b",
+        title: "Longrope: Extending llm context window beyond 2 million tokens",
+        authors: JSON.stringify(["Yiran Ding", "Li Lyna Zhang"]),
+        year: 2024,
+        venue: null,
+        doi: null,
+        rawCitation:
+          "DZZ + 24a] Yiran Ding, Li Lyna Zhang, Chengruidong Zhang, Yuanyuan Xu, Ning Shang, Jiahang Xu, Fan Yang, and Mao Yang. Longrope: Extending llm context window beyond 2 million tokens, 2024.",
+        referenceIndex: 5,
+        semanticScholarId: null,
+        arxivId: null,
+        externalUrl: null,
+        resolvedEntityId: null,
+        resolveConfidence: null,
+        resolveSource: null,
+        createdAt: new Date("2026-04-18T10:00:00Z"),
+        citationMentions: [],
+      },
+      new Map(),
+      new Map(),
+    );
+
+    expect(view.rawCitation.startsWith("DZZ + 24a]")).toBe(false);
+    expect(view.rawCitation.startsWith("Yiran Ding")).toBe(true);
+  });
+
   it("removes citation-key markers from displayed citation contexts", () => {
     const view = mapReferenceEntryToView(
       {

@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { candidateAuthorsPassTrustCheck } from "../reference-quality";
+import {
+  candidateAuthorsPassTrustCheck,
+  cleanReferenceText,
+  looksLikePollutedAuthors,
+  stripLeadingCitationMarker,
+} from "../reference-quality";
 
 describe("candidateAuthorsPassTrustCheck", () => {
   it("rejects truncated candidate author lists when the raw citation clearly carries more authors", () => {
@@ -28,6 +33,28 @@ describe("candidateAuthorsPassTrustCheck", () => {
           "Christopher Re",
         ],
       }),
+    ).toBe(true);
+  });
+});
+
+describe("citation key normalization", () => {
+  it("strips leading citation-key prefixes with suffix letters", () => {
+    expect(
+      stripLeadingCitationMarker(
+        "DZZ + 24a] Yiran Ding, Li Lyna Zhang, Chengruidong Zhang.",
+      ),
+    ).toBe("Yiran Ding, Li Lyna Zhang, Chengruidong Zhang.");
+  });
+
+  it("strips leading citation-key prefixes followed by separators", () => {
+    expect(cleanReferenceText("Fhl + 24 ; Xingyu Fu")).toBe("Xingyu Fu");
+  });
+
+  it("flags author lists polluted by citation-key prefixes without closing brackets", () => {
+    expect(
+      looksLikePollutedAuthors(
+        JSON.stringify(["Fhl + 24 ; Xingyu", "Yushi Fu", "Bangzheng Hu"]),
+      ),
     ).toBe(true);
   });
 });

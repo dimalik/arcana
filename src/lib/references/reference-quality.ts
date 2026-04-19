@@ -17,8 +17,10 @@ export interface PollutedMetadataField {
   beforeValue: string | null;
 }
 
-const LEADING_CITATION_MARKER_RE = /^[A-Z][A-Z0-9]{1,12}\s*\+\s*\d+\]\s*/;
-const VENUE_CITATION_MARKER_RE = /^[A-Z][A-Z0-9]{1,12}\s*\+\s*\d{2,4}$/;
+const LEADING_CITATION_MARKER_BODY_RE = /^[A-Z][A-Z0-9]{1,12}\s*\+\s*\d{2,4}[a-z]?/i;
+const LEADING_CITATION_MARKER_SEPARATOR_RE = /^\s*(?:\]|[;,:-])\s*/;
+const INLINE_CITATION_MARKER_RE = /\s\+\s\d{2,4}[a-z]?(?:\]|\s*[;,:-])/i;
+const VENUE_CITATION_MARKER_RE = /^[A-Z][A-Z0-9]{1,12}\s*\+\s*\d{2,4}[a-z]?$/i;
 const STANDALONE_YEAR_RE = /^\(?\d{4}[a-z]?\)?$/i;
 const TRAILING_YEAR_RE = /[\s,.;:()-]*\b\d{4}[a-z]?\)?\.?$/i;
 const PERSON_NAME_RE = "[A-Z][A-Za-z'`.-]+(?:\\s+(?:[A-Z]\\.|[A-Z][A-Za-z'`.-]+)){0,3}";
@@ -27,11 +29,26 @@ const LEADING_AUTHOR_BLOB_RE = new RegExp(
 );
 
 export function cleanReferenceText(value: string | null | undefined): string {
-  return (value ?? "")
+  return stripLeadingCitationMarker(value ?? "")
     .replace(/([a-z]{2,})-\s*\n\s*([a-z]{2,})/g, "$1$2")
-    .replace(LEADING_CITATION_MARKER_RE, "")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+export function stripLeadingCitationMarker(value: string): string {
+  const trimmed = value.trimStart();
+  const bodyMatch = trimmed.match(LEADING_CITATION_MARKER_BODY_RE);
+  if (!bodyMatch) return trimmed;
+
+  const remainder = trimmed.slice(bodyMatch[0].length);
+  const separatorMatch = remainder.match(LEADING_CITATION_MARKER_SEPARATOR_RE);
+  if (!separatorMatch) return trimmed;
+
+  return remainder.slice(separatorMatch[0].length);
+}
+
+function hasLeadingCitationMarker(value: string | null | undefined): boolean {
+  return stripLeadingCitationMarker(value ?? "") !== (value ?? "").trimStart();
 }
 
 export function splitCitationSentences(rawCitation: string): string[] {
@@ -43,7 +60,7 @@ export function splitCitationSentences(rawCitation: string): string[] {
 
 export function looksLikePollutedTitle(title: string | null | undefined): boolean {
   if (!title) return false;
-  if (LEADING_CITATION_MARKER_RE.test(title)) return true;
+  if (hasLeadingCitationMarker(title)) return true;
   const cleanedTitle = cleanReferenceText(title);
   if (!cleanedTitle) return false;
   return (
@@ -89,12 +106,20 @@ export function deriveTitleFromRawCitation(rawCitation: string): string | null {
 }
 
 export function parseAuthorsJson(authors: string | null): string[] | null {
+  const parsed = parseAuthorsJsonRaw(authors);
+  if (!parsed) return null;
+  return parsed
+    .map((value) => cleanReferenceText(value))
+    .filter(Boolean);
+}
+
+function parseAuthorsJsonRaw(authors: string | null): string[] | null {
   if (!authors) return null;
   try {
     const parsed = JSON.parse(authors) as unknown;
     if (!Array.isArray(parsed)) return null;
     return parsed
-      .map((value) => (typeof value === "string" ? cleanReferenceText(value) : ""))
+      .map((value) => (typeof value === "string" ? value.trim() : ""))
       .filter(Boolean);
   } catch {
     return null;
@@ -102,10 +127,12 @@ export function parseAuthorsJson(authors: string | null): string[] | null {
 }
 
 export function looksLikePollutedAuthors(authors: string | null): boolean {
-  const parsedAuthors = parseAuthorsJson(authors);
+  const parsedAuthors = parseAuthorsJsonRaw(authors);
   if (!parsedAuthors || parsedAuthors.length === 0) return false;
   return parsedAuthors.some(
-    (author) => author.includes("]") || /\s\+\s\d+\]/.test(author),
+    (author) =>
+      hasLeadingCitationMarker(author)
+      || INLINE_CITATION_MARKER_RE.test(author),
   );
 }
 
@@ -164,8 +191,8 @@ export function candidateAuthorsPassTrustCheck(params: {
 }
 
 export function looksLikePollutedVenue(venue: string | null | undefined): boolean {
-  const cleanedVenue = cleanReferenceText(venue);
-  return cleanedVenue.length > 0 && VENUE_CITATION_MARKER_RE.test(cleanedVenue);
+  const rawVenue = (venue ?? "").trim();
+  return rawVenue.length > 0 && VENUE_CITATION_MARKER_RE.test(rawVenue);
 }
 
 export function detectPollutedMetadataFields(
