@@ -32,8 +32,8 @@ async function main() {
     throw new Error("Usage: node --import tsx scripts/papers/scan-duplicate-candidates.ts --user-id <user-id> [--out <path>]");
   }
 
-  const [summary, dashboard, candidates] = await Promise.all([
-    scanPaperDuplicateCandidates(userId),
+  const summary = await scanPaperDuplicateCandidates(userId);
+  const [dashboard, candidates] = await Promise.all([
     getPaperDuplicateDashboard(userId),
     listPaperDuplicateCandidates(userId),
   ]);
