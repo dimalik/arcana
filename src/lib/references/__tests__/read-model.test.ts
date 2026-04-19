@@ -5,6 +5,9 @@ vi.mock("../../prisma", () => ({
     referenceEntry: {
       findMany: vi.fn(),
     },
+    paperEntity: {
+      findMany: vi.fn(),
+    },
     paper: {
       findMany: vi.fn(),
     },
@@ -204,7 +207,7 @@ describe("mapReferenceEntryToView", () => {
       ]),
     );
 
-    expect(view.title).toBe("Mistral 7b");
+    expect(view.title).toBe("Mistral 7B");
     expect(JSON.parse(view.authors ?? "[]")).toEqual(
       expect.arrayContaining(["Albert Q. Jiang", "Alexandre Sablayrolles", "William El Sayed"]),
     );
@@ -239,6 +242,48 @@ describe("mapReferenceEntryToView", () => {
     );
 
     expect(view.venue).toBeNull();
+  });
+
+  it("prefers resolved entity titles when they provide better canonical casing", () => {
+    const view = mapReferenceEntryToView(
+      {
+        id: "entry-5c",
+        legacyReferenceId: "legacy-5c",
+        title:
+          "Internlm-xcomposer2-4khd: A pioneering large vision-language model handling resolutions from 336 pixels to 4k hd",
+        authors: JSON.stringify(["Xiaoyi Dong", "Pan Zhang"]),
+        year: 2024,
+        venue: "arXiv (Cornell University)",
+        doi: null,
+        rawCitation:
+          "DZZ + 24b] Xiaoyi Dong, Pan Zhang, Yuhang Zang, Yuhang Cao, Bin Wang, Linke Ouyang, Songyang Zhang, Haodong Duan, Wenwei Zhang, Yining Li, et al. Internlm-xcomposer2-4khd: A pioneering large vision-language model handling resolutions from 336 pixels to 4k hd. arXiv preprint arXiv:2404.06512, 2024.",
+        referenceIndex: 5,
+        semanticScholarId: "https://openalex.org/W4394710885",
+        arxivId: "2404.06512",
+        externalUrl: null,
+        resolvedEntityId: "entity-internlm",
+        resolveConfidence: 1,
+        resolveSource: "openalex_candidate",
+        createdAt: new Date("2026-04-18T10:00:00Z"),
+        citationMentions: [],
+      },
+      new Map(),
+      new Map(),
+      new Map([
+        [
+          "entity-internlm",
+          {
+            id: "entity-internlm",
+            title:
+              "InternLM-XComposer2-4KHD: A Pioneering Large Vision-Language Model Handling Resolutions from 336 Pixels to 4K HD",
+          },
+        ],
+      ]),
+    );
+
+    expect(view.title).toBe(
+      "InternLM-XComposer2-4KHD: A Pioneering Large Vision-Language Model Handling Resolutions from 336 Pixels to 4K HD",
+    );
   });
 
   it("strips citation-key suffix variants from raw citation fallback text", () => {
@@ -412,6 +457,7 @@ describe("listPaperReferenceViews", () => {
         citationMentions: [],
       },
     ] as never);
+    vi.mocked(prisma.paperEntity.findMany).mockResolvedValue([] as never);
     vi.mocked(prisma.paper.findMany).mockResolvedValue([
       {
         id: "paper-2",
@@ -438,6 +484,15 @@ describe("listPaperReferenceViews", () => {
         },
       }),
     );
+    expect(prisma.paperEntity.findMany).toHaveBeenCalledWith({
+      where: {
+        id: { in: ["entity-1"] },
+      },
+      select: {
+        id: true,
+        title: true,
+      },
+    });
     expect(views).toHaveLength(1);
     expect(views[0]?.matchedPaperId).toBe("paper-2");
   });

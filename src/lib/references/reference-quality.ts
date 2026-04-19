@@ -36,12 +36,56 @@ const PERSON_NAME_RE = "[A-Z][A-Za-z'`.-]+(?:\\s+(?:[A-Z]\\.|[A-Z][A-Za-z'`.-]+)
 const LEADING_AUTHOR_BLOB_RE = new RegExp(
   `^${PERSON_NAME_RE},\\s+${PERSON_NAME_RE}\\.\\s+.+(?:,\\s*\\d{4}[a-z]?\\.?)?$`,
 );
+const TITLE_CASING_REPLACEMENTS: Array<{
+  pattern: RegExp;
+  replacement: string | ((match: string, ...args: string[]) => string);
+}> = [
+  { pattern: /\barxiv\b/gi, replacement: "arXiv" },
+  { pattern: /\bllms\b/gi, replacement: "LLMs" },
+  { pattern: /\bllm\b/gi, replacement: "LLM" },
+  { pattern: /\bvlms\b/gi, replacement: "VLMs" },
+  { pattern: /\bvlm\b/gi, replacement: "VLM" },
+  { pattern: /\bai2\b/gi, replacement: "AI2" },
+  { pattern: /\bmeta llama\b/gi, replacement: "Meta Llama" },
+  { pattern: /\bclaude 3\b/gi, replacement: "Claude 3" },
+  { pattern: /\bqwen-vl\b/gi, replacement: "Qwen-VL" },
+  { pattern: /\bvideo-mme\b/gi, replacement: "Video-MME" },
+  { pattern: /\blongrope\b/gi, replacement: "LongRoPE" },
+  { pattern: /\binternlm-xcomposer2-4khd\b/gi, replacement: "InternLM-XComposer2-4KHD" },
+  { pattern: /\bboolq\b/gi, replacement: "BoolQ" },
+  { pattern: /\bpiqa\b/gi, replacement: "PIQA" },
+  { pattern: /\bflashattention\b/gi, replacement: "FlashAttention" },
+  { pattern: /\bpagedattention\b/gi, replacement: "PagedAttention" },
+  { pattern: /\binter-gps\b/gi, replacement: "Inter-GPS" },
+  { pattern: /\bmistral 7b\b/gi, replacement: "Mistral 7B" },
+  { pattern: /\bphi-(\d+(?:\.\d+)?)\b/gi, replacement: (_match: string, version: string) => `Phi-${version}` },
+  { pattern: /\b4k hd\b/gi, replacement: "4K HD" },
+  { pattern: /\bmath dataset\b/gi, replacement: "MATH dataset" },
+  { pattern: /\btry arc\b/gi, replacement: "Try ARC" },
+  { pattern: /\bthe ai2 reasoning challenge\b/gi, replacement: "the AI2 reasoning challenge" },
+];
 
 export function cleanReferenceText(value: string | null | undefined): string {
   return stripLeadingCitationMarker(value ?? "")
     .replace(/([a-z]{2,})-\s*\n\s*([a-z]{2,})/g, "$1$2")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+export function restoreReferenceTitleCasing(title: string | null | undefined): string {
+  let normalized = cleanReferenceText(title);
+  if (!normalized) return "";
+
+  normalized = normalized.replace(
+    /(^|[?.!]\s+)([a-z])/g,
+    (_match, prefix: string, letter: string) => `${prefix}${letter.toUpperCase()}`,
+  );
+
+  for (const { pattern, replacement } of TITLE_CASING_REPLACEMENTS) {
+    normalized = normalized.replace(pattern, replacement as never);
+  }
+
+  return normalized;
 }
 
 export function stripLeadingCitationMarker(value: string): string {
@@ -247,7 +291,9 @@ export function sanitizeReferenceMetadataForDisplay(
   const venue = looksLikePollutedVenue(input.venue) ? null : cleanedVenue || null;
 
   return {
-    title: title || cleanedTitle || cleanReferenceText(input.rawCitation),
+    title: restoreReferenceTitleCasing(
+      title || cleanedTitle || cleanReferenceText(input.rawCitation),
+    ),
     authors: displayAuthors ? JSON.stringify(displayAuthors) : input.authors,
     venue,
     rawCitation: cleanReferenceText(input.rawCitation),

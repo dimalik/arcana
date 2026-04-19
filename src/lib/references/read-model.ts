@@ -1,7 +1,10 @@
 import { prisma } from "../prisma";
 import { normalizeTitle } from "./match";
 import { buildNormalizedCitationContext } from "./citation-context-normalization";
-import { sanitizeReferenceMetadataForDisplay } from "./reference-quality";
+import {
+  restoreReferenceTitleCasing,
+  sanitizeReferenceMetadataForDisplay,
+} from "./reference-quality";
 
 interface LocalPaperCandidate {
   id: string;
@@ -10,6 +13,11 @@ interface LocalPaperCandidate {
   year: number | null;
   authors: string | null;
   createdAt: Date;
+}
+
+interface ResolvedEntityDisplay {
+  id: string;
+  title: string;
 }
 
 export interface PaperReferenceView {
@@ -100,14 +108,21 @@ export function mapReferenceEntryToView(
   entry: ReferenceEntryRecord,
   localPaperByEntityId: Map<string, LocalPaperCandidate>,
   localPaperByNormalizedTitle: Map<string, LocalPaperCandidate>,
+  resolvedEntityById: Map<string, ResolvedEntityDisplay> = new Map(),
 ): PaperReferenceView {
   const display = sanitizeReferenceEntryDisplay(entry);
+  const resolvedEntityDisplay = entry.resolvedEntityId
+    ? resolvedEntityById.get(entry.resolvedEntityId) ?? null
+    : null;
+  const displayTitle = resolvedEntityDisplay?.title
+    ? restoreReferenceTitleCasing(resolvedEntityDisplay.title)
+    : display.title;
   const matchedPaper = entry.resolvedEntityId
     ? localPaperByEntityId.get(entry.resolvedEntityId) ?? null
     : null;
   const importReusablePaper = matchedPaper
     ? null
-    : getImportReusablePaper(display.title, localPaperByNormalizedTitle);
+    : getImportReusablePaper(displayTitle, localPaperByNormalizedTitle);
   const linkState = matchedPaper
     ? "canonical_entity_linked"
     : importReusablePaper
@@ -118,7 +133,7 @@ export function mapReferenceEntryToView(
     id: entry.legacyReferenceId ?? entry.id,
     referenceEntryId: entry.id,
     legacyReferenceId: entry.legacyReferenceId,
-    title: display.title,
+    title: displayTitle,
     authors: display.authors,
     year: entry.year,
     venue: display.venue,
@@ -151,7 +166,6 @@ export async function listPaperReferenceViews(
   paperId: string,
   userId: string | null | undefined,
 ): Promise<PaperReferenceView[]> {
-  const localPapers = await loadLocalLibraryPapers(paperId, userId);
   const referenceEntries = await prisma.referenceEntry.findMany({
     where: { paperId },
     orderBy: [{ referenceIndex: "asc" }, { createdAt: "asc" }],
@@ -183,7 +197,12 @@ export async function listPaperReferenceViews(
     },
   });
 
-  return mapReferenceEntriesToViews(referenceEntries, localPapers);
+  const [localPapers, resolvedEntities] = await Promise.all([
+    loadLocalLibraryPapers(paperId, userId),
+    loadResolvedEntityDisplay(referenceEntries),
+  ]);
+
+  return mapReferenceEntriesToViews(referenceEntries, localPapers, resolvedEntities);
 }
 
 export async function getPaperReferenceViewById(
@@ -228,7 +247,8 @@ export async function getPaperReferenceViewById(
   ]);
 
   if (!referenceEntry) return null;
-  return mapReferenceEntriesToViews([referenceEntry], localPapers)[0] ?? null;
+  const resolvedEntities = await loadResolvedEntityDisplay([referenceEntry]);
+  return mapReferenceEntriesToViews([referenceEntry], localPapers, resolvedEntities)[0] ?? null;
 }
 
 async function loadLocalLibraryPapers(
@@ -259,9 +279,11 @@ async function loadLocalLibraryPapers(
 function mapReferenceEntriesToViews(
   referenceEntries: ReferenceEntryRecord[],
   localPapers: LocalPaperCandidate[],
+  resolvedEntities: ResolvedEntityDisplay[],
 ): PaperReferenceView[] {
   const localPaperByEntityId = new Map<string, LocalPaperCandidate>();
   const localPaperByNormalizedTitle = new Map<string, LocalPaperCandidate>();
+  const resolvedEntityById = new Map<string, ResolvedEntityDisplay>();
 
   for (const paper of localPapers) {
     if (paper.entityId && !localPaperByEntityId.has(paper.entityId)) {
@@ -274,7 +296,42 @@ function mapReferenceEntriesToViews(
     }
   }
 
+  for (const entity of resolvedEntities) {
+    resolvedEntityById.set(entity.id, entity);
+  }
+
   return referenceEntries.map((entry) =>
-    mapReferenceEntryToView(entry, localPaperByEntityId, localPaperByNormalizedTitle),
+    mapReferenceEntryToView(
+      entry,
+      localPaperByEntityId,
+      localPaperByNormalizedTitle,
+      resolvedEntityById,
+    ),
   );
+}
+
+async function loadResolvedEntityDisplay(
+  referenceEntries: ReferenceEntryRecord[],
+): Promise<ResolvedEntityDisplay[]> {
+  const entityIds = Array.from(
+    new Set(
+      referenceEntries
+        .map((entry) => entry.resolvedEntityId)
+        .filter((value): value is string => Boolean(value)),
+    ),
+  );
+
+  if (entityIds.length === 0) {
+    return [];
+  }
+
+  return prisma.paperEntity.findMany({
+    where: {
+      id: { in: entityIds },
+    },
+    select: {
+      id: true,
+      title: true,
+    },
+  });
 }

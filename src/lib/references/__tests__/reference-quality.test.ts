@@ -5,6 +5,7 @@ import {
   candidateAuthorsPassTrustCheck,
   cleanReferenceText,
   looksLikePollutedAuthors,
+  restoreReferenceTitleCasing,
   stripLeadingCitationMarker,
 } from "../reference-quality";
 
@@ -102,6 +103,34 @@ describe("buildRawCitationFallbackText", () => {
       }),
     ).toBe(
       "Yiran Ding, Li Lyna Zhang, Chengruidong Zhang. Longrope: Extending llm context window beyond 2 million tokens, 2024.",
+    );
+  });
+});
+
+describe("restoreReferenceTitleCasing", () => {
+  it("restores common model and acronym casing without forcing generic title case", () => {
+    expect(
+      restoreReferenceTitleCasing(
+        "Longrope: Extending llm context window beyond 2 million tokens",
+      ),
+    ).toBe("LongRoPE: Extending LLM context window beyond 2 million tokens");
+
+    expect(
+      restoreReferenceTitleCasing(
+        "Qwen-vl: A versatile vision-language model for understanding, localization, text reading, and beyond",
+      ),
+    ).toBe(
+      "Qwen-VL: A versatile vision-language model for understanding, localization, text reading, and beyond",
+    );
+  });
+
+  it("capitalizes sentence starts after punctuation when the stored title is degraded", () => {
+    expect(
+      restoreReferenceTitleCasing(
+        "What disease does this patient have? a large-scale open domain question answering dataset from medical exams",
+      ),
+    ).toBe(
+      "What disease does this patient have? A large-scale open domain question answering dataset from medical exams",
     );
   });
 });
