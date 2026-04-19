@@ -641,7 +641,7 @@ describe("enrichReferenceEntryFromCandidate", () => {
       referenceId: "legacy-4",
       userId: "user-1",
       candidate: {
-        semanticScholarId: null,
+        semanticScholarId: "",
         title: "Mistral 7b",
         abstract: null,
         authors: ["Albert Q. Jiang", "Alexandre Sablayrolles"],

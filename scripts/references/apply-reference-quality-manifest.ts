@@ -74,7 +74,7 @@ async function main() {
     assertValidManifestDecision(decision);
   }
 
-  const paperIds = [...new Set(decisions.map((decision) => decision.paperId))];
+  const paperIds = Array.from(new Set(decisions.map((decision) => decision.paperId)));
   const papers = await prisma.paper.findMany({
     where: { id: { in: paperIds } },
     select: { id: true, userId: true },

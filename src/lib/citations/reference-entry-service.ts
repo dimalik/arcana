@@ -510,7 +510,7 @@ export async function applyReviewedReferenceMetadataDecision(params: {
         ...params.candidate,
         doi,
         arxivId,
-        semanticScholarId,
+        semanticScholarId: semanticScholarId ?? "",
       })
     : [];
   let resolvedEntityId = target.resolvedEntityId;
