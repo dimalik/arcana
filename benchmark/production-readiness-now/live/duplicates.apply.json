@@ -1,0 +1,18 @@
+{
+  "generatedAt": "2026-04-20T02:05:11.534Z",
+  "userId": "6b516c16-b931-4744-8a83-8f8e8d312438",
+  "applyResult": {
+    "applied": 75
+  },
+  "dashboard": {
+    "reviewCounts": {
+      "APPLIED": 75
+    },
+    "paperCounts": {
+      "active": 2351,
+      "hidden": 74,
+      "archived": 0,
+      "collapsed": 0
+    }
+  }
+}

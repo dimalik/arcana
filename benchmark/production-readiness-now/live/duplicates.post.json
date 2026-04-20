@@ -1,0 +1,23 @@
+{
+  "generatedAt": "2026-04-20T02:05:12.034Z",
+  "userId": "6b516c16-b931-4744-8a83-8f8e8d312438",
+  "summary": {
+    "scannedPaperCount": 2351,
+    "exactDuplicateCount": 0,
+    "fuzzyDuplicateCount": 0,
+    "safeAutoCollapseCount": 0,
+    "reviewRequiredCount": 0,
+    "canonicalEntityCollisionCount": 0,
+    "persistedCandidateCount": 0
+  },
+  "dashboard": {
+    "reviewCounts": {},
+    "paperCounts": {
+      "active": 2351,
+      "hidden": 74,
+      "archived": 0,
+      "collapsed": 0
+    }
+  },
+  "candidates": []
+}

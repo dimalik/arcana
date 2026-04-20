@@ -1,0 +1,111 @@
+{
+  "generatedAt": "2026-04-20T02:05:12.228Z",
+  "days": 365,
+  "since": "2025-04-20T02:05:12.190Z",
+  "summary": {
+    "paperCosts": {
+      "totalCost": 1.392828,
+      "paperCount": 1,
+      "avgCostPerPaper": 1.392828,
+      "byModel": {
+        "claude-sonnet-4-6": {
+          "cost": 1.392828,
+          "calls": 9,
+          "inputTokens": 422501,
+          "outputTokens": 8355
+        }
+      },
+      "bySegment": {
+        "processing": {
+          "cost": 1.383693,
+          "records": 8
+        },
+        "interactive": {
+          "cost": 0,
+          "records": 0
+        },
+        "reference_enrichment": {
+          "cost": 0.009135,
+          "records": 1
+        },
+        "agent": {
+          "cost": 0,
+          "records": 0
+        },
+        "unclassified": {
+          "cost": 0,
+          "records": 0
+        }
+      },
+      "sourceTotals": {
+        "providerMediated": {
+          "cost": 1.392828,
+          "records": 9
+        },
+        "agent": {
+          "cost": 0,
+          "records": 0
+        },
+        "combined": {
+          "cost": 1.392828,
+          "paperCount": 1
+        }
+      },
+      "unclassifiedOperations": {}
+    },
+    "paperProcessing": {
+      "totalCost": 1.383693,
+      "processedPapers": 1,
+      "avgCostPerPaper": 1.383693,
+      "byModel": {
+        "claude-sonnet-4-6": {
+          "cost": 1.383693,
+          "calls": 8,
+          "inputTokens": 419476,
+          "outputTokens": 8351
+        }
+      }
+    }
+  },
+  "reconciliation": {
+    "totalMatchesSourceTotals": true,
+    "totalMatchesSegmentTotals": true,
+    "unclassifiedCost": 0,
+    "unclassifiedOperationCount": 0
+  },
+  "topPapers": [
+    {
+      "paperId": "065a5aa8-6cc6-4bac-8a6d-856abc81e6ed",
+      "title": "Comparative Analysis of AI-Generated Text Detection Models in Student Textual Assignments",
+      "totalCost": 1.392828,
+      "providerCost": 1.392828,
+      "agentCost": 0,
+      "providerRecords": 9,
+      "agentRecords": 0,
+      "bySegment": {
+        "processing": {
+          "cost": 1.383693,
+          "records": 8
+        },
+        "interactive": {
+          "cost": 0,
+          "records": 0
+        },
+        "reference_enrichment": {
+          "cost": 0.009135,
+          "records": 1
+        },
+        "agent": {
+          "cost": 0,
+          "records": 0
+        },
+        "unclassified": {
+          "cost": 0,
+          "records": 0
+        }
+      },
+      "unclassifiedOperations": {}
+    }
+  ],
+  "selectedPapers": []
+}

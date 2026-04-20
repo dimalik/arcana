@@ -60,7 +60,21 @@ function sqliteScalar(dbPath, sql) {
   return runJsonCommand("sqlite3", [dbPath, sql]).trim();
 }
 
-function buildPaths({ backupDir, artifactDir }) {
+function repoRelative(targetPath) {
+  const cwd = process.cwd();
+  if (targetPath.startsWith(`${cwd}${path.sep}`)) {
+    return path.relative(cwd, targetPath);
+  }
+  return targetPath;
+}
+
+function serializeArtifactPaths(paths) {
+  return Object.fromEntries(
+    Object.entries(paths).map(([key, value]) => [key, repoRelative(value)]),
+  );
+}
+
+function buildPaths({ backupDir, artifactDir, snapshotMode }) {
   const stamp = timestamp();
   return {
     backupPath: path.join(backupDir, `production-readiness-now-pre-cutover-${stamp}.db`),
@@ -68,7 +82,11 @@ function buildPaths({ backupDir, artifactDir }) {
     duplicateReviewedPath: path.join(artifactDir, "duplicates.reviewed.json"),
     duplicateApplyPath: path.join(artifactDir, "duplicates.apply.json"),
     duplicatePostPath: path.join(artifactDir, "duplicates.post.json"),
-    deterministicPath: path.join(artifactDir, "deterministic-relatedness.snapshot.json"),
+    duplicatePostRestartPath: path.join(artifactDir, "duplicates.post-restart.json"),
+    deterministicPath: path.join(
+      artifactDir,
+      snapshotMode ? "deterministic-relatedness.snapshot.json" : "deterministic-relatedness.live.json",
+    ),
     costPath: path.join(artifactDir, "paper-costs.snapshot.json"),
     summaryPath: path.join(artifactDir, "cutover.summary.json"),
   };
@@ -86,8 +104,13 @@ function buildSequence(args, paths) {
     `8. Run paper cost reconciliation -> ${paths.costPath}`,
     args.snapshotMode
       ? `9. Run deterministic relatedness snapshot apply -> ${paths.deterministicPath}`
-      : "9. Post-restart: run deterministic relatedness live backfill",
-    `10. Deploy/restart the integration-branch artifact pinned to ${args.integrationRef} only after DB-side checks are clean`,
+      : `9. Post-restart: run deterministic relatedness live backfill -> ${paths.deterministicPath}`,
+    args.snapshotMode
+      ? `10. Deploy/restart the integration-branch artifact pinned to ${args.integrationRef} only after DB-side checks are clean`
+      : `10. Post-restart: re-run duplicate scan -> ${paths.duplicatePostRestartPath}`,
+    args.snapshotMode
+      ? "11. Snapshot run complete"
+      : `11. Deploy/restart the integration-branch artifact pinned to ${args.integrationRef} only after DB-side checks are clean`,
   ];
 }
 
@@ -106,7 +129,7 @@ function main() {
           userId: args.userId,
           days: args.days,
           integrationRef: args.integrationRef,
-          artifactPaths: paths,
+          artifactPaths: serializeArtifactPaths(paths),
           sequence,
         },
         null,
@@ -221,8 +244,8 @@ function main() {
     executedAt: new Date().toISOString(),
     snapshotMode: args.snapshotMode,
     dbPath: args.dbPath,
-    backupPath: paths.backupPath,
-    artifactPaths: paths,
+    backupPath: repoRelative(paths.backupPath),
+    artifactPaths: serializeArtifactPaths(paths),
     nextSteps: args.snapshotMode
       ? [
           "Review duplicate pre/apply/post artifacts together.",

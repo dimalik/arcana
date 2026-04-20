@@ -1,0 +1,52 @@
+{
+  "executedAt": "2026-04-20T02:05:12.234Z",
+  "snapshotMode": false,
+  "dbPath": "/Users/dimi/projects/paper_finder_unscrubbed_backup_20260417/prisma/dev.db",
+  "backupPath": "prisma/backups/production-readiness-now-pre-cutover-2026-04-20T02-05-05-857Z.db",
+  "artifactPaths": {
+    "backupPath": "prisma/backups/production-readiness-now-pre-cutover-2026-04-20T02-05-05-857Z.db",
+    "duplicatePrePath": "benchmark/production-readiness-now/live/duplicates.pre.json",
+    "duplicateReviewedPath": "benchmark/production-readiness-now/live/duplicates.reviewed.json",
+    "duplicateApplyPath": "benchmark/production-readiness-now/live/duplicates.apply.json",
+    "duplicatePostPath": "benchmark/production-readiness-now/live/duplicates.post.json",
+    "duplicatePostRestartPath": "benchmark/production-readiness-now/live/duplicates.post-restart.json",
+    "deterministicPath": "benchmark/production-readiness-now/live/deterministic-relatedness.live.json",
+    "costPath": "benchmark/production-readiness-now/live/paper-costs.snapshot.json",
+    "summaryPath": "benchmark/production-readiness-now/live/cutover.summary.json"
+  },
+  "postRestartValidation": {
+    "duplicatesRemaining": {
+      "exact": 0,
+      "fuzzy": 0,
+      "persistedCandidates": 0
+    },
+    "paperDuplicateStates": {
+      "active": 2351,
+      "hidden": 74,
+      "archived": 0,
+      "collapsed": 0
+    },
+    "deterministicRelatedness": {
+      "processed": 887,
+      "updated": 887,
+      "emittedCount": 789,
+      "llmSemanticAssertionsRemaining": 0,
+      "evidenceRows": 1655
+    },
+    "paperCosts": {
+      "totalMatchesSourceTotals": true,
+      "totalMatchesSegmentTotals": true,
+      "unclassifiedCost": 0,
+      "unclassifiedOperationCount": 0
+    },
+    "authenticatedApiSmokes": [
+      "/api/auth/login",
+      "/api/admin/cost-per-paper?days=365",
+      "/api/papers/065a5aa8-6cc6-4bac-8a6d-856abc81e6ed",
+      "/api/papers/065a5aa8-6cc6-4bac-8a6d-856abc81e6ed/relations",
+      "/api/papers/54d2be80-4fb1-4e52-845b-e96fe88892ba"
+    ]
+  },
+  "status": "completed",
+  "nextSteps": []
+}
