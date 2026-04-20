@@ -32,6 +32,7 @@ interface SearchCandidateSeed {
   lexicalMatchKinds: Set<SearchMatchField>;
   authorIndexHits: number;
   semanticScore: number;
+  strongTitlePhraseHit: boolean;
 }
 
 interface SearchQueryInfo {
@@ -133,6 +134,8 @@ function isMissingAuthorIndexError(error: unknown): boolean {
 const SEARCH_RERANK_WEIGHTS = {
   exactIdentifier: 1.2,
   exactTitle: 0.9,
+  titlePhraseContainment: 0.56,
+  titlePhrasePrefix: 0.22,
   titleContainment: 0.42,
   titleTokenOverlap: 0.28,
   authorIndex: 0.52,
@@ -219,6 +222,25 @@ function exactTitleMatch(query: SearchQueryInfo, title: string): number {
   return normalizeSearchText(title) === query.normalizedText ? 1 : 0;
 }
 
+function titlePhraseSignals(
+  query: SearchQueryInfo,
+  title: string,
+): { phraseContainment: number; phrasePrefix: number } {
+  if (query.tokens.length < 2 || !query.normalizedText) {
+    return { phraseContainment: 0, phrasePrefix: 0 };
+  }
+
+  const normalizedTitle = normalizeSearchText(title);
+  if (!normalizedTitle || !normalizedTitle.includes(query.normalizedText)) {
+    return { phraseContainment: 0, phrasePrefix: 0 };
+  }
+
+  return {
+    phraseContainment: 1,
+    phrasePrefix: normalizedTitle.startsWith(query.normalizedText) ? 1 : 0,
+  };
+}
+
 function titleContainmentScore(query: SearchQueryInfo, title: string): number {
   const normalizedTitle = normalizeSearchText(title);
   if (!query.normalizedText || !normalizedTitle) return 0;
@@ -294,6 +316,7 @@ function scorePaper(
       ? 1
       : 0;
   const exactTitle = exactTitleMatch(query, paper.title);
+  const phraseSignals = titlePhraseSignals(query, paper.title);
   const titleContainment = titleContainmentScore(query, paper.title);
   const abstractOverlap = tokenOverlapScore(query.tokens, paper.abstract);
   const summaryOverlap = tokenOverlapScore(query.tokens, paper.summary);
@@ -314,6 +337,9 @@ function scorePaper(
   let rerankScore =
     (doiMatch + arxivMatch) * SEARCH_RERANK_WEIGHTS.exactIdentifier +
     exactTitle * SEARCH_RERANK_WEIGHTS.exactTitle +
+    phraseSignals.phraseContainment *
+      SEARCH_RERANK_WEIGHTS.titlePhraseContainment +
+    phraseSignals.phrasePrefix * SEARCH_RERANK_WEIGHTS.titlePhrasePrefix +
     titleContainment * SEARCH_RERANK_WEIGHTS.titleContainment +
     tokenOverlapScore(query.tokens, paper.title) * SEARCH_RERANK_WEIGHTS.titleTokenOverlap +
     Math.max(authorSignals.lexical, seed.authorIndexHits > 0 ? 1 : 0)
@@ -416,11 +442,16 @@ async function collectLexicalCandidateSeeds(
     paperId: string,
     kind: SearchMatchField,
     authorHits = 0,
+    options?: {
+      strongTitlePhraseHit?: boolean;
+    },
   ) => {
     const current = seeds.get(paperId);
     if (current) {
       current.lexicalMatchKinds.add(kind);
       current.authorIndexHits = Math.max(current.authorIndexHits, authorHits);
+      current.strongTitlePhraseHit =
+        current.strongTitlePhraseHit || Boolean(options?.strongTitlePhraseHit);
       return;
     }
     seeds.set(paperId, {
@@ -428,6 +459,7 @@ async function collectLexicalCandidateSeeds(
       lexicalMatchKinds: new Set<SearchMatchField>([kind]),
       authorIndexHits: authorHits,
       semanticScore: 0,
+      strongTitlePhraseHit: Boolean(options?.strongTitlePhraseHit),
     });
   };
 
@@ -469,8 +501,14 @@ async function collectLexicalCandidateSeeds(
     ) {
       register(paper.id, "arxiv");
     }
-    if (tokenOverlapScore(query.tokens, paper.title) > 0 || exactTitleMatch(query, paper.title)) {
-      register(paper.id, "title");
+    const phraseSignals = titlePhraseSignals(query, paper.title);
+    if (
+      tokenOverlapScore(query.tokens, paper.title) > 0 ||
+      exactTitleMatch(query, paper.title)
+    ) {
+      register(paper.id, "title", 0, {
+        strongTitlePhraseHit: phraseSignals.phraseContainment > 0,
+      });
     }
     if (tokenOverlapScore(query.tokens, paper.abstract) > 0) {
       register(paper.id, "abstract");
@@ -589,6 +627,12 @@ export function shouldRunSemanticSearch(
     return false;
   }
 
+  for (const seed of Array.from(lexicalSeeds.values())) {
+    if (seed.strongTitlePhraseHit) {
+      return false;
+    }
+  }
+
   return lexicalSeeds.size < 8;
 }
 
@@ -631,6 +675,7 @@ async function collectSemanticCandidateSeeds(
       lexicalMatchKinds: new Set<SearchMatchField>(),
       authorIndexHits: 0,
       semanticScore: Number(match.score.toFixed(6)),
+      strongTitlePhraseHit: false,
     });
   }
 
@@ -753,6 +798,7 @@ export async function searchLibraryPapers(
         lexicalMatchKinds: new Set(entry.lexicalMatchKinds),
         authorIndexHits: entry.authorIndexHits,
         semanticScore: entry.semanticScore,
+        strongTitlePhraseHit: entry.strongTitlePhraseHit,
       });
       continue;
     }
@@ -762,6 +808,8 @@ export async function searchLibraryPapers(
     }
     current.authorIndexHits = Math.max(current.authorIndexHits, entry.authorIndexHits);
     current.semanticScore = Math.max(current.semanticScore, entry.semanticScore);
+    current.strongTitlePhraseHit =
+      current.strongTitlePhraseHit || entry.strongTitlePhraseHit;
   }
 
   const candidateIds = Array.from(mergedSeeds.keys());
@@ -797,6 +845,7 @@ export async function searchLibraryPapers(
         lexicalMatchKinds: new Set<SearchMatchField>(),
         authorIndexHits: 0,
         semanticScore: 0,
+        strongTitlePhraseHit: false,
       };
       const scoring = scorePaper(query, paper as SearchPaperRow, seed);
 

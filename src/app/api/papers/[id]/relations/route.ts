@@ -11,6 +11,7 @@ import {
 } from "@/lib/assertions/graph-relations";
 import {
   GraphRelationError,
+  type GraphRelationRow,
   listRelationsForPaper,
   toRouteRelationRow,
 } from "@/lib/assertions/relation-reader";
@@ -20,6 +21,24 @@ const createRelationSchema = z.object({
   relationType: z.string().min(1),
   description: z.string().optional(),
 });
+
+function toRelatedSurfaceRows(rows: GraphRelationRow[]): GraphRelationRow[] {
+  const filtered = rows.filter(
+    (row) => row.relationType.toLowerCase() !== "cites",
+  );
+  const bestByPaperId = new Map<string, GraphRelationRow>();
+
+  for (const row of filtered) {
+    const current = bestByPaperId.get(row.relatedPaper.id);
+    if (!current || row.confidence > current.confidence) {
+      bestByPaperId.set(row.relatedPaper.id, row);
+    }
+  }
+
+  return Array.from(bestByPaperId.values()).sort(
+    (left, right) => right.confidence - left.confidence,
+  );
+}
 
 export async function GET(
   _request: NextRequest,
@@ -31,7 +50,10 @@ export async function GET(
   }
   try {
     const result = await listRelationsForPaper(params.id, access.userId);
-    return jsonWithDuplicateState(access, result.rows.map(toRouteRelationRow));
+    return jsonWithDuplicateState(
+      access,
+      toRelatedSurfaceRows(result.rows).map(toRouteRelationRow),
+    );
   } catch (error) {
     if (error instanceof GraphRelationError) {
       const status = typeof error.status === "number" ? error.status : 500;
