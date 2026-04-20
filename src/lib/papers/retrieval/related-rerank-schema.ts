@@ -1,18 +1,22 @@
 import { z } from "zod";
 
+// Keep provider-facing schemas simple. Anthropic structured output currently
+// rejects several JSON-schema constraints such as array maxItems and numeric
+// min/max bounds, so cardinality and value limits are enforced in local code
+// after parse instead of in the transport schema.
 export const relatedPaperListwiseSelectionSchema = z
   .object({
-    paperId: z.string().min(1),
-    relevanceScore: z.number().min(0).max(1),
-    rationale: z.string().min(1),
-    primarySignals: z.array(z.string().min(1)).max(4).optional(),
+    paperId: z.string(),
+    relevanceScore: z.number(),
+    rationale: z.string(),
+    primarySignals: z.array(z.string()).optional(),
   })
   .passthrough();
 
 export const rerankRelatedPapersRuntimeOutputSchema = z
   .object({
-    selectedPapers: z.array(relatedPaperListwiseSelectionSchema).max(10),
-    summary: z.string().min(1),
+    selectedPapers: z.array(relatedPaperListwiseSelectionSchema),
+    summary: z.string(),
   })
   .passthrough();
 

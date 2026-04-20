@@ -1537,9 +1537,23 @@ function sanitizeListwiseSelections(
   const sanitized: RelatedPaperListwiseSelection[] = [];
 
   for (const selection of selections) {
-    if (!validIds.has(selection.paperId) || seen.has(selection.paperId)) continue;
-    seen.add(selection.paperId);
-    sanitized.push(selection);
+    const paperId = selection.paperId.trim();
+    if (!paperId || !validIds.has(paperId) || seen.has(paperId)) continue;
+    const rationale = selection.rationale.trim();
+    if (!rationale) continue;
+    seen.add(paperId);
+    sanitized.push({
+      ...selection,
+      paperId,
+      rationale,
+      relevanceScore: Number(
+        Math.max(0, Math.min(selection.relevanceScore, 1)).toFixed(6),
+      ),
+      primarySignals: (selection.primarySignals ?? [])
+        .map((signal) => signal.trim())
+        .filter(Boolean)
+        .slice(0, 4),
+    });
   }
 
   return sanitized.slice(0, RELATED_LLM_LISTWISE_RESULT_LIMIT);
