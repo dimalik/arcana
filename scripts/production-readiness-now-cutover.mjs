@@ -65,6 +65,7 @@ function buildPaths({ backupDir, artifactDir }) {
   return {
     backupPath: path.join(backupDir, `production-readiness-now-pre-cutover-${stamp}.db`),
     duplicatePrePath: path.join(artifactDir, "duplicates.pre.json"),
+    duplicateReviewedPath: path.join(artifactDir, "duplicates.reviewed.json"),
     duplicateApplyPath: path.join(artifactDir, "duplicates.apply.json"),
     duplicatePostPath: path.join(artifactDir, "duplicates.post.json"),
     deterministicPath: path.join(artifactDir, "deterministic-relatedness.snapshot.json"),
@@ -79,13 +80,14 @@ function buildSequence(args, paths) {
     "2. Apply Prisma migrations for PR 5 and PR 6",
     "3. Verify Concept table is gone on the migrated DB",
     `4. Run duplicate scan for user ${args.userId ?? "<user-id>"} -> ${paths.duplicatePrePath}`,
-    `5. Run duplicate apply -> ${paths.duplicateApplyPath}`,
-    `6. Re-run duplicate scan -> ${paths.duplicatePostPath}`,
-    `7. Run paper cost reconciliation -> ${paths.costPath}`,
+    `5. Review duplicate candidates in hide-only mode -> ${paths.duplicateReviewedPath}`,
+    `6. Run duplicate apply -> ${paths.duplicateApplyPath}`,
+    `7. Re-run duplicate scan -> ${paths.duplicatePostPath}`,
+    `8. Run paper cost reconciliation -> ${paths.costPath}`,
     args.snapshotMode
-      ? `8. Run deterministic relatedness snapshot apply -> ${paths.deterministicPath}`
-      : "8. Post-restart: run deterministic relatedness live backfill",
-    `9. Deploy/restart the integration-branch artifact pinned to ${args.integrationRef} only after DB-side checks are clean`,
+      ? `9. Run deterministic relatedness snapshot apply -> ${paths.deterministicPath}`
+      : "9. Post-restart: run deterministic relatedness live backfill",
+    `10. Deploy/restart the integration-branch artifact pinned to ${args.integrationRef} only after DB-side checks are clean`,
   ];
 }
 
@@ -148,6 +150,20 @@ function main() {
     args.userId,
     "--out",
     paths.duplicatePrePath,
+  ], {
+    env: { ...process.env, DATABASE_URL: databaseUrl },
+  });
+
+  runOrThrow("node", [
+    "--import",
+    "tsx",
+    "scripts/papers/review-duplicate-candidates.ts",
+    "--user-id",
+    args.userId,
+    "--mode",
+    "hide-all",
+    "--out",
+    paths.duplicateReviewedPath,
   ], {
     env: { ...process.env, DATABASE_URL: databaseUrl },
   });
