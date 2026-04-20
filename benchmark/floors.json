@@ -15,10 +15,10 @@
     },
     "relatedPapers": {
       "dev": {
-        "ndcgAt10": null,
-        "recallAt20": null,
-        "ilsAt10": null,
-        "subtopicCoverageAt10": null
+        "ndcgAt10": 0.5,
+        "recallAt20": 0.6,
+        "ilsAt10": 0.71,
+        "subtopicCoverageAt10": 0.75
       },
       "holdout": {
         "ndcgAt10": null,

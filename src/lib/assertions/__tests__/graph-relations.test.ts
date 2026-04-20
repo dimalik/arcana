@@ -233,6 +233,7 @@ describe("listRelationsForPaper", () => {
             title: "Target",
             year: 2024,
             authors: null,
+            duplicateState: "ACTIVE",
           },
         },
       ])
@@ -258,6 +259,7 @@ describe("listRelationsForPaper", () => {
         title: "Peer",
         year: 2024,
         authors: null,
+        duplicateState: "ACTIVE",
       });
     vi.mocked(getAggregatedRelationsForPaper).mockResolvedValue([
       {
@@ -328,6 +330,7 @@ describe("listRelationsForPaper", () => {
             title: "Represented peer",
             year: 2024,
             authors: null,
+            duplicateState: "ACTIVE",
           },
         },
         {
@@ -342,6 +345,7 @@ describe("listRelationsForPaper", () => {
             title: "Legacy-only peer",
             year: 2023,
             authors: null,
+            duplicateState: "ACTIVE",
           },
         },
       ])
@@ -774,6 +778,7 @@ describe("deleteManualRelation", () => {
                 title: "Legacy-only peer",
                 year: 2023,
                 authors: null,
+                duplicateState: "ACTIVE",
               },
             },
           ])

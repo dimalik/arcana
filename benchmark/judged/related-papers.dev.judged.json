@@ -1,7 +1,7 @@
 {
   "task": "related-papers",
   "split": "dev",
-  "status": "draft",
+  "status": "ready",
   "cases": [
     {
       "id": "related-hub-attention-is-all-you-need",
@@ -9,35 +9,190 @@
       "seed": {
         "title": "Attention Is All You Need"
       },
-      "judgments": [],
-      "notes": "Primary anti-hub collapse case."
+      "judgments": [
+        {
+          "title": "LOLA: Low-Rank Linear Attention with Sparse Caching",
+          "relevance": 2,
+          "subtopics": ["efficient-attention", "llm-inference"],
+          "novelty": 0.4
+        },
+        {
+          "title": "PackInfer: Compute- and I/O-Efficient Attention for Batched LLM Inference",
+          "relevance": 2,
+          "subtopics": ["efficient-attention", "llm-serving"],
+          "novelty": 0.5
+        },
+        {
+          "title": "Beyond Attention: Breaking the Limits of Transformer Context Length with Recurrent Memory",
+          "relevance": 2,
+          "subtopics": ["transformer-architecture", "long-context"],
+          "novelty": 0.7
+        },
+        {
+          "title": "SparQ Attention: Bandwidth-Efficient LLM Inference",
+          "relevance": 1,
+          "subtopics": ["efficient-attention", "kv-cache"],
+          "novelty": 0.6
+        },
+        {
+          "title": "TransMLA: MLA Is All You Need",
+          "relevance": 1,
+          "subtopics": ["attention-architecture"],
+          "novelty": 0.6
+        },
+        {
+          "title": "Mixture of Attention Schemes (MoAS): Learning to Route Between MHA, GQA, and MQA",
+          "relevance": 1,
+          "subtopics": ["attention-architecture"],
+          "novelty": 0.8
+        },
+        {
+          "title": "Human versus Machine Intelligence: Assessing Natural Language Generation Models through Complex Systems Theory",
+          "relevance": 0,
+          "subtopics": [],
+          "novelty": 0.2,
+          "notes": "Topical drift: language generation discussion, not a meaningful related-paper result for the transformer seed."
+        }
+      ],
+      "notes": "Primary anti-hub collapse case for the foundational transformer seed."
     },
     {
-      "id": "related-niche-pointer-sentinel-mixture-models",
-      "caseClass": "niche",
-      "seed": {
-        "title": "Pointer Sentinel Mixture Models"
-      },
-      "judgments": [],
-      "notes": "Low-degree seed to test recall."
-    },
-    {
-      "id": "related-ambiguous-transformer",
+      "id": "related-ambiguous-flashattention",
       "caseClass": "ambiguous-title",
       "seed": {
-        "title": "Transformer"
+        "title": "FlashAttention: Fast and Memory-Efficient Exact Attention with IO-Awareness"
       },
-      "judgments": [],
-      "notes": "Ambiguous-title seed for sense disambiguation."
+      "judgments": [
+        {
+          "title": "FlashAttention-2: Faster Attention with Better Parallelism and Work Partitioning",
+          "relevance": 2,
+          "subtopics": ["flashattention-family", "kernel-optimization"],
+          "novelty": 0.3
+        },
+        {
+          "title": "Fast Attention Over Long Sequences With Dynamic Sparse Flash Attention",
+          "relevance": 2,
+          "subtopics": ["flashattention-family", "long-context"],
+          "novelty": 0.6
+        },
+        {
+          "title": "DISTFLASHATTN: Distributed Memory-efficient Attention for Long-context LLMs Training",
+          "relevance": 2,
+          "subtopics": ["flashattention-family", "distributed-training"],
+          "novelty": 0.7
+        },
+        {
+          "title": "CHAI: Clustered Head Attention for Efficient LLM Inference",
+          "relevance": 1,
+          "subtopics": ["efficient-attention", "llm-inference"],
+          "novelty": 0.7
+        },
+        {
+          "title": "Longformer: The Long-Document Transformer",
+          "relevance": 1,
+          "subtopics": ["long-context", "transformer-architecture"],
+          "novelty": 0.5
+        },
+        {
+          "title": "Sculpting Large Language Models: Probing Structural Asymmetries in Layers and Embedding Spaces",
+          "relevance": 0,
+          "subtopics": [],
+          "novelty": 0.2
+        }
+      ],
+      "notes": "Attention-family paper where lexical overlap alone is not enough; good results should stay within efficient-attention / long-context neighborhoods."
     },
     {
-      "id": "related-cross-community-clip",
+      "id": "related-cross-community-lara",
       "caseClass": "cross-community",
       "seed": {
-        "title": "Learning Transferable Visual Models From Natural Language Supervision"
+        "title": "LaRA: Benchmarking Retrieval-Augmented Generation and Long-Context LLMs - No Silver Bullet for LC or RAG Routing"
       },
-      "judgments": [],
-      "notes": "Should bridge vision, language, and multimodal retrieval communities."
+      "judgments": [
+        {
+          "title": "Stronger Baselines for Retrieval-Augmented Generation with Long-Context Language Models",
+          "relevance": 2,
+          "subtopics": ["rag", "long-context"],
+          "novelty": 0.3
+        },
+        {
+          "title": "LongRAG: Enhancing Retrieval-Augmented Generation with Long-context LLMs",
+          "relevance": 2,
+          "subtopics": ["rag", "routing"],
+          "novelty": 0.5
+        },
+        {
+          "title": "Agri-Query: A Case Study on RAG vs. Long-Context LLMs for Cross-Lingual Technical Question Answering",
+          "relevance": 1,
+          "subtopics": ["rag", "cross-lingual"],
+          "novelty": 0.7
+        },
+        {
+          "title": "Mindscape-Aware Retrieval Augmented Generation for Improved Long Context Understanding",
+          "relevance": 1,
+          "subtopics": ["rag", "long-context"],
+          "novelty": 0.7
+        },
+        {
+          "title": "Smooth Reading: Bridging the Gap of Recurrent LLM to Self-Attention LLM on Long-Context Tasks",
+          "relevance": 1,
+          "subtopics": ["long-context"],
+          "novelty": 0.8
+        },
+        {
+          "title": "Authorship Attribution for Neural Text Generation",
+          "relevance": 0,
+          "subtopics": [],
+          "novelty": 0.2
+        }
+      ],
+      "notes": "Cross-community retrieval task spanning RAG and long-context evaluation rather than generic LLM-adjacent papers."
+    },
+    {
+      "id": "related-niche-edge-llm",
+      "caseClass": "niche",
+      "seed": {
+        "title": "EdgeLLM: Fast On-Device LLM Inference With Speculative Decoding"
+      },
+      "judgments": [
+        {
+          "title": "Think Before You Accept: Semantic Reflective Verification for Faster Speculative Decoding",
+          "relevance": 2,
+          "subtopics": ["speculative-decoding", "verification"],
+          "novelty": 0.6
+        },
+        {
+          "title": "DYSPEC: Faster Speculative Decoding with Dynamic Token Tree Structure",
+          "relevance": 2,
+          "subtopics": ["speculative-decoding"],
+          "novelty": 0.7
+        },
+        {
+          "title": "CHAI: Clustered Head Attention for Efficient LLM Inference",
+          "relevance": 1,
+          "subtopics": ["llm-inference", "efficient-attention"],
+          "novelty": 0.6
+        },
+        {
+          "title": "SwiftKV: An Edge-Oriented Attention Algorithm and Multi-Head Accelerator for Fast, Efficient LLM Decoding",
+          "relevance": 1,
+          "subtopics": ["edge-inference", "llm-inference"],
+          "novelty": 0.8
+        },
+        {
+          "title": "SparQ Attention: Bandwidth-Efficient LLM Inference",
+          "relevance": 1,
+          "subtopics": ["llm-inference", "efficient-attention"],
+          "novelty": 0.5
+        },
+        {
+          "title": "Leveraging Design-Aware Context in Large Language Models for Code Comment Generation",
+          "relevance": 0,
+          "subtopics": [],
+          "novelty": 0.2
+        }
+      ],
+      "notes": "Lower-degree efficient-inference seed; good ranking should recover speculative decoding and edge-serving work rather than generic LLM tasks."
     }
   ]
 }

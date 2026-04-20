@@ -1,9 +1,14 @@
 import { prisma } from "../prisma";
 import { getAggregatedRelationsForPaper } from "./relation-aggregate";
 import { isUserVisiblePaper, paperVisibilityWhere } from "../papers/visibility";
+import { rerankRelatedRelationRows } from "../papers/retrieval/related-ranker";
 
-type RelationReaderDb = Pick<typeof prisma, "paper" | "paperRelation" | "relationAssertion">;
-type ProjectedRelationDb = Pick<typeof prisma, "paperRelation">;
+type RelationReaderDb = Pick<
+  typeof prisma,
+  "paper" | "paperRelation" | "relationAssertion" | "paperRepresentation"
+>;
+type ProjectedRelationDb = Pick<typeof prisma, "paperRelation"> &
+  Partial<Pick<typeof prisma, "paper" | "relationAssertion" | "paperRepresentation">>;
 
 export const GRAPH_RELATED_PAPER_SELECT = {
   id: true,
@@ -88,6 +93,16 @@ export function toRouteRelationRow(row: GraphRelationRow): GraphRouteRelationRow
 
 function sortRelationRows(rows: GraphRelationRow[]): GraphRelationRow[] {
   return [...rows].sort((a, b) => b.confidence - a.confidence);
+}
+
+async function rerankGraphRows(
+  paperId: string,
+  userId: string,
+  rows: GraphRelationRow[],
+  db: RelationReaderDb,
+): Promise<GraphRelationRow[]> {
+  if (rows.length <= 1) return rows;
+  return rerankRelatedRelationRows(paperId, userId, rows, db);
 }
 
 function mapAggregateRowToRelation(
@@ -300,10 +315,17 @@ export async function listRelationsForPaper(
     );
     if (aggregateRows.length > 0) {
       const overlayRows = buildLegacyOverlayRows(aggregateRows, legacyRows);
+      const combinedRows = sortRelationRows([...aggregateRows, ...overlayRows]);
+      const rerankedRows = await rerankGraphRows(
+        paperId,
+        userId,
+        combinedRows,
+        db,
+      );
       if (overlayRows.length > 0) {
         return {
           mode: "aggregate_with_overlay",
-          rows: sortRelationRows([...aggregateRows, ...overlayRows]),
+          rows: rerankedRows,
           aggregateRows,
           legacyRows,
           overlayRows,
@@ -312,7 +334,7 @@ export async function listRelationsForPaper(
 
       return {
         mode: "aggregate_only",
-        rows: aggregateRows,
+        rows: rerankedRows,
         aggregateRows,
         legacyRows,
         overlayRows: [],
@@ -320,9 +342,10 @@ export async function listRelationsForPaper(
     }
   }
 
+  const rerankedLegacyRows = await rerankGraphRows(paperId, userId, legacyRows, db);
   return {
     mode: "legacy_fallback",
-    rows: legacyRows,
+    rows: rerankedLegacyRows,
     aggregateRows: [],
     legacyRows,
     overlayRows: [],
@@ -337,6 +360,33 @@ export async function listProjectedTargetPaperIds(
   }: { excludeRelationTypes?: string[]; limit?: number } = {},
   db: ProjectedRelationDb = prisma,
 ): Promise<string[]> {
+  if ("paper" in db && db.paper) {
+    const sourcePaper = await db.paper.findUnique({
+      where: { id: sourcePaperId },
+      select: { userId: true },
+    });
+
+    if (sourcePaper?.userId) {
+      const relatedRows = await listRelationsForPaper(
+        sourcePaperId,
+        sourcePaper.userId,
+        db as RelationReaderDb,
+      );
+
+      const excludedTypes = new Set(
+        excludeRelationTypes.map((relationType) => relationType.toLowerCase()),
+      );
+
+      return relatedRows.rows
+        .filter(
+          (row) =>
+            !excludedTypes.has(row.relationType.toLowerCase()),
+        )
+        .slice(0, limit)
+        .map((row) => row.relatedPaper.id);
+    }
+  }
+
   const relationTypeFilter =
     excludeRelationTypes.length > 0 ? { notIn: excludeRelationTypes } : undefined;
   const relations = await db.paperRelation.findMany({

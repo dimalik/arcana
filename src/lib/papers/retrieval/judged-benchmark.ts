@@ -197,3 +197,4 @@ export const judgedSetSchemas = {
 } as const;
 
 export type JudgedTask = z.infer<typeof judgedTaskSchema>;
+export type JudgedLabel = z.infer<typeof judgedLabelSchema>;

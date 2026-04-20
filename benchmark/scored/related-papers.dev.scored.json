@@ -1,0 +1,239 @@
+{
+  "task": "related-papers",
+  "split": "dev",
+  "budgets": {
+    "cacheP95Ms": 1500,
+    "candidateCap": 200,
+    "costP95UsdAmortized": 0.02,
+    "cacheTtlDays": 7,
+    "degradedPath": "deterministic_relatedness"
+  },
+  "floors": {
+    "ndcgAt10": 0.5,
+    "recallAt20": 0.6,
+    "ilsAt10": 0.71,
+    "subtopicCoverageAt10": 0.75
+  },
+  "baseline": {
+    "ndcgAt10": 0.159578,
+    "recallAt20": 0.25,
+    "ilsAt10": 0.70331,
+    "subtopicCoverageAt10": 0.258929
+  },
+  "reranked": {
+    "ndcgAt10": 0.555395,
+    "recallAt20": 0.658333,
+    "ilsAt10": 0.694679,
+    "subtopicCoverageAt10": 0.780357
+  },
+  "latencyP95Ms": 0.0855,
+  "costP95UsdAmortized": 0,
+  "floorChecks": {
+    "ndcgAt10": true,
+    "recallAt20": true,
+    "ilsAt10": true,
+    "subtopicCoverageAt10": true
+  },
+  "cases": [
+    {
+      "id": "related-hub-attention-is-all-you-need",
+      "caseClass": "hub",
+      "seedPaperId": "e1fb60a8-7834-4e0e-a98b-db34fb239029",
+      "seedTitle": "Attention Is All You Need",
+      "latencyMs": 0.060917,
+      "budgetPass": true,
+      "baseline": {
+        "top10": [
+          "A Case Study in CUDA Kernel Fusion: Implementing FlashAttention-2 on NVIDIA Hopper Architecture using the CUTLASS Library",
+          "A Markov Categorical Framework for Language Modeling",
+          "A Probabilistic Formulation of Unsupervised Text Style Transfer",
+          "A Self-Supervised Reinforcement Learning Approach for Fine-Tuning Large Language Models Using Cross-Attention Signals",
+          "Alert-ME: An Explainability-Driven Defense Against Adversarial Examples in Transformer-Based Text Classification",
+          "Approximated Variational Bayesian Inverse Reinforcement Learning for Large Language Model Alignment",
+          "Attention-aware Semantic Communications for Collaborative Inference",
+          "Cognitive Workspace: Active Memory Management for LLMs — An Empirical Study of Functional Infinite Context",
+          "DAM: Dynamic Attention Mask for Long-Context Large Language Model Inference Acceleration",
+          "Data-to-Text Generation with Style Imitation"
+        ],
+        "metrics": {
+          "ndcgAt10": 0,
+          "recallAt20": 0,
+          "ilsAt10": 0.68308,
+          "subtopicCoverageAt10": 0
+        }
+      },
+      "reranked": {
+        "top10": [
+          "Efficient Memory Management for Large Language Model Serving with PagedAttention",
+          "Human versus Machine Intelligence: Assessing Natural Language Generation Models through Complex Systems Theory",
+          "LOLA: Low-Rank Linear Attention with Sparse Caching",
+          "PackInfer: Compute- and I/O-Efficient Attention for Batched LLM Inference",
+          "TransMLA: MLA Is All You Need",
+          "Beyond Attention: Breaking the Limits of Transformer Context Length with Recurrent Memory",
+          "TCNCA: Temporal Convolution Network with Chunked Attention for Scalable Sequence Processing",
+          "Efficient LLMs with AMP: Attention Heads and MLP Pruning",
+          "Mixture of Attention Schemes (MoAS): Learning to Route Between MHA, GQA, and MQA",
+          "DAM: Dynamic Attention Mask for Long-Context Large Language Model Inference Acceleration"
+        ],
+        "metrics": {
+          "ndcgAt10": 0.601139,
+          "recallAt20": 0.833333,
+          "ilsAt10": 0.708385,
+          "subtopicCoverageAt10": 0.857143
+        }
+      },
+      "lift": {
+        "ndcgAt10": 0.601139,
+        "recallAt20": 0.833333,
+        "ilsAt10": 0.025305,
+        "subtopicCoverageAt10": 0.857143
+      }
+    },
+    {
+      "id": "related-ambiguous-flashattention",
+      "caseClass": "ambiguous-title",
+      "seedPaperId": "1543790c-3c77-4b75-b2eb-aacb6de79893",
+      "seedTitle": "FlashAttention: Fast and Memory-Efficient Exact Attention with IO-Awareness",
+      "latencyMs": 0.0855,
+      "budgetPass": true,
+      "baseline": {
+        "top10": [
+          "A Case Study in CUDA Kernel Fusion: Implementing FlashAttention-2 on NVIDIA Hopper Architecture using the CUTLASS Library",
+          "Advancing Zero-shot Text-to-Speech Intelligibility across Diverse Domains via Preference Alignment",
+          "AttentionEngine: A Versatile Framework for Efficient Attention Mechanisms on Diverse Hardware Platforms",
+          "BRIGHT: A Realistic and Challenging Benchmark for Reasoning-Intensive Retrieval",
+          "CHAI: Clustered Head Attention for Efficient LLM Inference",
+          "CLLMs: Consistency Large Language Models",
+          "CoCA: Fusing Position Embedding with Collinear Constrained Attention in Transformers for Long Context Window Extending",
+          "ColaVLA: Leveraging Cognitive Latent Reasoning for Hierarchical Parallel Trajectory Planning in Autonomous Driving",
+          "Compact Attention: Exploiting Structured Spatio-Temporal Sparsity for Fast Video Generation",
+          "Counter Turing Test (CT2): AI-Generated Text Detection is Not as Easy as You May Think – Introducing AI Detectability Index"
+        ],
+        "metrics": {
+          "ndcgAt10": 0.053653,
+          "recallAt20": 0.6,
+          "ilsAt10": 0.679052,
+          "subtopicCoverageAt10": 0.285714
+        }
+      },
+      "reranked": {
+        "top10": [
+          "CHAI: Clustered Head Attention for Efficient LLM Inference",
+          "PackInfer: Compute- and I/O-Efficient Attention for Batched LLM Inference",
+          "DISTFLASHATTN: Distributed Memory-efficient Attention for Long-context LLMs Training",
+          "Efficient Memory Management for Large Language Model Serving with PagedAttention",
+          "Fast Attention Over Long Sequences With Dynamic Sparse Flash Attention",
+          "Sculpting Large Language Models: Probing Structural Asymmetries in Layers and Embedding Spaces",
+          "BI-RADS Categories and Breast Lesions Classification of Mammographic Images Using Artificial Intelligence Diagnostic Models",
+          "Efficient Reinforcement Learning with Semantic and Token Entropy for LLM Reasoning",
+          "Dynamic Feature Engineering Through Reinforcement and Prompt Based Learning",
+          "Walking Down the Memory Maze: Beyond Context Limit Through Interactive Reading"
+        ],
+        "metrics": {
+          "ndcgAt10": 0.507683,
+          "recallAt20": 0.6,
+          "ilsAt10": 0.686716,
+          "subtopicCoverageAt10": 0.714286
+        }
+      },
+      "lift": {
+        "ndcgAt10": 0.45403,
+        "recallAt20": 0,
+        "ilsAt10": 0.007664,
+        "subtopicCoverageAt10": 0.428572
+      }
+    },
+    {
+      "id": "related-cross-community-lara",
+      "caseClass": "cross-community",
+      "seedPaperId": "e0bb6d74-0eb1-4500-b7fb-a8cef418c9a0",
+      "seedTitle": "LaRA: Benchmarking Retrieval-Augmented Generation and Long-Context LLMs - No Silver Bullet for LC or RAG Routing",
+      "latencyMs": 0.010375,
+      "budgetPass": true,
+      "baseline": {
+        "top10": [
+          "Stronger Baselines for Retrieval-Augmented Generation with Long-Context Language Models",
+          "Agri-Query: A Case Study on RAG vs. Long-Context LLMs for Cross-Lingual Technical Question Answering"
+        ],
+        "metrics": {
+          "ndcgAt10": 0.584661,
+          "recallAt20": 0.4,
+          "ilsAt10": 0.764136,
+          "subtopicCoverageAt10": 0.75
+        }
+      },
+      "reranked": {
+        "top10": [
+          "Stronger Baselines for Retrieval-Augmented Generation with Long-Context Language Models",
+          "Agri-Query: A Case Study on RAG vs. Long-Context LLMs for Cross-Lingual Technical Question Answering",
+          "Authorship Attribution for Neural Text Generation",
+          "Ensemble Learning for Large Language Models in Text and Code Generation: A Survey",
+          "Text Style Transfer with Parameter-efficient LLM Finetuning and Round-trip Translation",
+          "MrGuard: A Multilingual Reasoning Guardrail for Universal LLM Safety",
+          "Hardware-Efficient Attention for Fast Decoding",
+          "LLM-CoOpt: A Co-Design and Optimization Framework for Efficient LLM Inference on Heterogeneous Platforms",
+          "RAS-EVAL: A Comprehensive Benchmark for Security Evaluation of LLM Agents in Real-World Environments",
+          "Multidimensional Evaluation for Text Style Transfer Using ChatGPT"
+        ],
+        "metrics": {
+          "ndcgAt10": 0.584661,
+          "recallAt20": 0.4,
+          "ilsAt10": 0.689094,
+          "subtopicCoverageAt10": 0.75
+        }
+      },
+      "lift": {
+        "ndcgAt10": 0,
+        "recallAt20": 0,
+        "ilsAt10": -0.075042,
+        "subtopicCoverageAt10": 0
+      }
+    },
+    {
+      "id": "related-niche-edge-llm",
+      "caseClass": "niche",
+      "seedPaperId": "32f497db-0e0f-4045-8c15-401c032cec4c",
+      "seedTitle": "EdgeLLM: Fast On-Device LLM Inference With Speculative Decoding",
+      "latencyMs": 0.008875,
+      "budgetPass": true,
+      "baseline": {
+        "top10": [
+          "Joint Continual Learning of Local Language Models and Cloud Offloading Decisions with Budget Constraints",
+          "Tensor Product Attention Is All You Need"
+        ],
+        "metrics": {
+          "ndcgAt10": 0,
+          "recallAt20": 0,
+          "ilsAt10": 0.686971,
+          "subtopicCoverageAt10": 0
+        }
+      },
+      "reranked": {
+        "top10": [
+          "CHAI: Clustered Head Attention for Efficient LLM Inference",
+          "Think Before You Accept: Semantic Reflective Verification for Faster Speculative Decoding",
+          "Enhancing Persian text summarization through a three-phase fine-tuning and reinforcement learning approach with the mT5 transformer model",
+          "Reward-Augmented Decoding: Efficient Controlled Text Generation With a Unidirectional Reward Model",
+          "SparQ Attention: Bandwidth-Efficient LLM Inference",
+          "Leveraging Design-Aware Context in Large Language Models for Code Comment Generation",
+          "Beyond Attention: Breaking the Limits of Transformer Context Length with Recurrent Memory",
+          "A Practical Examination of AI-Generated Text Detectors for Large Language Models",
+          "Diversity Explains Inference Scaling Laws: Through a Case Study of Minimum Bayes Risk Decoding",
+          "HybridPrompt: Bridging Generative Priors and Traditional Codecs for Mobile Streaming"
+        ],
+        "metrics": {
+          "ndcgAt10": 0.528096,
+          "recallAt20": 0.8,
+          "ilsAt10": 0.694522,
+          "subtopicCoverageAt10": 0.8
+        }
+      },
+      "lift": {
+        "ndcgAt10": 0.528096,
+        "recallAt20": 0.8,
+        "ilsAt10": 0.007551,
+        "subtopicCoverageAt10": 0.8
+      }
+    }
+  ]
+}
