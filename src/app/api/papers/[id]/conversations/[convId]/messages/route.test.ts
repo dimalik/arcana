@@ -5,6 +5,7 @@ const hoisted = vi.hoisted(() => ({
   requirePaperAccess: vi.fn(),
   chatMessageFindMany: vi.fn(),
   chatMessageCreate: vi.fn(),
+  chatMessageFindFirst: vi.fn(),
   conversationFindUnique: vi.fn(),
   conversationUpdate: vi.fn(),
   conversationArtifactCreate: vi.fn(),
@@ -13,9 +14,9 @@ const hoisted = vi.hoisted(() => ({
   resolveModelConfig: vi.fn(),
   preparePaperAnswer: vi.fn(),
   buildChatMessageMetadata: vi.fn((value) => value),
-  serializeChatMessageMetadata: vi.fn(() => "{\"intent\":\"direct_qa\",\"citations\":[]}"),
+  serializeChatMessageMetadata: vi.fn(() => "{\"intent\":\"timeline\",\"citations\":[{\"paperId\":\"paper-2\",\"paperTitle\":\"Paper 2\",\"snippet\":\"2024: Key advance\",\"sourceKind\":\"artifact\"}]}"),
   normalizeChatHistory: vi.fn((messages) => messages),
-  extractChatMessageText: vi.fn(() => "Explain the method"),
+  extractChatMessageText: vi.fn(() => "Build a timeline"),
   trackEngagement: vi.fn(() => Promise.resolve()),
 }));
 
@@ -24,7 +25,7 @@ vi.mock("@/lib/prisma", () => ({
     chatMessage: {
       findMany: hoisted.chatMessageFindMany,
       create: hoisted.chatMessageCreate,
-      findFirst: vi.fn(),
+      findFirst: hoisted.chatMessageFindFirst,
     },
     conversation: {
       findUnique: hoisted.conversationFindUnique,
@@ -41,7 +42,9 @@ vi.mock("@/lib/llm/provider", () => ({
 }));
 
 vi.mock("@/lib/llm/paper-llm-context", () => ({
-  PAPER_INTERACTIVE_LLM_OPERATIONS: { CONVERSATION_MESSAGE: "conversation_message" },
+  PAPER_INTERACTIVE_LLM_OPERATIONS: {
+    CONVERSATION_MESSAGE: "paper_conversation_message",
+  },
   withPaperLlmContext: hoisted.withPaperLlmContext,
 }));
 
@@ -78,18 +81,17 @@ vi.mock("@/lib/paper-auth", () => ({
 
 import { POST } from "./route";
 
-describe("POST /api/papers/[id]/conversations/[convId]/messages duplicate-state contract", () => {
-  it("adds duplicate-state headers to the message stream response", async () => {
+describe("POST /api/papers/[id]/conversations/[convId]/messages", () => {
+  it("persists assistant metadata and typed artifacts from the shared answer engine", async () => {
     hoisted.requirePaperAccess.mockResolvedValue({
       userId: "user-1",
       paper: {
         id: "paper-1",
-        title: "Conversation paper",
-        fullText: "Full text",
+        title: "Seed paper",
+        fullText: "Some full text",
         abstract: null,
       },
       setDuplicateStateHeaders(response: Response) {
-        response.headers.set("X-Paper-Duplicate-State", "active");
         return response;
       },
     });
@@ -98,32 +100,73 @@ describe("POST /api/papers/[id]/conversations/[convId]/messages duplicate-state 
       modelId: "gpt-test",
       proxyConfig: null,
     });
-    hoisted.chatMessageFindMany.mockResolvedValue([]);
-    hoisted.chatMessageCreate.mockResolvedValue({});
-    hoisted.conversationFindUnique.mockResolvedValue(null);
     hoisted.preparePaperAnswer.mockResolvedValue({
-      intent: "direct_qa",
+      intent: "timeline",
       systemPrompt: "prepared-system",
-      citations: [],
-      artifacts: [],
+      citations: [
+        {
+          paperId: "paper-2",
+          paperTitle: "Paper 2",
+          snippet: "2024: Key advance",
+          sourceKind: "artifact",
+        },
+      ],
+      artifacts: [
+        {
+          kind: "TIMELINE",
+          title: "Idea timeline",
+          payloadJson: "{\"timeline\":[{\"paperId\":\"paper-2\",\"year\":2024,\"keyAdvance\":\"Key advance\"}],\"narrative\":\"narrative\",\"openQuestions\":[]}",
+        },
+      ],
     });
     hoisted.withPaperLlmContext.mockImplementation(async (_context, callback) => callback());
     hoisted.streamLLMResponse.mockResolvedValue({
       text: Promise.resolve("assistant reply"),
-      toTextStreamResponse: () => new Response("message-stream"),
+      toTextStreamResponse: () => new Response("stream"),
     });
+    hoisted.chatMessageCreate
+      .mockResolvedValueOnce({ id: "user-msg" })
+      .mockResolvedValueOnce({ id: "assistant-msg" });
+    hoisted.conversationFindUnique.mockResolvedValue({ id: "conv-1", title: "Timeline chat" });
 
-    const response = await POST(
+    await POST(
       new NextRequest("http://localhost/api/papers/paper-1/conversations/conv-1/messages", {
         method: "POST",
         body: JSON.stringify({
-          messages: [{ role: "user", content: "Explain the method" }],
+          messages: [{ role: "user", content: "Build a timeline" }],
         }),
       }),
       { params: Promise.resolve({ id: "paper-1", convId: "conv-1" }) },
     );
 
-    expect(response.headers.get("X-Paper-Duplicate-State")).toBe("active");
-    expect(await response.text()).toBe("message-stream");
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(hoisted.preparePaperAnswer).toHaveBeenCalledWith(
+      expect.objectContaining({
+        paperId: "paper-1",
+        conversationId: "conv-1",
+        question: "Build a timeline",
+      }),
+    );
+    expect(hoisted.chatMessageCreate).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        data: expect.objectContaining({
+          role: "assistant",
+          metadataJson: expect.stringContaining("\"intent\":\"timeline\""),
+        }),
+      }),
+    );
+    expect(hoisted.conversationArtifactCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          conversationId: "conv-1",
+          messageId: "assistant-msg",
+          kind: "TIMELINE",
+          title: "Idea timeline",
+        }),
+      }),
+    );
   });
 });

@@ -9,6 +9,26 @@ import { Textarea } from "@/components/ui/textarea";
 import { X, Send, Loader2, ArrowUpRight, BookmarkPlus } from "lucide-react";
 import { useNotebook } from "@/hooks/use-notebook";
 import { MarkdownRenderer } from "@/components/ui/markdown-renderer";
+import { ChatMessageSupport } from "./chat-message-support";
+import {
+  parseChatMessageMetadata,
+  type AnswerCitation,
+} from "@/lib/papers/answer-engine";
+
+interface ConversationArtifactRecord {
+  id: string;
+  kind: string;
+  title: string;
+  payloadJson: string;
+}
+
+interface PersistedInlineMessage {
+  id: string;
+  role: string;
+  content: string;
+  metadataJson?: string | null;
+  artifacts?: ConversationArtifactRecord[];
+}
 
 interface InlineChatProps {
   paperId: string;
@@ -37,6 +57,10 @@ export function InlineChat({
   const [input, setInput] = useState("");
   const [sent, setSent] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
+  const [assistantSupport, setAssistantSupport] = useState<{
+    citations?: AnswerCitation[];
+    artifacts?: ConversationArtifactRecord[];
+  } | null>(null);
   const { saveToNotebook, saving: notebookSaving } = useNotebook();
   const cardRef = useRef<HTMLDivElement>(null);
   const initialSent = useRef(false);
@@ -63,6 +87,25 @@ export function InlineChat({
       });
     }
   }, [mode, selectedText, sendMessage]);
+
+  const previousStatus = useRef(status);
+  useEffect(() => {
+    if (previousStatus.current === "streaming" && status === "ready") {
+      void fetch(`/api/papers/${paperId}/conversations/${conversationId}/messages`)
+        .then((response) => response.json())
+        .then((history: PersistedInlineMessage[]) => {
+          const assistant = history.findLast((message) => message.role === "assistant");
+          if (!assistant) return;
+          const metadata = parseChatMessageMetadata(assistant.metadataJson);
+          setAssistantSupport({
+            citations: metadata?.citations,
+            artifacts: assistant.artifacts ?? [],
+          });
+        })
+        .catch(() => {});
+    }
+    previousStatus.current = status;
+  }, [conversationId, paperId, status]);
 
   const handleSend = useCallback(async () => {
     if (!input.trim() || isLoading) return;
@@ -186,6 +229,11 @@ export function InlineChat({
         {responseText && (
           <div className="px-2.5 py-1.5">
             <MarkdownRenderer content={responseText} className="text-xs" />
+            <ChatMessageSupport
+              compact
+              citations={assistantSupport?.citations}
+              artifacts={assistantSupport?.artifacts}
+            />
             {!isLoading && (
               <div className="mt-1.5 flex justify-end">
                 <button

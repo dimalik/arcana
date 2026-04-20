@@ -8,8 +8,11 @@ const hoisted = vi.hoisted(() => ({
   streamLLMResponse: vi.fn(),
   withPaperLlmContext: vi.fn(),
   resolveModelConfig: vi.fn(),
-  getUserContext: vi.fn(),
-  buildUserContextPreamble: vi.fn(() => ""),
+  preparePaperAnswer: vi.fn(),
+  buildChatMessageMetadata: vi.fn((value) => value),
+  serializeChatMessageMetadata: vi.fn(() => "{\"intent\":\"direct_qa\",\"citations\":[]}"),
+  normalizeChatHistory: vi.fn((messages) => messages),
+  extractChatMessageText: vi.fn(() => "Summarize this paper"),
 }));
 
 vi.mock("@/lib/prisma", () => ({
@@ -35,13 +38,15 @@ vi.mock("@/lib/llm/auto-process", () => ({
   resolveModelConfig: hoisted.resolveModelConfig,
 }));
 
-vi.mock("@/lib/llm/prompts", () => ({
-  SYSTEM_PROMPTS: { chat: "system-prompt" },
+vi.mock("@/lib/papers/answer-engine", () => ({
+  preparePaperAnswer: hoisted.preparePaperAnswer,
+  buildChatMessageMetadata: hoisted.buildChatMessageMetadata,
+  serializeChatMessageMetadata: hoisted.serializeChatMessageMetadata,
+  normalizeChatHistory: hoisted.normalizeChatHistory,
 }));
 
-vi.mock("@/lib/llm/user-context", () => ({
-  getUserContext: hoisted.getUserContext,
-  buildUserContextPreamble: hoisted.buildUserContextPreamble,
+vi.mock("@/lib/papers/answer-engine/chat-history", () => ({
+  extractChatMessageText: hoisted.extractChatMessageText,
 }));
 
 vi.mock("@/lib/paper-auth", () => ({
@@ -76,7 +81,12 @@ describe("POST /api/papers/[id]/llm/chat duplicate-state contract", () => {
       modelId: "gpt-test",
       proxyConfig: null,
     });
-    hoisted.getUserContext.mockResolvedValue(null);
+    hoisted.preparePaperAnswer.mockResolvedValue({
+      intent: "direct_qa",
+      systemPrompt: "prepared-system",
+      citations: [],
+      artifacts: [],
+    });
     hoisted.withPaperLlmContext.mockImplementation(async (_context, callback) => callback());
     hoisted.streamLLMResponse.mockResolvedValue({
       text: Promise.resolve("assistant reply"),

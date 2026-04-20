@@ -9,10 +9,11 @@
     "src/app/api/papers/[id]/llm/custom/route.ts": 1,
     "src/app/api/papers/[id]/llm/code/route.ts": 1,
     "src/app/api/papers/[id]/llm/rewrite-section/route.ts": 1,
-    "src/app/api/papers/[id]/distill/route.ts": 1,
-    "src/app/api/papers/[id]/llm/gap-finder/route.ts": 1,
-    "src/app/api/papers/[id]/llm/timeline/route.ts": 1,
-    "src/app/api/papers/[id]/llm/compare-methodologies/route.ts": 1
+    "src/app/api/papers/[id]/distill/route.ts": 1
   },
-  "excludedRoutes": {}
+  "excludedRoutes": {
+    "src/app/api/papers/[id]/llm/gap-finder/route.ts": "provider call is delegated to the shared cross-paper analysis engine",
+    "src/app/api/papers/[id]/llm/timeline/route.ts": "provider call is delegated to the shared cross-paper analysis engine",
+    "src/app/api/papers/[id]/llm/compare-methodologies/route.ts": "provider call is delegated to the shared cross-paper analysis engine"
+  }
 }

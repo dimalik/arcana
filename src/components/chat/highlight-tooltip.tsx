@@ -18,6 +18,11 @@ import {
 } from "lucide-react";
 import { useNotebook } from "@/hooks/use-notebook";
 import { MarkdownRenderer } from "@/components/ui/markdown-renderer";
+import { ChatMessageSupport } from "./chat-message-support";
+import {
+  parseChatMessageMetadata,
+  type AnswerCitation,
+} from "@/lib/papers/answer-engine";
 
 interface ConversationInfo {
   id: string;
@@ -420,6 +425,10 @@ function QuickChatStream({
   mode: "explain" | "chat";
 }) {
   const initialSent = useRef(false);
+  const [assistantSupport, setAssistantSupport] = useState<{
+    citations?: AnswerCitation[];
+    artifacts?: Array<{ id: string; kind: string; title: string; payloadJson: string }>;
+  } | null>(null);
 
   const transport = useMemo(
     () =>
@@ -446,9 +455,29 @@ function QuickChatStream({
   useEffect(() => {
     if (prevStatus.current === "streaming" && status === "ready") {
       window.dispatchEvent(new CustomEvent("paper-highlights-changed"));
+      void fetch(`/api/papers/${paperId}/conversations/${conversationId}/messages`)
+        .then((response) => response.json())
+        .then(
+          (
+            history: Array<{
+              role: string;
+              metadataJson?: string | null;
+              artifacts?: Array<{ id: string; kind: string; title: string; payloadJson: string }>;
+            }>,
+          ) => {
+            const assistant = history.findLast((message) => message.role === "assistant");
+            if (!assistant) return;
+            const metadata = parseChatMessageMetadata(assistant.metadataJson);
+            setAssistantSupport({
+              citations: metadata?.citations,
+              artifacts: assistant.artifacts ?? [],
+            });
+          },
+        )
+        .catch(() => {});
     }
     prevStatus.current = status;
-  }, [status]);
+  }, [conversationId, paperId, status]);
 
   const assistantMessage = messages.find((m) => m.role === "assistant");
   const responseText = assistantMessage
@@ -474,6 +503,11 @@ function QuickChatStream({
   return (
     <div className="max-h-40 overflow-y-auto rounded bg-muted/40 px-2.5 py-1.5 highlight-tooltip-scroll text-xs [&_p]:mb-1 [&_p]:leading-snug [&_h1]:text-sm [&_h2]:text-xs [&_h3]:text-xs [&_ul]:mb-1 [&_ol]:mb-1 [&_pre]:my-1 [&_blockquote]:my-1">
       <MarkdownRenderer content={responseText} className="text-xs" />
+      <ChatMessageSupport
+        compact
+        citations={assistantSupport?.citations}
+        artifacts={assistantSupport?.artifacts}
+      />
       {isLoading && (
         <Loader2 className="inline h-3 w-3 animate-spin text-muted-foreground ml-1" />
       )}

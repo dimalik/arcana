@@ -3,35 +3,22 @@ import { NextRequest } from "next/server";
 
 const hoisted = vi.hoisted(() => ({
   requirePaperAccess: vi.fn(),
-  chatMessageFindMany: vi.fn(),
   chatMessageCreate: vi.fn(),
-  conversationFindUnique: vi.fn(),
-  conversationUpdate: vi.fn(),
-  conversationArtifactCreate: vi.fn(),
   streamLLMResponse: vi.fn(),
   withPaperLlmContext: vi.fn(),
   resolveModelConfig: vi.fn(),
   preparePaperAnswer: vi.fn(),
   buildChatMessageMetadata: vi.fn((value) => value),
-  serializeChatMessageMetadata: vi.fn(() => "{\"intent\":\"direct_qa\",\"citations\":[]}"),
+  serializeChatMessageMetadata: vi.fn(() => "{\"intent\":\"claims\",\"citations\":[{\"paperId\":\"paper-1\",\"paperTitle\":\"Seed\",\"snippet\":\"Claim text\",\"sourceKind\":\"claim\"}]}"),
   normalizeChatHistory: vi.fn((messages) => messages),
-  extractChatMessageText: vi.fn(() => "Explain the method"),
-  trackEngagement: vi.fn(() => Promise.resolve()),
+  extractChatMessageText: vi.fn(() => "What are the key claims?"),
 }));
 
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     chatMessage: {
-      findMany: hoisted.chatMessageFindMany,
       create: hoisted.chatMessageCreate,
-      findFirst: vi.fn(),
-    },
-    conversation: {
-      findUnique: hoisted.conversationFindUnique,
-      update: hoisted.conversationUpdate,
-    },
-    conversationArtifact: {
-      create: hoisted.conversationArtifactCreate,
+      findMany: vi.fn(),
     },
   },
 }));
@@ -41,7 +28,7 @@ vi.mock("@/lib/llm/provider", () => ({
 }));
 
 vi.mock("@/lib/llm/paper-llm-context", () => ({
-  PAPER_INTERACTIVE_LLM_OPERATIONS: { CONVERSATION_MESSAGE: "conversation_message" },
+  PAPER_INTERACTIVE_LLM_OPERATIONS: { CHAT: "paper_chat" },
   withPaperLlmContext: hoisted.withPaperLlmContext,
 }));
 
@@ -49,15 +36,8 @@ vi.mock("@/lib/llm/auto-process", () => ({
   resolveModelConfig: hoisted.resolveModelConfig,
 }));
 
-vi.mock("@/lib/engagement/track", () => ({
-  trackEngagement: hoisted.trackEngagement,
-}));
-
 vi.mock("@/lib/papers/answer-engine", () => ({
   preparePaperAnswer: hoisted.preparePaperAnswer,
-  createConversationArtifact: vi.fn((_db, params) =>
-    hoisted.conversationArtifactCreate({ data: params }),
-  ),
   buildChatMessageMetadata: hoisted.buildChatMessageMetadata,
   serializeChatMessageMetadata: hoisted.serializeChatMessageMetadata,
   normalizeChatHistory: hoisted.normalizeChatHistory,
@@ -70,26 +50,22 @@ vi.mock("@/lib/papers/answer-engine/chat-history", () => ({
 vi.mock("@/lib/paper-auth", () => ({
   requirePaperAccess: hoisted.requirePaperAccess,
   paperAccessErrorToResponse: vi.fn(() => null),
-  jsonWithDuplicateState: vi.fn((access, data, init) => {
-    const response = Response.json(data, init);
-    return access.setDuplicateStateHeaders(response);
-  }),
+  jsonWithDuplicateState: vi.fn(),
 }));
 
 import { POST } from "./route";
 
-describe("POST /api/papers/[id]/conversations/[convId]/messages duplicate-state contract", () => {
-  it("adds duplicate-state headers to the message stream response", async () => {
+describe("POST /api/papers/[id]/llm/chat", () => {
+  it("persists assistant metadata from the shared answer engine", async () => {
     hoisted.requirePaperAccess.mockResolvedValue({
       userId: "user-1",
       paper: {
         id: "paper-1",
-        title: "Conversation paper",
-        fullText: "Full text",
+        title: "Seed",
+        fullText: "Some full text",
         abstract: null,
       },
       setDuplicateStateHeaders(response: Response) {
-        response.headers.set("X-Paper-Duplicate-State", "active");
         return response;
       },
     });
@@ -98,32 +74,55 @@ describe("POST /api/papers/[id]/conversations/[convId]/messages duplicate-state 
       modelId: "gpt-test",
       proxyConfig: null,
     });
-    hoisted.chatMessageFindMany.mockResolvedValue([]);
-    hoisted.chatMessageCreate.mockResolvedValue({});
-    hoisted.conversationFindUnique.mockResolvedValue(null);
     hoisted.preparePaperAnswer.mockResolvedValue({
-      intent: "direct_qa",
+      intent: "claims",
       systemPrompt: "prepared-system",
-      citations: [],
+      citations: [
+        {
+          paperId: "paper-1",
+          paperTitle: "Seed",
+          snippet: "Claim text",
+          sourceKind: "claim",
+        },
+      ],
       artifacts: [],
     });
     hoisted.withPaperLlmContext.mockImplementation(async (_context, callback) => callback());
     hoisted.streamLLMResponse.mockResolvedValue({
       text: Promise.resolve("assistant reply"),
-      toTextStreamResponse: () => new Response("message-stream"),
+      toTextStreamResponse: () => new Response("stream"),
     });
+    hoisted.chatMessageCreate
+      .mockResolvedValueOnce({ id: "user-msg" })
+      .mockResolvedValueOnce({ id: "assistant-msg" });
 
-    const response = await POST(
-      new NextRequest("http://localhost/api/papers/paper-1/conversations/conv-1/messages", {
+    await POST(
+      new NextRequest("http://localhost/api/papers/paper-1/llm/chat", {
         method: "POST",
         body: JSON.stringify({
-          messages: [{ role: "user", content: "Explain the method" }],
+          messages: [{ role: "user", content: "What are the key claims?" }],
         }),
       }),
-      { params: Promise.resolve({ id: "paper-1", convId: "conv-1" }) },
+      { params: Promise.resolve({ id: "paper-1" }) },
     );
 
-    expect(response.headers.get("X-Paper-Duplicate-State")).toBe("active");
-    expect(await response.text()).toBe("message-stream");
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(hoisted.preparePaperAnswer).toHaveBeenCalledWith(
+      expect.objectContaining({
+        paperId: "paper-1",
+        question: "What are the key claims?",
+      }),
+    );
+    expect(hoisted.chatMessageCreate).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        data: expect.objectContaining({
+          role: "assistant",
+          metadataJson: expect.stringContaining("\"intent\":\"claims\""),
+        }),
+      }),
+    );
   });
 });

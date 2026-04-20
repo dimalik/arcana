@@ -537,6 +537,7 @@ model ChatMessage {
   paperId        String
   role           String // user, assistant, system
   content        String
+  metadataJson   String?
   provider       String?
   model          String?
   conversationId String?

@@ -43,8 +43,6 @@ export async function GET(
           : null,
         claims: latestRun?.claims ?? [],
       },
-      undefined,
-      { includeBodyState: true },
     );
   } catch (error) {
     const response = paperAccessErrorToResponse(error);

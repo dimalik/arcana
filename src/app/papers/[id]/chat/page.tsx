@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useState, useRef, useMemo } from "react";
+import { useEffect, useState, useRef, useMemo, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
+import type { UIMessage } from "ai";
 import { useChat } from "@ai-sdk/react";
 import { TextStreamChatTransport } from "ai";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -13,6 +14,11 @@ import { ModelSelector } from "@/components/llm/model-selector";
 import { ArrowLeft, Send, Loader2, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { MarkdownRenderer } from "@/components/ui/markdown-renderer";
+import { ChatMessageSupport } from "@/components/chat/chat-message-support";
+import {
+  parseChatMessageMetadata,
+  type ChatMessageMetadata,
+} from "@/lib/papers/answer-engine";
 
 interface PaperInfo {
   id: string;
@@ -20,6 +26,15 @@ interface PaperInfo {
   fullText: string | null;
   abstract: string | null;
 }
+
+interface PersistedChatMessage {
+  id: string;
+  role: string;
+  content: string;
+  metadataJson?: string | null;
+}
+
+type PaperChatPageMessage = UIMessage<Partial<ChatMessageMetadata>>;
 
 export default function ChatPage() {
   const params = useParams();
@@ -41,11 +56,29 @@ export default function ChatPage() {
     [id, provider, modelId]
   );
 
-  const { messages, sendMessage, status, setMessages } = useChat({
+  const { messages, sendMessage, status, setMessages } = useChat<PaperChatPageMessage>({
     transport,
   });
 
   const isLoading = status === "submitted" || status === "streaming";
+
+  const fetchHistory = useCallback(async () => {
+      const res = await fetch(`/api/papers/${id}/llm/chat`);
+      const history = (await res.json()) as PersistedChatMessage[];
+      if (history.length > 0) {
+        setMessages(
+        history.map((m) => ({
+          id: m.id,
+          role: m.role as "user" | "assistant",
+          metadata: parseChatMessageMetadata(m.metadataJson) ?? undefined,
+          content: m.content,
+          parts: [{ type: "text" as const, text: m.content }],
+          }))
+        );
+      }
+    },
+    [id, setMessages],
+  );
 
   useEffect(() => {
     const fetchPaper = async () => {
@@ -59,25 +92,17 @@ export default function ChatPage() {
       setLoading(false);
     };
 
-    const fetchHistory = async () => {
-      const res = await fetch(`/api/papers/${id}/llm/chat`);
-      const history = await res.json();
-      if (history.length > 0) {
-        setMessages(
-          history.map((m: { id: string; role: string; content: string }) => ({
-            id: m.id,
-            role: m.role as "user" | "assistant",
-            content: m.content,
-            parts: [{ type: "text" as const, text: m.content }],
-          }))
-        );
-      }
-    };
-
     fetchPaper();
-    fetchHistory();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id]);
+    void fetchHistory();
+  }, [fetchHistory, id, router]);
+
+  const previousStatus = useRef(status);
+  useEffect(() => {
+    if (previousStatus.current === "streaming" && status === "ready") {
+      void fetchHistory();
+    }
+    previousStatus.current = status;
+  }, [fetchHistory, status]);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -174,15 +199,18 @@ export default function ChatPage() {
                         }`}
                       >
                         {message.role === "assistant" ? (
-                          <MarkdownRenderer
-                            content={
-                              message.parts
-                                ?.filter((p): p is { type: "text"; text: string } => p.type === "text")
-                                .map((p) => p.text)
-                                .join("") || ""
-                            }
-                            className="text-sm"
-                          />
+                          <>
+                            <MarkdownRenderer
+                              content={
+                                message.parts
+                                  ?.filter((p): p is { type: "text"; text: string } => p.type === "text")
+                                  .map((p) => p.text)
+                                  .join("") || ""
+                              }
+                              className="text-sm"
+                            />
+                            <ChatMessageSupport citations={message.metadata?.citations} />
+                          </>
                         ) : (
                           <p className="text-sm whitespace-pre-wrap">
                             {message.parts

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useRef, useMemo, useCallback } from "react";
+import type { UIMessage } from "ai";
 import { useChat } from "@ai-sdk/react";
 import { TextStreamChatTransport } from "ai";
 import { Button } from "@/components/ui/button";
@@ -21,6 +22,32 @@ import {
 import { useNotebook } from "@/hooks/use-notebook";
 import { MarkdownRenderer } from "@/components/ui/markdown-renderer";
 import { PaperPicker } from "./paper-picker";
+import { ChatMessageSupport } from "./chat-message-support";
+import {
+  parseChatMessageMetadata,
+  type ChatMessageMetadata,
+} from "@/lib/papers/answer-engine";
+
+interface ConversationArtifactRecord {
+  id: string;
+  kind: string;
+  title: string;
+  payloadJson: string;
+}
+
+type PaperChatMessageMetadata = Partial<ChatMessageMetadata> & {
+  artifacts?: ConversationArtifactRecord[];
+};
+
+type PaperChatMessage = UIMessage<PaperChatMessageMetadata>;
+
+interface PersistedConversationMessage {
+  id: string;
+  role: string;
+  content: string;
+  metadataJson?: string | null;
+  artifacts?: ConversationArtifactRecord[];
+}
 
 interface ConversationViewProps {
   paperId: string;
@@ -72,22 +99,20 @@ export function ConversationView({
     [paperId, conversationId]
   );
 
-  const { messages, sendMessage, status, setMessages } = useChat({
+  const { messages, sendMessage, status, setMessages } = useChat<PaperChatMessage>({
     transport,
   });
 
   const isLoading = status === "submitted" || status === "streaming";
 
-  // Load conversation details + history on mount
-  useEffect(() => {
-    const load = async () => {
+  const loadConversation = useCallback(async () => {
       const [historyRes, convRes] = await Promise.all([
         fetch(
           `/api/papers/${paperId}/conversations/${conversationId}/messages`
         ),
         fetch(`/api/papers/${paperId}/conversations/${conversationId}`),
       ]);
-      const history = await historyRes.json();
+      const history = (await historyRes.json()) as PersistedConversationMessage[];
       const conv = await convRes.json();
       setTitle(conv.title || null);
       setReferencedPapers(
@@ -99,9 +124,13 @@ export function ConversationView({
       if (history.length > 0) {
         setMessages(
           history.map(
-            (m: { id: string; role: string; content: string }) => ({
+            (m) => ({
               id: m.id,
               role: m.role as "user" | "assistant",
+              metadata: {
+                ...(parseChatMessageMetadata(m.metadataJson) ?? undefined),
+                ...(m.artifacts?.length ? { artifacts: m.artifacts } : {}),
+              },
               content: m.content,
               parts: [{ type: "text" as const, text: m.content }],
             })
@@ -109,10 +138,21 @@ export function ConversationView({
         );
       }
       setHistoryLoaded(true);
-    };
-    load();
+  }, [conversationId, paperId, setMessages]);
+
+  // Load conversation details + history on mount
+  useEffect(() => {
+    void loadConversation();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [paperId, conversationId]);
+  }, [loadConversation]);
+
+  const previousStatus = useRef(status);
+  useEffect(() => {
+    if (previousStatus.current === "streaming" && status === "ready") {
+      void loadConversation();
+    }
+    previousStatus.current = status;
+  }, [loadConversation, status]);
 
   // Send initial message AFTER history is loaded (fixes race condition)
   useEffect(() => {
@@ -299,6 +339,10 @@ export function ConversationView({
                       <MarkdownRenderer
                         content={messageText}
                         className="text-sm"
+                      />
+                      <ChatMessageSupport
+                        citations={message.metadata?.citations}
+                        artifacts={message.metadata?.artifacts}
                       />
                       <button
                         onClick={() =>
