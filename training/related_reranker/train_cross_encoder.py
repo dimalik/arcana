@@ -482,6 +482,38 @@ def build_training_arguments(args: argparse.Namespace, output_dir: Path) -> Trai
     )
 
 
+def build_trainer(
+    *,
+    model: torch.nn.Module,
+    training_args: TrainingArguments,
+    train_dataset: Dataset,
+    eval_dataset: Dataset,
+    tokenizer: AutoTokenizer,
+    compute_metrics: Any,
+    class_weights: torch.Tensor,
+) -> WeightedSequenceClassificationTrainer:
+    signature = inspect.signature(Trainer.__init__)
+    supported = set(signature.parameters)
+
+    kwargs: Dict[str, Any] = {
+        "model": model,
+        "args": training_args,
+        "train_dataset": train_dataset,
+        "eval_dataset": eval_dataset,
+        "compute_metrics": compute_metrics,
+    }
+
+    if "tokenizer" in supported:
+        kwargs["tokenizer"] = tokenizer
+    elif "processing_class" in supported:
+        kwargs["processing_class"] = tokenizer
+
+    return WeightedSequenceClassificationTrainer(
+        class_weights=class_weights,
+        **kwargs,
+    )
+
+
 def main() -> None:
     args = parse_args()
     set_seed(args.seed)
@@ -523,9 +555,9 @@ def main() -> None:
     output_dir = Path(args.output_dir)
     training_args = build_training_arguments(args, output_dir)
 
-    trainer = WeightedSequenceClassificationTrainer(
+    trainer = build_trainer(
         model=model,
-        args=training_args,
+        training_args=training_args,
         train_dataset=train_dataset,
         eval_dataset=dev_dataset,
         tokenizer=tokenizer,
