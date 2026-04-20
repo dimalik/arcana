@@ -4,6 +4,10 @@ import { z } from "zod";
 import { findAndDownloadPdf } from "@/lib/import/pdf-finder";
 import { processingQueue } from "@/lib/processing/queue";
 import { requireUserId } from "@/lib/paper-auth";
+import {
+  createPaperWithAuthorIndex,
+  serializePaperAuthors,
+} from "@/lib/papers/authors";
 import { handleDuplicatePaperError, resolveEntityForImport } from "@/lib/canonical/import-dedup";
 
 const importSchema = z.object({
@@ -75,12 +79,12 @@ export async function POST(request: NextRequest) {
 
     let paper;
     try {
-      paper = await prisma.paper.create({
+      paper = await createPaperWithAuthorIndex({
         data: {
           title: data.title,
           userId,
           abstract: data.abstract ?? null,
-          authors: data.authors ? JSON.stringify(data.authors) : null,
+          authors: serializePaperAuthors(data.authors),
           year: data.year ?? null,
           venue: data.venue ?? null,
           doi: data.doi ?? null,

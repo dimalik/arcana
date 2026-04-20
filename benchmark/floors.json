@@ -29,9 +29,9 @@
     },
     "search": {
       "dev": {
-        "ndcgAt10": null,
-        "mrrAt10": null,
-        "recallAt20": null
+        "ndcgAt10": 0.85,
+        "mrrAt10": 0.95,
+        "recallAt20": 0.85
       },
       "holdout": {
         "ndcgAt10": null,

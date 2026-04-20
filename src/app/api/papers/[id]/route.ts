@@ -5,6 +5,10 @@ import {
   paperAccessErrorToResponse,
   requirePaperAccess,
 } from "@/lib/paper-auth";
+import {
+  serializePaperAuthors,
+  updatePaperWithAuthorIndex,
+} from "@/lib/papers/authors";
 import { z } from "zod";
 
 const updatePaperSchema = z.object({
@@ -76,13 +80,13 @@ export async function PATCH(
     const data = updatePaperSchema.parse(body);
 
     const updateData: Record<string, unknown> = { ...data };
-    if (data.authors) updateData.authors = JSON.stringify(data.authors);
+    if (data.authors) updateData.authors = serializePaperAuthors(data.authors);
     if (data.keyFindings)
       updateData.keyFindings = JSON.stringify(data.keyFindings);
     if (data.categories)
       updateData.categories = JSON.stringify(data.categories);
 
-    const paper = await prisma.paper.update({
+    const paper = await updatePaperWithAuthorIndex({
       where: { id: params.id },
       data: updateData,
       include: {

@@ -7,6 +7,10 @@ import {
 } from "@/lib/import/openreview";
 import { processingQueue } from "@/lib/processing/queue";
 import { requireUserId } from "@/lib/paper-auth";
+import {
+  createPaperWithAuthorIndex,
+  serializePaperAuthors,
+} from "@/lib/papers/authors";
 import { z } from "zod";
 
 const importSchema = z.object({
@@ -52,14 +56,12 @@ export async function POST(request: NextRequest) {
     }
 
     // Create paper record
-    const paper = await prisma.paper.create({
+    const paper = await createPaperWithAuthorIndex({
       data: {
         title: metadata.title,
         userId,
         abstract: metadata.abstract || null,
-        authors: metadata.authors.length > 0
-          ? JSON.stringify(metadata.authors)
-          : null,
+        authors: serializePaperAuthors(metadata.authors),
         year: metadata.year,
         venue: metadata.venue,
         sourceType: "OPENREVIEW",

@@ -6,6 +6,11 @@ import { requireUserId } from "@/lib/paper-auth";
 import { z } from "zod";
 import { handleDuplicatePaperError, resolveEntityForImport } from "@/lib/canonical/import-dedup";
 import { buildInitialReferenceState } from "@/lib/references/reference-state";
+import {
+  createPaperWithAuthorIndex,
+  serializePaperAuthors,
+} from "@/lib/papers/authors";
+import { searchLibraryPapers } from "@/lib/papers/search";
 import { mergePaperVisibilityWhere } from "@/lib/papers/visibility";
 
 const createPaperSchema = z.object({
@@ -34,7 +39,6 @@ export async function GET(request: NextRequest) {
   const sort = searchParams.get("sort") || "newest";
   const page = parseInt(searchParams.get("page") || "1");
   const limit = parseInt(searchParams.get("limit") || "20");
-  const skip = (page - 1) * limit;
 
   const where: Prisma.PaperWhereInput = mergePaperVisibilityWhere(userId);
 
@@ -88,52 +92,24 @@ export async function GET(request: NextRequest) {
     where.filePath = null;
   }
 
-  const [papers, total] = await Promise.all([
-    prisma.paper.findMany({
-      where,
-      include: {
-        tags: { include: { tag: true } },
-        collections: { include: { collection: true } },
-      },
-      orderBy:
-        sort === "oldest" ? { createdAt: "asc" as const }
-        : sort === "title" ? { title: "asc" as const }
-        : sort === "year" ? { year: "desc" as const }
-        : sort === "engagement" ? { engagementScore: "desc" as const }
-        : { createdAt: "desc" as const },
-      skip,
-      take: limit,
-    }),
-    prisma.paper.count({ where }),
-  ]);
-
-  // When searching, annotate each result with where the match was found and rank
-  let rankedPapers = papers;
-  if (search) {
-    const lower = search.toLowerCase();
-    rankedPapers = papers
-      .map((p) => {
-        const matchFields: string[] = [];
-        if (p.title?.toLowerCase().includes(lower)) matchFields.push("title");
-        if (p.abstract?.toLowerCase().includes(lower)) matchFields.push("abstract");
-        if (p.summary?.toLowerCase().includes(lower)) matchFields.push("summary");
-        if (p.authors?.toLowerCase().includes(lower)) matchFields.push("authors");
-        // Rank: title=0, abstract=1, summary=2, authors=3
-        const rank = matchFields.includes("title") ? 0
-          : matchFields.includes("abstract") ? 1
-          : matchFields.includes("summary") ? 2
-          : 3;
-        return { ...p, matchFields, _rank: rank };
-      })
-      .sort((a, b) => a._rank - b._rank)
-      .map(({ _rank, ...rest }) => rest);
-  }
+  const result = await searchLibraryPapers({
+    userId,
+    queryText: search,
+    where,
+    sort:
+      sort === "oldest" || sort === "title" || sort === "year" || sort === "engagement"
+        ? sort
+        : "newest",
+    page,
+    limit,
+  });
 
   return NextResponse.json({
-    papers: rankedPapers,
-    total,
-    page,
-    totalPages: Math.ceil(total / limit),
+    papers: result.papers,
+    total: result.total,
+    page: result.page,
+    totalPages: result.totalPages,
+    degraded: result.degraded,
   });
 }
 
@@ -159,11 +135,11 @@ export async function POST(request: NextRequest) {
 
     let paper;
     try {
-      paper = await prisma.paper.create({
+      paper = await createPaperWithAuthorIndex({
         data: {
           ...data,
           userId,
-          authors: data.authors ? JSON.stringify(data.authors) : null,
+          authors: serializePaperAuthors(data.authors),
           processingStatus: data.fullText ? "TEXT_EXTRACTED" : "PENDING",
           referenceState: buildInitialReferenceState({
             filePath: data.filePath,

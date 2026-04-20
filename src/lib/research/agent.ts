@@ -75,6 +75,10 @@ import {
 } from "./experiment-convergence";
 import { recoverProjectRemoteResults } from "./result-import";
 import {
+  serializePaperAuthors,
+  syncPaperAuthorIndex,
+} from "@/lib/papers/authors";
+import {
   resolveExperimentContract,
   type ExperimentGrounding,
   type ExperimentPurpose,
@@ -3941,7 +3945,7 @@ function createTools(
                 data: {
                   title: r.title, userId,
                   abstract: r.abstract ?? null,
-                  authors: r.authors ? JSON.stringify(r.authors) : null,
+                  authors: serializePaperAuthors(r.authors),
                   year: r.year ?? null, venue: r.venue ?? null,
                   doi: r.doi ?? null,
                   arxivId: r.arxivId ?? (r.doi?.match(/10\.48550\/arXiv\.(\d+\.\d+)/i)?.[1] || null),
@@ -3951,6 +3955,7 @@ function createTools(
                   isResearchOnly: true,
                 },
               });
+              await syncPaperAuthorIndex(paper.id, paper.authors, tx);
               await tx.collectionPaper.create({ data: { collectionId, paperId: paper.id } });
               return {
                 kind: "created" as const,

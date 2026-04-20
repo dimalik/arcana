@@ -44,6 +44,10 @@ import { refreshTagScores } from "@/lib/tags/cleanup";
 import { recomputeDeterministicRelatednessForPapers } from "../assertions/deterministic-relatedness";
 import { listProjectedTargetPaperIds } from "../assertions/relation-reader";
 import {
+  serializePaperAuthors,
+  updatePaperWithAuthorIndex,
+} from "@/lib/papers/authors";
+import {
   advanceBatchPhase,
   completeBatchRuns,
   createBatchProcessingRuns,
@@ -514,13 +518,13 @@ async function processExtractResult(paperId: string, text: string, modelId: stri
 
     const updateData: Record<string, unknown> = {};
     if (parsed.title) updateData.title = parsed.title;
-    if (parsed.authors) updateData.authors = JSON.stringify(parsed.authors);
+    if (parsed.authors) updateData.authors = serializePaperAuthors(parsed.authors);
     if (parsed.year) updateData.year = parsed.year;
     if (parsed.venue) updateData.venue = parsed.venue;
     if (parsed.abstract) updateData.abstract = parsed.abstract;
     if (parsed.keyFindings) updateData.keyFindings = JSON.stringify(parsed.keyFindings);
     if (Object.keys(updateData).length > 0) {
-      await prisma.paper.update({ where: { id: paperId }, data: updateData });
+      await updatePaperWithAuthorIndex({ where: { id: paperId }, data: updateData });
     }
   } catch (error) {
     console.error(

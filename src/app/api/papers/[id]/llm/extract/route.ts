@@ -8,6 +8,10 @@ import {
 import { buildPrompt, cleanJsonResponse } from "@/lib/llm/prompts";
 import { resolveModelConfig } from "@/lib/llm/auto-process";
 import { paperAccessErrorToResponse, requirePaperAccess } from "@/lib/paper-auth";
+import {
+  serializePaperAuthors,
+  updatePaperWithAuthorIndex,
+} from "@/lib/papers/authors";
 
 export async function POST(
   request: NextRequest,
@@ -68,7 +72,7 @@ export async function POST(
       const parsed = JSON.parse(cleanJsonResponse(result));
       const updateData: Record<string, unknown> = {};
       if (parsed.title) updateData.title = parsed.title;
-      if (parsed.authors) updateData.authors = JSON.stringify(parsed.authors);
+      if (parsed.authors) updateData.authors = serializePaperAuthors(parsed.authors);
       if (parsed.year) updateData.year = parsed.year;
       if (parsed.venue) updateData.venue = parsed.venue;
       if (parsed.abstract) updateData.abstract = parsed.abstract;
@@ -76,7 +80,7 @@ export async function POST(
         updateData.keyFindings = JSON.stringify(parsed.keyFindings);
 
       if (Object.keys(updateData).length > 0) {
-        await prisma.paper.update({
+        await updatePaperWithAuthorIndex({
           where: { id },
           data: updateData,
         });

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireUserId } from "@/lib/paper-auth";
 import { buildInitialReferenceState } from "@/lib/references/reference-state";
+import { createPaperWithAuthorIndex } from "@/lib/papers/authors";
 import { writeFile, mkdir } from "fs/promises";
 import path from "path";
 
@@ -54,7 +55,7 @@ export async function POST(request: NextRequest) {
         if (existing) {
           paperId = existing.id;
         } else {
-          const created = await prisma.paper.create({
+          const created = await createPaperWithAuthorIndex({
             data: {
               userId,
               title: p.title,

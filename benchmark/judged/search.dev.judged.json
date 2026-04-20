@@ -1,42 +1,201 @@
 {
   "task": "search",
   "split": "dev",
-  "status": "draft",
+  "status": "ready",
   "cases": [
     {
       "id": "search-doi-attention-is-all-you-need",
-      "query": "10.5555/3295222.3295349",
+      "query": "10.65215/2q58a426",
       "queryClass": "doi-exact",
-      "judgments": [],
-      "notes": "Exact DOI lookup."
+      "judgments": [
+        {
+          "title": "Attention Is All You Need",
+          "doi": "10.65215/2q58a426",
+          "relevance": 2,
+          "subtopics": ["transformer-foundation"],
+          "notes": "Exact DOI lookup must short-circuit to the indexed paper."
+        }
+      ],
+      "notes": "Library-grounded DOI exact lookup."
     },
     {
-      "id": "search-full-title-bert",
-      "query": "BERT: Pre-training of Deep Bidirectional Transformers for Language Understanding",
+      "id": "search-arxiv-phi-3-technical-report",
+      "query": "2404.14219",
+      "queryClass": "arxiv-exact",
+      "judgments": [
+        {
+          "title": "Phi-3 Technical Report: A Highly Capable Language Model Locally on Your Phone",
+          "arxivId": "2404.14219",
+          "relevance": 2,
+          "subtopics": ["small-language-models", "on-device-llms"],
+          "notes": "Exact arXiv id lookup should return the canonical paper immediately."
+        }
+      ],
+      "notes": "ArXiv exact search case grounded in an active library paper."
+    },
+    {
+      "id": "search-full-title-flashattention-2",
+      "query": "FlashAttention-2: Faster Attention with Better Parallelism and Work Partitioning",
       "queryClass": "full-title",
-      "judgments": [],
-      "notes": "Exact full-title lookup."
+      "judgments": [
+        {
+          "title": "FlashAttention-2: Faster Attention with Better Parallelism and Work Partitioning",
+          "arxivId": "2307.08691",
+          "relevance": 2,
+          "subtopics": ["flashattention-family", "kernel-optimization"]
+        },
+        {
+          "title": "FlashAttention-3: Fast and Accurate Attention with Asynchrony and Low-precision",
+          "relevance": 1,
+          "subtopics": ["flashattention-family", "kernel-optimization"]
+        },
+        {
+          "title": "FlashAttention: Fast and Memory-Efficient Exact Attention with IO-Awareness",
+          "arxivId": "2205.14135",
+          "relevance": 1,
+          "subtopics": ["flashattention-family", "kernel-optimization"]
+        }
+      ],
+      "notes": "Exact full-title query with same-family papers as lower-grade neighbors."
     },
     {
       "id": "search-partial-title-transformer",
       "query": "transformer",
       "queryClass": "partial-title",
-      "judgments": [],
-      "notes": "Hub-title ambiguity case."
+      "judgments": [
+        {
+          "title": "Beyond Attention: Breaking the Limits of Transformer Context Length with Recurrent Memory",
+          "relevance": 2,
+          "subtopics": ["transformer-architecture", "long-context"]
+        },
+        {
+          "title": "Context Compression for Auto-regressive Transformers with Sentinel Tokens",
+          "relevance": 2,
+          "subtopics": ["transformer-architecture", "long-context"]
+        },
+        {
+          "title": "FLatten Transformer: Vision Transformer using Focused Linear Attention",
+          "relevance": 1,
+          "subtopics": ["vision-transformers", "efficient-attention"]
+        },
+        {
+          "title": "An Exploration of Hierarchical Attention Transformers for Efficient Long Document Classification",
+          "relevance": 1,
+          "subtopics": ["long-document", "classification"]
+        },
+        {
+          "title": "Dilated Neighborhood Attention Transformer",
+          "relevance": 1,
+          "subtopics": ["vision-transformers", "efficient-attention"]
+        },
+        {
+          "title": "Layer-Wise Pruning of Transformer Attention Heads for Efficient Language Modeling",
+          "relevance": 1,
+          "subtopics": ["language-modeling", "model-compression"]
+        },
+        {
+          "title": "SWAT: Scalable and Efficient Window Attention-based Transformers Acceleration on FPGAs",
+          "relevance": 1,
+          "subtopics": ["hardware-acceleration", "efficient-transformers"]
+        },
+        {
+          "title": "Ring Attention with Blockwise Transformers for Near-Infinite Context",
+          "relevance": 1,
+          "subtopics": ["transformer-architecture", "long-context"]
+        },
+        {
+          "title": "Diffuser: Efficient Transformers with Multi-hop Attention Diffusion for Long Sequences",
+          "relevance": 1,
+          "subtopics": ["long-context", "efficient-attention"]
+        },
+        {
+          "title": "Hierarchical Transformers for Long Document Classification",
+          "relevance": 1,
+          "subtopics": ["long-document", "classification"]
+        }
+      ],
+      "notes": "Hub-title ambiguity case. Good results should stay inside transformer-family subtopics rather than drifting to generic LLM papers."
     },
     {
-      "id": "search-author-geoffrey-hinton",
-      "query": "Geoffrey Hinton",
+      "id": "search-author-tri-dao",
+      "query": "Tri Dao",
       "queryClass": "author",
-      "judgments": [],
-      "notes": "Author retrieval via normalized join-table path."
+      "judgments": [
+        {
+          "title": "FlashAttention-2: Faster Attention with Better Parallelism and Work Partitioning",
+          "relevance": 2,
+          "subtopics": ["flashattention-family", "kernel-optimization"]
+        },
+        {
+          "title": "FlashAttention-3: Fast and Accurate Attention with Asynchrony and Low-precision",
+          "relevance": 2,
+          "subtopics": ["flashattention-family", "kernel-optimization"]
+        },
+        {
+          "title": "FlashAttention: Fast and Memory-Efficient Exact Attention with IO-Awareness",
+          "relevance": 2,
+          "subtopics": ["flashattention-family", "kernel-optimization"]
+        },
+        {
+          "title": "Hardware-Efficient Attention for Fast Decoding",
+          "relevance": 1,
+          "subtopics": ["efficient-attention", "llm-inference"]
+        },
+        {
+          "title": "MEDUSA: Simple LLM Inference Acceleration Framework with Multiple Decoding Heads",
+          "relevance": 1,
+          "subtopics": ["llm-inference", "decoding"]
+        }
+      ],
+      "notes": "Author lookup via normalized join-table path."
     },
     {
       "id": "search-concept-instruction-tuning",
       "query": "instruction tuning",
       "queryClass": "concept",
-      "judgments": [],
-      "notes": "Concept search case."
+      "judgments": [
+        {
+          "title": "The Flan Collection: Designing Data and Methods for Effective Instruction Tuning",
+          "relevance": 2,
+          "subtopics": ["instruction-tuning", "dataset-design"]
+        },
+        {
+          "title": "Towards Robust Instruction Tuning on Multimodal Large Language Models",
+          "relevance": 2,
+          "subtopics": ["instruction-tuning", "multimodal-llms"]
+        },
+        {
+          "title": "ImageBind-LLM: Multi-modality Instruction Tuning",
+          "relevance": 1,
+          "subtopics": ["instruction-tuning", "multimodal-llms"]
+        },
+        {
+          "title": "LLM-Detector: Improving AI-Generated Chinese Text Detection with Open-Source LLM Instruction Tuning",
+          "relevance": 1,
+          "subtopics": ["instruction-tuning", "text-detection"]
+        },
+        {
+          "title": "BioMistral-NLU: Towards More Generalizable Medical Language Understanding through Instruction Tuning",
+          "relevance": 1,
+          "subtopics": ["instruction-tuning", "domain-adaptation"]
+        },
+        {
+          "title": "LLaDA-V: Large Language Diffusion Models with Visual Instruction Tuning",
+          "relevance": 1,
+          "subtopics": ["instruction-tuning", "multimodal-llms"]
+        },
+        {
+          "title": "Multi-modal Preference Alignment Remedies Degradation of Visual Instruction Tuning on Language Models",
+          "relevance": 1,
+          "subtopics": ["instruction-tuning", "preference-alignment"]
+        },
+        {
+          "title": "MentalQLM: A lightweight large language model for mental healthcare based on instruction tuning and dual LoRA modules",
+          "relevance": 1,
+          "subtopics": ["instruction-tuning", "domain-adaptation"]
+        }
+      ],
+      "notes": "Concept search case with a mix of general, multimodal, and domain-specific instruction-tuning papers."
     }
   ]
 }

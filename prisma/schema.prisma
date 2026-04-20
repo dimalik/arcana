@@ -417,6 +417,7 @@ model Paper {
   claimRuns                      PaperClaimRun[]
   claims                         PaperClaim[]
   representations                PaperRepresentation[]
+  paperAuthors                   PaperAuthor[]
   wonDuplicateCandidates         PaperDuplicateCandidate[]       @relation("DuplicateCandidateWinner")
   lostDuplicateCandidates        PaperDuplicateCandidate[]       @relation("DuplicateCandidateLoser")
 
@@ -710,6 +711,34 @@ model PaperRepresentation {
   @@unique([paperId, representationKind])
   @@index([representationKind, updatedAt])
   @@index([representationKind, sourceFingerprint])
+}
+
+model Author {
+  id                      String   @id @default(uuid())
+  canonicalName           String
+  normalizedName          String   @unique
+  orcid                   String?
+  semanticScholarAuthorId String?
+  createdAt               DateTime @default(now())
+
+  papers PaperAuthor[]
+
+  @@index([normalizedName])
+}
+
+model PaperAuthor {
+  id         String   @id @default(uuid())
+  paperId    String
+  authorId   String
+  orderIndex Int
+  rawName    String
+  createdAt  DateTime @default(now())
+
+  paper  Paper  @relation(fields: [paperId], references: [id], onDelete: Cascade)
+  author Author @relation(fields: [authorId], references: [id], onDelete: Cascade)
+
+  @@unique([paperId, authorId])
+  @@index([authorId, paperId])
 }
 
 model NotebookEntry {

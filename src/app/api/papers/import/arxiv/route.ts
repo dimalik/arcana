@@ -7,6 +7,10 @@ import {
 } from "@/lib/import/arxiv";
 import { processingQueue } from "@/lib/processing/queue";
 import { requireUserId } from "@/lib/paper-auth";
+import {
+  createPaperWithAuthorIndex,
+  serializePaperAuthors,
+} from "@/lib/papers/authors";
 import { z } from "zod";
 import { handleDuplicatePaperError, resolveEntityForImport } from "@/lib/canonical/import-dedup";
 
@@ -55,12 +59,12 @@ export async function POST(request: NextRequest) {
     // Create paper record
     let paper;
     try {
-      paper = await prisma.paper.create({
+      paper = await createPaperWithAuthorIndex({
         data: {
           title: metadata.title,
           userId,
           abstract: metadata.abstract,
-          authors: JSON.stringify(metadata.authors),
+          authors: serializePaperAuthors(metadata.authors),
           year: metadata.year,
           sourceType: "ARXIV",
           sourceUrl: `https://arxiv.org/abs/${arxivId}`,

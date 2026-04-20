@@ -13,6 +13,10 @@ import { buildProjectContext, formatContextForPrompt } from "@/lib/research/cont
 import { searchAllSources } from "@/lib/import/semantic-scholar";
 import { findAndDownloadPdf } from "@/lib/import/pdf-finder";
 import { processingQueue } from "@/lib/processing/queue";
+import {
+  createPaperWithAuthorIndex,
+  serializePaperAuthors,
+} from "@/lib/papers/authors";
 
 // ── Public API ───────────────────────────────────────────────────
 
@@ -190,12 +194,12 @@ async function runSearchPapers(
           // PDF download is optional
         }
 
-        const paper = await prisma.paper.create({
+        const paper = await createPaperWithAuthorIndex({
           data: {
             title: result.title,
             userId,
             abstract: result.abstract ?? null,
-            authors: result.authors ? JSON.stringify(result.authors) : null,
+            authors: serializePaperAuthors(result.authors),
             year: result.year ?? null,
             venue: result.venue ?? null,
             doi: result.doi ?? null,

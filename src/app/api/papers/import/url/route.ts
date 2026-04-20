@@ -8,6 +8,10 @@ import {
 import { processingQueue } from "@/lib/processing/queue";
 import { findAndDownloadPdf } from "@/lib/import/pdf-finder";
 import { requireUserId } from "@/lib/paper-auth";
+import {
+  createPaperWithAuthorIndex,
+  serializePaperAuthors,
+} from "@/lib/papers/authors";
 import { z } from "zod";
 import { buildInitialReferenceState } from "@/lib/references/reference-state";
 
@@ -56,12 +60,12 @@ export async function POST(request: NextRequest) {
           existingPdfUrl: metadata.openAccessPdfUrl,
         });
 
-        const paper = await prisma.paper.create({
+        const paper = await createPaperWithAuthorIndex({
           data: {
             title: metadata.title,
             userId,
             abstract: metadata.abstract,
-            authors: JSON.stringify(metadata.authors),
+            authors: serializePaperAuthors(metadata.authors),
             year: metadata.year,
             venue: metadata.venue,
             doi: metadata.doi,
@@ -104,14 +108,12 @@ export async function POST(request: NextRequest) {
       existingPdfUrl: content.pdfUrl,
     });
 
-    const paper = await prisma.paper.create({
+    const paper = await createPaperWithAuthorIndex({
       data: {
         title: content.title,
         userId,
         abstract: content.excerpt || undefined,
-        authors: content.authors?.length
-          ? JSON.stringify(content.authors)
-          : undefined,
+        authors: serializePaperAuthors(content.authors),
         year: content.year ?? undefined,
         venue: content.siteName || undefined,
         doi: content.doi || undefined,

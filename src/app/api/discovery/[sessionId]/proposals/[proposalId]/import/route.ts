@@ -5,6 +5,10 @@ import { processingQueue } from "@/lib/processing/queue";
 import { findAndDownloadPdf } from "@/lib/import/pdf-finder";
 import { fetchDoiMetadata } from "@/lib/import/url";
 import { requireUserId } from "@/lib/paper-auth";
+import {
+  createPaperWithAuthorIndex,
+  serializePaperAuthors,
+} from "@/lib/papers/authors";
 import { handleDuplicatePaperError, resolveEntityForImport } from "@/lib/canonical/import-dedup";
 
 /**
@@ -70,12 +74,12 @@ export async function POST(
       }
 
       try {
-        paper = await prisma.paper.create({
+        paper = await createPaperWithAuthorIndex({
           data: {
             title: metadata.title,
             userId,
             abstract: metadata.abstract,
-            authors: JSON.stringify(metadata.authors),
+            authors: serializePaperAuthors(metadata.authors),
             year: metadata.year,
             sourceType: "ARXIV",
             sourceUrl: `https://arxiv.org/abs/${proposal.arxivId}`,
@@ -145,7 +149,7 @@ export async function POST(
           : "PENDING";
 
       try {
-        paper = await prisma.paper.create({
+        paper = await createPaperWithAuthorIndex({
           data: {
             title: proposal.title,
             userId,

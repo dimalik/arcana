@@ -35,6 +35,10 @@ import {
 } from "@/lib/processing/runtime-ledger";
 import { runCrossPaperAnalysisCapability } from "@/lib/papers/analysis";
 import {
+  serializePaperAuthors,
+  updatePaperWithAuthorIndex,
+} from "@/lib/papers/authors";
+import {
   categorizeRuntimeOutputSchema,
   detectContradictionsRuntimeOutputSchema,
   distillRuntimeOutputSchema,
@@ -697,7 +701,7 @@ export async function runAutoProcessPipeline(opts: {
 
       const updateData: Record<string, unknown> = {};
       if (parsed.title) updateData.title = parsed.title;
-      if (parsed.authors) updateData.authors = JSON.stringify(parsed.authors);
+      if (parsed.authors) updateData.authors = serializePaperAuthors(parsed.authors);
       if (parsed.year) updateData.year = parsed.year;
       if (parsed.venue) updateData.venue = parsed.venue;
       if (parsed.doi && !paper.doi) updateData.doi = parsed.doi;
@@ -707,7 +711,7 @@ export async function runAutoProcessPipeline(opts: {
         updateData.keyFindings = JSON.stringify(parsed.keyFindings);
 
       if (Object.keys(updateData).length > 0) {
-        await prisma.paper.update({
+        await updatePaperWithAuthorIndex({
           where: { id: paperId },
           data: updateData,
         });

@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import {
+  createPaperWithAuthorIndex,
+  serializePaperAuthors,
+} from "@/lib/papers/authors";
 
 /**
  * POST /api/onboarding/import-seeds
@@ -33,12 +37,12 @@ export async function POST(req: NextRequest) {
     });
     if (existing) continue;
 
-    await prisma.paper.create({
+    await createPaperWithAuthorIndex({
       data: {
         userId: user.id,
         title: p.title,
         abstract: p.abstract || null,
-        authors: Array.isArray(p.authors) ? JSON.stringify(p.authors) : null,
+        authors: serializePaperAuthors(Array.isArray(p.authors) ? p.authors : null),
         year: p.year ? parseInt(String(p.year)) : null,
         venue: p.venue || null,
         doi: p.doi || null,

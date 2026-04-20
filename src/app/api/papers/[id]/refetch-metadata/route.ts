@@ -4,6 +4,10 @@ import { searchByTitle, isFigureOrSupplementDoi } from "@/lib/import/semantic-sc
 import { titleSimilarity } from "@/lib/references/match";
 import { logger } from "@/lib/logger";
 import {
+  serializePaperAuthors,
+  updatePaperWithAuthorIndex,
+} from "@/lib/papers/authors";
+import {
   jsonWithDuplicateState,
   paperAccessErrorToResponse,
   requirePaperAccess,
@@ -61,7 +65,7 @@ export async function POST(
 
     const updateData: Record<string, unknown> = {};
     if (result.abstract) updateData.abstract = result.abstract;
-    if (result.authors?.length) updateData.authors = JSON.stringify(result.authors);
+    if (result.authors?.length) updateData.authors = serializePaperAuthors(result.authors);
     if (result.year) updateData.year = result.year;
     if (result.venue) updateData.venue = result.venue;
     if (result.doi) updateData.doi = result.doi;
@@ -69,7 +73,7 @@ export async function POST(
     if (result.citationCount != null) updateData.citationCount = result.citationCount;
     if (result.externalUrl) updateData.sourceUrl = result.externalUrl;
     if (Object.keys(updateData).length > 0) {
-      await prisma.paper.update({ where: { id }, data: updateData });
+      await updatePaperWithAuthorIndex({ where: { id }, data: updateData });
     }
 
     logger.info(`Re-fetched metadata for "${paper.title}"`, {

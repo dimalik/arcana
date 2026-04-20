@@ -3,6 +3,10 @@ import { prisma } from "@/lib/prisma";
 import { cleanJsonResponse } from "@/lib/llm/prompts";
 import { resolveAndAssignTags } from "@/lib/tags/auto-tag";
 import {
+  serializePaperAuthors,
+  updatePaperWithAuthorIndex,
+} from "@/lib/papers/authors";
+import {
   jsonWithDuplicateState,
   paperAccessErrorToResponse,
   requirePaperAccess,
@@ -52,7 +56,7 @@ export async function POST(
         const parsed = JSON.parse(cleaned);
         const updateData: Record<string, unknown> = {};
         if (parsed.title) updateData.title = parsed.title;
-        if (parsed.authors) updateData.authors = JSON.stringify(parsed.authors);
+        if (parsed.authors) updateData.authors = serializePaperAuthors(parsed.authors);
         if (parsed.year) updateData.year = parsed.year;
         if (parsed.venue) updateData.venue = parsed.venue;
         if (parsed.abstract) updateData.abstract = parsed.abstract;
@@ -60,7 +64,7 @@ export async function POST(
           updateData.keyFindings = JSON.stringify(parsed.keyFindings);
 
         if (Object.keys(updateData).length > 0) {
-          await prisma.paper.update({ where: { id }, data: updateData });
+          await updatePaperWithAuthorIndex({ where: { id }, data: updateData });
         }
         break;
       }

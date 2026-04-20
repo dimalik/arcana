@@ -1,0 +1,716 @@
+{
+  "task": "search",
+  "split": "dev",
+  "retrievalConfig": {
+    "lexicalStages": [
+      "doi_exact",
+      "arxiv_exact",
+      "title_phrase",
+      "author_token",
+      "tag_overlap",
+      "body_text_contains_when_needed"
+    ],
+    "semanticCandidateGeneration": {
+      "representationKind": "shared_raw_features_v1",
+      "strategy": "conditional_shared_feature_hash_dense_retrieval",
+      "enabledWhen": "lexical_seed_count < 8 and query is not identifier/author/broad title"
+    },
+    "rerankerFamily": "feature_reranker_v1",
+    "diversificationStage": "shared_search_diversify_low_lambda",
+    "costP95Usd": 0
+  },
+  "budgets": {
+    "apiP95Ms": 600,
+    "rerankerP95Ms": 400,
+    "candidateCap": 50,
+    "costP95Usd": 0.005,
+    "degradedPath": "feature_reranker"
+  },
+  "floors": {
+    "ndcgAt10": 0.85,
+    "mrrAt10": 0.95,
+    "recallAt20": 0.85
+  },
+  "metrics": {
+    "ndcgAt10": 0.879274,
+    "mrrAt10": 1,
+    "recallAt20": 0.888889
+  },
+  "latencyP95Ms": 173.25425,
+  "degraded": false,
+  "floorChecks": {
+    "ndcgAt10": true,
+    "mrrAt10": true,
+    "recallAt20": true
+  },
+  "caseResults": [
+    {
+      "id": "search-doi-attention-is-all-you-need",
+      "queryClass": "doi-exact",
+      "query": "10.65215/2q58a426",
+      "degraded": false,
+      "latencyMs": 16.724834,
+      "budgetPass": true,
+      "metrics": {
+        "ndcgAt10": 1,
+        "mrrAt10": 1,
+        "recallAt20": 1
+      },
+      "top10": [
+        {
+          "id": "e1fb60a8-7834-4e0e-a98b-db34fb239029",
+          "title": "Attention Is All You Need",
+          "matchFields": [
+            "doi",
+            "summary"
+          ],
+          "searchDiagnostics": {
+            "lexicalMatchKinds": [
+              "doi",
+              "summary"
+            ],
+            "semanticScore": 0,
+            "rerankScore": 1.253017,
+            "diversificationPenalty": 0,
+            "authorIndexHits": 0
+          }
+        }
+      ]
+    },
+    {
+      "id": "search-arxiv-phi-3-technical-report",
+      "queryClass": "arxiv-exact",
+      "query": "2404.14219",
+      "degraded": false,
+      "latencyMs": 16.224292,
+      "budgetPass": true,
+      "metrics": {
+        "ndcgAt10": 1,
+        "mrrAt10": 1,
+        "recallAt20": 1
+      },
+      "top10": [
+        {
+          "id": "6526e73b-7eac-4ab2-8bbd-82eb8f669dac",
+          "title": "Phi-3 Technical Report: A Highly Capable Language Model Locally on Your Phone",
+          "matchFields": [
+            "arxiv"
+          ],
+          "searchDiagnostics": {
+            "lexicalMatchKinds": [
+              "arxiv"
+            ],
+            "semanticScore": 0,
+            "rerankScore": 1.2,
+            "diversificationPenalty": 0,
+            "authorIndexHits": 0
+          }
+        }
+      ]
+    },
+    {
+      "id": "search-full-title-flashattention-2",
+      "queryClass": "full-title",
+      "query": "FlashAttention-2: Faster Attention with Better Parallelism and Work Partitioning",
+      "degraded": false,
+      "latencyMs": 14.7215,
+      "budgetPass": true,
+      "metrics": {
+        "ndcgAt10": 0.726229,
+        "mrrAt10": 1,
+        "recallAt20": 0.333333
+      },
+      "top10": [
+        {
+          "id": "08aea62b-87b4-4ecb-b4ef-8286e34458e5",
+          "title": "FlashAttention-2: Faster Attention with Better Parallelism and Work Partitioning",
+          "matchFields": [
+            "title",
+            "abstract",
+            "summary",
+            "tags"
+          ],
+          "searchDiagnostics": {
+            "lexicalMatchKinds": [
+              "title",
+              "abstract",
+              "summary",
+              "tags"
+            ],
+            "semanticScore": 0,
+            "rerankScore": 1.813735,
+            "diversificationPenalty": 0,
+            "authorIndexHits": 0
+          }
+        }
+      ]
+    },
+    {
+      "id": "search-partial-title-transformer",
+      "queryClass": "partial-title",
+      "query": "transformer",
+      "degraded": false,
+      "latencyMs": 163.611833,
+      "budgetPass": true,
+      "metrics": {
+        "ndcgAt10": 0.772499,
+        "mrrAt10": 1,
+        "recallAt20": 1
+      },
+      "top10": [
+        {
+          "id": "8c968a82-5f0b-4753-a38c-668720e339d4",
+          "title": "FLatten Transformer: Vision Transformer using Focused Linear Attention",
+          "matchFields": [
+            "title",
+            "abstract",
+            "summary",
+            "tags"
+          ],
+          "searchDiagnostics": {
+            "lexicalMatchKinds": [
+              "title",
+              "abstract",
+              "summary",
+              "tags"
+            ],
+            "semanticScore": 0,
+            "rerankScore": 1.02667,
+            "diversificationPenalty": 0,
+            "authorIndexHits": 0
+          }
+        },
+        {
+          "id": "095e4a37-1818-4640-9e2b-fe18b13c6e96",
+          "title": "An Exploration of Hierarchical Attention Transformers for Efficient Long Document Classification",
+          "matchFields": [
+            "title",
+            "abstract",
+            "summary",
+            "tags"
+          ],
+          "searchDiagnostics": {
+            "lexicalMatchKinds": [
+              "title",
+              "abstract",
+              "summary",
+              "tags"
+            ],
+            "semanticScore": 0,
+            "rerankScore": 1.018671,
+            "diversificationPenalty": 0.02,
+            "authorIndexHits": 0
+          }
+        },
+        {
+          "id": "cb7889a4-698b-461c-9921-d2e00ddb2ee5",
+          "title": "Dilated Neighborhood Attention Transformer",
+          "matchFields": [
+            "title",
+            "abstract",
+            "summary",
+            "tags"
+          ],
+          "searchDiagnostics": {
+            "lexicalMatchKinds": [
+              "title",
+              "abstract",
+              "summary",
+              "tags"
+            ],
+            "semanticScore": 0,
+            "rerankScore": 1.020102,
+            "diversificationPenalty": 0.14,
+            "authorIndexHits": 0
+          }
+        },
+        {
+          "id": "f33ce98d-f5e2-49c8-8409-c0550378ff69",
+          "title": "Layer-Wise Pruning of Transformer Attention Heads for Efficient Language Modeling",
+          "matchFields": [
+            "title",
+            "abstract",
+            "summary",
+            "tags"
+          ],
+          "searchDiagnostics": {
+            "lexicalMatchKinds": [
+              "title",
+              "abstract",
+              "summary",
+              "tags"
+            ],
+            "semanticScore": 0,
+            "rerankScore": 1.01,
+            "diversificationPenalty": 0.04,
+            "authorIndexHits": 0
+          }
+        },
+        {
+          "id": "2a73d8d0-26fd-4697-93b4-c1f46c78ba21",
+          "title": "Context Compression for Auto-regressive Transformers with Sentinel Tokens",
+          "matchFields": [
+            "title",
+            "abstract",
+            "summary",
+            "tags"
+          ],
+          "searchDiagnostics": {
+            "lexicalMatchKinds": [
+              "title",
+              "abstract",
+              "summary",
+              "tags"
+            ],
+            "semanticScore": 0,
+            "rerankScore": 1.015375,
+            "diversificationPenalty": 0.18,
+            "authorIndexHits": 0
+          }
+        },
+        {
+          "id": "4e43562b-e73c-4e2f-b106-36ac0df3e5ba",
+          "title": "Beyond Attention: Breaking the Limits of Transformer Context Length with Recurrent Memory",
+          "matchFields": [
+            "title",
+            "abstract",
+            "summary",
+            "tags"
+          ],
+          "searchDiagnostics": {
+            "lexicalMatchKinds": [
+              "title",
+              "abstract",
+              "summary",
+              "tags"
+            ],
+            "semanticScore": 0,
+            "rerankScore": 1.016592,
+            "diversificationPenalty": 0.24,
+            "authorIndexHits": 0
+          }
+        },
+        {
+          "id": "6be9865c-942a-452a-831e-8a5fd24aaece",
+          "title": "SWAT: Scalable and Efficient Window Attention-based Transformers Acceleration on FPGAs",
+          "matchFields": [
+            "title",
+            "abstract",
+            "summary",
+            "tags"
+          ],
+          "searchDiagnostics": {
+            "lexicalMatchKinds": [
+              "title",
+              "abstract",
+              "summary",
+              "tags"
+            ],
+            "semanticScore": 0,
+            "rerankScore": 1.01,
+            "diversificationPenalty": 0.2,
+            "authorIndexHits": 0
+          }
+        },
+        {
+          "id": "c405d1bb-2ea3-4546-a2e7-326d52ebe991",
+          "title": "Ring Attention with Blockwise Transformers for Near-Infinite Context",
+          "matchFields": [
+            "title",
+            "abstract",
+            "summary",
+            "tags"
+          ],
+          "searchDiagnostics": {
+            "lexicalMatchKinds": [
+              "title",
+              "abstract",
+              "summary",
+              "tags"
+            ],
+            "semanticScore": 0,
+            "rerankScore": 1.01,
+            "diversificationPenalty": 0.26,
+            "authorIndexHits": 0
+          }
+        },
+        {
+          "id": "3d9de440-a525-44a1-90c1-8ad29bc2b67e",
+          "title": "Diffuser: Efficient Transformers with Multi-hop Attention Diffusion for Long Sequences",
+          "matchFields": [
+            "title",
+            "abstract",
+            "summary",
+            "tags"
+          ],
+          "searchDiagnostics": {
+            "lexicalMatchKinds": [
+              "title",
+              "abstract",
+              "summary",
+              "tags"
+            ],
+            "semanticScore": 0,
+            "rerankScore": 1.015838,
+            "diversificationPenalty": 0.42,
+            "authorIndexHits": 0
+          }
+        },
+        {
+          "id": "bf9b83ea-e94f-4b73-b886-5cecc9434715",
+          "title": "Hierarchical Transformers for Long Document Classification",
+          "matchFields": [
+            "title",
+            "abstract",
+            "summary",
+            "tags"
+          ],
+          "searchDiagnostics": {
+            "lexicalMatchKinds": [
+              "title",
+              "abstract",
+              "summary",
+              "tags"
+            ],
+            "semanticScore": 0,
+            "rerankScore": 1.01,
+            "diversificationPenalty": 0.44,
+            "authorIndexHits": 0
+          }
+        }
+      ]
+    },
+    {
+      "id": "search-author-tri-dao",
+      "queryClass": "author",
+      "query": "Tri Dao",
+      "degraded": false,
+      "latencyMs": 25.180042,
+      "budgetPass": true,
+      "metrics": {
+        "ndcgAt10": 1,
+        "mrrAt10": 1,
+        "recallAt20": 1
+      },
+      "top10": [
+        {
+          "id": "08aea62b-87b4-4ecb-b4ef-8286e34458e5",
+          "title": "FlashAttention-2: Faster Attention with Better Parallelism and Work Partitioning",
+          "matchFields": [
+            "authors",
+            "abstract",
+            "summary"
+          ],
+          "searchDiagnostics": {
+            "lexicalMatchKinds": [
+              "authors",
+              "abstract",
+              "summary"
+            ],
+            "semanticScore": 0,
+            "rerankScore": 0.804846,
+            "diversificationPenalty": 0,
+            "authorIndexHits": 2
+          }
+        },
+        {
+          "id": "a0131af8-566d-4d73-966d-8b928479c13b",
+          "title": "FlashAttention-3: Fast and Accurate Attention with Asynchrony and Low-precision",
+          "matchFields": [
+            "authors",
+            "summary"
+          ],
+          "searchDiagnostics": {
+            "lexicalMatchKinds": [
+              "authors",
+              "summary"
+            ],
+            "semanticScore": 0,
+            "rerankScore": 0.689273,
+            "diversificationPenalty": 0.2,
+            "authorIndexHits": 2
+          }
+        },
+        {
+          "id": "1543790c-3c77-4b75-b2eb-aacb6de79893",
+          "title": "FlashAttention: Fast and Memory-Efficient Exact Attention with IO-Awareness",
+          "matchFields": [
+            "authors",
+            "summary"
+          ],
+          "searchDiagnostics": {
+            "lexicalMatchKinds": [
+              "authors",
+              "summary"
+            ],
+            "semanticScore": 0,
+            "rerankScore": 0.698381,
+            "diversificationPenalty": 0.4,
+            "authorIndexHits": 2
+          }
+        },
+        {
+          "id": "fcc019f3-4016-4e12-9ace-24206c1e635a",
+          "title": "Hardware-Efficient Attention for Fast Decoding",
+          "matchFields": [
+            "authors",
+            "summary"
+          ],
+          "searchDiagnostics": {
+            "lexicalMatchKinds": [
+              "authors",
+              "summary"
+            ],
+            "semanticScore": 0,
+            "rerankScore": 0.68,
+            "diversificationPenalty": 0.6,
+            "authorIndexHits": 2
+          }
+        },
+        {
+          "id": "325813eb-b70d-4ba4-aaee-1abf781a4bfc",
+          "title": "MEDUSA: Simple LLM Inference Acceleration Framework with Multiple Decoding Heads",
+          "matchFields": [
+            "authors",
+            "summary"
+          ],
+          "searchDiagnostics": {
+            "lexicalMatchKinds": [
+              "authors",
+              "summary"
+            ],
+            "semanticScore": 0,
+            "rerankScore": 0.68,
+            "diversificationPenalty": 0.8,
+            "authorIndexHits": 2
+          }
+        }
+      ]
+    },
+    {
+      "id": "search-concept-instruction-tuning",
+      "queryClass": "concept",
+      "query": "instruction tuning",
+      "degraded": false,
+      "latencyMs": 173.25425,
+      "budgetPass": true,
+      "metrics": {
+        "ndcgAt10": 0.776915,
+        "mrrAt10": 1,
+        "recallAt20": 1
+      },
+      "top10": [
+        {
+          "id": "1fffaeba-af75-492f-8b21-7a9d40757aea",
+          "title": "LLM-Detector: Improving AI-Generated Chinese Text Detection with Open-Source LLM Instruction Tuning",
+          "matchFields": [
+            "title",
+            "abstract",
+            "summary",
+            "tags"
+          ],
+          "searchDiagnostics": {
+            "lexicalMatchKinds": [
+              "title",
+              "abstract",
+              "summary",
+              "tags"
+            ],
+            "semanticScore": 0,
+            "rerankScore": 1.01,
+            "diversificationPenalty": 0,
+            "authorIndexHits": 0
+          }
+        },
+        {
+          "id": "2728a1fd-b23a-4ad2-b469-b08cfa52de94",
+          "title": "ImageBind-LLM: Multi-modality Instruction Tuning",
+          "matchFields": [
+            "title",
+            "abstract",
+            "summary",
+            "tags"
+          ],
+          "searchDiagnostics": {
+            "lexicalMatchKinds": [
+              "title",
+              "abstract",
+              "summary",
+              "tags"
+            ],
+            "semanticScore": 0,
+            "rerankScore": 1.01,
+            "diversificationPenalty": 0.029412,
+            "authorIndexHits": 0
+          }
+        },
+        {
+          "id": "887f3df0-926d-443b-973e-5db275b9c45a",
+          "title": "The Flan Collection: Designing Data and Methods for Effective Instruction Tuning",
+          "matchFields": [
+            "title",
+            "abstract",
+            "summary",
+            "tags"
+          ],
+          "searchDiagnostics": {
+            "lexicalMatchKinds": [
+              "title",
+              "abstract",
+              "summary",
+              "tags"
+            ],
+            "semanticScore": 0,
+            "rerankScore": 1.01,
+            "diversificationPenalty": 0.058824,
+            "authorIndexHits": 0
+          }
+        },
+        {
+          "id": "8a015773-0174-4cc6-b758-296aab618a91",
+          "title": "MentalQLM: A lightweight large language model for mental healthcare based on instruction tuning and dual LoRA modules",
+          "matchFields": [
+            "title",
+            "abstract",
+            "summary",
+            "tags"
+          ],
+          "searchDiagnostics": {
+            "lexicalMatchKinds": [
+              "title",
+              "abstract",
+              "summary",
+              "tags"
+            ],
+            "semanticScore": 0,
+            "rerankScore": 1.01,
+            "diversificationPenalty": 0.088235,
+            "authorIndexHits": 0
+          }
+        },
+        {
+          "id": "d8128ca8-d16c-428f-be3b-e630fbd0aa5c",
+          "title": "BioMistral-NLU: Towards More Generalizable Medical Language Understanding through Instruction Tuning",
+          "matchFields": [
+            "title",
+            "abstract",
+            "summary"
+          ],
+          "searchDiagnostics": {
+            "lexicalMatchKinds": [
+              "title",
+              "abstract",
+              "summary"
+            ],
+            "semanticScore": 0,
+            "rerankScore": 0.922079,
+            "diversificationPenalty": 0.117647,
+            "authorIndexHits": 0
+          }
+        },
+        {
+          "id": "a5f43c09-5fda-45aa-bff0-62c6af8122d2",
+          "title": "LLaDA-V: Large Language Diffusion Models with Visual Instruction Tuning",
+          "matchFields": [
+            "title",
+            "abstract",
+            "summary"
+          ],
+          "searchDiagnostics": {
+            "lexicalMatchKinds": [
+              "title",
+              "abstract",
+              "summary"
+            ],
+            "semanticScore": 0,
+            "rerankScore": 0.92,
+            "diversificationPenalty": 0.147059,
+            "authorIndexHits": 0
+          }
+        },
+        {
+          "id": "0a7bd9b9-4b94-4b86-b9e6-84f784e6b15d",
+          "title": "Towards Robust Instruction Tuning on Multimodal Large Language Models",
+          "matchFields": [
+            "title",
+            "abstract",
+            "summary"
+          ],
+          "searchDiagnostics": {
+            "lexicalMatchKinds": [
+              "title",
+              "abstract",
+              "summary"
+            ],
+            "semanticScore": 0,
+            "rerankScore": 0.92,
+            "diversificationPenalty": 0.176471,
+            "authorIndexHits": 0
+          }
+        },
+        {
+          "id": "da24639c-4ea2-44cd-b2d8-674d898c1f19",
+          "title": "Fine-Tuning Causal LLMs for Text Classification: Embedding-Based vs. Instruction-Based Approaches",
+          "matchFields": [
+            "abstract",
+            "summary",
+            "title"
+          ],
+          "searchDiagnostics": {
+            "lexicalMatchKinds": [
+              "abstract",
+              "summary",
+              "title"
+            ],
+            "semanticScore": 0,
+            "rerankScore": 0.92,
+            "diversificationPenalty": 0.205882,
+            "authorIndexHits": 0
+          }
+        },
+        {
+          "id": "8228f061-69ff-49b0-ad96-1e0464f2a833",
+          "title": "Multi-modal Preference Alignment Remedies Degradation of Visual Instruction Tuning on Language Models",
+          "matchFields": [
+            "title",
+            "abstract",
+            "summary"
+          ],
+          "searchDiagnostics": {
+            "lexicalMatchKinds": [
+              "title",
+              "abstract",
+              "summary"
+            ],
+            "semanticScore": 0,
+            "rerankScore": 0.92,
+            "diversificationPenalty": 0.235294,
+            "authorIndexHits": 0
+          }
+        },
+        {
+          "id": "047a0fdf-38e8-4315-8e28-848f68ebe848",
+          "title": "Improving Low-Resource Translation with Dictionary-Guided Fine-Tuning and RL: A Spanish-to-Wayuunaiki Study",
+          "matchFields": [
+            "abstract",
+            "summary",
+            "title",
+            "tags"
+          ],
+          "searchDiagnostics": {
+            "lexicalMatchKinds": [
+              "abstract",
+              "summary",
+              "title",
+              "tags"
+            ],
+            "semanticScore": 0,
+            "rerankScore": 0.615,
+            "diversificationPenalty": 0.264706,
+            "authorIndexHits": 0
+          }
+        }
+      ]
+    }
+  ]
+}

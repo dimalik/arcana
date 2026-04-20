@@ -10,6 +10,10 @@ import {
   paperAccessErrorToResponse,
   requirePaperAccess,
 } from "@/lib/paper-auth";
+import {
+  createPaperWithAuthorIndex,
+  serializePaperAuthors,
+} from "@/lib/papers/authors";
 import { writeFile, mkdir } from "fs/promises";
 import path from "path";
 import { v4 as uuidv4 } from "uuid";
@@ -103,12 +107,12 @@ export async function POST(
       }
 
       try {
-        paper = await prisma.paper.create({
+        paper = await createPaperWithAuthorIndex({
           data: {
             title: metadata.title,
             userId,
             abstract: metadata.abstract,
-            authors: JSON.stringify(metadata.authors),
+            authors: serializePaperAuthors(metadata.authors),
             year: metadata.year,
             sourceType: "ARXIV",
             sourceUrl: `https://arxiv.org/abs/${reference.arxivId}`,
@@ -179,11 +183,13 @@ export async function POST(
       }
 
       try {
-        paper = await prisma.paper.create({
+        paper = await createPaperWithAuthorIndex({
           data: {
             title: reference.title,
             userId,
-            authors: reference.authors || JSON.stringify(authors),
+            authors:
+              reference.authors
+              || serializePaperAuthors(authors),
             year: reference.year,
             venue: reference.venue,
             doi: reference.doi,
@@ -239,11 +245,13 @@ export async function POST(
 
       // Create minimal paper record from reference metadata
       try {
-        paper = await prisma.paper.create({
+        paper = await createPaperWithAuthorIndex({
           data: {
             title: reference.title,
             userId,
-            authors: reference.authors || JSON.stringify(authors),
+            authors:
+              reference.authors
+              || serializePaperAuthors(authors),
             year: reference.year,
             venue: reference.venue,
             doi: reference.doi,
