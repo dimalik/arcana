@@ -1,0 +1,42 @@
+{
+  "task": "search",
+  "split": "dev",
+  "status": "draft",
+  "cases": [
+    {
+      "id": "search-doi-attention-is-all-you-need",
+      "query": "10.5555/3295222.3295349",
+      "queryClass": "doi-exact",
+      "judgments": [],
+      "notes": "Exact DOI lookup."
+    },
+    {
+      "id": "search-full-title-bert",
+      "query": "BERT: Pre-training of Deep Bidirectional Transformers for Language Understanding",
+      "queryClass": "full-title",
+      "judgments": [],
+      "notes": "Exact full-title lookup."
+    },
+    {
+      "id": "search-partial-title-transformer",
+      "query": "transformer",
+      "queryClass": "partial-title",
+      "judgments": [],
+      "notes": "Hub-title ambiguity case."
+    },
+    {
+      "id": "search-author-geoffrey-hinton",
+      "query": "Geoffrey Hinton",
+      "queryClass": "author",
+      "judgments": [],
+      "notes": "Author retrieval via normalized join-table path."
+    },
+    {
+      "id": "search-concept-instruction-tuning",
+      "query": "instruction tuning",
+      "queryClass": "concept",
+      "judgments": [],
+      "notes": "Concept search case."
+    }
+  ]
+}

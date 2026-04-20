@@ -1,0 +1,10 @@
+{
+  "matcherVersion": "1.0.0",
+  "spanIouWeight": 0.45,
+  "textSimWeight": 0.35,
+  "fieldAgreementWeight": 0.2,
+  "assignmentMatchThreshold": 0.55,
+  "textSimilarity": {
+    "mode": "edit_distance_ratio"
+  }
+}

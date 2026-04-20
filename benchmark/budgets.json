@@ -1,0 +1,22 @@
+{
+  "search": {
+    "apiP95Ms": 600,
+    "rerankerP95Ms": 400,
+    "candidateCap": 50,
+    "costP95Usd": 0.005,
+    "degradedPath": "feature_reranker"
+  },
+  "related": {
+    "cacheP95Ms": 1500,
+    "candidateCap": 200,
+    "costP95UsdAmortized": 0.02,
+    "cacheTtlDays": 7,
+    "degradedPath": "deterministic_relatedness"
+  },
+  "recommendations": {
+    "freshnessSlaHours": 24,
+    "readP95Ms": 200,
+    "costP95UsdPerUserDay": 0.1,
+    "degradedPath": "previous_cached_ranking"
+  }
+}

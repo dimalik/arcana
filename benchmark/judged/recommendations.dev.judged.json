@@ -1,0 +1,67 @@
+{
+  "task": "recommendations",
+  "split": "dev",
+  "status": "draft",
+  "cases": [
+    {
+      "id": "recommendations-single-interest-transformers",
+      "caseClass": "single-interest",
+      "profileDescription": "Library centered on foundational transformer and language-model papers.",
+      "seedPapers": [
+        {
+          "title": "Attention Is All You Need"
+        },
+        {
+          "title": "BERT: Pre-training of Deep Bidirectional Transformers for Language Understanding"
+        }
+      ],
+      "judgments": [],
+      "notes": "Should produce useful adjacent work without repeating the same clique."
+    },
+    {
+      "id": "recommendations-multi-interest-multimodal-plus-retrieval",
+      "caseClass": "multi-interest",
+      "profileDescription": "Library spans multimodal models and retrieval-augmented generation.",
+      "seedPapers": [
+        {
+          "title": "Learning Transferable Visual Models From Natural Language Supervision"
+        },
+        {
+          "title": "Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks"
+        }
+      ],
+      "judgments": [],
+      "notes": "Tests multi-interest blending."
+    },
+    {
+      "id": "recommendations-hub-heavy-foundation-models",
+      "caseClass": "hub-heavy",
+      "profileDescription": "Library is dominated by highly cited foundation-model papers.",
+      "seedPapers": [
+        {
+          "title": "Attention Is All You Need"
+        },
+        {
+          "title": "BERT: Pre-training of Deep Bidirectional Transformers for Language Understanding"
+        },
+        {
+          "title": "Language Models are Few-Shot Learners"
+        }
+      ],
+      "judgments": [],
+      "notes": "Should not devolve into only the most popular hubs."
+    },
+    {
+      "id": "recommendations-new-to-field-efficient-llms",
+      "caseClass": "new-to-field",
+      "profileDescription": "User is new to efficient language models and needs strong starting points.",
+      "seedPapers": [
+        {
+          "title": "LoRA: Low-Rank Adaptation of Large Language Models"
+        }
+      ],
+      "judgments": [],
+      "notes": "Should balance relevance with onboarding novelty."
+    }
+  ]
+}

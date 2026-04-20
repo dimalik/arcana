@@ -1,0 +1,34 @@
+{
+  "task": "claims",
+  "split": "dev",
+  "status": "draft",
+  "cases": [
+    {
+      "id": "claims-attention-is-all-you-need",
+      "domain": "nlp",
+      "paper": {
+        "title": "Attention Is All You Need"
+      },
+      "judgments": [],
+      "notes": "Hub paper for extraction quality and evaluation-context fidelity."
+    },
+    {
+      "id": "claims-bert",
+      "domain": "nlp",
+      "paper": {
+        "title": "BERT: Pre-training of Deep Bidirectional Transformers for Language Understanding"
+      },
+      "judgments": [],
+      "notes": "Pretraining paper with mixed methodology and evaluation claims."
+    },
+    {
+      "id": "claims-alphafold",
+      "domain": "biology",
+      "paper": {
+        "title": "Highly accurate protein structure prediction with AlphaFold"
+      },
+      "judgments": [],
+      "notes": "Non-CS paper to keep the benchmark from collapsing into one domain."
+    }
+  ]
+}

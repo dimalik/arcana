@@ -1,0 +1,57 @@
+{
+  "status": "draft",
+  "tasks": {
+    "claims": {
+      "dev": {
+        "claimF1": null,
+        "rhetoricalRoleAccuracy": null,
+        "evaluationContextRecall": null
+      },
+      "holdout": {
+        "claimF1": null,
+        "rhetoricalRoleAccuracy": null,
+        "evaluationContextRecall": null
+      }
+    },
+    "relatedPapers": {
+      "dev": {
+        "ndcgAt10": null,
+        "recallAt20": null,
+        "ilsAt10": null,
+        "subtopicCoverageAt10": null
+      },
+      "holdout": {
+        "ndcgAt10": null,
+        "recallAt20": null,
+        "ilsAt10": null,
+        "subtopicCoverageAt10": null
+      }
+    },
+    "search": {
+      "dev": {
+        "ndcgAt10": null,
+        "mrrAt10": null,
+        "recallAt20": null
+      },
+      "holdout": {
+        "ndcgAt10": null,
+        "mrrAt10": null,
+        "recallAt20": null
+      }
+    },
+    "recommendations": {
+      "dev": {
+        "ndcgAt10": null,
+        "noveltyAt10": null,
+        "ilsAt10": null,
+        "subtopicCoverageAt10": null
+      },
+      "holdout": {
+        "ndcgAt10": null,
+        "noveltyAt10": null,
+        "ilsAt10": null,
+        "subtopicCoverageAt10": null
+      }
+    }
+  }
+}

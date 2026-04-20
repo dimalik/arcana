@@ -1,0 +1,9 @@
+{
+  "task": "related-papers",
+  "split": "dev",
+  "status": "draft",
+  "agreementMetric": "cohen_kappa",
+  "agreementValue": null,
+  "annotatorsPerCase": 2,
+  "adjudicatedCaseCount": 0
+}

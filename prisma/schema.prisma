@@ -416,6 +416,7 @@ model Paper {
   processingStepRuns             ProcessingStepRun[]
   claimRuns                      PaperClaimRun[]
   claims                         PaperClaim[]
+  representations                PaperRepresentation[]
   wonDuplicateCandidates         PaperDuplicateCandidate[]       @relation("DuplicateCandidateWinner")
   lostDuplicateCandidates        PaperDuplicateCandidate[]       @relation("DuplicateCandidateLoser")
 
@@ -689,6 +690,26 @@ model ConversationArtifact {
 
   @@index([conversationId, createdAt])
   @@index([messageId])
+}
+
+model PaperRepresentation {
+  id                 String   @id @default(uuid())
+  paperId            String
+  representationKind String
+  encoderVersion     String
+  sourceFingerprint  String
+  dimensions         Int
+  featureText        String
+  vectorJson         String
+  metadataJson       String?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  paper Paper @relation(fields: [paperId], references: [id], onDelete: Cascade)
+
+  @@unique([paperId, representationKind])
+  @@index([representationKind, updatedAt])
+  @@index([representationKind, sourceFingerprint])
 }
 
 model NotebookEntry {

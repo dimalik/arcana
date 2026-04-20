@@ -28,6 +28,8 @@
     "check:paper-visibility": "node --import tsx scripts/check-paper-visibility.mjs",
     "check:paper-api-duplicate-state": "node --import tsx scripts/check-paper-api-duplicate-state.mjs",
     "check:concepts-removed": "node --import tsx scripts/check-concepts-removed.mjs",
+    "check:holdout-leak": "node --import tsx scripts/benchmark/check-holdout-leak.mjs",
+    "benchmark:judged:validate": "node --import tsx scripts/benchmark/run-judged.mjs --split dev",
     "check:experiment-integrity": "node scripts/check-experiment-integrity.js",
     "trace": "node scripts/dump-agent-trace.js",
     "project:activity": "node scripts/show-project-activity.js",

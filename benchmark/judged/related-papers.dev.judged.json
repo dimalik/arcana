@@ -1,0 +1,43 @@
+{
+  "task": "related-papers",
+  "split": "dev",
+  "status": "draft",
+  "cases": [
+    {
+      "id": "related-hub-attention-is-all-you-need",
+      "caseClass": "hub",
+      "seed": {
+        "title": "Attention Is All You Need"
+      },
+      "judgments": [],
+      "notes": "Primary anti-hub collapse case."
+    },
+    {
+      "id": "related-niche-pointer-sentinel-mixture-models",
+      "caseClass": "niche",
+      "seed": {
+        "title": "Pointer Sentinel Mixture Models"
+      },
+      "judgments": [],
+      "notes": "Low-degree seed to test recall."
+    },
+    {
+      "id": "related-ambiguous-transformer",
+      "caseClass": "ambiguous-title",
+      "seed": {
+        "title": "Transformer"
+      },
+      "judgments": [],
+      "notes": "Ambiguous-title seed for sense disambiguation."
+    },
+    {
+      "id": "related-cross-community-clip",
+      "caseClass": "cross-community",
+      "seed": {
+        "title": "Learning Transferable Visual Models From Natural Language Supervision"
+      },
+      "judgments": [],
+      "notes": "Should bridge vision, language, and multimodal retrieval communities."
+    }
+  ]
+}
