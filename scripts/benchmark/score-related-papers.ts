@@ -3,7 +3,10 @@ import path from "path";
 
 import { prisma } from "@/lib/prisma";
 import { listRelationsForPaper } from "@/lib/assertions/relation-reader";
-import { buildRelatedRerankResult } from "@/lib/papers/retrieval/related-ranker";
+import {
+  buildRelatedRerankResult,
+  type RelatedRerankerBackendId,
+} from "@/lib/papers/retrieval/related-ranker";
 import {
   SHARED_RAW_PAPER_REPRESENTATION_KIND,
   cosineSimilarity,
@@ -160,9 +163,19 @@ async function resolvePaper(locator: {
 
 async function main() {
   const argv = process.argv.slice(2);
+  const backendId = (valueFor(argv, "--backend") ??
+    process.env.ARCANA_RELATED_RERANKER_BACKEND ??
+    "feature_v1") as RelatedRerankerBackendId;
   const outPath =
     valueFor(argv, "--out") ??
-    path.join(process.cwd(), "benchmark", "scored", "related-papers.dev.scored.json");
+    path.join(
+      process.cwd(),
+      "benchmark",
+      "scored",
+      backendId === "feature_v1"
+        ? "related-papers.dev.scored.json"
+        : `related-papers.dev.${backendId}.scored.json`,
+    );
 
   const judgedSet = relatedJudgedSetSchema.parse(
     JSON.parse(
@@ -202,6 +215,8 @@ async function main() {
       seedPaper.id,
       seedPaper.userId,
       baselineInputRows,
+      prisma,
+      { backendId },
     );
     const elapsedMs = round(performance.now() - startedAt);
 
@@ -265,6 +280,7 @@ async function main() {
   const summary = {
     task: "related-papers",
     split: "dev",
+    requestedBackendId: backendId,
     backend: caseResults[0]?.reranked.backend ?? null,
     budgets: budgets.related,
     floors: floors.tasks.relatedPapers.dev,

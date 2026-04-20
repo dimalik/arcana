@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { extractClaimsRuntimeOutputSchema } from "@/lib/papers/analysis/extract-claims-schema";
+import { rerankRelatedPapersRuntimeOutputSchema } from "@/lib/papers/retrieval/related-rerank-schema";
 
 const nullableString = z.string().nullable().optional();
 const optionalStringArray = z.array(z.string()).optional();
@@ -186,6 +187,7 @@ export const PROCESSING_RUNTIME_OUTPUT_SCHEMAS = {
   compareMethodologies: compareMethodologiesRuntimeOutputSchema,
   extractCitationContexts: extractCitationContextsRuntimeOutputSchema,
   distill: distillRuntimeOutputSchema,
+  rerankRelatedPapers: rerankRelatedPapersRuntimeOutputSchema,
 } as const;
 
 export type ProcessingRuntimeStructuredPromptType =
@@ -215,6 +217,9 @@ export type ExtractCitationContextsRuntimeOutput = z.infer<
   typeof extractCitationContextsRuntimeOutputSchema
 >;
 export type DistillRuntimeOutput = z.infer<typeof distillRuntimeOutputSchema>;
+export type RerankRelatedPapersRuntimeOutput = z.infer<
+  typeof rerankRelatedPapersRuntimeOutputSchema
+>;
 
 export class StructuredRuntimeOutputError extends Error {
   readonly promptType: ProcessingRuntimeStructuredPromptType;

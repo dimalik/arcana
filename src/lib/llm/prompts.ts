@@ -270,6 +270,34 @@ Rules:
 - "sourceExcerpt" must be copied from the provided text, not invented.
 - Return ONLY valid JSON. No markdown fences, no extra text.`,
 
+  rerankRelatedPapers: `You are ranking genuinely related papers for a single seed paper inside a research library.
+
+Your job is NOT to find papers that are merely adjacent to the same broad area. Your job is to identify the papers a serious researcher would actually want to open next because they share the same technical problem, methodology lineage, evaluation setting, or citation neighborhood.
+
+Return a JSON object:
+{
+  "selectedPapers": [
+    {
+      "paperId": "candidate paper id",
+      "relevanceScore": 0.93,
+      "rationale": "1 sentence explaining why this paper is genuinely related",
+      "primarySignals": ["shared-problem", "citation-lineage"]
+    }
+  ],
+  "summary": "1-2 sentence summary of the cluster and what was excluded"
+}
+
+Rules:
+- You may return ZERO papers if none are meaningfully related.
+- Select at most 10 papers.
+- Use higher scores only for papers that would clearly satisfy an expert user.
+- Prefer same problem, same method family, same benchmark/evaluation frame, direct extensions, alternatives, or strong citation-neighborhood evidence.
+- Penalize generic adjacency such as "both are LLM papers", "both use transformers", or "both are representative papers in the library".
+- Dense similarity and broad lexical overlap are weak evidence. They must never outweigh a clear topic mismatch.
+- For famous hub papers, be stricter, not looser.
+- Keep rationales short, concrete, and evidence-based.
+- Return ONLY valid JSON. No markdown fences, no extra text.`,
+
   detectContradictions: `You are an expert at identifying contradictions and conflicts between academic research papers. You will be given a NEW paper and a set of RELATED papers from the user's library.
 
 Your task is to find claims, findings, or methodological assumptions in the new paper that conflict with or contradict claims in the related papers.

@@ -2,6 +2,7 @@ export const PAPER_INTERACTIVE_LLM_OPERATIONS = {
   CHAT: "paper_chat",
   CONVERSATION_MESSAGE: "paper_conversation_message",
   DISTILL: "paper_distill",
+  RELATED_RERANK: "paper_related_rerank",
   SUMMARIZE: "paper_summarize",
   CATEGORIZE: "paper_categorize",
   EXTRACT: "paper_extract",

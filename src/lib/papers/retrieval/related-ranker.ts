@@ -6,6 +6,10 @@ import {
   type DeterministicSignalName,
 } from "../../assertions/deterministic-relatedness";
 import type { GraphRelationRow } from "../../assertions/relation-reader";
+import { getDefaultModel } from "../../llm/auto-process";
+import { PAPER_INTERACTIVE_LLM_OPERATIONS, withPaperLlmContext } from "../../llm/paper-llm-context";
+import { SYSTEM_PROMPTS } from "../../llm/prompts";
+import { generateStructuredObject } from "../../llm/provider";
 
 import {
   SHARED_RAW_PAPER_REPRESENTATION_KIND,
@@ -17,6 +21,10 @@ import {
   upsertSharedPaperRepresentation,
 } from "./embeddings";
 import { diversifyCandidates } from "./diversify";
+import {
+  rerankRelatedPapersRuntimeOutputSchema,
+  type RelatedPaperListwiseSelection,
+} from "./related-rerank-schema";
 
 type RelatedRerankDb = Pick<
   typeof prisma,
@@ -73,7 +81,26 @@ export interface RelatedRerankResult {
   diagnostics: RelatedRerankCandidateDiagnostics[];
 }
 
-export type RelatedRerankerBackendId = "baseline_v1" | "feature_v1";
+interface PreparedFeatureRelatedRerankState {
+  baselineRows: GraphRelationRow[];
+  seedPaper: RelatedPaperContext | null;
+  paperContexts: Map<string, RelatedPaperContext>;
+  representationMap: Map<
+    string,
+    {
+      vector: number[];
+      metadata: ReturnType<typeof parsePaperRepresentationMetadata>;
+    }
+  >;
+  candidateRows: GraphRelationRow[];
+  diagnostics: RelatedRerankCandidateDiagnostics[];
+  diagnosticsByPaperId: Map<string, RelatedRerankCandidateDiagnostics>;
+}
+
+export type RelatedRerankerBackendId =
+  | "baseline_v1"
+  | "feature_v1"
+  | "llm_listwise_v1";
 
 export type RelatedRerankerFamily =
   | "baseline"
@@ -123,6 +150,10 @@ const RELATED_SIGNAL_WEIGHTS = {
 
 const RELATED_RERANK_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const RELATED_RERANK_CACHE_VERSION = "2026-04-20-hub-filter-v3";
+const RELATED_LLM_LISTWISE_CANDIDATE_LIMIT = 16;
+const RELATED_LLM_LISTWISE_RESULT_LIMIT = 8;
+const RELATED_LLM_LISTWISE_MAX_TOKENS = 2_200;
+const RELATED_LLM_ABSTRACT_SNIPPET_CHARS = 260;
 const relatedRerankCache = new Map<
   string,
   { expiresAt: number; result: RelatedRerankResult }
@@ -230,6 +261,17 @@ function normalizeText(value: string | null | undefined): string {
     .replace(/[^a-z0-9\s]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function truncateSnippet(
+  value: string | null | undefined,
+  maxChars = RELATED_LLM_ABSTRACT_SNIPPET_CHARS,
+): string | null {
+  if (!value) return null;
+  const normalized = normalizeWhitespace(value);
+  if (!normalized) return null;
+  if (normalized.length <= maxChars) return normalized;
+  return `${normalized.slice(0, maxChars - 1).trimEnd()}…`;
 }
 
 function tokenizeInformativeText(value: string | null | undefined): string[] {
@@ -475,6 +517,13 @@ function describeRelatedRerankerBackend(
     };
   }
 
+  if (backendId === "llm_listwise_v1") {
+    return {
+      id: "llm_listwise_v1",
+      family: "llm-listwise",
+    };
+  }
+
   return {
     id: "feature_v1",
     family: "feature-ranker",
@@ -484,7 +533,9 @@ function describeRelatedRerankerBackend(
 export function resolveRelatedRerankerBackendId(
   value: string | null | undefined = process.env.ARCANA_RELATED_RERANKER_BACKEND,
 ): RelatedRerankerBackendId {
-  return value === "baseline_v1" ? "baseline_v1" : "feature_v1";
+  if (value === "baseline_v1") return "baseline_v1";
+  if (value === "llm_listwise_v1") return "llm_listwise_v1";
+  return "feature_v1";
 }
 
 function normalizeCitationPrior(
@@ -1030,21 +1081,52 @@ async function buildFeatureRelatedRerankResult(
   db: RelatedRerankDb = prisma,
 ): Promise<RelatedRerankResult> {
   const baselineRows = sortRelatedRowsBaseline(rows);
-
   const cacheKey = buildCacheKey("feature_v1", paperId, userId, baselineRows);
   const cached = relatedRerankCache.get(cacheKey);
   if (cached && cached.expiresAt > Date.now()) {
     return cached.result;
   }
 
-  const seedPaperMap = await loadPaperContexts([paperId], db);
-  const seedPaper = seedPaperMap.get(paperId);
-  if (!seedPaper) {
+  const prepared = await prepareFeatureRelatedRerankState(
+    paperId,
+    userId,
+    baselineRows,
+    db,
+  );
+  if (!prepared.seedPaper) {
     return {
       backend: describeRelatedRerankerBackend("feature_v1"),
       baselineRows,
       rerankedRows: baselineRows,
       diagnostics: [],
+    };
+  }
+
+  const result = buildFeatureRelatedRerankResultFromPrepared(prepared);
+  relatedRerankCache.set(cacheKey, {
+    expiresAt: Date.now() + RELATED_RERANK_CACHE_TTL_MS,
+    result,
+  });
+  return result;
+}
+
+async function prepareFeatureRelatedRerankState(
+  paperId: string,
+  userId: string,
+  baselineRows: GraphRelationRow[],
+  db: RelatedRerankDb,
+): Promise<PreparedFeatureRelatedRerankState> {
+  const seedPaperMap = await loadPaperContexts([paperId], db);
+  const seedPaper = seedPaperMap.get(paperId) ?? null;
+  if (!seedPaper) {
+    return {
+      baselineRows,
+      seedPaper: null,
+      paperContexts: new Map(),
+      representationMap: new Map(),
+      candidateRows: [],
+      diagnostics: [],
+      diagnosticsByPaperId: new Map(),
     };
   }
 
@@ -1054,7 +1136,10 @@ async function buildFeatureRelatedRerankResult(
     paperId,
     SHARED_RAW_PAPER_REPRESENTATION_KIND,
   );
-  const seedSignature = collectSeedSignature(seedPaper, seedRepresentation?.metadata);
+  const seedSignature = collectSeedSignature(
+    seedPaper,
+    seedRepresentation?.metadata,
+  );
 
   const lexicalExpansionRows = await loadLexicalExpansionRows(
     {
@@ -1079,10 +1164,13 @@ async function buildFeatureRelatedRerankResult(
   );
   if (candidateRows.length === 0) {
     return {
-      backend: describeRelatedRerankerBackend("feature_v1"),
       baselineRows,
-      rerankedRows: [],
+      seedPaper,
+      paperContexts: new Map([[paperId, seedPaper]]),
+      representationMap: new Map(),
+      candidateRows: [],
       diagnostics: [],
+      diagnosticsByPaperId: new Map(),
     };
   }
 
@@ -1126,7 +1214,8 @@ async function buildFeatureRelatedRerankResult(
   const hubScores = computeHubScores(
     candidateRows.map((row) => ({
       paperId: row.relatedPaper.id,
-      citationCount: paperContexts.get(row.relatedPaper.id)?.citationCount ?? null,
+      citationCount:
+        paperContexts.get(row.relatedPaper.id)?.citationCount ?? null,
       degree: candidateDegrees.get(row.relatedPaper.id) ?? 0,
     })),
   );
@@ -1175,7 +1264,8 @@ async function buildFeatureRelatedRerankResult(
         : null) ?? emptyDeterministicSignals();
     const deterministicSignals = mergeSignalSummary(
       assertionSignals,
-      localCitationSignalMap.get(row.relatedPaper.id) ?? emptyDeterministicSignals(),
+      localCitationSignalMap.get(row.relatedPaper.id) ??
+        emptyDeterministicSignals(),
     );
     const relationTypePrior = computeRelationTypePrior(row.relationType);
     const citationPrior = normalizeCitationPrior(
@@ -1186,10 +1276,9 @@ async function buildFeatureRelatedRerankResult(
     const metadata = candidateRepresentation?.metadata;
     const subtopics = Array.from(
       new Set(
-        [
-          ...(metadata?.tagNames ?? []),
-          row.relationType.toLowerCase(),
-        ].filter(Boolean),
+        [...(metadata?.tagNames ?? []), row.relationType.toLowerCase()].filter(
+          Boolean,
+        ),
       ),
     );
 
@@ -1221,7 +1310,9 @@ async function buildFeatureRelatedRerankResult(
       deterministicSignals.bibliographic_coupling === 0 &&
       deterministicSignals.co_citation === 0;
     const citationOnlyPenalty =
-      isCitationOnlyRow && semanticSimilarity < 0.32 && titleSimilarity < 0.12
+      isCitationOnlyRow &&
+      semanticSimilarity < 0.32 &&
+      titleSimilarity < 0.12
         ? 0.24
         : isCitationOnlyRow && titleSimilarity < 0.06
           ? 0.12
@@ -1252,57 +1343,121 @@ async function buildFeatureRelatedRerankResult(
     } satisfies RelatedRerankCandidateDiagnostics;
   });
 
-  const diagnosticsByPaperId = new Map(
-    diagnostics.map((diagnostic) => [diagnostic.paperId, diagnostic]),
-  );
+  return {
+    baselineRows,
+    seedPaper,
+    paperContexts,
+    representationMap,
+    candidateRows,
+    diagnostics,
+    diagnosticsByPaperId: new Map(
+      diagnostics.map((diagnostic) => [diagnostic.paperId, diagnostic]),
+    ),
+  };
+}
 
-  const filteredRows = rerankedTopicalRows(candidateRows, diagnosticsByPaperId, seedPaper);
+function finalizeRelatedRows(params: {
+  rows: GraphRelationRow[];
+  diagnosticsByPaperId: Map<string, RelatedRerankCandidateDiagnostics>;
+  representationMap: PreparedFeatureRelatedRerankState["representationMap"];
+  scoreForPaperId: (paperId: string) => number;
+  limit: number;
+}): {
+  rerankedRows: GraphRelationRow[];
+  rerankedDiagnostics: RelatedRerankCandidateDiagnostics[];
+} {
+  if (params.rows.length === 0) {
+    return { rerankedRows: [], rerankedDiagnostics: [] };
+  }
 
   const diversified = diversifyCandidates(
-    filteredRows.map((row) => {
-      const diagnostic = diagnosticsByPaperId.get(row.relatedPaper.id);
+    params.rows.map((row) => {
+      const diagnostic = params.diagnosticsByPaperId.get(row.relatedPaper.id);
       if (!diagnostic) {
-        throw new Error(`Missing related-paper diagnostics for ${row.relatedPaper.id}`);
+        throw new Error(
+          `Missing related-paper diagnostics for ${row.relatedPaper.id}`,
+        );
       }
       return {
         id: diagnostic.paperId,
-        relevanceScore: diagnostic.rerankScore,
+        relevanceScore: params.scoreForPaperId(diagnostic.paperId),
         hubScore: diagnostic.hubScore,
         noveltyScore: 0,
         subtopics: diagnostic.subtopics,
-        vector: representationMap.get(diagnostic.paperId)?.vector ?? [],
+        vector: params.representationMap.get(diagnostic.paperId)?.vector ?? [],
       };
     }),
     {
       task: "related",
-      limit: Math.min(
-        Math.max(baselineRows.length, Math.min(candidateRows.length, 10)),
-        candidateRows.length,
-      ),
+      limit: params.limit,
     },
   );
 
-  const order = new Map(diversified.map((candidate, index) => [candidate.id, index]));
-  const rerankedRows = [...filteredRows].sort((left, right) => {
+  const order = new Map(
+    diversified.map((candidate, index) => [candidate.id, index]),
+  );
+  const rerankedRows = [...params.rows].sort((left, right) => {
     const leftOrder = order.get(left.relatedPaper.id);
     const rightOrder = order.get(right.relatedPaper.id);
-    if (leftOrder != null && rightOrder != null && leftOrder !== rightOrder) {
+    if (
+      leftOrder != null &&
+      rightOrder != null &&
+      leftOrder !== rightOrder
+    ) {
       return leftOrder - rightOrder;
     }
 
-    const leftScore = diagnosticsByPaperId.get(left.relatedPaper.id)?.rerankScore ?? left.confidence;
-    const rightScore = diagnosticsByPaperId.get(right.relatedPaper.id)?.rerankScore ?? right.confidence;
+    const leftScore = params.scoreForPaperId(left.relatedPaper.id);
+    const rightScore = params.scoreForPaperId(right.relatedPaper.id);
     if (rightScore !== leftScore) return rightScore - leftScore;
     return left.relatedPaper.title.localeCompare(right.relatedPaper.title);
   });
 
-  const rerankedDiagnostics = rerankedRows
-    .map((row) => diagnosticsByPaperId.get(row.relatedPaper.id))
-    .filter((diagnostic): diagnostic is RelatedRerankCandidateDiagnostics =>
-      Boolean(diagnostic),
-    );
+  return {
+    rerankedRows,
+    rerankedDiagnostics: rerankedRows
+      .map((row) => params.diagnosticsByPaperId.get(row.relatedPaper.id))
+      .filter(
+        (
+          diagnostic,
+        ): diagnostic is RelatedRerankCandidateDiagnostics => Boolean(diagnostic),
+      ),
+  };
+}
 
-  const topDiagnostic = rerankedDiagnostics[0] ?? null;
+function buildFeatureRelatedRerankResultFromPrepared(
+  prepared: PreparedFeatureRelatedRerankState,
+): RelatedRerankResult {
+  if (!prepared.seedPaper) {
+    return {
+      backend: describeRelatedRerankerBackend("feature_v1"),
+      baselineRows: prepared.baselineRows,
+      rerankedRows: prepared.baselineRows,
+      diagnostics: [],
+    };
+  }
+
+  const filteredRows = rerankedTopicalRows(
+    prepared.candidateRows,
+    prepared.diagnosticsByPaperId,
+    prepared.seedPaper,
+  );
+  const finalized = finalizeRelatedRows({
+    rows: filteredRows,
+    diagnosticsByPaperId: prepared.diagnosticsByPaperId,
+    representationMap: prepared.representationMap,
+    scoreForPaperId: (paperId) =>
+      prepared.diagnosticsByPaperId.get(paperId)?.rerankScore ?? 0,
+    limit: Math.min(
+      Math.max(
+        prepared.baselineRows.length,
+        Math.min(prepared.candidateRows.length, 10),
+      ),
+      prepared.candidateRows.length,
+    ),
+  });
+
+  const topDiagnostic = finalized.rerankedDiagnostics[0] ?? null;
   const shouldFailClosed =
     Boolean(topDiagnostic) &&
     topDiagnostic.rerankScore < 0.4 &&
@@ -1310,24 +1465,228 @@ async function buildFeatureRelatedRerankResult(
     topDiagnostic.titleSimilarity < 0.18 &&
     topDiagnostic.tagOverlap < 0.2;
 
-  const finalRows = shouldFailClosed ? rerankedRows.slice(0, 2) : rerankedRows;
+  const finalRows = shouldFailClosed
+    ? finalized.rerankedRows.slice(0, 2)
+    : finalized.rerankedRows;
   const finalDiagnostics = shouldFailClosed
-    ? rerankedDiagnostics.slice(0, 2)
-    : rerankedDiagnostics;
+    ? finalized.rerankedDiagnostics.slice(0, 2)
+    : finalized.rerankedDiagnostics;
 
-  const result = {
+  return {
     backend: describeRelatedRerankerBackend("feature_v1"),
-    baselineRows,
+    baselineRows: prepared.baselineRows,
     rerankedRows: finalRows,
     diagnostics: finalDiagnostics,
-  } satisfies RelatedRerankResult;
+  };
+}
 
-  relatedRerankCache.set(cacheKey, {
-    expiresAt: Date.now() + RELATED_RERANK_CACHE_TTL_MS,
-    result,
+function buildRelatedListwisePrompt(params: {
+  seedPaper: RelatedPaperContext;
+  candidateRows: GraphRelationRow[];
+  paperContexts: Map<string, RelatedPaperContext>;
+  diagnosticsByPaperId: Map<string, RelatedRerankCandidateDiagnostics>;
+  representationMap: PreparedFeatureRelatedRerankState["representationMap"];
+}): string {
+  const seedMetadata =
+    params.representationMap.get(params.seedPaper.id)?.metadata ?? null;
+  const seedLines = [
+    `Seed paper`,
+    `- paperId: ${params.seedPaper.id}`,
+    `- title: ${params.seedPaper.title}`,
+    `- year: ${params.seedPaper.year ?? "unknown"}`,
+    `- venue: ${params.seedPaper.venue ?? "unknown"}`,
+    `- citationCount: ${params.seedPaper.citationCount ?? 0}`,
+    `- tags: ${(seedMetadata?.tagNames ?? []).slice(0, 8).join(", ") || "none"}`,
+    `- abstract: ${truncateSnippet(params.seedPaper.abstract) ?? "none"}`,
+    `- summary: ${truncateSnippet(params.seedPaper.summary) ?? "none"}`,
+  ];
+
+  const candidateBlocks = params.candidateRows.map((row, index) => {
+    const context = params.paperContexts.get(row.relatedPaper.id);
+    const diagnostic = params.diagnosticsByPaperId.get(row.relatedPaper.id);
+    const metadata = params.representationMap.get(row.relatedPaper.id)?.metadata;
+    return [
+      `Candidate ${index + 1}`,
+      `- paperId: ${row.relatedPaper.id}`,
+      `- title: ${row.relatedPaper.title}`,
+      `- year: ${context?.year ?? row.relatedPaper.year ?? "unknown"}`,
+      `- venue: ${context?.venue ?? "unknown"}`,
+      `- authors: ${parseStringArray(context?.authors ?? row.relatedPaper.authors).join(", ") || "unknown"}`,
+      `- relationType: ${row.relationType}`,
+      `- relationDescription: ${row.description ?? "none"}`,
+      `- candidateTags: ${(metadata?.tagNames ?? []).slice(0, 8).join(", ") || "none"}`,
+      `- abstract: ${truncateSnippet(context?.abstract) ?? "none"}`,
+      `- summary: ${truncateSnippet(context?.summary) ?? "none"}`,
+      `- featureSignals: baseline=${row.confidence.toFixed(3)}, feature=${(diagnostic?.rerankScore ?? row.confidence).toFixed(3)}, titleSimilarity=${(diagnostic?.titleSimilarity ?? 0).toFixed(3)}, titleOverlap=${(diagnostic?.queryTitleOverlap ?? 0).toFixed(3)}, bodyOverlap=${(diagnostic?.bodyTokenOverlap ?? 0).toFixed(3)}, tagOverlap=${(diagnostic?.tagOverlap ?? 0).toFixed(3)}, lexicalAuthorOverlap=${(diagnostic?.lexicalAuthorOverlap ?? 0).toFixed(3)}`,
+      `- citationSignals: direct=${diagnostic?.deterministicSignals.direct_citation ?? 0}, reverse=${diagnostic?.deterministicSignals.reverse_citation ?? 0}, bibliographicCoupling=${(diagnostic?.deterministicSignals.bibliographic_coupling ?? 0).toFixed(3)}, coCitation=${(diagnostic?.deterministicSignals.co_citation ?? 0).toFixed(3)}`,
+      `- denseSimilarity: ${(diagnostic?.semanticSimilarity ?? 0).toFixed(3)} (weak evidence only)`,
+    ].join("\n");
   });
 
-  return result;
+  return `${seedLines.join("\n")}\n\nCandidates\n${candidateBlocks.join(
+    "\n\n",
+  )}\n\nSelect only the papers that are meaningfully related next reads for the seed paper.`;
+}
+
+function sanitizeListwiseSelections(
+  selections: RelatedPaperListwiseSelection[],
+  candidateRows: GraphRelationRow[],
+): RelatedPaperListwiseSelection[] {
+  const validIds = new Set(candidateRows.map((row) => row.relatedPaper.id));
+  const seen = new Set<string>();
+  const sanitized: RelatedPaperListwiseSelection[] = [];
+
+  for (const selection of selections) {
+    if (!validIds.has(selection.paperId) || seen.has(selection.paperId)) continue;
+    seen.add(selection.paperId);
+    sanitized.push(selection);
+  }
+
+  return sanitized.slice(0, RELATED_LLM_LISTWISE_RESULT_LIMIT);
+}
+
+async function buildLlmListwiseRelatedRerankResult(
+  paperId: string,
+  userId: string,
+  rows: GraphRelationRow[],
+  db: RelatedRerankDb = prisma,
+): Promise<RelatedRerankResult> {
+  const baselineRows = sortRelatedRowsBaseline(rows);
+  const cacheKey = buildCacheKey("llm_listwise_v1", paperId, userId, baselineRows);
+  const cached = relatedRerankCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.result;
+  }
+
+  const prepared = await prepareFeatureRelatedRerankState(
+    paperId,
+    userId,
+    baselineRows,
+    db,
+  );
+  const featureResult = buildFeatureRelatedRerankResultFromPrepared(prepared);
+  if (!prepared.seedPaper || prepared.candidateRows.length === 0) {
+    return {
+      backend: describeRelatedRerankerBackend("llm_listwise_v1"),
+      baselineRows,
+      rerankedRows: [],
+      diagnostics: [],
+    };
+  }
+
+  const sortedCandidates = [...prepared.candidateRows]
+    .sort((left, right) => {
+      const leftScore =
+        prepared.diagnosticsByPaperId.get(left.relatedPaper.id)?.rerankScore ??
+        left.confidence;
+      const rightScore =
+        prepared.diagnosticsByPaperId.get(right.relatedPaper.id)?.rerankScore ??
+        right.confidence;
+      if (rightScore !== leftScore) return rightScore - leftScore;
+      return left.relatedPaper.title.localeCompare(right.relatedPaper.title);
+    })
+    .slice(0, RELATED_LLM_LISTWISE_CANDIDATE_LIMIT);
+
+  if (sortedCandidates.length <= 2) {
+    return {
+      backend: describeRelatedRerankerBackend("llm_listwise_v1"),
+      baselineRows,
+      rerankedRows: featureResult.rerankedRows,
+      diagnostics: featureResult.diagnostics,
+    };
+  }
+
+  try {
+    const { provider, modelId, proxyConfig } = await getDefaultModel();
+    const prompt = buildRelatedListwisePrompt({
+      seedPaper: prepared.seedPaper,
+      candidateRows: sortedCandidates,
+      paperContexts: prepared.paperContexts,
+      diagnosticsByPaperId: prepared.diagnosticsByPaperId,
+      representationMap: prepared.representationMap,
+    });
+    const { object } = await withPaperLlmContext(
+      {
+        operation: PAPER_INTERACTIVE_LLM_OPERATIONS.RELATED_RERANK,
+        paperId,
+        userId,
+        runtime: "interactive",
+        source: "papers.retrieval.related_listwise",
+        metadata: {
+          backendId: "llm_listwise_v1",
+          candidateCount: sortedCandidates.length,
+        },
+      },
+      () =>
+        generateStructuredObject({
+          provider,
+          modelId,
+          proxyConfig: proxyConfig ?? undefined,
+          system: SYSTEM_PROMPTS.rerankRelatedPapers,
+          prompt,
+          schemaName: "rerankRelatedPapers",
+          schema: rerankRelatedPapersRuntimeOutputSchema,
+          maxTokens: RELATED_LLM_LISTWISE_MAX_TOKENS,
+        }),
+    );
+
+    const selections = sanitizeListwiseSelections(
+      object.selectedPapers,
+      sortedCandidates,
+    );
+    const selectedRows = selections
+      .map((selection) =>
+        sortedCandidates.find(
+          (row) => row.relatedPaper.id === selection.paperId,
+        ),
+      )
+      .filter((row): row is GraphRelationRow => Boolean(row));
+
+    const diagnosticsByPaperId = new Map(
+      prepared.diagnostics.map((diagnostic) => [diagnostic.paperId, diagnostic]),
+    );
+    const llmScoreByPaperId = new Map(
+      selections.map((selection) => [
+        selection.paperId,
+        Number(selection.relevanceScore.toFixed(6)),
+      ]),
+    );
+    const finalized = finalizeRelatedRows({
+      rows: selectedRows,
+      diagnosticsByPaperId,
+      representationMap: prepared.representationMap,
+      scoreForPaperId: (candidatePaperId) =>
+        llmScoreByPaperId.get(candidatePaperId) ??
+        diagnosticsByPaperId.get(candidatePaperId)?.rerankScore ??
+        0,
+      limit: Math.min(RELATED_LLM_LISTWISE_RESULT_LIMIT, selectedRows.length),
+    });
+
+    const diagnostics = finalized.rerankedDiagnostics.map((diagnostic) => ({
+      ...diagnostic,
+      rerankScore:
+        llmScoreByPaperId.get(diagnostic.paperId) ?? diagnostic.rerankScore,
+    }));
+
+    const result = {
+      backend: describeRelatedRerankerBackend("llm_listwise_v1"),
+      baselineRows,
+      rerankedRows: finalized.rerankedRows,
+      diagnostics,
+    } satisfies RelatedRerankResult;
+
+    relatedRerankCache.set(cacheKey, {
+      expiresAt: Date.now() + RELATED_RERANK_CACHE_TTL_MS,
+      result,
+    });
+    return result;
+  } catch (error) {
+    console.warn(
+      "[related-ranker] LLM listwise backend fell back to feature ranking:",
+      error,
+    );
+    return featureResult;
+  }
 }
 
 export async function buildRelatedRerankResult(
@@ -1341,6 +1700,10 @@ export async function buildRelatedRerankResult(
 
   if (backendId === "baseline_v1") {
     return buildBaselineRelatedRerankResult(rows, backendId);
+  }
+
+  if (backendId === "llm_listwise_v1") {
+    return buildLlmListwiseRelatedRerankResult(paperId, userId, rows, db);
   }
 
   return buildFeatureRelatedRerankResult(paperId, userId, rows, db);
