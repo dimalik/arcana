@@ -18,7 +18,7 @@ import { ChatMessageSupport } from "@/components/chat/chat-message-support";
 import {
   parseChatMessageMetadata,
   type ChatMessageMetadata,
-} from "@/lib/papers/answer-engine";
+} from "@/lib/papers/answer-engine/metadata";
 
 interface PaperInfo {
   id: string;

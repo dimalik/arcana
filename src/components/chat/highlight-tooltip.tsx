@@ -22,7 +22,7 @@ import { ChatMessageSupport } from "./chat-message-support";
 import {
   parseChatMessageMetadata,
   type AnswerCitation,
-} from "@/lib/papers/answer-engine";
+} from "@/lib/papers/answer-engine/metadata";
 
 interface ConversationInfo {
   id: string;

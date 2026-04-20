@@ -1,7 +1,7 @@
 "use client";
 
 import { Badge } from "@/components/ui/badge";
-import type { AnswerCitation } from "@/lib/papers/answer-engine";
+import type { AnswerCitation } from "@/lib/papers/answer-engine/metadata";
 
 interface ConversationArtifactRecord {
   id: string;

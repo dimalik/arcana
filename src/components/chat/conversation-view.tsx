@@ -26,7 +26,7 @@ import { ChatMessageSupport } from "./chat-message-support";
 import {
   parseChatMessageMetadata,
   type ChatMessageMetadata,
-} from "@/lib/papers/answer-engine";
+} from "@/lib/papers/answer-engine/metadata";
 
 interface ConversationArtifactRecord {
   id: string;
