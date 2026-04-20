@@ -1,0 +1,8 @@
+{
+  "targetRoutes": {},
+  "excludedRoutes": {
+    "src/app/api/papers/[id]/llm/gap-finder/route.ts": "Legacy bespoke prompt wrapper; PR 3 migrates this route onto the shared paper-analysis engine.",
+    "src/app/api/papers/[id]/llm/timeline/route.ts": "Legacy bespoke prompt wrapper; PR 3 migrates this route onto the shared paper-analysis engine.",
+    "src/app/api/papers/[id]/llm/compare-methodologies/route.ts": "Legacy bespoke prompt wrapper; PR 3 migrates this route onto the shared paper-analysis engine."
+  }
+}

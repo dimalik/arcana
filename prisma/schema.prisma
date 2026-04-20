@@ -31,14 +31,14 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  sessions          UserSession[]
-  llmUsageLogs      LlmUsageLog[]
-  appEvents         AppEvent[]
-  papers            Paper[]
-  researchProjects  ResearchProject[]
-  discoverySessions DiscoverySession[]
-  agentCapabilities AgentCapability[]
-  agentMemories     AgentMemory[]
+  sessions                 UserSession[]
+  llmUsageLogs             LlmUsageLog[]
+  appEvents                AppEvent[]
+  papers                   Paper[]
+  researchProjects         ResearchProject[]
+  discoverySessions        DiscoverySession[]
+  agentCapabilities        AgentCapability[]
+  agentMemories            AgentMemory[]
   paperDuplicateCandidates PaperDuplicateCandidate[]
 }
 
@@ -286,83 +286,138 @@ enum PaperDuplicateAction {
   COLLAPSE
 }
 
-model Paper {
-  id                  String    @id @default(uuid())
-  userId              String?
-  title               String
-  abstract            String?
-  authors             String? // JSON array as string
-  year                Int?
-  venue               String?
-  doi                 String?
-  sourceType          String    @default("UPLOAD") // UPLOAD, ARXIV, URL
-  sourceUrl           String?
-  arxivId             String?
-  filePath            String?
-  fullText            String?
-  summary             String?
-  keyFindings         String? // JSON array as string
-  categories          String? // JSON array as string
-  processingStatus    String    @default("PENDING") // PENDING, EXTRACTING_TEXT, TEXT_EXTRACTED, COMPLETED, FAILED
-  processingStep      String? // Current step: "extracting_text", "metadata", "summarize", "categorize", "linking", "references", "contexts"
-  processingStartedAt DateTime? // When current processing began — for stall detection
-  referenceState      String    @default("pending") // available | pending | extraction_failed | unavailable_no_pdf
-  citationCount       Int?
-  isLiked             Boolean   @default(false)
-  isResearchOnly      Boolean   @default(false) // true = imported by research agent, hidden from main library
-  engagementScore     Float     @default(0)
-  duplicateState      PaperDuplicateState @default(ACTIVE)
-  collapsedIntoPaperId String?
-  entityId            String?
-  createdAt           DateTime  @default(now())
-  updatedAt           DateTime  @updatedAt
+enum PaperClaimRunStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+}
 
-  owner              User?               @relation(fields: [userId], references: [id], onDelete: SetNull)
-  collapsedIntoPaper Paper?              @relation("PaperCollapse", fields: [collapsedIntoPaperId], references: [id], onDelete: SetNull)
-  collapsedPapers    Paper[]             @relation("PaperCollapse")
-  entity             PaperEntity?        @relation(fields: [entityId], references: [id], onDelete: SetNull)
-  tags               PaperTag[]
-  collections        CollectionPaper[]
-  chatMessages       ChatMessage[]
-  promptResults      PromptResult[]
-  sourceRelations    PaperRelation[]     @relation("SourceRelations")
-  targetRelations    PaperRelation[]     @relation("TargetRelations")
-  references         Reference[]
-  matchedBy          Reference[]         @relation("MatchedReferences")
-  conversations      Conversation[]
-  conversationPapers ConversationPaper[]
-  notebookEntries    NotebookEntry[]
-  discoverySeeds     DiscoverySeed[]
-  discoveryImports   DiscoveryProposal[]
-  engagements        PaperEngagement[]
-  insights           Insight[]
-  agentSessions      AgentSession[]
-  synthesisPapers    SynthesisPaper[]
-  figures            PaperFigure[]
-  figureAssets       Asset[]
-  sourceCapabilityEvaluations SourceCapabilityEvaluation[]
-  capabilitySnapshots CapabilitySnapshot[]
-  extractionRuns     ExtractionRun[]
+enum PaperClaimRhetoricalRole {
+  BACKGROUND
+  MOTIVATION
+  RESEARCH_QUESTION
+  HYPOTHESIS
+  DEFINITION
+  ASSUMPTION
+  METHOD
+  DATASET
+  RESULT
+  EVALUATION
+  LIMITATION
+  FUTURE_WORK
+  CONTRIBUTION
+}
+
+enum PaperClaimFacet {
+  PROBLEM
+  APPROACH
+  RESULT
+  COMPARISON
+  LIMITATION
+  RESOURCE
+}
+
+enum PaperClaimPolarity {
+  ASSERTIVE
+  NEGATED
+  CONDITIONAL
+  SPECULATIVE
+}
+
+enum PaperClaimEvidenceType {
+  PRIMARY
+  SECONDARY
+  CITING
+}
+
+enum ConversationArtifactKind {
+  CLAIM_LIST
+  CONTRADICTION_TABLE
+  GAP_LIST
+  TIMELINE
+  METHODOLOGY_COMPARE
+}
+
+model Paper {
+  id                   String              @id @default(uuid())
+  userId               String?
+  title                String
+  abstract             String?
+  authors              String? // JSON array as string
+  year                 Int?
+  venue                String?
+  doi                  String?
+  sourceType           String              @default("UPLOAD") // UPLOAD, ARXIV, URL
+  sourceUrl            String?
+  arxivId              String?
+  filePath             String?
+  fullText             String?
+  summary              String?
+  keyFindings          String? // JSON array as string
+  categories           String? // JSON array as string
+  processingStatus     String              @default("PENDING") // PENDING, EXTRACTING_TEXT, TEXT_EXTRACTED, COMPLETED, FAILED
+  processingStep       String? // Current step: "extracting_text", "metadata", "summarize", "categorize", "linking", "references", "contexts"
+  processingStartedAt  DateTime? // When current processing began — for stall detection
+  referenceState       String              @default("pending") // available | pending | extraction_failed | unavailable_no_pdf
+  citationCount        Int?
+  isLiked              Boolean             @default(false)
+  isResearchOnly       Boolean             @default(false) // true = imported by research agent, hidden from main library
+  engagementScore      Float               @default(0)
+  duplicateState       PaperDuplicateState @default(ACTIVE)
+  collapsedIntoPaperId String?
+  entityId             String?
+  createdAt            DateTime            @default(now())
+  updatedAt            DateTime            @updatedAt
+
+  owner                          User?                           @relation(fields: [userId], references: [id], onDelete: SetNull)
+  collapsedIntoPaper             Paper?                          @relation("PaperCollapse", fields: [collapsedIntoPaperId], references: [id], onDelete: SetNull)
+  collapsedPapers                Paper[]                         @relation("PaperCollapse")
+  entity                         PaperEntity?                    @relation(fields: [entityId], references: [id], onDelete: SetNull)
+  tags                           PaperTag[]
+  collections                    CollectionPaper[]
+  chatMessages                   ChatMessage[]
+  promptResults                  PromptResult[]
+  sourceRelations                PaperRelation[]                 @relation("SourceRelations")
+  targetRelations                PaperRelation[]                 @relation("TargetRelations")
+  references                     Reference[]
+  matchedBy                      Reference[]                     @relation("MatchedReferences")
+  conversations                  Conversation[]
+  conversationPapers             ConversationPaper[]
+  notebookEntries                NotebookEntry[]
+  discoverySeeds                 DiscoverySeed[]
+  discoveryImports               DiscoveryProposal[]
+  engagements                    PaperEngagement[]
+  insights                       Insight[]
+  agentSessions                  AgentSession[]
+  synthesisPapers                SynthesisPaper[]
+  figures                        PaperFigure[]
+  figureAssets                   Asset[]
+  sourceCapabilityEvaluations    SourceCapabilityEvaluation[]
+  capabilitySnapshots            CapabilitySnapshot[]
+  extractionRuns                 ExtractionRun[]
   legacyPublicationBootstrapRuns LegacyPublicationBootstrapRun[]
-  figureCandidates   FigureCandidate[]
-  identityResolutions IdentityResolution[]
-  figureIdentities   FigureIdentity[]
-  projectionRuns     ProjectionRun[]
-  previewSelectionRuns PreviewSelectionRun[]
-  renderRuns         RenderRun[]
-  publishedFigureHandles PublishedFigureHandle[]
-  figureOverrides    FigureOverride[]
-  publicationState   PaperPublicationState?
-  migrationState     PaperMigrationState?
-  workLease          PaperWorkLease?
-  claimEvidence      ClaimEvidence[]
-  referenceEntries   ReferenceEntry[]    @relation("ReferenceEntries")
-  citationMentions   CitationMention[]   @relation("CitationMentions")
-  derivedAssertions  RelationAssertion[] @relation("DerivedAssertions")
-  processingRuns     ProcessingRun[]
-  processingStepRuns ProcessingStepRun[]
-  wonDuplicateCandidates PaperDuplicateCandidate[] @relation("DuplicateCandidateWinner")
-  lostDuplicateCandidates PaperDuplicateCandidate[] @relation("DuplicateCandidateLoser")
+  figureCandidates               FigureCandidate[]
+  identityResolutions            IdentityResolution[]
+  figureIdentities               FigureIdentity[]
+  projectionRuns                 ProjectionRun[]
+  previewSelectionRuns           PreviewSelectionRun[]
+  renderRuns                     RenderRun[]
+  publishedFigureHandles         PublishedFigureHandle[]
+  figureOverrides                FigureOverride[]
+  publicationState               PaperPublicationState?
+  migrationState                 PaperMigrationState?
+  workLease                      PaperWorkLease?
+  claimEvidence                  ClaimEvidence[]
+  referenceEntries               ReferenceEntry[]                @relation("ReferenceEntries")
+  citationMentions               CitationMention[]               @relation("CitationMentions")
+  derivedAssertions              RelationAssertion[]             @relation("DerivedAssertions")
+  processingRuns                 ProcessingRun[]
+  processingStepRuns             ProcessingStepRun[]
+  claimRuns                      PaperClaimRun[]
+  claims                         PaperClaim[]
+  wonDuplicateCandidates         PaperDuplicateCandidate[]       @relation("DuplicateCandidateWinner")
+  lostDuplicateCandidates        PaperDuplicateCandidate[]       @relation("DuplicateCandidateLoser")
 
   @@unique([userId, entityId])
   @@index([userId, duplicateState])
@@ -487,8 +542,9 @@ model ChatMessage {
   conversationId String?
   createdAt      DateTime @default(now())
 
-  paper        Paper         @relation(fields: [paperId], references: [id], onDelete: Cascade)
-  conversation Conversation? @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  paper        Paper                  @relation(fields: [paperId], references: [id], onDelete: Cascade)
+  conversation Conversation?          @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  artifacts    ConversationArtifact[]
 }
 
 model PromptResult {
@@ -551,10 +607,11 @@ model Conversation {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  paper            Paper               @relation(fields: [paperId], references: [id], onDelete: Cascade)
+  paper            Paper                  @relation(fields: [paperId], references: [id], onDelete: Cascade)
   messages         ChatMessage[]
   additionalPapers ConversationPaper[]
   notebookEntries  NotebookEntry[]
+  artifacts        ConversationArtifact[]
 }
 
 model ConversationPaper {
@@ -566,6 +623,71 @@ model ConversationPaper {
   paper        Paper        @relation(fields: [paperId], references: [id], onDelete: Cascade)
 
   @@unique([conversationId, paperId])
+}
+
+model PaperClaimRun {
+  id               String              @id @default(uuid())
+  paperId          String
+  extractorVersion String
+  status           PaperClaimRunStatus @default(PENDING)
+  sourceTextHash   String
+  createdAt        DateTime            @default(now())
+  completedAt      DateTime?
+
+  paper  Paper        @relation(fields: [paperId], references: [id], onDelete: Cascade)
+  claims PaperClaim[]
+
+  @@unique([paperId, extractorVersion, sourceTextHash])
+  @@index([paperId, status])
+  @@index([paperId, createdAt])
+}
+
+model PaperClaim {
+  id                String                   @id @default(uuid())
+  paperId           String
+  runId             String
+  claimType         String? // coarse category, e.g. factual | methodological | evaluative
+  rhetoricalRole    PaperClaimRhetoricalRole
+  facet             PaperClaimFacet
+  polarity          PaperClaimPolarity
+  stance            String? // JSON { subjectText, predicateText, objectText, qualifierText? }
+  evaluationContext String? // JSON { task, dataset, metric, comparator, setting, split }
+  text              String
+  normalizedText    String
+  confidence        Float                    @default(0)
+  sectionLabel      String?
+  sectionPath       String
+  sourceExcerpt     String
+  excerptHash       String
+  sourceSpan        String? // JSON { charStart, charEnd, page? }
+  citationAnchors   String? // JSON array of { citationMentionId?, referenceEntryId?, rawMarker }
+  evidenceType      PaperClaimEvidenceType
+  orderIndex        Int
+  createdAt         DateTime                 @default(now())
+
+  paper Paper         @relation(fields: [paperId], references: [id], onDelete: Cascade)
+  run   PaperClaimRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@index([paperId, runId])
+  @@index([runId, orderIndex])
+  @@index([paperId, rhetoricalRole])
+  @@index([paperId, facet])
+}
+
+model ConversationArtifact {
+  id             String                   @id @default(uuid())
+  conversationId String
+  messageId      String?
+  kind           ConversationArtifactKind
+  title          String
+  payloadJson    String
+  createdAt      DateTime                 @default(now())
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  message      ChatMessage? @relation(fields: [messageId], references: [id], onDelete: SetNull)
+
+  @@index([conversationId, createdAt])
+  @@index([messageId])
 }
 
 model NotebookEntry {
@@ -667,29 +789,29 @@ model Asset {
   producerVersion String?
   createdAt       DateTime @default(now())
 
-  paper               Paper             @relation(fields: [paperId], references: [id], onDelete: Cascade)
-  figureCandidates    FigureCandidate[] @relation("CandidateNativeAsset")
-  previewSelections   PreviewSelectionFigure[] @relation("SelectedPreviewAsset")
-  renderedPreviews    RenderedPreview[] @relation("RenderedPreviewAsset")
+  paper             Paper                    @relation(fields: [paperId], references: [id], onDelete: Cascade)
+  figureCandidates  FigureCandidate[]        @relation("CandidateNativeAsset")
+  previewSelections PreviewSelectionFigure[] @relation("SelectedPreviewAsset")
+  renderedPreviews  RenderedPreview[]        @relation("RenderedPreviewAsset")
 
   @@unique([paperId, contentHash])
   @@index([paperId])
 }
 
 model ExtractionRun {
-  id               String   @id @default(uuid())
-  paperId          String
+  id                   String    @id @default(uuid())
+  paperId              String
   capabilitySnapshotId String?
-  extractorVersion String
-  status           String
-  metadata         String?
-  createdAt        DateTime @default(now())
-  completedAt      DateTime?
+  extractorVersion     String
+  status               String
+  metadata             String?
+  createdAt            DateTime  @default(now())
+  completedAt          DateTime?
 
-  paper          Paper                    @relation(fields: [paperId], references: [id], onDelete: Cascade)
-  capabilitySnapshot CapabilitySnapshot?  @relation(fields: [capabilitySnapshotId], references: [id], onDelete: SetNull)
-  sourceAttempts ExtractionSourceAttempt[]
-  candidates     FigureCandidate[]
+  paper               Paper                     @relation(fields: [paperId], references: [id], onDelete: Cascade)
+  capabilitySnapshot  CapabilitySnapshot?       @relation(fields: [capabilitySnapshotId], references: [id], onDelete: SetNull)
+  sourceAttempts      ExtractionSourceAttempt[]
+  candidates          FigureCandidate[]
   identityResolutions IdentityResolution[]
 
   @@index([paperId, createdAt])
@@ -707,7 +829,7 @@ model SourceCapabilityEvaluation {
   inputsHash       String
   createdAt        DateTime @default(now())
 
-  paper           Paper                    @relation(fields: [paperId], references: [id], onDelete: Cascade)
+  paper           Paper                     @relation(fields: [paperId], references: [id], onDelete: Cascade)
   snapshotEntries CapabilitySnapshotEntry[]
 
   @@index([paperId, source, checkedAt])
@@ -721,7 +843,7 @@ model CapabilitySnapshot {
   inputsHash      String
   createdAt       DateTime @default(now())
 
-  paper          Paper                   @relation(fields: [paperId], references: [id], onDelete: Cascade)
+  paper          Paper                     @relation(fields: [paperId], references: [id], onDelete: Cascade)
   entries        CapabilitySnapshotEntry[]
   extractionRuns ExtractionRun[]
 
@@ -729,15 +851,15 @@ model CapabilitySnapshot {
 }
 
 model CapabilitySnapshotEntry {
-  id                         String   @id @default(uuid())
-  capabilitySnapshotId       String
-  source                     String
+  id                           String   @id @default(uuid())
+  capabilitySnapshotId         String
+  source                       String
   sourceCapabilityEvaluationId String
-  status                     String
-  reasonCode                 String
-  createdAt                  DateTime @default(now())
+  status                       String
+  reasonCode                   String
+  createdAt                    DateTime @default(now())
 
-  capabilitySnapshot       CapabilitySnapshot       @relation(fields: [capabilitySnapshotId], references: [id], onDelete: Cascade)
+  capabilitySnapshot         CapabilitySnapshot         @relation(fields: [capabilitySnapshotId], references: [id], onDelete: Cascade)
   sourceCapabilityEvaluation SourceCapabilityEvaluation @relation(fields: [sourceCapabilityEvaluationId], references: [id], onDelete: Cascade)
 
   @@unique([capabilitySnapshotId, source])
@@ -761,35 +883,35 @@ model ExtractionSourceAttempt {
 }
 
 model FigureCandidate {
-  id                  String   @id @default(uuid())
-  paperId             String
-  extractionRunId     String?
-  bootstrapRunId      String?
-  candidateOrigin     String   @default("extracted")
-  sourceMethod        String
-  type                String
-  sourceLocalLocator  String?
-  locatorSupport      String   @default("unsupported")
-  sourceNamespace     String?
-  sourceOrder         Int      @default(0)
-  figureLabelRaw      String?
+  id                    String   @id @default(uuid())
+  paperId               String
+  extractionRunId       String?
+  bootstrapRunId        String?
+  candidateOrigin       String   @default("extracted")
+  sourceMethod          String
+  type                  String
+  sourceLocalLocator    String?
+  locatorSupport        String   @default("unsupported")
+  sourceNamespace       String?
+  sourceOrder           Int      @default(0)
+  figureLabelRaw        String?
   figureLabelNormalized String?
-  captionTextRaw      String?
-  structuredContentRaw String?
+  captionTextRaw        String?
+  structuredContentRaw  String?
   structuredContentType String?
-  nativeAssetId       String?
-  nativePreviewTrust  String   @default("none")
-  pageAnchorCandidate String?
-  confidence          String?
-  diagnostics         String?
-  createdAt           DateTime @default(now())
+  nativeAssetId         String?
+  nativePreviewTrust    String   @default("none")
+  pageAnchorCandidate   String?
+  confidence            String?
+  diagnostics           String?
+  createdAt             DateTime @default(now())
 
-  paper          Paper         @relation(fields: [paperId], references: [id], onDelete: Cascade)
-  extractionRun  ExtractionRun? @relation(fields: [extractionRunId], references: [id], onDelete: Cascade)
-  bootstrapRun   LegacyPublicationBootstrapRun? @relation(fields: [bootstrapRunId], references: [id], onDelete: Cascade)
-  nativeAsset    Asset?        @relation("CandidateNativeAsset", fields: [nativeAssetId], references: [id], onDelete: SetNull)
+  paper               Paper                          @relation(fields: [paperId], references: [id], onDelete: Cascade)
+  extractionRun       ExtractionRun?                 @relation(fields: [extractionRunId], references: [id], onDelete: Cascade)
+  bootstrapRun        LegacyPublicationBootstrapRun? @relation(fields: [bootstrapRunId], references: [id], onDelete: Cascade)
+  nativeAsset         Asset?                         @relation("CandidateNativeAsset", fields: [nativeAssetId], references: [id], onDelete: SetNull)
   identityMemberships FigureIdentityMember[]
-  previewSelections PreviewSelectionFigure[] @relation("SelectedPreviewCandidate")
+  previewSelections   PreviewSelectionFigure[]       @relation("SelectedPreviewCandidate")
 
   @@index([paperId, extractionRunId])
   @@index([paperId, bootstrapRunId])
@@ -798,39 +920,39 @@ model FigureCandidate {
 }
 
 model LegacyPublicationBootstrapRun {
-  id          String   @id @default(uuid())
+  id          String    @id @default(uuid())
   paperId     String
   status      String
   metadata    String?
-  createdAt   DateTime @default(now())
+  createdAt   DateTime  @default(now())
   completedAt DateTime?
 
-  paper              Paper               @relation(fields: [paperId], references: [id], onDelete: Cascade)
-  candidates         FigureCandidate[]
-  identityResolutions IdentityResolution[]
+  paper                    Paper                 @relation(fields: [paperId], references: [id], onDelete: Cascade)
+  candidates               FigureCandidate[]
+  identityResolutions      IdentityResolution[]
   latestForMigrationStates PaperMigrationState[] @relation("LatestBootstrapRun")
 
   @@index([paperId, createdAt])
 }
 
 model IdentityResolution {
-  id              String   @id @default(uuid())
+  id              String    @id @default(uuid())
   paperId         String
-  provenanceKind  String   @default("extraction")
+  provenanceKind  String    @default("extraction")
   extractionRunId String?
   bootstrapRunId  String?
   resolverVersion String
   status          String
   metadata        String?
-  createdAt       DateTime @default(now())
+  createdAt       DateTime  @default(now())
   promotedAt      DateTime?
 
-  paper         Paper           @relation(fields: [paperId], references: [id], onDelete: Cascade)
-  extractionRun ExtractionRun?  @relation(fields: [extractionRunId], references: [id], onDelete: Cascade)
-  bootstrapRun  LegacyPublicationBootstrapRun? @relation(fields: [bootstrapRunId], references: [id], onDelete: Cascade)
-  identities    FigureIdentity[]
-  projectionRuns ProjectionRun[]
-  publicationStates PaperPublicationState[] @relation("ActiveIdentityResolution")
+  paper             Paper                          @relation(fields: [paperId], references: [id], onDelete: Cascade)
+  extractionRun     ExtractionRun?                 @relation(fields: [extractionRunId], references: [id], onDelete: Cascade)
+  bootstrapRun      LegacyPublicationBootstrapRun? @relation(fields: [bootstrapRunId], references: [id], onDelete: Cascade)
+  identities        FigureIdentity[]
+  projectionRuns    ProjectionRun[]
+  publicationStates PaperPublicationState[]        @relation("ActiveIdentityResolution")
 
   @@index([paperId, createdAt])
   @@index([extractionRunId])
@@ -838,18 +960,18 @@ model IdentityResolution {
 }
 
 model FigureIdentity {
-  id                     String   @id @default(uuid())
-  identityResolutionId   String
-  paperId                String
-  type                   String
-  identityNamespace      String?
+  id                       String   @id @default(uuid())
+  identityResolutionId     String
+  paperId                  String
+  type                     String
+  identityNamespace        String?
   canonicalLabelNormalized String?
-  identityKey            String
-  metadata               String?
-  createdAt              DateTime @default(now())
+  identityKey              String
+  metadata                 String?
+  createdAt                DateTime @default(now())
 
-  identityResolution IdentityResolution   @relation(fields: [identityResolutionId], references: [id], onDelete: Cascade)
-  paper              Paper                @relation(fields: [paperId], references: [id], onDelete: Cascade)
+  identityResolution IdentityResolution     @relation(fields: [identityResolutionId], references: [id], onDelete: Cascade)
+  paper              Paper                  @relation(fields: [paperId], references: [id], onDelete: Cascade)
   members            FigureIdentityMember[]
   projectionFigures  ProjectionFigure[]
 
@@ -859,12 +981,12 @@ model FigureIdentity {
 }
 
 model FigureIdentityMember {
-  id               String   @id @default(uuid())
-  figureIdentityId String
+  id                String   @id @default(uuid())
+  figureIdentityId  String
   figureCandidateId String
-  createdAt        DateTime @default(now())
+  createdAt         DateTime @default(now())
 
-  figureIdentity FigureIdentity @relation(fields: [figureIdentityId], references: [id], onDelete: Cascade)
+  figureIdentity  FigureIdentity  @relation(fields: [figureIdentityId], references: [id], onDelete: Cascade)
   figureCandidate FigureCandidate @relation(fields: [figureCandidateId], references: [id], onDelete: Cascade)
 
   @@unique([figureIdentityId, figureCandidateId])
@@ -872,68 +994,68 @@ model FigureIdentityMember {
 }
 
 model ProjectionRun {
-  id                 String   @id @default(uuid())
-  paperId            String
+  id                   String    @id @default(uuid())
+  paperId              String
   identityResolutionId String
-  projectionVersion  String
-  status             String
-  comparisonStatus   String?
-  comparisonSummary  String?
-  publicationMode    String?
-  metadata           String?
-  createdAt          DateTime @default(now())
-  publishedAt        DateTime?
+  projectionVersion    String
+  status               String
+  comparisonStatus     String?
+  comparisonSummary    String?
+  publicationMode      String?
+  metadata             String?
+  createdAt            DateTime  @default(now())
+  publishedAt          DateTime?
 
-  paper              Paper                 @relation(fields: [paperId], references: [id], onDelete: Cascade)
-  identityResolution IdentityResolution    @relation(fields: [identityResolutionId], references: [id], onDelete: Cascade)
-  figures            ProjectionFigure[]
+  paper                Paper                   @relation(fields: [paperId], references: [id], onDelete: Cascade)
+  identityResolution   IdentityResolution      @relation(fields: [identityResolutionId], references: [id], onDelete: Cascade)
+  figures              ProjectionFigure[]
   previewSelectionRuns PreviewSelectionRun[]
-  renderRuns         RenderRun[]
-  publicationStates  PaperPublicationState[] @relation("ActiveProjectionRun")
+  renderRuns           RenderRun[]
+  publicationStates    PaperPublicationState[] @relation("ActiveProjectionRun")
 
   @@index([paperId, createdAt])
   @@index([identityResolutionId])
 }
 
 model ProjectionFigure {
-  id                   String   @id @default(uuid())
-  projectionRunId      String
-  figureIdentityId     String
-  publishedFigureHandleId String?
-  sortOrder            Int      @default(0)
-  sourceMethod         String
-  imageSourceMethod    String?
-  pageSourceMethod     String?
-  contentCandidateId   String
-  basePreviewCandidateId String?
-  pageAnchorCandidateId String?
-  figureLabel          String?
-  captionText          String?
-  captionSource        String?
-  structuredContent    String?
-  structuredContentType String?
-  sourceUrl            String?
-  confidence           String?
-  imagePath            String?
-  assetHash            String?
-  pdfPage              Int?
-  bbox                 String?
-  type                 String
-  width                Int?
-  height               Int?
-  gapReason            String?
+  id                            String   @id @default(uuid())
+  projectionRunId               String
+  figureIdentityId              String
+  publishedFigureHandleId       String?
+  sortOrder                     Int      @default(0)
+  sourceMethod                  String
+  imageSourceMethod             String?
+  pageSourceMethod              String?
+  contentCandidateId            String
+  basePreviewCandidateId        String?
+  pageAnchorCandidateId         String?
+  figureLabel                   String?
+  captionText                   String?
+  captionSource                 String?
+  structuredContent             String?
+  structuredContentType         String?
+  sourceUrl                     String?
+  confidence                    String?
+  imagePath                     String?
+  assetHash                     String?
+  pdfPage                       Int?
+  bbox                          String?
+  type                          String
+  width                         Int?
+  height                        Int?
+  gapReason                     String?
   predecessorProjectionFigureId String?
-  handleAssignmentDecision String?
-  handleAssignmentVersion String?
-  handleAssignmentEvidenceType String?
-  handleAssignmentEvidenceIds String?
-  createdAt            DateTime @default(now())
+  handleAssignmentDecision      String?
+  handleAssignmentVersion       String?
+  handleAssignmentEvidenceType  String?
+  handleAssignmentEvidenceIds   String?
+  createdAt                     DateTime @default(now())
 
-  projectionRun    ProjectionRun @relation(fields: [projectionRunId], references: [id], onDelete: Cascade)
-  figureIdentity   FigureIdentity @relation(fields: [figureIdentityId], references: [id], onDelete: Cascade)
-  publishedFigureHandle PublishedFigureHandle? @relation(fields: [publishedFigureHandleId], references: [id], onDelete: SetNull)
-  previewSelections PreviewSelectionFigure[]
-  renderedPreviews RenderedPreview[]
+  projectionRun         ProjectionRun            @relation(fields: [projectionRunId], references: [id], onDelete: Cascade)
+  figureIdentity        FigureIdentity           @relation(fields: [figureIdentityId], references: [id], onDelete: Cascade)
+  publishedFigureHandle PublishedFigureHandle?   @relation(fields: [publishedFigureHandleId], references: [id], onDelete: SetNull)
+  previewSelections     PreviewSelectionFigure[]
+  renderedPreviews      RenderedPreview[]
 
   @@unique([projectionRunId, figureIdentityId])
   @@index([projectionRunId, sortOrder])
@@ -941,25 +1063,25 @@ model ProjectionFigure {
 }
 
 model PreviewSelectionRun {
-  id                            String   @id @default(uuid())
-  paperId                       String
-  projectionRunId               String
-  selectionKind                 String
-  status                        String
-  comparisonStatus              String?
-  comparisonSummary             String?
-  publicationMode               String?
-  metadata                      String?
+  id                              String    @id @default(uuid())
+  paperId                         String
+  projectionRunId                 String
+  selectionKind                   String
+  status                          String
+  comparisonStatus                String?
+  comparisonSummary               String?
+  publicationMode                 String?
+  metadata                        String?
   supersedesPreviewSelectionRunId String?
-  createdAt                     DateTime @default(now())
-  promotedAt                    DateTime?
+  createdAt                       DateTime  @default(now())
+  promotedAt                      DateTime?
 
-  paper                         Paper                @relation(fields: [paperId], references: [id], onDelete: Cascade)
-  projectionRun                 ProjectionRun        @relation(fields: [projectionRunId], references: [id], onDelete: Cascade)
+  paper                         Paper                    @relation(fields: [paperId], references: [id], onDelete: Cascade)
+  projectionRun                 ProjectionRun            @relation(fields: [projectionRunId], references: [id], onDelete: Cascade)
   figures                       PreviewSelectionFigure[]
-  supersedesPreviewSelectionRun PreviewSelectionRun? @relation("PreviewSelectionSupersession", fields: [supersedesPreviewSelectionRunId], references: [id], onDelete: SetNull)
-  supersededBy                  PreviewSelectionRun[] @relation("PreviewSelectionSupersession")
-  publicationStates             PaperPublicationState[] @relation("ActivePreviewSelectionRun")
+  supersedesPreviewSelectionRun PreviewSelectionRun?     @relation("PreviewSelectionSupersession", fields: [supersedesPreviewSelectionRunId], references: [id], onDelete: SetNull)
+  supersededBy                  PreviewSelectionRun[]    @relation("PreviewSelectionSupersession")
+  publicationStates             PaperPublicationState[]  @relation("ActivePreviewSelectionRun")
 
   @@index([paperId, createdAt])
   @@index([projectionRunId])
@@ -967,21 +1089,21 @@ model PreviewSelectionRun {
 }
 
 model PreviewSelectionFigure {
-  id                         String   @id @default(uuid())
-  previewSelectionRunId      String
-  projectionFigureId         String
-  selectedPreviewSource      String
+  id                          String   @id @default(uuid())
+  previewSelectionRunId       String
+  projectionFigureId          String
+  selectedPreviewSource       String
   selectedPreviewSourceMethod String?
-  selectedAssetId            String?
-  selectedRenderedPreviewId  String?
-  selectedNativeCandidateId  String?
-  createdAt                  DateTime @default(now())
+  selectedAssetId             String?
+  selectedRenderedPreviewId   String?
+  selectedNativeCandidateId   String?
+  createdAt                   DateTime @default(now())
 
-  previewSelectionRun PreviewSelectionRun @relation(fields: [previewSelectionRunId], references: [id], onDelete: Cascade)
-  projectionFigure    ProjectionFigure    @relation(fields: [projectionFigureId], references: [id], onDelete: Cascade)
-  selectedAsset       Asset?              @relation("SelectedPreviewAsset", fields: [selectedAssetId], references: [id], onDelete: SetNull)
-  selectedRenderedPreview RenderedPreview? @relation("SelectedRenderedPreview", fields: [selectedRenderedPreviewId], references: [id], onDelete: SetNull)
-  selectedNativeCandidate FigureCandidate? @relation("SelectedPreviewCandidate", fields: [selectedNativeCandidateId], references: [id], onDelete: SetNull)
+  previewSelectionRun     PreviewSelectionRun @relation(fields: [previewSelectionRunId], references: [id], onDelete: Cascade)
+  projectionFigure        ProjectionFigure    @relation(fields: [projectionFigureId], references: [id], onDelete: Cascade)
+  selectedAsset           Asset?              @relation("SelectedPreviewAsset", fields: [selectedAssetId], references: [id], onDelete: SetNull)
+  selectedRenderedPreview RenderedPreview?    @relation("SelectedRenderedPreview", fields: [selectedRenderedPreviewId], references: [id], onDelete: SetNull)
+  selectedNativeCandidate FigureCandidate?    @relation("SelectedPreviewCandidate", fields: [selectedNativeCandidateId], references: [id], onDelete: SetNull)
 
   @@unique([previewSelectionRunId, projectionFigureId])
   @@index([projectionFigureId])
@@ -991,7 +1113,7 @@ model PreviewSelectionFigure {
 }
 
 model RenderRun {
-  id              String   @id @default(uuid())
+  id              String    @id @default(uuid())
   paperId         String
   projectionRunId String
   rendererVersion String
@@ -999,11 +1121,11 @@ model RenderRun {
   browserVersion  String
   status          String
   metadata        String?
-  createdAt       DateTime @default(now())
+  createdAt       DateTime  @default(now())
   completedAt     DateTime?
 
-  paper          Paper            @relation(fields: [paperId], references: [id], onDelete: Cascade)
-  projectionRun  ProjectionRun    @relation(fields: [projectionRunId], references: [id], onDelete: Cascade)
+  paper            Paper             @relation(fields: [paperId], references: [id], onDelete: Cascade)
+  projectionRun    ProjectionRun     @relation(fields: [projectionRunId], references: [id], onDelete: Cascade)
   renderedPreviews RenderedPreview[]
 
   @@index([paperId, createdAt])
@@ -1011,18 +1133,18 @@ model RenderRun {
 }
 
 model RenderedPreview {
-  id               String   @id @default(uuid())
-  renderRunId      String
+  id                 String   @id @default(uuid())
+  renderRunId        String
   projectionFigureId String
-  assetId          String
-  renderMode       String
-  inputHash        String
-  createdAt        DateTime @default(now())
+  assetId            String
+  renderMode         String
+  inputHash          String
+  createdAt          DateTime @default(now())
 
-  renderRun       RenderRun              @relation(fields: [renderRunId], references: [id], onDelete: Cascade)
-  projectionFigure ProjectionFigure      @relation(fields: [projectionFigureId], references: [id], onDelete: Cascade)
-  asset           Asset                  @relation("RenderedPreviewAsset", fields: [assetId], references: [id], onDelete: Cascade)
-  selectedBy      PreviewSelectionFigure[] @relation("SelectedRenderedPreview")
+  renderRun        RenderRun                @relation(fields: [renderRunId], references: [id], onDelete: Cascade)
+  projectionFigure ProjectionFigure         @relation(fields: [projectionFigureId], references: [id], onDelete: Cascade)
+  asset            Asset                    @relation("RenderedPreviewAsset", fields: [assetId], references: [id], onDelete: Cascade)
+  selectedBy       PreviewSelectionFigure[] @relation("SelectedRenderedPreview")
 
   @@unique([renderRunId, projectionFigureId])
   @@index([projectionFigureId])
@@ -1030,17 +1152,17 @@ model RenderedPreview {
 }
 
 model PaperPublicationState {
-  id                      String   @id @default(uuid())
-  paperId                 String   @unique
-  activeProjectionRunId   String?
-  activeIdentityResolutionId String?
+  id                          String   @id @default(uuid())
+  paperId                     String   @unique
+  activeProjectionRunId       String?
+  activeIdentityResolutionId  String?
   activePreviewSelectionRunId String?
-  createdAt               DateTime @default(now())
-  updatedAt               DateTime @updatedAt
+  createdAt                   DateTime @default(now())
+  updatedAt                   DateTime @updatedAt
 
-  paper                   Paper              @relation(fields: [paperId], references: [id], onDelete: Cascade)
-  activeProjectionRun     ProjectionRun?     @relation("ActiveProjectionRun", fields: [activeProjectionRunId], references: [id], onDelete: SetNull)
-  activeIdentityResolution IdentityResolution? @relation("ActiveIdentityResolution", fields: [activeIdentityResolutionId], references: [id], onDelete: SetNull)
+  paper                     Paper                @relation(fields: [paperId], references: [id], onDelete: Cascade)
+  activeProjectionRun       ProjectionRun?       @relation("ActiveProjectionRun", fields: [activeProjectionRunId], references: [id], onDelete: SetNull)
+  activeIdentityResolution  IdentityResolution?  @relation("ActiveIdentityResolution", fields: [activeIdentityResolutionId], references: [id], onDelete: SetNull)
   activePreviewSelectionRun PreviewSelectionRun? @relation("ActivePreviewSelectionRun", fields: [activePreviewSelectionRunId], references: [id], onDelete: SetNull)
 
   @@index([activeProjectionRunId])
@@ -1049,21 +1171,21 @@ model PaperPublicationState {
 }
 
 model PaperMigrationState {
-  id                  String   @id @default(uuid())
-  paperId             String   @unique
+  id                   String   @id @default(uuid())
+  paperId              String   @unique
   latestBootstrapRunId String?
-  migrationState      String
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
+  migrationState       String
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
 
-  paper               Paper                        @relation(fields: [paperId], references: [id], onDelete: Cascade)
-  latestBootstrapRun  LegacyPublicationBootstrapRun? @relation("LatestBootstrapRun", fields: [latestBootstrapRunId], references: [id], onDelete: SetNull)
+  paper              Paper                          @relation(fields: [paperId], references: [id], onDelete: Cascade)
+  latestBootstrapRun LegacyPublicationBootstrapRun? @relation("LatestBootstrapRun", fields: [latestBootstrapRunId], references: [id], onDelete: SetNull)
 
   @@index([latestBootstrapRunId])
 }
 
 model FigureOverride {
-  id            String   @id @default(uuid())
+  id            String    @id @default(uuid())
   paperId       String
   overrideType  String
   overrideStage String
@@ -1072,12 +1194,12 @@ model FigureOverride {
   payload       String?
   reason        String?
   createdBy     String?
-  status        String   @default("active")
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  status        String    @default("active")
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
   disabledAt    DateTime?
 
-  paper         Paper    @relation(fields: [paperId], references: [id], onDelete: Cascade)
+  paper Paper @relation(fields: [paperId], references: [id], onDelete: Cascade)
 
   @@index([paperId, status, overrideStage])
   @@index([paperId, selectorType, selectorValue, status])
@@ -1092,58 +1214,58 @@ model PaperWorkLease {
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
-  paper      Paper    @relation(fields: [paperId], references: [id], onDelete: Cascade)
+  paper Paper @relation(fields: [paperId], references: [id], onDelete: Cascade)
 
   @@index([expiresAt])
 }
 
 model PublishedFigureHandle {
-  id         String   @id @default(uuid())
-  paperId    String
-  publicKey  String   @unique
-  status     String
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
-  retiredAt  DateTime?
+  id        String    @id @default(uuid())
+  paperId   String
+  publicKey String    @unique
+  status    String
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  retiredAt DateTime?
 
-  paper              Paper              @relation(fields: [paperId], references: [id], onDelete: Cascade)
-  projectionFigures  ProjectionFigure[]
-  paperFigures       PaperFigure[]
+  paper             Paper              @relation(fields: [paperId], references: [id], onDelete: Cascade)
+  projectionFigures ProjectionFigure[]
+  paperFigures      PaperFigure[]
 
   @@index([paperId, status])
 }
 
 model PaperFigure {
-  id                  String   @id @default(uuid())
-  paperId             String
+  id                      String   @id @default(uuid())
+  paperId                 String
   publishedFigureHandleId String?
-  figureLabel         String?
-  captionText         String?
-  captionSource       String   @default("none")
-  description         String?
-  sourceMethod        String   @default("pdf_embedded")
-  sourceUrl           String?
-  sourceVersion       String?
-  confidence          String   @default("medium")
-  imagePath           String?
-  assetHash           String?
-  pdfPage             Int?
-  sourcePage          Int?
-  figureIndex         Int      @default(0)
-  bbox                String?
-  type                String   @default("figure")
-  parentFigureId      String?
-  isPrimaryExtraction Boolean  @default(true)
-  width               Int?
-  height              Int?
-  gapReason           String? // Product-facing: why canonical row has no image. Only set when isPrimaryExtraction=true AND imagePath is null.
-  imageSourceMethod   String? // Provenance of imagePath. Null iff imagePath is null. Equals sourceMethod when own source provided the image; differs when borrowed from another source or rendered.
-  createdAt           DateTime @default(now())
+  figureLabel             String?
+  captionText             String?
+  captionSource           String   @default("none")
+  description             String?
+  sourceMethod            String   @default("pdf_embedded")
+  sourceUrl               String?
+  sourceVersion           String?
+  confidence              String   @default("medium")
+  imagePath               String?
+  assetHash               String?
+  pdfPage                 Int?
+  sourcePage              Int?
+  figureIndex             Int      @default(0)
+  bbox                    String?
+  type                    String   @default("figure")
+  parentFigureId          String?
+  isPrimaryExtraction     Boolean  @default(true)
+  width                   Int?
+  height                  Int?
+  gapReason               String? // Product-facing: why canonical row has no image. Only set when isPrimaryExtraction=true AND imagePath is null.
+  imageSourceMethod       String? // Provenance of imagePath. Null iff imagePath is null. Equals sourceMethod when own source provided the image; differs when borrowed from another source or rendered.
+  createdAt               DateTime @default(now())
 
-  paper      Paper         @relation(fields: [paperId], references: [id], onDelete: Cascade)
+  paper                 Paper                  @relation(fields: [paperId], references: [id], onDelete: Cascade)
   publishedFigureHandle PublishedFigureHandle? @relation(fields: [publishedFigureHandleId], references: [id], onDelete: SetNull)
-  parent     PaperFigure?  @relation("SubFigures", fields: [parentFigureId], references: [id])
-  subfigures PaperFigure[] @relation("SubFigures")
+  parent                PaperFigure?           @relation("SubFigures", fields: [parentFigureId], references: [id])
+  subfigures            PaperFigure[]          @relation("SubFigures")
 
   @@unique([paperId, sourceMethod, assetHash])
   @@unique([paperId, sourceMethod, figureLabel])
@@ -1907,31 +2029,31 @@ model AgentMemory {
 // ── Batch Processing ───────────────────────────────────────────────
 
 model ProcessingRun {
-  id           String   @id @default(uuid())
+  id           String    @id @default(uuid())
   paperId      String
   trigger      String
-  status       String   @default("RUNNING") // RUNNING | COMPLETED | FAILED | CANCELLED
+  status       String    @default("RUNNING") // RUNNING | COMPLETED | FAILED | CANCELLED
   metadata     String?
-  startedAt    DateTime @default(now())
+  startedAt    DateTime  @default(now())
   completedAt  DateTime?
   error        String?
   reconciledAt DateTime?
 
-  paper  Paper              @relation(fields: [paperId], references: [id], onDelete: Cascade)
-  steps  ProcessingStepRun[]
+  paper Paper               @relation(fields: [paperId], references: [id], onDelete: Cascade)
+  steps ProcessingStepRun[]
 
   @@index([paperId, status])
   @@index([startedAt])
 }
 
 model ProcessingStepRun {
-  id              String   @id @default(uuid())
+  id              String    @id @default(uuid())
   processingRunId String
   paperId         String
   step            String
-  status          String   @default("RUNNING") // RUNNING | COMPLETED | FAILED | CANCELLED
+  status          String    @default("RUNNING") // RUNNING | COMPLETED | FAILED | CANCELLED
   metadata        String?
-  startedAt       DateTime @default(now())
+  startedAt       DateTime  @default(now())
   completedAt     DateTime?
   error           String?
 
