@@ -33,6 +33,7 @@
     "check:holdout-leak": "node --import tsx scripts/benchmark/check-holdout-leak.mjs",
     "benchmark:judged:validate": "node --import tsx scripts/benchmark/run-judged.mjs --split dev",
     "benchmark:related:dev": "node --import tsx scripts/benchmark/score-related-papers.ts",
+    "benchmark:related:training": "node --import tsx scripts/benchmark/build-related-training-set.ts",
     "benchmark:search:dev": "node --import tsx scripts/benchmark/score-search.ts",
     "check:experiment-integrity": "node scripts/check-experiment-integrity.js",
     "trace": "node scripts/dump-agent-trace.js",

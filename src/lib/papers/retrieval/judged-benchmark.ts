@@ -197,4 +197,6 @@ export const judgedSetSchemas = {
 } as const;
 
 export type JudgedTask = z.infer<typeof judgedTaskSchema>;
+export type JudgedSplit = z.infer<typeof judgedSplitSchema>;
 export type JudgedLabel = z.infer<typeof judgedLabelSchema>;
+export type RelatedJudgedSet = z.infer<typeof relatedJudgedSetSchema>;
