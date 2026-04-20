@@ -116,6 +116,20 @@ export interface SearchLibraryPapersResult {
   degraded: boolean;
 }
 
+function isMissingAuthorIndexError(error: unknown): boolean {
+  const message =
+    error instanceof Error
+      ? error.message
+      : typeof error === "string"
+        ? error
+        : "";
+
+  return (
+    message.includes("The table `main.PaperAuthor` does not exist")
+    || message.includes("The table `main.Author` does not exist")
+  );
+}
+
 const SEARCH_RERANK_WEIGHTS = {
   exactIdentifier: 1.2,
   exactTitle: 0.9,
@@ -329,6 +343,68 @@ function mergeWhereInputs(
   };
 }
 
+async function findSearchPapers(
+  params: {
+    where: Prisma.PaperWhereInput;
+    orderBy?: Prisma.PaperOrderByWithRelationInput;
+    skip?: number;
+    take?: number;
+  },
+  db: SearchDb,
+): Promise<{ rows: SearchPaperRow[]; degraded: boolean }> {
+  try {
+    const rows = await db.paper.findMany({
+      where: params.where,
+      include: {
+        tags: { include: { tag: true } },
+        collections: { include: { collection: true } },
+        paperAuthors: {
+          include: {
+            author: {
+              select: {
+                id: true,
+                canonicalName: true,
+                normalizedName: true,
+                orcid: true,
+                semanticScholarAuthorId: true,
+              },
+            },
+          },
+          orderBy: { orderIndex: "asc" },
+        },
+      },
+      orderBy: params.orderBy,
+      skip: params.skip,
+      take: params.take,
+    });
+
+    return { rows: rows as SearchPaperRow[], degraded: false };
+  } catch (error) {
+    if (!isMissingAuthorIndexError(error)) {
+      throw error;
+    }
+
+    const rows = await db.paper.findMany({
+      where: params.where,
+      include: {
+        tags: { include: { tag: true } },
+        collections: { include: { collection: true } },
+      },
+      orderBy: params.orderBy,
+      skip: params.skip,
+      take: params.take,
+    });
+
+    return {
+      rows: rows.map((row) => ({
+        ...((row as unknown) as SearchPaperRow),
+        paperAuthors: [],
+      })),
+      degraded: true,
+    };
+  }
+}
+
 async function collectLexicalCandidateSeeds(
   query: SearchQueryInfo,
   where: Prisma.PaperWhereInput,
@@ -450,38 +526,44 @@ async function collectLexicalCandidateSeeds(
   }
 
   if (query.tokens.length >= 1) {
-    const matchingAuthors = await db.author.findMany({
-      where: {
-        AND: query.tokens.map((token) => ({
-          normalizedName: { contains: token },
-        })),
-      },
-      take: 25,
-      select: {
-        id: true,
-        normalizedName: true,
-      },
-    });
-
-    if (matchingAuthors.length > 0) {
-      const paperAuthors = await db.paperAuthor.findMany({
+    try {
+      const matchingAuthors = await db.author.findMany({
         where: {
-          authorId: { in: matchingAuthors.map((author) => author.id) },
-          paper: where,
+          AND: query.tokens.map((token) => ({
+            normalizedName: { contains: token },
+          })),
         },
-        take: 100,
+        take: 25,
         select: {
-          paperId: true,
-          author: {
-            select: { normalizedName: true },
-          },
+          id: true,
+          normalizedName: true,
         },
       });
 
-      for (const row of paperAuthors) {
-        const authorHits =
-          row.author.normalizedName === query.normalizedAuthorText ? 2 : 1;
-        register(row.paperId, "authors", authorHits);
+      if (matchingAuthors.length > 0) {
+        const paperAuthors = await db.paperAuthor.findMany({
+          where: {
+            authorId: { in: matchingAuthors.map((author) => author.id) },
+            paper: where,
+          },
+          take: 100,
+          select: {
+            paperId: true,
+            author: {
+              select: { normalizedName: true },
+            },
+          },
+        });
+
+        for (const row of paperAuthors) {
+          const authorHits =
+            row.author.normalizedName === query.normalizedAuthorText ? 2 : 1;
+          register(row.paperId, "authors", authorHits);
+        }
+      }
+    } catch (error) {
+      if (!isMissingAuthorIndexError(error)) {
+        throw error;
       }
     }
   }
@@ -625,40 +707,22 @@ export async function searchLibraryPapers(
   const sort = params.sort ?? "newest";
 
   if (!queryText) {
-    const [papers, total] = await Promise.all([
-      db.paper.findMany({
+    const [papersResult, total] = await Promise.all([
+      findSearchPapers({
         where: params.where,
-        include: {
-          tags: { include: { tag: true } },
-          collections: { include: { collection: true } },
-          paperAuthors: {
-            include: {
-              author: {
-                select: {
-                  id: true,
-                  canonicalName: true,
-                  normalizedName: true,
-                  orcid: true,
-                  semanticScholarAuthorId: true,
-                },
-              },
-            },
-            orderBy: { orderIndex: "asc" },
-          },
-        },
         orderBy: buildSearchOrderBy(sort),
         skip,
         take: limit,
-      }),
+      }, db),
       db.paper.count({ where: params.where }),
     ]);
 
     return {
-      papers: papers.map(stripInternalFields),
+      papers: papersResult.rows.map(stripInternalFields),
       total,
       page,
       totalPages: Math.ceil(total / limit),
-      degraded: false,
+      degraded: papersResult.degraded,
     };
   }
 
@@ -711,29 +775,15 @@ export async function searchLibraryPapers(
     };
   }
 
-  const papers = await db.paper.findMany({
-    where: mergeWhereInputs(params.where, {
-      id: { in: candidateIds },
-    }),
-    include: {
-      tags: { include: { tag: true } },
-      collections: { include: { collection: true } },
-      paperAuthors: {
-        include: {
-          author: {
-            select: {
-              id: true,
-              canonicalName: true,
-              normalizedName: true,
-              orcid: true,
-              semanticScholarAuthorId: true,
-            },
-          },
-        },
-        orderBy: { orderIndex: "asc" },
-      },
+  const papersResult = await findSearchPapers(
+    {
+      where: mergeWhereInputs(params.where, {
+        id: { in: candidateIds },
+      }),
     },
-  });
+    db,
+  );
+  const papers = papersResult.rows;
 
   const vectorByPaperId = await loadSearchVectors(
     papers.map((paper) => paper.id),
@@ -817,6 +867,6 @@ export async function searchLibraryPapers(
     total: ranked.length,
     page,
     totalPages: Math.ceil(ranked.length / limit),
-    degraded: false,
+    degraded: papersResult.degraded,
   };
 }

@@ -42,22 +42,6 @@ export async function GET(request: NextRequest) {
 
   const where: Prisma.PaperWhereInput = mergePaperVisibilityWhere(userId);
 
-  if (search) {
-    const existingAnd = Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : [];
-    where.AND = [
-      ...existingAnd,
-      {
-        OR: [
-          { title: { contains: search } },
-          { abstract: { contains: search } },
-          { authors: { contains: search } },
-          { summary: { contains: search } },
-          { tags: { some: { tag: { name: { contains: search } } } } },
-        ],
-      },
-    ];
-  }
-
   if (tagIds) {
     const ids = tagIds.split(",").filter(Boolean);
     if (ids.length > 0) {
