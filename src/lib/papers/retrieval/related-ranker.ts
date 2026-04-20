@@ -24,7 +24,9 @@ import {
 import { diversifyCandidates } from "./diversify";
 import {
   rerankRelatedPapersRuntimeOutputSchema,
+  scoreRelatedPapersPointwiseRuntimeOutputSchema,
   type RelatedPaperListwiseSelection,
+  type RelatedPaperPointwiseAssessment,
 } from "./related-rerank-schema";
 
 type RelatedRerankDb = Pick<
@@ -101,14 +103,16 @@ interface PreparedFeatureRelatedRerankState {
 export type RelatedRerankerBackendId =
   | "baseline_v1"
   | "feature_v1"
-  | "llm_listwise_v1";
+  | "llm_listwise_v1"
+  | "llm_pointwise_v1";
 
 export type RelatedRerankerFamily =
   | "baseline"
   | "feature-ranker"
   | "cross-encoder"
   | "distilled-reranker"
-  | "llm-listwise";
+  | "llm-listwise"
+  | "llm-pointwise";
 
 export interface RelatedRerankerBackendDescriptor {
   id: RelatedRerankerBackendId;
@@ -154,10 +158,14 @@ const RELATED_RERANK_CACHE_VERSION = "2026-04-20-hub-filter-v3";
 const RELATED_LLM_LISTWISE_CANDIDATE_LIMIT = 16;
 const RELATED_LLM_LISTWISE_RESULT_LIMIT = 8;
 const RELATED_LLM_LISTWISE_MAX_TOKENS = 2_200;
+const RELATED_LLM_POINTWISE_CANDIDATE_LIMIT = 18;
+const RELATED_LLM_POINTWISE_RESULT_LIMIT = 10;
+const RELATED_LLM_POINTWISE_MAX_TOKENS = 2_800;
 const RELATED_LLM_ABSTRACT_SNIPPET_CHARS = 260;
 const RELATED_CONTENT_EXPANSION_LIMIT = 80;
 const RELATED_CONTENT_EXPANSION_SCORE_FLOOR = 0.18;
 const RELATED_LLM_SELECTION_BOOST_WEIGHT = 0.14;
+const RELATED_LLM_POINTWISE_SCORE_WEIGHT = 0.22;
 const relatedRerankCache = new Map<
   string,
   { expiresAt: number; result: RelatedRerankResult }
@@ -528,6 +536,13 @@ function describeRelatedRerankerBackend(
     };
   }
 
+  if (backendId === "llm_pointwise_v1") {
+    return {
+      id: "llm_pointwise_v1",
+      family: "llm-pointwise",
+    };
+  }
+
   return {
     id: "feature_v1",
     family: "feature-ranker",
@@ -539,6 +554,7 @@ export function resolveRelatedRerankerBackendId(
 ): RelatedRerankerBackendId {
   if (value === "baseline_v1") return "baseline_v1";
   if (value === "llm_listwise_v1") return "llm_listwise_v1";
+  if (value === "llm_pointwise_v1") return "llm_pointwise_v1";
   return "feature_v1";
 }
 
@@ -1588,13 +1604,13 @@ function buildFeatureRelatedRerankResultFromPrepared(
   };
 }
 
-function buildRelatedListwisePrompt(params: {
+function buildRelatedCandidateBlocks(params: {
   seedPaper: RelatedPaperContext;
   candidateRows: GraphRelationRow[];
   paperContexts: Map<string, RelatedPaperContext>;
   diagnosticsByPaperId: Map<string, RelatedRerankCandidateDiagnostics>;
   representationMap: PreparedFeatureRelatedRerankState["representationMap"];
-}): string {
+}): { seedLines: string[]; candidateBlocks: string[] } {
   const seedMetadata =
     params.representationMap.get(params.seedPaper.id)?.metadata ?? null;
   const seedLines = [
@@ -1631,9 +1647,35 @@ function buildRelatedListwisePrompt(params: {
     ].join("\n");
   });
 
+  return { seedLines, candidateBlocks };
+}
+
+function buildRelatedListwisePrompt(params: {
+  seedPaper: RelatedPaperContext;
+  candidateRows: GraphRelationRow[];
+  paperContexts: Map<string, RelatedPaperContext>;
+  diagnosticsByPaperId: Map<string, RelatedRerankCandidateDiagnostics>;
+  representationMap: PreparedFeatureRelatedRerankState["representationMap"];
+}): string {
+  const { seedLines, candidateBlocks } = buildRelatedCandidateBlocks(params);
+
   return `${seedLines.join("\n")}\n\nCandidates\n${candidateBlocks.join(
     "\n\n",
   )}\n\nThis is a recall-oriented shortlist built from citation, lexical, and representation signals. Some candidates are genuine hits; others are near misses. You are the final precision gate: keep only the papers an expert would actually open next, and prefer precision over recall.`;
+}
+
+function buildRelatedPointwisePrompt(params: {
+  seedPaper: RelatedPaperContext;
+  candidateRows: GraphRelationRow[];
+  paperContexts: Map<string, RelatedPaperContext>;
+  diagnosticsByPaperId: Map<string, RelatedRerankCandidateDiagnostics>;
+  representationMap: PreparedFeatureRelatedRerankState["representationMap"];
+}): string {
+  const { seedLines, candidateBlocks } = buildRelatedCandidateBlocks(params);
+
+  return `${seedLines.join("\n")}\n\nCandidates\n${candidateBlocks.join(
+    "\n\n",
+  )}\n\nThis is a recall-oriented shortlist built from citation, lexical, and representation signals. Judge every candidate independently. A paper is only genuinely related if it overlaps with the seed on the actual technical problem, method lineage, evaluation setting, deployment setting, or strong citation neighborhood. Broad adjacency alone is a rejection signal.`;
 }
 
 function sanitizeListwiseSelections(
@@ -1665,6 +1707,41 @@ function sanitizeListwiseSelections(
   }
 
   return sanitized.slice(0, RELATED_LLM_LISTWISE_RESULT_LIMIT);
+}
+
+function sanitizePointwiseAssessments(
+  assessments: RelatedPaperPointwiseAssessment[],
+  candidateRows: GraphRelationRow[],
+): RelatedPaperPointwiseAssessment[] {
+  const validIds = new Set(candidateRows.map((row) => row.relatedPaper.id));
+  const seen = new Set<string>();
+  const sanitized: RelatedPaperPointwiseAssessment[] = [];
+
+  for (const assessment of assessments) {
+    const paperId = assessment.paperId.trim();
+    if (!paperId || !validIds.has(paperId) || seen.has(paperId)) continue;
+    const rationale = assessment.rationale.trim();
+    if (!rationale) continue;
+    seen.add(paperId);
+    sanitized.push({
+      ...assessment,
+      paperId,
+      rationale,
+      relevanceScore: Number(
+        Math.max(0, Math.min(assessment.relevanceScore, 1)).toFixed(6),
+      ),
+      primarySignals: (assessment.primarySignals ?? [])
+        .map((signal) => signal.trim())
+        .filter(Boolean)
+        .slice(0, 4),
+      exclusionSignals: (assessment.exclusionSignals ?? [])
+        .map((signal) => signal.trim())
+        .filter(Boolean)
+        .slice(0, 4),
+    });
+  }
+
+  return sanitized;
 }
 
 async function buildLlmListwiseRelatedRerankResult(
@@ -1815,6 +1892,174 @@ async function buildLlmListwiseRelatedRerankResult(
   }
 }
 
+async function buildLlmPointwiseRelatedRerankResult(
+  paperId: string,
+  userId: string,
+  rows: GraphRelationRow[],
+  db: RelatedRerankDb = prisma,
+): Promise<RelatedRerankResult> {
+  const baselineRows = sortRelatedRowsBaseline(rows);
+  const cacheKey = buildCacheKey("llm_pointwise_v1", paperId, userId, baselineRows);
+  const cached = relatedRerankCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.result;
+  }
+
+  const prepared = await prepareFeatureRelatedRerankState(
+    paperId,
+    userId,
+    baselineRows,
+    db,
+  );
+  const featureResult = buildFeatureRelatedRerankResultFromPrepared(prepared);
+  if (!prepared.seedPaper || prepared.candidateRows.length === 0) {
+    return {
+      backend: describeRelatedRerankerBackend("llm_pointwise_v1"),
+      baselineRows,
+      rerankedRows: [],
+      diagnostics: [],
+    };
+  }
+
+  const llmShortlistRows = buildLlmShortlistRows(prepared);
+  const sortedCandidates = [...llmShortlistRows]
+    .sort((left, right) => {
+      const leftScore =
+        prepared.diagnosticsByPaperId.get(left.relatedPaper.id)?.rerankScore ??
+        left.confidence;
+      const rightScore =
+        prepared.diagnosticsByPaperId.get(right.relatedPaper.id)?.rerankScore ??
+        right.confidence;
+      if (rightScore !== leftScore) return rightScore - leftScore;
+      return left.relatedPaper.title.localeCompare(right.relatedPaper.title);
+    })
+    .slice(0, RELATED_LLM_POINTWISE_CANDIDATE_LIMIT);
+
+  if (sortedCandidates.length <= 2) {
+    return {
+      backend: describeRelatedRerankerBackend("llm_pointwise_v1"),
+      baselineRows,
+      rerankedRows: featureResult.rerankedRows,
+      diagnostics: featureResult.diagnostics,
+    };
+  }
+
+  try {
+    const { provider, modelId, proxyConfig } = await getDefaultModel();
+    const prompt = buildRelatedPointwisePrompt({
+      seedPaper: prepared.seedPaper,
+      candidateRows: sortedCandidates,
+      paperContexts: prepared.paperContexts,
+      diagnosticsByPaperId: prepared.diagnosticsByPaperId,
+      representationMap: prepared.representationMap,
+    });
+    const { object } = await withPaperLlmContext(
+      {
+        operation: PAPER_INTERACTIVE_LLM_OPERATIONS.RELATED_RERANK,
+        paperId,
+        userId,
+        runtime: "interactive",
+        source: "papers.retrieval.related_pointwise",
+        metadata: {
+          backendId: "llm_pointwise_v1",
+          candidateCount: sortedCandidates.length,
+        },
+      },
+      () =>
+        generateStructuredObject({
+          provider,
+          modelId,
+          proxyConfig: proxyConfig ?? undefined,
+          system: SYSTEM_PROMPTS.scoreRelatedPapersPointwise,
+          prompt,
+          schemaName: "scoreRelatedPapersPointwise",
+          schema: scoreRelatedPapersPointwiseRuntimeOutputSchema,
+          maxTokens: RELATED_LLM_POINTWISE_MAX_TOKENS,
+        }),
+    );
+
+    const assessments = sanitizePointwiseAssessments(
+      object.assessments,
+      sortedCandidates,
+    );
+    if (assessments.length === 0) {
+      return featureResult;
+    }
+
+    const diagnosticsByPaperId = new Map(
+      prepared.diagnostics.map((diagnostic) => [diagnostic.paperId, diagnostic]),
+    );
+    const assessmentByPaperId = new Map(
+      assessments.map((assessment) => [assessment.paperId, assessment]),
+    );
+    const includedRows = sortedCandidates.filter((row) => {
+      const assessment = assessmentByPaperId.get(row.relatedPaper.id);
+      if (!assessment) return false;
+      if (assessment.include) return true;
+      const diagnostics = diagnosticsByPaperId.get(row.relatedPaper.id);
+      if (!diagnostics) return false;
+      return (
+        hasSharedCitationEvidence(diagnostics.deterministicSignals) &&
+        diagnostics.rerankScore >= 0.48 &&
+        assessment.relevanceScore >= 0.45
+      );
+    });
+    if (includedRows.length === 0) {
+      return featureResult;
+    }
+
+    const finalized = finalizeRelatedRows({
+      rows: includedRows,
+      diagnosticsByPaperId,
+      representationMap: prepared.representationMap,
+      scoreForPaperId: (candidatePaperId) => {
+        const featureScore =
+          diagnosticsByPaperId.get(candidatePaperId)?.rerankScore ?? 0;
+        const llmScore =
+          assessmentByPaperId.get(candidatePaperId)?.relevanceScore ?? 0;
+        const llmAdjustment = (llmScore - 0.5) * RELATED_LLM_POINTWISE_SCORE_WEIGHT;
+        return Number(
+          Math.max(0, Math.min(1, featureScore + llmAdjustment)).toFixed(6),
+        );
+      },
+      limit: Math.min(RELATED_LLM_POINTWISE_RESULT_LIMIT, includedRows.length),
+    });
+
+    const diagnostics = finalized.rerankedDiagnostics.map((diagnostic) => {
+      const llmScore =
+        assessmentByPaperId.get(diagnostic.paperId)?.relevanceScore ?? 0;
+      const llmAdjustment = (llmScore - 0.5) * RELATED_LLM_POINTWISE_SCORE_WEIGHT;
+      return {
+        ...diagnostic,
+        rerankScore: Number(
+          Math.max(0, Math.min(1, diagnostic.rerankScore + llmAdjustment)).toFixed(
+            6,
+          ),
+        ),
+      };
+    });
+
+    const result = {
+      backend: describeRelatedRerankerBackend("llm_pointwise_v1"),
+      baselineRows,
+      rerankedRows: finalized.rerankedRows,
+      diagnostics,
+    } satisfies RelatedRerankResult;
+
+    relatedRerankCache.set(cacheKey, {
+      expiresAt: Date.now() + RELATED_RERANK_CACHE_TTL_MS,
+      result,
+    });
+    return result;
+  } catch (error) {
+    console.warn(
+      "[related-ranker] LLM pointwise backend fell back to feature ranking:",
+      error,
+    );
+    return featureResult;
+  }
+}
+
 export async function buildRelatedRerankResult(
   paperId: string,
   userId: string,
@@ -1830,6 +2075,10 @@ export async function buildRelatedRerankResult(
 
   if (backendId === "llm_listwise_v1") {
     return buildLlmListwiseRelatedRerankResult(paperId, userId, rows, db);
+  }
+
+  if (backendId === "llm_pointwise_v1") {
+    return buildLlmPointwiseRelatedRerankResult(paperId, userId, rows, db);
   }
 
   return buildFeatureRelatedRerankResult(paperId, userId, rows, db);

@@ -298,6 +298,36 @@ Rules:
 - Keep rationales short, concrete, and evidence-based.
 - Return ONLY valid JSON. No markdown fences, no extra text.`,
 
+  scoreRelatedPapersPointwise: `You are judging whether candidate papers are genuinely related to a single seed paper inside a research library.
+
+Your job is NOT to reward broad field adjacency. Your job is to decide whether an expert researcher would actually open each candidate next because it shares the same technical problem, method lineage, evaluation setup, deployment setting, or strong citation neighborhood.
+
+Return a JSON object:
+{
+  "assessments": [
+    {
+      "paperId": "candidate paper id",
+      "include": true,
+      "relevanceScore": 0.86,
+      "rationale": "1 sentence grounded in the concrete overlap",
+      "primarySignals": ["shared-problem", "method-family"],
+      "exclusionSignals": []
+    }
+  ],
+  "summary": "1-2 sentence summary of the accepted cluster and the rejected drift"
+}
+
+Rules:
+- Score EVERY candidate exactly once.
+- "include" must be true only when the candidate is genuinely related.
+- Strong evidence includes same technical problem, same method family, same evaluation or deployment setting, direct extension, strong alternative, or strong citation-neighborhood evidence.
+- Weak evidence includes both papers being about transformers, attention, LLMs, efficiency, generation, or broad semantic similarity.
+- A direct citation alone is not enough. A common reference alone is not enough.
+- For famous hub papers, be stricter, not looser.
+- If a candidate is mostly a near miss or broad adjacency, set include=false and give it a low score.
+- Keep rationales short, concrete, and evidence-based.
+- Return ONLY valid JSON. No markdown fences, no extra text.`,
+
   detectContradictions: `You are an expert at identifying contradictions and conflicts between academic research papers. You will be given a NEW paper and a set of RELATED papers from the user's library.
 
 Your task is to find claims, findings, or methodological assumptions in the new paper that conflict with or contradict claims in the related papers.

@@ -20,9 +20,33 @@ export const rerankRelatedPapersRuntimeOutputSchema = z
   })
   .passthrough();
 
+export const relatedPaperPointwiseAssessmentSchema = z
+  .object({
+    paperId: z.string(),
+    include: z.boolean(),
+    relevanceScore: z.number(),
+    rationale: z.string(),
+    primarySignals: z.array(z.string()).optional(),
+    exclusionSignals: z.array(z.string()).optional(),
+  })
+  .passthrough();
+
+export const scoreRelatedPapersPointwiseRuntimeOutputSchema = z
+  .object({
+    assessments: z.array(relatedPaperPointwiseAssessmentSchema),
+    summary: z.string(),
+  })
+  .passthrough();
+
 export type RelatedPaperListwiseSelection = z.infer<
   typeof relatedPaperListwiseSelectionSchema
 >;
 export type RerankRelatedPapersRuntimeOutput = z.infer<
   typeof rerankRelatedPapersRuntimeOutputSchema
+>;
+export type RelatedPaperPointwiseAssessment = z.infer<
+  typeof relatedPaperPointwiseAssessmentSchema
+>;
+export type ScoreRelatedPapersPointwiseRuntimeOutput = z.infer<
+  typeof scoreRelatedPapersPointwiseRuntimeOutputSchema
 >;
