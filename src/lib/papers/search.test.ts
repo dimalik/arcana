@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   parseSearchQuery,
+  searchLibraryEntities,
   searchLibraryPapers,
   shouldRunSemanticSearch,
 } from "./search";
@@ -207,5 +208,109 @@ describe("paper search query heuristics", () => {
       "other-title-hit",
     ]);
     expect(result.papers[0]?.matchFields).toContain("title");
+  });
+
+  it("returns author entity hits for local search when the query matches an indexed author", async () => {
+    const papers = [
+      makePaper(
+        "paper-1",
+        "FlashAttention: Fast and Memory-Efficient Exact Attention with IO-Awareness",
+        350,
+      ),
+      makePaper(
+        "paper-2",
+        "FlashAttention-2: Faster Attention with Better Parallelism and Work Partitioning",
+        275,
+      ),
+    ];
+
+    const authors = [
+      {
+        id: "author-tri-dao",
+        canonicalName: "Tri Dao",
+        normalizedName: "tri dao",
+        orcid: null,
+        semanticScholarAuthorId: null,
+      },
+    ];
+
+    const paperAuthors = [
+      {
+        paperId: "paper-1",
+        authorId: "author-tri-dao",
+        rawName: "Tri Dao",
+        orderIndex: 0,
+        author: authors[0],
+        paper: {
+          id: "paper-1",
+          title: papers[0].title,
+          year: papers[0].year,
+          citationCount: papers[0].citationCount,
+          createdAt: papers[0].createdAt,
+        },
+      },
+      {
+        paperId: "paper-2",
+        authorId: "author-tri-dao",
+        rawName: "Tri Dao",
+        orderIndex: 0,
+        author: authors[0],
+        paper: {
+          id: "paper-2",
+          title: papers[1].title,
+          year: papers[1].year,
+          citationCount: papers[1].citationCount,
+          createdAt: papers[1].createdAt,
+        },
+      },
+    ];
+
+    const db = {
+      paper: {
+        findMany: async ({ where }: { where: MockPaperWhere }) =>
+          papers.filter((paper) => matchesPaperWhere(paper, where)),
+        count: async ({ where }: { where: MockPaperWhere }) =>
+          papers.filter((paper) => matchesPaperWhere(paper, where)).length,
+      },
+      author: {
+        findMany: async () => authors,
+      },
+      paperAuthor: {
+        findMany: async () => paperAuthors,
+      },
+      paperRepresentation: {
+        findMany: async () => [],
+      },
+    };
+
+    const result = await searchLibraryEntities(
+      {
+        userId: "user-1",
+        queryText: "Tri Dao",
+        where: {
+          userId: "user-1",
+          duplicateState: "ACTIVE",
+          isResearchOnly: false,
+        },
+        paperLimit: 5,
+        authorLimit: 3,
+      },
+      db as never,
+    );
+
+    expect(result.authors).toHaveLength(1);
+    expect(result.authors[0]).toMatchObject({
+      id: "author-tri-dao",
+      name: "Tri Dao",
+      paperCount: 2,
+    });
+    expect(result.authors[0]?.topPaperTitles).toEqual([
+      "FlashAttention: Fast and Memory-Efficient Exact Attention with IO-Awareness",
+      "FlashAttention-2: Faster Attention with Better Parallelism and Work Partitioning",
+    ]);
+    expect(result.papers.map((paper) => paper.id).sort()).toEqual([
+      "paper-1",
+      "paper-2",
+    ]);
   });
 });

@@ -79,6 +79,27 @@ interface SearchPaperRow {
   }>;
 }
 
+interface SearchAuthorPaperRow {
+  paperId: string;
+  authorId: string;
+  rawName: string;
+  orderIndex: number;
+  author: {
+    id: string;
+    canonicalName: string;
+    normalizedName: string;
+    orcid: string | null;
+    semanticScholarAuthorId: string | null;
+  };
+  paper: {
+    id: string;
+    title: string;
+    year: number | null;
+    citationCount: number | null;
+    createdAt: Date;
+  };
+}
+
 export interface SearchDiagnostics {
   lexicalMatchKinds: SearchMatchField[];
   semanticScore: number;
@@ -109,11 +130,33 @@ export interface SearchPaperResult {
   searchDiagnostics: SearchDiagnostics;
 }
 
+export interface SearchAuthorResult {
+  id: string;
+  name: string;
+  normalizedName: string;
+  orcid: string | null;
+  semanticScholarAuthorId: string | null;
+  paperCount: number;
+  topPaperTitles: string[];
+  authorDiagnostics: {
+    exactMatch: boolean;
+    prefixMatch: boolean;
+    tokenPrefixHits: number;
+    score: number;
+  };
+}
+
 export interface SearchLibraryPapersResult {
   papers: SearchPaperResult[];
   total: number;
   page: number;
   totalPages: number;
+  degraded: boolean;
+}
+
+export interface SearchLibraryEntitiesResult {
+  papers: SearchPaperResult[];
+  authors: SearchAuthorResult[];
   degraded: boolean;
 }
 
@@ -168,6 +211,18 @@ function tokenizeSearchText(value: string): string[] {
 function normalizeIdentifier(value: string | null | undefined): string | null {
   if (!value) return null;
   return normalizeWhitespace(value).toLowerCase();
+}
+
+function tokenPrefixHitCount(tokens: string[], normalizedName: string): number {
+  if (tokens.length === 0 || !normalizedName) return 0;
+  const parts = normalizedName.split(" ").filter(Boolean);
+  let hits = 0;
+  for (const token of tokens) {
+    if (parts.some((part) => part.startsWith(token))) {
+      hits += 1;
+    }
+  }
+  return hits;
 }
 
 export function parseSearchQuery(query: string): SearchQueryInfo {
@@ -734,6 +789,174 @@ async function loadSearchVectors(
   );
 }
 
+async function searchLibraryAuthors(
+  params: {
+    queryText: string;
+    where: Prisma.PaperWhereInput;
+    limit?: number;
+  },
+  db: SearchDb,
+): Promise<SearchAuthorResult[]> {
+  const query = parseSearchQuery(params.queryText);
+  const limit = Math.max(1, params.limit ?? 5);
+
+  if (query.doiExact || query.arxivExact) return [];
+  if (query.tokens.length === 0) return [];
+  if (query.tokens.length === 1 && query.tokens[0]!.length < 3) return [];
+  if (query.tokens.length > 4) return [];
+
+  let matchingAuthors: Array<{
+    id: string;
+    canonicalName: string;
+    normalizedName: string;
+    orcid: string | null;
+    semanticScholarAuthorId: string | null;
+  }> = [];
+
+  try {
+    matchingAuthors = await db.author.findMany({
+      where: {
+        AND: query.tokens.map((token) => ({
+          normalizedName: { contains: token },
+        })),
+      },
+      take: 25,
+      select: {
+        id: true,
+        canonicalName: true,
+        normalizedName: true,
+        orcid: true,
+        semanticScholarAuthorId: true,
+      },
+    });
+  } catch (error) {
+    if (isMissingAuthorIndexError(error)) {
+      return [];
+    }
+    throw error;
+  }
+
+  if (matchingAuthors.length === 0) return [];
+
+  let rows: SearchAuthorPaperRow[] = [];
+  try {
+    rows = (await db.paperAuthor.findMany({
+      where: {
+        authorId: { in: matchingAuthors.map((author) => author.id) },
+        paper: params.where,
+      },
+      take: 200,
+      select: {
+        paperId: true,
+        authorId: true,
+        rawName: true,
+        orderIndex: true,
+        author: {
+          select: {
+            id: true,
+            canonicalName: true,
+            normalizedName: true,
+            orcid: true,
+            semanticScholarAuthorId: true,
+          },
+        },
+        paper: {
+          select: {
+            id: true,
+            title: true,
+            year: true,
+            citationCount: true,
+            createdAt: true,
+          },
+        },
+      },
+    })) as SearchAuthorPaperRow[];
+  } catch (error) {
+    if (isMissingAuthorIndexError(error)) {
+      return [];
+    }
+    throw error;
+  }
+
+  const byAuthorId = new Map<
+    string,
+    {
+      author: SearchAuthorPaperRow["author"];
+      papers: SearchAuthorPaperRow["paper"][];
+    }
+  >();
+
+  for (const row of rows) {
+    const current = byAuthorId.get(row.authorId);
+    if (!current) {
+      byAuthorId.set(row.authorId, {
+        author: row.author,
+        papers: [row.paper],
+      });
+      continue;
+    }
+    if (!current.papers.some((paper) => paper.id === row.paper.id)) {
+      current.papers.push(row.paper);
+    }
+  }
+
+  return Array.from(byAuthorId.values())
+    .map(({ author, papers }) => {
+      const exactMatch = author.normalizedName === query.normalizedAuthorText;
+      const prefixMatch =
+        Boolean(query.normalizedAuthorText) &&
+        author.normalizedName.startsWith(query.normalizedAuthorText);
+      const tokenPrefixHits = tokenPrefixHitCount(
+        query.tokens,
+        author.normalizedName,
+      );
+      const tokenCoverage = Number(
+        (tokenPrefixHits / Math.max(query.tokens.length, 1)).toFixed(6),
+      );
+      let score = tokenCoverage * 0.62;
+      if (prefixMatch) score += 0.22;
+      if (exactMatch) score += 0.16;
+      score = Number(Math.min(score, 1).toFixed(6));
+
+      const sortedPapers = [...papers].sort((left, right) => {
+        const leftCitation = left.citationCount ?? 0;
+        const rightCitation = right.citationCount ?? 0;
+        if (rightCitation !== leftCitation) return rightCitation - leftCitation;
+        const leftYear = left.year ?? 0;
+        const rightYear = right.year ?? 0;
+        if (rightYear !== leftYear) return rightYear - leftYear;
+        return right.createdAt.getTime() - left.createdAt.getTime();
+      });
+
+      return {
+        id: author.id,
+        name: author.canonicalName,
+        normalizedName: author.normalizedName,
+        orcid: author.orcid,
+        semanticScholarAuthorId: author.semanticScholarAuthorId,
+        paperCount: papers.length,
+        topPaperTitles: sortedPapers.slice(0, 3).map((paper) => paper.title),
+        authorDiagnostics: {
+          exactMatch,
+          prefixMatch,
+          tokenPrefixHits,
+          score,
+        },
+      } satisfies SearchAuthorResult;
+    })
+    .filter((author) => author.paperCount > 0 && author.authorDiagnostics.score >= 0.45)
+    .sort((left, right) => {
+      if (right.authorDiagnostics.score !== left.authorDiagnostics.score) {
+        return right.authorDiagnostics.score - left.authorDiagnostics.score;
+      }
+      if (right.paperCount !== left.paperCount) {
+        return right.paperCount - left.paperCount;
+      }
+      return left.name.localeCompare(right.name);
+    })
+    .slice(0, limit);
+}
+
 export async function searchLibraryPapers(
   params: {
     userId: string;
@@ -919,3 +1142,50 @@ export async function searchLibraryPapers(
     degraded: papersResult.degraded,
   };
 }
+
+export async function searchLibraryEntities(
+  params: {
+    userId: string;
+    queryText: string;
+    where: Prisma.PaperWhereInput;
+    paperLimit?: number;
+    authorLimit?: number;
+  },
+  db: SearchDb = prisma,
+): Promise<SearchLibraryEntitiesResult> {
+  const [papers, authors] = await Promise.all([
+    searchLibraryPapers(
+      {
+        userId: params.userId,
+        queryText: params.queryText,
+        where: params.where,
+        page: 1,
+        limit: params.paperLimit ?? 5,
+      },
+      db,
+    ),
+    searchLibraryAuthors(
+      {
+        queryText: params.queryText,
+        where: params.where,
+        limit: params.authorLimit ?? 5,
+      },
+      db,
+    ),
+  ]);
+
+  return {
+    papers: papers.papers,
+    authors,
+    degraded: papers.degraded,
+  };
+}
+
+const searchModule = {
+  parseSearchQuery,
+  shouldRunSemanticSearch,
+  searchLibraryPapers,
+  searchLibraryEntities,
+};
+
+export default searchModule;

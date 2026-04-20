@@ -2,14 +2,27 @@
 
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { Search, FileText, Loader2, Plus, Check, ExternalLink } from "lucide-react";
+import { Search, FileText, Loader2, Plus, Check, Users } from "lucide-react";
 import { toast } from "sonner";
 
-interface LocalResult {
+interface LocalPaperResult {
   id: string;
   title: string;
   authors: string | null;
   year: number | null;
+}
+
+interface LocalAuthorResult {
+  id: string;
+  name: string;
+  paperCount: number;
+  topPaperTitles: string[];
+}
+
+interface LocalSearchResponse {
+  papers: LocalPaperResult[];
+  authors: LocalAuthorResult[];
+  degraded: boolean;
 }
 
 interface OnlineResult {
@@ -45,7 +58,8 @@ function normalize(s: string) {
 export function TopbarSearch({ wide = false }: { wide?: boolean }) {
   const router = useRouter();
   const [query, setQuery] = useState("");
-  const [localResults, setLocalResults] = useState<LocalResult[]>([]);
+  const [localPaperResults, setLocalPaperResults] = useState<LocalPaperResult[]>([]);
+  const [localAuthorResults, setLocalAuthorResults] = useState<LocalAuthorResult[]>([]);
   const [onlineResults, setOnlineResults] = useState<OnlineResult[]>([]);
   const [localLoading, setLocalLoading] = useState(false);
   const [onlineLoading, setOnlineLoading] = useState(false);
@@ -61,7 +75,8 @@ export function TopbarSearch({ wide = false }: { wide?: boolean }) {
   // --- Local search (200ms debounce) ---
   const searchLocal = useCallback(async (q: string) => {
     if (q.length < 2) {
-      setLocalResults([]);
+      setLocalPaperResults([]);
+      setLocalAuthorResults([]);
       return;
     }
     localAbortRef.current?.abort();
@@ -70,12 +85,13 @@ export function TopbarSearch({ wide = false }: { wide?: boolean }) {
     setLocalLoading(true);
     try {
       const res = await fetch(
-        `/api/papers?search=${encodeURIComponent(q)}&limit=5`,
+        `/api/search/local?q=${encodeURIComponent(q)}`,
         { signal: controller.signal }
       );
       if (!res.ok) return;
-      const data = await res.json();
-      setLocalResults(data.papers ?? []);
+      const data: LocalSearchResponse = await res.json();
+      setLocalPaperResults(data.papers ?? []);
+      setLocalAuthorResults(data.authors ?? []);
       setSelected(-1);
     } catch {
       // aborted
@@ -123,7 +139,7 @@ export function TopbarSearch({ wide = false }: { wide?: boolean }) {
 
   // Dedup online results against local
   const filteredOnline = onlineResults.filter((online) => {
-    return !localResults.some((local) => {
+    return !localPaperResults.some((local) => {
       const localAuthorsRaw = local.authors;
       // Check DOI
       if (online.doi && localAuthorsRaw) {
@@ -138,7 +154,8 @@ export function TopbarSearch({ wide = false }: { wide?: boolean }) {
 
   // Open logic
   const shouldOpen = query.length >= 2 && (
-    localResults.length > 0 ||
+    localPaperResults.length > 0 ||
+    localAuthorResults.length > 0 ||
     filteredOnline.length > 0 ||
     onlineLoading ||
     localLoading
@@ -150,7 +167,11 @@ export function TopbarSearch({ wide = false }: { wide?: boolean }) {
   }, [shouldOpen, query]);
 
   // Combined flat list for keyboard nav
-  const flatList = [...localResults.map((r) => ({ type: "local" as const, data: r })), ...filteredOnline.map((r) => ({ type: "online" as const, data: r }))];
+  const flatList = [
+    ...localAuthorResults.map((author) => ({ type: "author" as const, data: author })),
+    ...localPaperResults.map((paper) => ({ type: "paper" as const, data: paper })),
+    ...filteredOnline.map((paper) => ({ type: "online" as const, data: paper })),
+  ];
 
   // Close on outside click
   useEffect(() => {
@@ -163,10 +184,16 @@ export function TopbarSearch({ wide = false }: { wide?: boolean }) {
     return () => document.removeEventListener("mousedown", handler);
   }, []);
 
-  const navigateLocal = (id: string) => {
+  const navigateLocalPaper = (id: string) => {
     setOpen(false);
     setQuery("");
     router.push(`/papers/${id}`);
+  };
+
+  const navigateLocalAuthor = (id: string) => {
+    setOpen(false);
+    setQuery("");
+    router.push(`/authors/${id}`);
   };
 
   const handleImport = async (result: OnlineResult) => {
@@ -222,8 +249,10 @@ export function TopbarSearch({ wide = false }: { wide?: boolean }) {
     } else if (e.key === "Enter" && selected >= 0) {
       e.preventDefault();
       const item = flatList[selected];
-      if (item.type === "local") {
-        navigateLocal((item.data as LocalResult).id);
+      if (item.type === "author") {
+        navigateLocalAuthor((item.data as LocalAuthorResult).id);
+      } else if (item.type === "paper") {
+        navigateLocalPaper((item.data as LocalPaperResult).id);
       } else {
         handleImport(item.data as OnlineResult);
       }
@@ -276,7 +305,7 @@ export function TopbarSearch({ wide = false }: { wide?: boolean }) {
           onChange={(e) => setQuery(e.target.value)}
           onFocus={() => { if (shouldOpen) setOpen(true); }}
           onKeyDown={handleKeyDown}
-          placeholder="Search papers..."
+          placeholder="Search papers or authors..."
           className={`bg-transparent outline-none placeholder:text-muted-foreground/60 transition-all ${
             wide ? "w-full" : "w-36 focus:w-52"
           }`}
@@ -287,21 +316,54 @@ export function TopbarSearch({ wide = false }: { wide?: boolean }) {
       {/* Results dropdown */}
       {open && (
         <div className="absolute left-0 top-full mt-1 rounded-md border bg-popover shadow-lg z-50 w-[420px] max-h-[420px] overflow-y-auto">
-          {/* Local section */}
-          {localResults.length > 0 && (
+          {localAuthorResults.length > 0 && (
             <div>
+              <div className="px-2.5 pt-2 pb-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/60">
+                Authors
+              </div>
+              <div className="p-1">
+                {localAuthorResults.map((author) => {
+                  globalIndex++;
+                  const idx = globalIndex;
+                  return (
+                    <button
+                      key={author.id}
+                      onClick={() => navigateLocalAuthor(author.id)}
+                      onMouseEnter={() => setSelected(idx)}
+                      className={`flex w-full items-start gap-2 rounded-sm px-2 py-1.5 text-left text-sm transition-colors ${
+                        selected === idx ? "bg-accent text-accent-foreground" : ""
+                      }`}
+                    >
+                      <Users className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate font-medium text-xs">{author.name}</div>
+                        <div className="truncate text-[11px] text-muted-foreground">
+                          {author.paperCount} paper{author.paperCount === 1 ? "" : "s"}
+                          {author.topPaperTitles[0] && ` \u00b7 ${author.topPaperTitles[0]}`}
+                        </div>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {localPaperResults.length > 0 && (
+            <div>
+              {localAuthorResults.length > 0 && <div className="border-t border-border/40" />}
               <div className="px-2.5 pt-2 pb-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/60">
                 In Library
               </div>
               <div className="p-1">
-                {localResults.map((paper) => {
+                {localPaperResults.map((paper) => {
                   globalIndex++;
                   const idx = globalIndex;
                   const authors = paper.authors ? JSON.parse(paper.authors) as string[] : [];
                   return (
                     <button
                       key={paper.id}
-                      onClick={() => navigateLocal(paper.id)}
+                      onClick={() => navigateLocalPaper(paper.id)}
                       onMouseEnter={() => setSelected(idx)}
                       className={`flex w-full items-start gap-2 rounded-sm px-2 py-1.5 text-left text-sm transition-colors ${
                         selected === idx ? "bg-accent text-accent-foreground" : ""
@@ -325,10 +387,11 @@ export function TopbarSearch({ wide = false }: { wide?: boolean }) {
             </div>
           )}
 
-          {/* Online section */}
           {(filteredOnline.length > 0 || onlineLoading) && query.length >= 3 && (
             <div>
-              {localResults.length > 0 && <div className="border-t border-border/40" />}
+              {(localAuthorResults.length > 0 || localPaperResults.length > 0) && (
+                <div className="border-t border-border/40" />
+              )}
               <div className="px-2.5 pt-2 pb-1 flex items-center justify-between">
                 <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground/60">
                   Online
@@ -404,9 +467,9 @@ export function TopbarSearch({ wide = false }: { wide?: boolean }) {
           )}
 
           {/* Empty state */}
-          {localResults.length === 0 && filteredOnline.length === 0 && !localLoading && !onlineLoading && query.length >= 2 && (
+          {localAuthorResults.length === 0 && localPaperResults.length === 0 && filteredOnline.length === 0 && !localLoading && !onlineLoading && query.length >= 2 && (
             <div className="p-3 text-center text-sm text-muted-foreground">
-              No papers found
+              No papers or authors found
             </div>
           )}
         </div>
