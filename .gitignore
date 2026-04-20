@@ -53,6 +53,8 @@ next-env.d.ts
 .claude/
 .playwright-mcp/
 scripts/__pycache__/
+training/**/__pycache__/
+*.pyc
 tmp/
 ".exit_code > stdout.log 2> stderr.log & echo $!"
 
