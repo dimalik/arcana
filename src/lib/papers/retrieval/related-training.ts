@@ -633,7 +633,6 @@ async function buildWeakTrainCases(
     where: {
       userId: params.userId,
       duplicateState: "ACTIVE",
-      entityId: { not: null },
       id: { notIn: Array.from(params.devSeedIds) },
     },
     select: RELATED_TRAINING_PAPER_SELECT,
