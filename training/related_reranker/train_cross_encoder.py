@@ -7,6 +7,7 @@ The input format matches benchmark/training/related-papers/*.pairs.jsonl.
 from __future__ import annotations
 
 import argparse
+import inspect
 import json
 import math
 import random
@@ -440,6 +441,47 @@ def save_predictions(
             handle.write(json.dumps(row) + "\n")
 
 
+def build_training_arguments(args: argparse.Namespace, output_dir: Path) -> TrainingArguments:
+    signature = inspect.signature(TrainingArguments.__init__)
+    supported = set(signature.parameters)
+
+    kwargs: Dict[str, Any] = {
+        "output_dir": str(output_dir),
+        "learning_rate": args.learning_rate,
+        "weight_decay": args.weight_decay,
+        "warmup_ratio": args.warmup_ratio,
+        "num_train_epochs": args.epochs,
+        "per_device_train_batch_size": args.train_batch_size,
+        "per_device_eval_batch_size": args.eval_batch_size,
+        "gradient_accumulation_steps": args.gradient_accumulation,
+        "dataloader_num_workers": args.num_workers,
+        "save_strategy": "epoch",
+        "logging_strategy": "steps",
+        "logging_steps": args.logging_steps,
+        "load_best_model_at_end": True,
+        "metric_for_best_model": "ndcg_at_10",
+        "greater_is_better": True,
+        "save_total_limit": args.save_total_limit,
+        "remove_unused_columns": False,
+        "bf16": args.bf16,
+        "fp16": args.fp16,
+        "seed": args.seed,
+        "do_eval": True,
+    }
+
+    if "evaluation_strategy" in supported:
+        kwargs["evaluation_strategy"] = "epoch"
+    elif "eval_strategy" in supported:
+        kwargs["eval_strategy"] = "epoch"
+
+    if "report_to" in supported:
+        kwargs["report_to"] = []
+
+    return TrainingArguments(
+        **{key: value for key, value in kwargs.items() if key in supported}
+    )
+
+
 def main() -> None:
     args = parse_args()
     set_seed(args.seed)
@@ -479,31 +521,7 @@ def main() -> None:
 
     class_weights = class_weights_from_pairs(train_pairs)
     output_dir = Path(args.output_dir)
-
-    training_args = TrainingArguments(
-        output_dir=str(output_dir),
-        learning_rate=args.learning_rate,
-        weight_decay=args.weight_decay,
-        warmup_ratio=args.warmup_ratio,
-        num_train_epochs=args.epochs,
-        per_device_train_batch_size=args.train_batch_size,
-        per_device_eval_batch_size=args.eval_batch_size,
-        gradient_accumulation_steps=args.gradient_accumulation,
-        dataloader_num_workers=args.num_workers,
-        evaluation_strategy="epoch",
-        save_strategy="epoch",
-        logging_strategy="steps",
-        logging_steps=args.logging_steps,
-        load_best_model_at_end=True,
-        metric_for_best_model="ndcg_at_10",
-        greater_is_better=True,
-        save_total_limit=args.save_total_limit,
-        report_to=[],
-        remove_unused_columns=False,
-        bf16=args.bf16,
-        fp16=args.fp16,
-        seed=args.seed,
-    )
+    training_args = build_training_arguments(args, output_dir)
 
     trainer = WeightedSequenceClassificationTrainer(
         model=model,
