@@ -1,10 +1,9 @@
 {
   "targetRoutes": {
-    "src/app/api/papers/[id]/llm/claims/route.ts": 1
+    "src/app/api/papers/[id]/llm/claims/route.ts": 1,
+    "src/app/api/papers/[id]/llm/gap-finder/route.ts": 1,
+    "src/app/api/papers/[id]/llm/timeline/route.ts": 1,
+    "src/app/api/papers/[id]/llm/compare-methodologies/route.ts": 1
   },
-  "excludedRoutes": {
-    "src/app/api/papers/[id]/llm/gap-finder/route.ts": "Legacy bespoke prompt wrapper; PR 3 migrates this route onto the shared paper-analysis engine.",
-    "src/app/api/papers/[id]/llm/timeline/route.ts": "Legacy bespoke prompt wrapper; PR 3 migrates this route onto the shared paper-analysis engine.",
-    "src/app/api/papers/[id]/llm/compare-methodologies/route.ts": "Legacy bespoke prompt wrapper; PR 3 migrates this route onto the shared paper-analysis engine."
-  }
+  "excludedRoutes": {}
 }

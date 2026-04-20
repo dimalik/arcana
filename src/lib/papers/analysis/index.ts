@@ -5,3 +5,4 @@ export * from "./types";
 export * from "./extract-claims-schema";
 export * from "./claim-extraction";
 export * from "./capability";
+export * from "./cross-paper-engine";

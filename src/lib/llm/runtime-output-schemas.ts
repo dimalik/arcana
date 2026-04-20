@@ -58,6 +58,99 @@ export const detectContradictionsRuntimeOutputSchema = z
   })
   .passthrough();
 
+export const findGapsRuntimeOutputSchema = z
+  .object({
+    gaps: z.array(
+      z
+        .object({
+          title: z.string(),
+          description: z.string(),
+          relevantPaperIds: z.array(z.string()),
+          type: z.enum([
+            "methodological",
+            "empirical",
+            "theoretical",
+            "application",
+            "scale",
+          ]),
+          confidence: z.number(),
+        })
+        .passthrough(),
+    ),
+    overallAssessment: z.string(),
+  })
+  .passthrough();
+
+export const buildTimelineRuntimeOutputSchema = z
+  .object({
+    timeline: z.array(
+      z
+        .object({
+          paperId: z.string(),
+          year: z.coerce.number().int(),
+          role: z.string(),
+          contribution: z.string(),
+          buildsOn: z.array(z.string()),
+          keyAdvance: z.string(),
+        })
+        .passthrough(),
+    ),
+    narrative: z.string(),
+    openQuestions: z.array(z.string()),
+  })
+  .passthrough();
+
+export const compareMethodologiesRuntimeOutputSchema = z
+  .object({
+    comparison: z
+      .object({
+        papers: z.array(
+          z
+            .object({
+              paperId: z.string(),
+              title: z.string(),
+              approach: z.string(),
+              datasets: z.array(z.string()),
+              metrics: z.array(z.string()),
+              baselines: z.array(z.string()),
+              keyResults: z.string(),
+            })
+            .passthrough(),
+        ),
+        commonDatasets: z.array(z.string()),
+        commonMetrics: z.array(z.string()),
+        headToHead: z.array(
+          z
+            .object({
+              dataset: z.string(),
+              metric: z.string(),
+              results: z.array(
+                z
+                  .object({
+                    paperId: z.string(),
+                    value: z.string(),
+                    notes: z.string(),
+                  })
+                  .passthrough(),
+              ),
+            })
+            .passthrough(),
+        ),
+      })
+      .passthrough(),
+    methodologicalDifferences: z.array(
+      z
+        .object({
+          aspect: z.string(),
+          description: z.string(),
+          implication: z.string(),
+        })
+        .passthrough(),
+    ),
+    verdict: z.string(),
+  })
+  .passthrough();
+
 export const extractCitationContextsRuntimeOutputSchema = z.array(
   z
     .object({
@@ -88,6 +181,9 @@ export const PROCESSING_RUNTIME_OUTPUT_SCHEMAS = {
   categorize: categorizeRuntimeOutputSchema,
   extractReferences: extractReferencesRuntimeOutputSchema,
   detectContradictions: detectContradictionsRuntimeOutputSchema,
+  findGaps: findGapsRuntimeOutputSchema,
+  buildTimeline: buildTimelineRuntimeOutputSchema,
+  compareMethodologies: compareMethodologiesRuntimeOutputSchema,
   extractCitationContexts: extractCitationContextsRuntimeOutputSchema,
   distill: distillRuntimeOutputSchema,
 } as const;
@@ -107,6 +203,13 @@ export type ExtractReferencesRuntimeOutput = z.infer<
 >;
 export type DetectContradictionsRuntimeOutput = z.infer<
   typeof detectContradictionsRuntimeOutputSchema
+>;
+export type FindGapsRuntimeOutput = z.infer<typeof findGapsRuntimeOutputSchema>;
+export type BuildTimelineRuntimeOutput = z.infer<
+  typeof buildTimelineRuntimeOutputSchema
+>;
+export type CompareMethodologiesRuntimeOutput = z.infer<
+  typeof compareMethodologiesRuntimeOutputSchema
 >;
 export type ExtractCitationContextsRuntimeOutput = z.infer<
   typeof extractCitationContextsRuntimeOutputSchema

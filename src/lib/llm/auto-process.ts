@@ -33,6 +33,7 @@ import {
   setProcessingProjection,
   startProcessingStep,
 } from "@/lib/processing/runtime-ledger";
+import { runCrossPaperAnalysisCapability } from "@/lib/papers/analysis";
 import {
   categorizeRuntimeOutputSchema,
   detectContradictionsRuntimeOutputSchema,
@@ -884,59 +885,22 @@ export async function runAutoProcessPipeline(opts: {
         processingRunId,
       });
       console.log("[auto-process] Detecting contradictions for", paperId);
-      const relatedPapers = await prisma.paper.findMany({
-        where: { id: { in: relatedPaperIds } },
-        select: { id: true, title: true, abstract: true, summary: true, keyFindings: true },
+      const parsed = await runCrossPaperAnalysisCapability({
+        capability: "contradictions",
+        paperId,
+        relatedPaperIds,
+        provider,
+        modelId,
+        proxyConfig,
+        userId: paper.userId ?? undefined,
       });
-
-      // Re-fetch paper for latest summary/keyFindings
-      const updatedPaper = await prisma.paper.findUnique({
-        where: { id: paperId },
-        select: { title: true, abstract: true, summary: true, keyFindings: true },
-      });
-
-      const newPaperInfo = [
-        `Title: ${updatedPaper?.title || paper.title}`,
-        updatedPaper?.abstract ? `Abstract: ${updatedPaper.abstract}` : "",
-        updatedPaper?.summary ? `Summary: ${updatedPaper.summary.slice(0, 1000)}` : "",
-        updatedPaper?.keyFindings ? `Key Findings: ${updatedPaper.keyFindings}` : "",
-      ].filter(Boolean).join("\n");
-
-      const relatedList = relatedPapers.map((p) => {
-        const parts = [`id: ${p.id}`, `title: ${p.title}`];
-        if (p.abstract) parts.push(`abstract: ${p.abstract.slice(0, 300)}`);
-        if (p.summary) parts.push(`summary: ${p.summary.slice(0, 300)}`);
-        if (p.keyFindings) parts.push(`keyFindings: ${p.keyFindings}`);
-        return parts.join(" | ");
-      }).join("\n");
-
-      const contradictionPrompt = `NEW PAPER:\n${newPaperInfo}\n\n---\n\nRELATED PAPERS:\n${relatedList}`;
-      const { system } = buildPrompt("detectContradictions", "");
-      const { resultText } = await runProcessingStructuredCall(
-        {
-          paperId,
-          userId: paper.userId,
-          step: "detectContradictions",
-          processingRunId,
-        },
-        {
-          provider,
-          modelId,
-          system,
-          prompt: contradictionPrompt,
-          schemaName: "detectContradictions",
-          schema: detectContradictionsRuntimeOutputSchema,
-          maxTokens: 3000,
-          proxyConfig,
-        },
-      );
 
       await prisma.promptResult.create({
         data: {
           paperId,
           promptType: "detectContradictions",
           prompt: "Auto-detect contradictions",
-          result: resultText,
+          result: JSON.stringify(parsed),
           provider,
           model: modelId,
         },

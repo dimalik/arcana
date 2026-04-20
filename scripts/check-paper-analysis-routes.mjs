@@ -55,10 +55,12 @@ async function main() {
     if (route.path in excludedRoutes) continue;
 
     const expectedCalls = targetRoutes[route.path];
-    const actualCalls = countNamedCalls(route.text, "runPaperAnalysisCapability");
+    const actualCalls =
+      countNamedCalls(route.text, "runPaperAnalysisCapability") +
+      countNamedCalls(route.text, "runCrossPaperAnalysisCapability");
     if (actualCalls !== expectedCalls) {
       violations.push(
-        `${route.path} expected ${expectedCalls} runPaperAnalysisCapability call(s) but found ${actualCalls}`,
+        `${route.path} expected ${expectedCalls} shared paper-analysis call(s) but found ${actualCalls}`,
       );
     }
   }
