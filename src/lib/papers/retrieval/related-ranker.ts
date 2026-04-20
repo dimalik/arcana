@@ -53,6 +53,8 @@ export interface RelatedRerankCandidateDiagnostics {
   titleSimilarity: number;
   queryTitleOverlap: number;
   queryTitleOverlapCount: number;
+  bodyTokenOverlap: number;
+  tagOverlap: number;
   lexicalAuthorOverlap: number;
   identityAuthorOverlap: number;
   venueOverlap: number;
@@ -65,9 +67,28 @@ export interface RelatedRerankCandidateDiagnostics {
 }
 
 export interface RelatedRerankResult {
+  backend: RelatedRerankerBackendDescriptor;
   baselineRows: GraphRelationRow[];
   rerankedRows: GraphRelationRow[];
   diagnostics: RelatedRerankCandidateDiagnostics[];
+}
+
+export type RelatedRerankerBackendId = "baseline_v1" | "feature_v1";
+
+export type RelatedRerankerFamily =
+  | "baseline"
+  | "feature-ranker"
+  | "cross-encoder"
+  | "distilled-reranker"
+  | "llm-listwise";
+
+export interface RelatedRerankerBackendDescriptor {
+  id: RelatedRerankerBackendId;
+  family: RelatedRerankerFamily;
+}
+
+export interface BuildRelatedRerankOptions {
+  backendId?: RelatedRerankerBackendId;
 }
 
 const RELATED_RELATION_TYPE_PRIORS: Array<[RegExp, number]> = [
@@ -82,19 +103,21 @@ const RELATED_RELATION_TYPE_PRIORS: Array<[RegExp, number]> = [
 ];
 
 const RELATED_SIGNAL_WEIGHTS = {
-  graphConfidence: 0.24,
-  semanticSimilarity: 0.2,
-  titleSimilarity: 0.1,
-  queryTitleOverlap: 0.12,
+  graphConfidence: 0.26,
+  semanticSimilarity: 0.04,
+  titleSimilarity: 0.14,
+  queryTitleOverlap: 0.16,
+  bodyTokenOverlap: 0.08,
+  tagOverlap: 0.04,
   lexicalAuthorOverlap: 0.05,
   identityAuthorOverlap: 0.03,
   venueOverlap: 0.04,
   yearProximity: 0.04,
   directCitation: 0.08,
-  reverseCitation: 0.04,
-  bibliographicCoupling: 0.05,
-  coCitation: 0.03,
-  relationTypePrior: 0.05,
+  reverseCitation: 0.06,
+  bibliographicCoupling: 0.08,
+  coCitation: 0.04,
+  relationTypePrior: 0.03,
   citationPrior: 0.02,
 } as const;
 
@@ -133,6 +156,58 @@ const GENERIC_RELATEDNESS_TOKENS = new Set([
   "you",
 ]);
 
+const RELATED_SIGNATURE_STOPWORDS = new Set([
+  "a",
+  "an",
+  "and",
+  "are",
+  "as",
+  "assistant",
+  "at",
+  "benchmarking",
+  "beyond",
+  "bullet",
+  "capable",
+  "fast",
+  "for",
+  "from",
+  "generation",
+  "highly",
+  "in",
+  "into",
+  "is",
+  "language",
+  "languages",
+  "large",
+  "model",
+  "models",
+  "need",
+  "new",
+  "no",
+  "of",
+  "on",
+  "or",
+  "propose",
+  "report",
+  "solely",
+  "technical",
+  "the",
+  "to",
+  "using",
+  "via",
+  "with",
+]);
+
+const RELATED_SIGNATURE_SHORT_TOKEN_ALLOWLIST = new Set([
+  "io",
+  "kv",
+  "lc",
+  "rag",
+]);
+
+const RELATED_LEXICAL_EXPANSION_LIMIT = 120;
+const RELATED_LEXICAL_QUERY_TERMS = 6;
+
 function supportsRelatedRerankDb(db: unknown): db is RelatedRerankDb {
   if (!db || typeof db !== "object") return false;
   const candidate = db as Record<string, unknown>;
@@ -166,6 +241,19 @@ function tokenizeInformativeText(value: string | null | undefined): string[] {
     );
 }
 
+function tokenizeRelatedSignatureText(
+  value: string | null | undefined,
+): string[] {
+  return normalizeText(value)
+    .split(/\s+/)
+    .map((token) => token.trim())
+    .filter((token) => {
+      if (!token) return false;
+      if (RELATED_SIGNATURE_SHORT_TOKEN_ALLOWLIST.has(token)) return true;
+      return token.length >= 4 && !RELATED_SIGNATURE_STOPWORDS.has(token);
+    });
+}
+
 function parseStringArray(value: string | null | undefined): string[] {
   if (!value) return [];
   try {
@@ -179,6 +267,26 @@ function parseStringArray(value: string | null | undefined): string[] {
   } catch {
     return [];
   }
+}
+
+function collectSignaturePhrases(
+  value: string | null | undefined,
+): string[] {
+  const tokens = tokenizeRelatedSignatureText(value);
+  if (tokens.length < 2) return [];
+
+  const phrases: string[] = [];
+  for (let index = 0; index < tokens.length - 1; index += 1) {
+    const bigram = `${tokens[index]} ${tokens[index + 1]}`;
+    phrases.push(bigram);
+    if (index < tokens.length - 2) {
+      phrases.push(`${bigram} ${tokens[index + 2]}`);
+    }
+  }
+
+  return stableUnique(
+    phrases.filter((phrase) => phrase.split(" ").length >= 2),
+  ).slice(0, 6);
 }
 
 function stableUnique(values: string[]): string[] {
@@ -215,6 +323,32 @@ function containmentOverlap(source: string[], candidate: string[]): number {
   return candidateSet.size > 0 ? overlap / candidateSet.size : 0;
 }
 
+function tokenOverlapScore(
+  tokens: string[],
+  haystack: string | null | undefined,
+): number {
+  if (tokens.length === 0 || !haystack) return 0;
+  const normalized = normalizeText(haystack);
+  if (!normalized) return 0;
+  let hits = 0;
+  for (const token of tokens) {
+    if (normalized.includes(token)) hits += 1;
+  }
+  return Number((hits / tokens.length).toFixed(6));
+}
+
+function phraseContainmentScore(
+  phrases: string[],
+  haystack: string | null | undefined,
+): number {
+  if (phrases.length === 0 || !haystack) return 0;
+  const normalized = normalizeText(haystack);
+  if (!normalized) return 0;
+  const matched = phrases.filter((phrase) => normalized.includes(phrase)).length;
+  if (matched <= 0) return 0;
+  return Number((matched / phrases.length).toFixed(6));
+}
+
 function sharedTokenCount(source: string[], candidate: string[]): number {
   const sourceSet = new Set(source.filter(Boolean));
   const candidateSet = new Set(candidate.filter(Boolean));
@@ -228,6 +362,41 @@ function sharedTokenCount(source: string[], candidate: string[]): number {
 
 function normalizeVenue(value: string | null | undefined): string {
   return normalizeText(value);
+}
+
+function mergeSignalSummary(
+  primary: DeterministicSignalSummary,
+  secondary: DeterministicSignalSummary,
+): DeterministicSignalSummary {
+  return {
+    direct_citation: Math.max(
+      primary.direct_citation,
+      secondary.direct_citation,
+    ),
+    reverse_citation: Math.max(
+      primary.reverse_citation,
+      secondary.reverse_citation,
+    ),
+    bibliographic_coupling: Math.max(
+      primary.bibliographic_coupling,
+      secondary.bibliographic_coupling,
+    ),
+    co_citation: Math.max(primary.co_citation, secondary.co_citation),
+    title_similarity: Math.max(
+      primary.title_similarity,
+      secondary.title_similarity,
+    ),
+  };
+}
+
+function accumulateWeightedTerms(
+  weights: Map<string, number>,
+  tokens: string[],
+  weight: number,
+): void {
+  for (const token of tokens) {
+    weights.set(token, (weights.get(token) ?? 0) + weight);
+  }
 }
 
 function computeVenueOverlap(
@@ -279,20 +448,43 @@ function parseSignalSummary(
     const payload = parseDeterministicSignalPayload(evidence.excerpt);
     if (!payload) continue;
     summary[signal] = Number(
-      Math.max(summary[signal], payload.contribution).toFixed(6),
+      Math.max(summary[signal], payload.rawValue).toFixed(6),
     );
   }
   return summary;
 }
 
 function buildCacheKey(
+  backendId: RelatedRerankerBackendId,
   paperId: string,
   userId: string,
   rows: GraphRelationRow[],
 ): string {
-  return `${RELATED_RERANK_CACHE_VERSION}:${paperId}:${userId}:${rows
+  return `${RELATED_RERANK_CACHE_VERSION}:${backendId}:${paperId}:${userId}:${rows
     .map((row) => `${row.id}:${row.confidence.toFixed(6)}`)
     .join("|")}`;
+}
+
+function describeRelatedRerankerBackend(
+  backendId: RelatedRerankerBackendId,
+): RelatedRerankerBackendDescriptor {
+  if (backendId === "baseline_v1") {
+    return {
+      id: "baseline_v1",
+      family: "baseline",
+    };
+  }
+
+  return {
+    id: "feature_v1",
+    family: "feature-ranker",
+  };
+}
+
+export function resolveRelatedRerankerBackendId(
+  value: string | null | undefined = process.env.ARCANA_RELATED_RERANKER_BACKEND,
+): RelatedRerankerBackendId {
+  return value === "baseline_v1" ? "baseline_v1" : "feature_v1";
 }
 
 function normalizeCitationPrior(
@@ -438,6 +630,248 @@ async function loadDeterministicSignalMap(
   );
 }
 
+function collectSeedSignature(
+  seedPaper: RelatedPaperContext,
+  seedMetadata: ReturnType<typeof parsePaperRepresentationMetadata> | undefined,
+): {
+  terms: string[];
+  queryTerms: string[];
+  phrases: string[];
+} {
+  const titleTerms = stableUnique(tokenizeRelatedSignatureText(seedPaper.title));
+  const tagTerms = stableUnique(
+    (seedMetadata?.tagNames ?? []).flatMap((tagName) =>
+      tokenizeRelatedSignatureText(tagName),
+    ),
+  );
+  const abstractTerms = stableUnique(tokenizeRelatedSignatureText(seedPaper.abstract));
+  const summaryTerms = stableUnique(tokenizeRelatedSignatureText(seedPaper.summary));
+  const termWeights = new Map<string, number>();
+  accumulateWeightedTerms(termWeights, titleTerms, 3);
+  accumulateWeightedTerms(termWeights, tagTerms, 2.5);
+  accumulateWeightedTerms(termWeights, abstractTerms, 1.25);
+  accumulateWeightedTerms(termWeights, summaryTerms, 1);
+
+  const terms = Array.from(termWeights.entries())
+    .sort((left, right) => {
+      if (right[1] !== left[1]) return right[1] - left[1];
+      if (right[0].length !== left[0].length) {
+        return right[0].length - left[0].length;
+      }
+      return left[0].localeCompare(right[0]);
+    })
+    .map(([term]) => term)
+    .slice(0, 8);
+  const phrases = stableUnique([
+    ...collectSignaturePhrases(seedPaper.title),
+    ...(seedMetadata?.tagNames ?? []).map((tagName) => normalizeText(tagName)),
+    ...collectSignaturePhrases(seedPaper.abstract),
+  ]).slice(0, 8);
+
+  return {
+    terms,
+    queryTerms: terms.slice(0, RELATED_LEXICAL_QUERY_TERMS),
+    phrases,
+  };
+}
+
+async function loadLocalCitationSignalMap(
+  paperId: string,
+  candidatePaperIds: string[],
+  db: RelatedRerankDb,
+): Promise<Map<string, DeterministicSignalSummary>> {
+  if (candidatePaperIds.length === 0) return new Map();
+
+  const [outgoingRows, incomingRows] = await Promise.all([
+    db.paperRelation.findMany({
+      where: {
+        OR: [
+          { sourcePaperId: paperId },
+          { sourcePaperId: { in: candidatePaperIds } },
+        ],
+      },
+      select: {
+        sourcePaperId: true,
+        targetPaperId: true,
+      },
+    }),
+    db.paperRelation.findMany({
+      where: {
+        OR: [
+          { targetPaperId: paperId },
+          { targetPaperId: { in: candidatePaperIds } },
+        ],
+      },
+      select: {
+        sourcePaperId: true,
+        targetPaperId: true,
+      },
+    }),
+  ]);
+
+  const outgoingByPaper = new Map<string, Set<string>>();
+  for (const row of outgoingRows) {
+    const current = outgoingByPaper.get(row.sourcePaperId) ?? new Set<string>();
+    current.add(row.targetPaperId);
+    outgoingByPaper.set(row.sourcePaperId, current);
+  }
+
+  const incomingByPaper = new Map<string, Set<string>>();
+  for (const row of incomingRows) {
+    const current = incomingByPaper.get(row.targetPaperId) ?? new Set<string>();
+    current.add(row.sourcePaperId);
+    incomingByPaper.set(row.targetPaperId, current);
+  }
+
+  const seedOutgoing = outgoingByPaper.get(paperId) ?? new Set<string>();
+  const seedIncoming = incomingByPaper.get(paperId) ?? new Set<string>();
+
+  const signalMap = new Map<string, DeterministicSignalSummary>();
+  for (const candidatePaperId of candidatePaperIds) {
+    const candidateOutgoing =
+      outgoingByPaper.get(candidatePaperId) ?? new Set<string>();
+    const candidateIncoming =
+      incomingByPaper.get(candidatePaperId) ?? new Set<string>();
+
+    let sharedOutgoing = 0;
+    for (const targetId of Array.from(candidateOutgoing)) {
+      if (seedOutgoing.has(targetId)) sharedOutgoing += 1;
+    }
+
+    let sharedIncoming = 0;
+    for (const sourceId of Array.from(candidateIncoming)) {
+      if (seedIncoming.has(sourceId)) sharedIncoming += 1;
+    }
+
+    signalMap.set(candidatePaperId, {
+      direct_citation: seedOutgoing.has(candidatePaperId) ? 1 : 0,
+      reverse_citation: seedIncoming.has(candidatePaperId) ? 1 : 0,
+      bibliographic_coupling:
+        Math.min(
+          1,
+          sharedOutgoing / Math.max(1, Math.min(seedOutgoing.size, candidateOutgoing.size)),
+        ) || 0,
+      co_citation:
+        Math.min(
+          1,
+          sharedIncoming / Math.max(1, Math.min(seedIncoming.size, candidateIncoming.size)),
+        ) || 0,
+      title_similarity: 0,
+    });
+  }
+
+  return signalMap;
+}
+
+async function loadLexicalExpansionRows(
+  params: {
+    paperId: string;
+    userId: string;
+    seedSignature: {
+      terms: string[];
+      queryTerms: string[];
+      phrases: string[];
+    };
+    excludePaperIds: string[];
+  },
+  db: RelatedRerankDb,
+): Promise<GraphRelationRow[]> {
+  if (params.seedSignature.queryTerms.length === 0) return [];
+
+  const candidates = new Map<
+    string,
+    {
+      id: string;
+      entityId: string | null;
+      title: string;
+      year: number | null;
+      authors: string | null;
+      abstract: string | null;
+      summary: string | null;
+      lexicalScore: number;
+    }
+  >();
+
+  for (const term of params.seedSignature.queryTerms) {
+    const rows = await db.paper.findMany({
+      where: {
+        userId: params.userId,
+        duplicateState: "ACTIVE",
+        id: { notIn: [params.paperId, ...params.excludePaperIds] },
+        OR: [
+          { title: { contains: term } },
+          { abstract: { contains: term } },
+          { summary: { contains: term } },
+          { tags: { some: { tag: { name: { contains: term } } } } },
+        ],
+      },
+      select: {
+        id: true,
+        entityId: true,
+        title: true,
+        year: true,
+        authors: true,
+        abstract: true,
+        summary: true,
+      },
+      orderBy: [
+        { year: "desc" },
+        { citationCount: "desc" },
+        { createdAt: "desc" },
+      ],
+      take: RELATED_LEXICAL_EXPANSION_LIMIT,
+    });
+
+    for (const row of rows) {
+      const titleOverlap = tokenOverlapScore(params.seedSignature.terms, row.title);
+      const bodyOverlap = Math.max(
+        tokenOverlapScore(params.seedSignature.terms, row.abstract),
+        tokenOverlapScore(params.seedSignature.terms, row.summary),
+      );
+      const phraseHit = Math.max(
+        phraseContainmentScore(params.seedSignature.phrases, row.title),
+        phraseContainmentScore(params.seedSignature.phrases, row.abstract),
+      );
+      const lexicalScore = Number(
+        (titleOverlap * 0.64 + bodyOverlap * 0.24 + phraseHit * 0.12).toFixed(6),
+      );
+      if (lexicalScore < 0.16) continue;
+
+      const current = candidates.get(row.id);
+      if (!current || lexicalScore > current.lexicalScore) {
+        candidates.set(row.id, {
+          ...row,
+          lexicalScore,
+        });
+      }
+    }
+  }
+
+  return Array.from(candidates.values())
+    .sort((left, right) => {
+      if (right.lexicalScore !== left.lexicalScore) {
+        return right.lexicalScore - left.lexicalScore;
+      }
+      return left.title.localeCompare(right.title);
+    })
+    .slice(0, RELATED_LEXICAL_EXPANSION_LIMIT)
+    .map((candidate) => ({
+      id: `lex::${candidate.id}`,
+      relatedPaper: {
+        id: candidate.id,
+        entityId: candidate.entityId,
+        title: candidate.title,
+        year: candidate.year,
+        authors: candidate.authors,
+        duplicateState: "ACTIVE",
+      },
+      relationType: "related",
+      description: "Related via shared topical terms in title, abstract, or tags.",
+      confidence: Number((0.18 + candidate.lexicalScore * 0.52).toFixed(6)),
+      isAutoGenerated: true,
+    }));
+}
+
 function computeHubScores(
   candidates: Array<{
     paperId: string;
@@ -494,6 +928,8 @@ function hasTopicalLexicalEvidence(
     | "titleSimilarity"
     | "queryTitleOverlap"
     | "queryTitleOverlapCount"
+    | "bodyTokenOverlap"
+    | "tagOverlap"
     | "lexicalAuthorOverlap"
     | "identityAuthorOverlap"
     | "venueOverlap"
@@ -508,6 +944,8 @@ function hasTopicalLexicalEvidence(
     (allowTitleSimilarity && diagnostics.titleSimilarity >= 0.12) ||
     (diagnostics.queryTitleOverlap >= 0.18 &&
       diagnostics.queryTitleOverlapCount >= 1) ||
+    diagnostics.bodyTokenOverlap >= 0.2 ||
+    diagnostics.tagOverlap >= 0.2 ||
     diagnostics.lexicalAuthorOverlap >= 0.2 ||
     diagnostics.identityAuthorOverlap >= 0.1 ||
     diagnostics.venueOverlap >= 1
@@ -529,11 +967,15 @@ function passesTopicalityFloor(
     diagnostics.deterministicSignals,
   );
   const hasDenseCitationEvidence =
-    diagnostics.deterministicSignals.direct_citation >= 0.08 ||
-    diagnostics.deterministicSignals.reverse_citation >= 0.08;
+    diagnostics.deterministicSignals.direct_citation >= 1 ||
+    diagnostics.deterministicSignals.reverse_citation >= 1;
+  const hasHubLexicalEvidence =
+    (diagnostics.queryTitleOverlap >= 0.34 &&
+      (diagnostics.bodyTokenOverlap >= 0.12 || diagnostics.tagOverlap >= 0.2)) ||
+    diagnostics.titleSimilarity >= 0.2;
 
   if (seedIsHub) {
-    return hasCitationNeighborhoodEvidence;
+    return hasCitationNeighborhoodEvidence || (hasHubLexicalEvidence && hasDenseCitationEvidence);
   }
 
   if (hasLexicalEvidence || hasCitationNeighborhoodEvidence) {
@@ -547,7 +989,41 @@ function passesTopicalityFloor(
   return false;
 }
 
-export async function buildRelatedRerankResult(
+function buildBaselineRelatedRerankResult(
+  rows: GraphRelationRow[],
+  backendId: RelatedRerankerBackendId = "baseline_v1",
+): RelatedRerankResult {
+  const baselineRows = sortRelatedRowsBaseline(rows);
+
+  return {
+    backend: describeRelatedRerankerBackend(backendId),
+    baselineRows,
+    rerankedRows: baselineRows,
+    diagnostics: baselineRows.map((row) => ({
+      paperId: row.relatedPaper.id,
+      title: row.relatedPaper.title,
+      baselineConfidence: row.confidence,
+      rerankScore: row.confidence,
+      semanticSimilarity: 0,
+      titleSimilarity: 0,
+      queryTitleOverlap: 0,
+      queryTitleOverlapCount: 0,
+      bodyTokenOverlap: 0,
+      tagOverlap: 0,
+      lexicalAuthorOverlap: 0,
+      identityAuthorOverlap: 0,
+      venueOverlap: 0,
+      yearProximity: 0,
+      hubScore: 0,
+      citationPrior: 0,
+      relationTypePrior: 0,
+      deterministicSignals: emptyDeterministicSignals(),
+      subtopics: [],
+    })),
+  };
+}
+
+async function buildFeatureRelatedRerankResult(
   paperId: string,
   userId: string,
   rows: GraphRelationRow[],
@@ -555,61 +1031,87 @@ export async function buildRelatedRerankResult(
 ): Promise<RelatedRerankResult> {
   const baselineRows = sortRelatedRowsBaseline(rows);
 
-  const cacheKey = buildCacheKey(paperId, userId, baselineRows);
+  const cacheKey = buildCacheKey("feature_v1", paperId, userId, baselineRows);
   const cached = relatedRerankCache.get(cacheKey);
   if (cached && cached.expiresAt > Date.now()) {
     return cached.result;
   }
 
-  const candidateRows = sortRelatedRowsBaseline(baselineRows);
-  if (candidateRows.length <= 1) {
+  const seedPaperMap = await loadPaperContexts([paperId], db);
+  const seedPaper = seedPaperMap.get(paperId);
+  if (!seedPaper) {
     return {
+      backend: describeRelatedRerankerBackend("feature_v1"),
       baselineRows,
-      rerankedRows: candidateRows,
-      diagnostics: candidateRows.map((row) => ({
-        paperId: row.relatedPaper.id,
-        title: row.relatedPaper.title,
-        baselineConfidence: row.confidence,
-        rerankScore: row.confidence,
-        semanticSimilarity: 0,
-        titleSimilarity: 0,
-        queryTitleOverlap: 0,
-        queryTitleOverlapCount: 0,
-        lexicalAuthorOverlap: 0,
-        identityAuthorOverlap: 0,
-        venueOverlap: 0,
-        yearProximity: 0,
-        hubScore: 0,
-        citationPrior: 0,
-        relationTypePrior: 0,
-        deterministicSignals: emptyDeterministicSignals(),
-        subtopics: [],
-      })),
+      rerankedRows: baselineRows,
+      diagnostics: [],
     };
   }
+
+  await ensureRepresentations([paperId], db);
+  const seedRepresentation = await getPaperRepresentation(
+    db,
+    paperId,
+    SHARED_RAW_PAPER_REPRESENTATION_KIND,
+  );
+  const seedSignature = collectSeedSignature(seedPaper, seedRepresentation?.metadata);
+
+  const lexicalExpansionRows = await loadLexicalExpansionRows(
+    {
+      paperId,
+      userId,
+      seedSignature,
+      excludePaperIds: baselineRows.map((row) => row.relatedPaper.id),
+    },
+    db,
+  );
+
+  const candidateRowsByPaperId = new Map<string, GraphRelationRow>();
+  for (const row of [...baselineRows, ...lexicalExpansionRows]) {
+    const current = candidateRowsByPaperId.get(row.relatedPaper.id);
+    if (!current || row.confidence > current.confidence) {
+      candidateRowsByPaperId.set(row.relatedPaper.id, row);
+    }
+  }
+
+  const candidateRows = sortRelatedRowsBaseline(
+    Array.from(candidateRowsByPaperId.values()),
+  );
+  if (candidateRows.length === 0) {
+    return {
+      backend: describeRelatedRerankerBackend("feature_v1"),
+      baselineRows,
+      rerankedRows: [],
+      diagnostics: [],
+    };
+  }
+
   const paperIds = [paperId, ...candidateRows.map((row) => row.relatedPaper.id)];
   await ensureRepresentations(paperIds, db);
 
-  const [paperContexts, representationMap, candidateDegrees, deterministicSignalMap] =
-    await Promise.all([
-      loadPaperContexts(paperIds, db),
-      loadRepresentationVectors(paperIds, db),
-      loadCandidateDegrees(
-        candidateRows.map((row) => row.relatedPaper.id),
-        db,
-      ),
-      loadDeterministicSignalMap(paperId, candidateRows, db),
-    ]);
-
-  const seedPaper = paperContexts.get(paperId);
-  if (!seedPaper) {
-    return { baselineRows, rerankedRows: baselineRows, diagnostics: [] };
-  }
+  const [
+    paperContexts,
+    representationMap,
+    candidateDegrees,
+    deterministicSignalMap,
+    localCitationSignalMap,
+  ] = await Promise.all([
+    loadPaperContexts(paperIds, db),
+    loadRepresentationVectors(paperIds, db),
+    loadCandidateDegrees(
+      candidateRows.map((row) => row.relatedPaper.id),
+      db,
+    ),
+    loadDeterministicSignalMap(paperId, candidateRows, db),
+    loadLocalCitationSignalMap(
+      paperId,
+      candidateRows.map((row) => row.relatedPaper.id),
+      db,
+    ),
+  ]);
 
   const seedAuthors = parseStringArray(seedPaper.authors);
-  const seedQueryTokens = tokenizeInformativeText(
-    [seedPaper.title, seedPaper.abstract].filter(Boolean).join(" "),
-  );
+  const seedQueryTokens = seedSignature.terms;
   const seedQueryVector = encodeTextToVector(
     [
       seedPaper.title,
@@ -634,15 +1136,23 @@ export async function buildRelatedRerankResult(
     const candidateAuthors = parseStringArray(candidateContext?.authors ?? null);
     const queryTitleOverlap = containmentOverlap(
       seedQueryTokens,
-      tokenizeInformativeText(row.relatedPaper.title),
+      tokenizeRelatedSignatureText(row.relatedPaper.title),
     );
     const queryTitleOverlapCount = sharedTokenCount(
       seedQueryTokens,
-      tokenizeInformativeText(row.relatedPaper.title),
+      tokenizeRelatedSignatureText(row.relatedPaper.title),
+    );
+    const bodyTokenOverlap = Math.max(
+      tokenOverlapScore(seedQueryTokens, candidateContext?.abstract ?? null),
+      tokenOverlapScore(seedQueryTokens, candidateContext?.summary ?? null),
     );
     const lexicalAuthorOverlap = jaccardOverlap(seedAuthors, candidateAuthors);
     const identityAuthorOverlap = 0;
     const candidateRepresentation = representationMap.get(row.relatedPaper.id);
+    const tagOverlap = jaccardOverlap(
+      seedRepresentation?.metadata?.tagNames ?? [],
+      candidateRepresentation?.metadata?.tagNames ?? [],
+    );
     const semanticSimilarity =
       seedQueryVector.length > 0 && candidateRepresentation?.vector?.length
         ? cosineSimilarity(seedQueryVector, candidateRepresentation.vector)
@@ -659,10 +1169,14 @@ export async function buildRelatedRerankResult(
       seedPaper.year,
       candidateContext?.year ?? null,
     );
-    const deterministicSignals =
+    const assertionSignals =
       (row.relatedPaper.entityId
         ? deterministicSignalMap.get(row.relatedPaper.entityId)
         : null) ?? emptyDeterministicSignals();
+    const deterministicSignals = mergeSignalSummary(
+      assertionSignals,
+      localCitationSignalMap.get(row.relatedPaper.id) ?? emptyDeterministicSignals(),
+    );
     const relationTypePrior = computeRelationTypePrior(row.relationType);
     const citationPrior = normalizeCitationPrior(
       candidateContext?.citationCount ?? null,
@@ -684,6 +1198,8 @@ export async function buildRelatedRerankResult(
       semanticSimilarity * RELATED_SIGNAL_WEIGHTS.semanticSimilarity +
       titleSimilarity * RELATED_SIGNAL_WEIGHTS.titleSimilarity +
       queryTitleOverlap * RELATED_SIGNAL_WEIGHTS.queryTitleOverlap +
+      bodyTokenOverlap * RELATED_SIGNAL_WEIGHTS.bodyTokenOverlap +
+      tagOverlap * RELATED_SIGNAL_WEIGHTS.tagOverlap +
       lexicalAuthorOverlap * RELATED_SIGNAL_WEIGHTS.lexicalAuthorOverlap +
       identityAuthorOverlap * RELATED_SIGNAL_WEIGHTS.identityAuthorOverlap +
       venueOverlap * RELATED_SIGNAL_WEIGHTS.venueOverlap +
@@ -722,6 +1238,8 @@ export async function buildRelatedRerankResult(
       titleSimilarity,
       queryTitleOverlap: Number(queryTitleOverlap.toFixed(6)),
       queryTitleOverlapCount,
+      bodyTokenOverlap,
+      tagOverlap: Number(tagOverlap.toFixed(6)),
       lexicalAuthorOverlap: Number(lexicalAuthorOverlap.toFixed(6)),
       identityAuthorOverlap,
       venueOverlap,
@@ -757,7 +1275,10 @@ export async function buildRelatedRerankResult(
     }),
     {
       task: "related",
-      limit: baselineRows.length,
+      limit: Math.min(
+        Math.max(baselineRows.length, Math.min(candidateRows.length, 10)),
+        candidateRows.length,
+      ),
     },
   );
 
@@ -775,14 +1296,30 @@ export async function buildRelatedRerankResult(
     return left.relatedPaper.title.localeCompare(right.relatedPaper.title);
   });
 
+  const rerankedDiagnostics = rerankedRows
+    .map((row) => diagnosticsByPaperId.get(row.relatedPaper.id))
+    .filter((diagnostic): diagnostic is RelatedRerankCandidateDiagnostics =>
+      Boolean(diagnostic),
+    );
+
+  const topDiagnostic = rerankedDiagnostics[0] ?? null;
+  const shouldFailClosed =
+    Boolean(topDiagnostic) &&
+    topDiagnostic.rerankScore < 0.4 &&
+    topDiagnostic.queryTitleOverlap < 0.2 &&
+    topDiagnostic.titleSimilarity < 0.18 &&
+    topDiagnostic.tagOverlap < 0.2;
+
+  const finalRows = shouldFailClosed ? rerankedRows.slice(0, 2) : rerankedRows;
+  const finalDiagnostics = shouldFailClosed
+    ? rerankedDiagnostics.slice(0, 2)
+    : rerankedDiagnostics;
+
   const result = {
+    backend: describeRelatedRerankerBackend("feature_v1"),
     baselineRows,
-    rerankedRows,
-    diagnostics: rerankedRows
-      .map((row) => diagnosticsByPaperId.get(row.relatedPaper.id))
-      .filter((diagnostic): diagnostic is RelatedRerankCandidateDiagnostics =>
-        Boolean(diagnostic),
-      ),
+    rerankedRows: finalRows,
+    diagnostics: finalDiagnostics,
   } satisfies RelatedRerankResult;
 
   relatedRerankCache.set(cacheKey, {
@@ -791,6 +1328,22 @@ export async function buildRelatedRerankResult(
   });
 
   return result;
+}
+
+export async function buildRelatedRerankResult(
+  paperId: string,
+  userId: string,
+  rows: GraphRelationRow[],
+  db: RelatedRerankDb = prisma,
+  options: BuildRelatedRerankOptions = {},
+): Promise<RelatedRerankResult> {
+  const backendId = options.backendId ?? resolveRelatedRerankerBackendId();
+
+  if (backendId === "baseline_v1") {
+    return buildBaselineRelatedRerankResult(rows, backendId);
+  }
+
+  return buildFeatureRelatedRerankResult(paperId, userId, rows, db);
 }
 
 function rerankedTopicalRows(

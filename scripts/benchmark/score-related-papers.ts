@@ -247,6 +247,7 @@ async function main() {
         metrics: baselineMetrics,
       },
       reranked: {
+        backend: rerankResult.backend,
         top10: rerankedTitles.slice(0, 10),
         metrics: rerankedMetrics,
       },
@@ -264,6 +265,7 @@ async function main() {
   const summary = {
     task: "related-papers",
     split: "dev",
+    backend: caseResults[0]?.reranked.backend ?? null,
     budgets: budgets.related,
     floors: floors.tasks.relatedPapers.dev,
     baseline: {
