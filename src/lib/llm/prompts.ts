@@ -217,6 +217,59 @@ Rules:
 - Extract from body text ONLY. Do not invent citations or contexts.
 - Return ONLY valid JSON. No markdown fences, no extra text.`,
 
+  extractClaims: `You are an expert scientific information extraction system. Given an excerpt from a research paper, extract atomic claims that are actually asserted in the excerpt.
+
+Return a JSON object:
+{
+  "claims": [
+    {
+      "claimType": "factual | methodological | evaluative | contextual | null",
+      "rhetoricalRole": "background | motivation | research_question | hypothesis | definition | assumption | method | dataset | result | evaluation | limitation | future_work | contribution",
+      "facet": "problem | approach | result | comparison | limitation | resource",
+      "polarity": "assertive | negated | conditional | speculative",
+      "stance": {
+        "subjectText": "what is being discussed",
+        "predicateText": "relation or claim verb",
+        "objectText": "what is asserted about it",
+        "qualifierText": "optional qualifier"
+      },
+      "evaluationContext": {
+        "task": "task name",
+        "dataset": "dataset or benchmark name",
+        "metric": "metric name",
+        "comparator": "optional baseline or comparator",
+        "setting": "optional experimental setting",
+        "split": "optional split or subset"
+      },
+      "text": "the atomic claim in one sentence",
+      "sectionLabel": "section heading if visible in the excerpt, else null",
+      "sourceExcerpt": "the shortest supporting excerpt copied from the provided text",
+      "sourceSpan": {
+        "charStart": 0,
+        "charEnd": 42,
+        "page": 1
+      },
+      "citationAnchors": [
+        {
+          "rawMarker": "[12]"
+        }
+      ],
+      "evidenceType": "primary | secondary | citing",
+      "confidence": 0.0
+    }
+  ]
+}
+
+Rules:
+- Extract only atomic claims actually supported by the excerpt. Split compound statements into separate claims.
+- Prefer 2-8 strong claims per excerpt. Do not pad with weak paraphrases.
+- "text" should be concise and faithful, not a long rewrite.
+- Use null or omit fields that cannot be grounded from the excerpt.
+- Only set evaluationContext when task, dataset, and metric are all recoverable from the excerpt.
+- "evidenceType" must be "citing" when the excerpt is only summarizing cited work rather than asserting the paper's own result.
+- "sourceExcerpt" must be copied from the provided text, not invented.
+- Return ONLY valid JSON. No markdown fences, no extra text.`,
+
   detectContradictions: `You are an expert at identifying contradictions and conflicts between academic research papers. You will be given a NEW paper and a set of RELATED papers from the user's library.
 
 Your task is to find claims, findings, or methodological assumptions in the new paper that conflict with or contradict claims in the related papers.

@@ -1,18 +1,4 @@
-export const PAPER_CLAIM_RHETORICAL_ROLE_VALUES = [
-  "background",
-  "motivation",
-  "research_question",
-  "hypothesis",
-  "definition",
-  "assumption",
-  "method",
-  "dataset",
-  "result",
-  "evaluation",
-  "limitation",
-  "future_work",
-  "contribution",
-] as const;
+import { PAPER_CLAIM_RHETORICAL_ROLE_VALUES } from "./extract-claims-schema";
 
 export type PaperClaimRhetoricalRoleValue =
   (typeof PAPER_CLAIM_RHETORICAL_ROLE_VALUES)[number];

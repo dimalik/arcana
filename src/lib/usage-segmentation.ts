@@ -1,4 +1,5 @@
 import {
+  PAPER_ANALYSIS_LLM_OPERATION_VALUES,
   PAPER_INTERACTIVE_LLM_OPERATION_VALUES,
   PAPER_REFERENCE_ENRICHMENT_LLM_OPERATION_VALUES,
 } from "./llm/paper-llm-operations";
@@ -19,7 +20,10 @@ export const REFERENCE_ENRICHMENT_PROCESSING_OPERATIONS = [
   "processing_extractCitationContexts",
 ] as const;
 
-const INTERACTIVE_OPERATION_SET = new Set<string>(PAPER_INTERACTIVE_LLM_OPERATION_VALUES);
+const INTERACTIVE_OPERATION_SET = new Set<string>([
+  ...PAPER_INTERACTIVE_LLM_OPERATION_VALUES,
+  ...PAPER_ANALYSIS_LLM_OPERATION_VALUES,
+]);
 // These two operations are emitted by the processing runtime, but they are
 // reference-surface work and therefore roll up under reference_enrichment.
 const REFERENCE_ENRICHMENT_OPERATION_SET = new Set<string>([
@@ -49,6 +53,7 @@ export function isMappedProviderUsageOperation(operation: string): boolean {
 export function getKnownPaperUsageOperations(): string[] {
   return [
     ...PAPER_INTERACTIVE_LLM_OPERATION_VALUES,
+    ...PAPER_ANALYSIS_LLM_OPERATION_VALUES,
     ...PAPER_REFERENCE_ENRICHMENT_LLM_OPERATION_VALUES,
     ...REFERENCE_ENRICHMENT_PROCESSING_OPERATIONS,
   ];

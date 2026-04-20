@@ -28,7 +28,7 @@ import {
   serializePaperClaimStance,
 } from "./types";
 
-type PaperAnalysisDb = Prisma.TransactionClient | typeof prisma;
+export type PaperAnalysisDb = Prisma.TransactionClient | typeof prisma;
 
 export interface UpsertPaperClaimRunInput {
   paperId: string;
@@ -192,6 +192,38 @@ export async function getLatestCompletedPaperClaimRun(
     ...run,
     claims: run.claims.map(hydratePaperClaim),
   };
+}
+
+export async function getPaperClaimRunByFingerprint(
+  db: PaperAnalysisDb,
+  paperId: string,
+  extractorVersion: string,
+  sourceTextHash: string,
+): Promise<(PaperClaimRun & { claims: PaperClaim[] }) | null> {
+  return db.paperClaimRun.findUnique({
+    where: {
+      paperId_extractorVersion_sourceTextHash: {
+        paperId,
+        extractorVersion,
+        sourceTextHash,
+      },
+    },
+    include: {
+      claims: {
+        orderBy: { orderIndex: "asc" },
+      },
+    },
+  });
+}
+
+export async function getPaperClaimsForRun(
+  db: PaperAnalysisDb,
+  runId: string,
+): Promise<PaperClaim[]> {
+  return db.paperClaim.findMany({
+    where: { runId },
+    orderBy: { orderIndex: "asc" },
+  });
 }
 
 export async function listPaperClaimsForPaper(

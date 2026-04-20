@@ -1,0 +1,100 @@
+{
+  "cases": [
+    {
+      "paperId": "fixture-paper-1",
+      "claims": [
+        {
+          "claimType": "methodological",
+          "rhetoricalRole": "CONTRIBUTION",
+          "facet": "APPROACH",
+          "polarity": "ASSERTIVE",
+          "stance": null,
+          "evaluationContext": null,
+          "text": "We introduce CacheBack, a cache-aware speculative decoding method.",
+          "normalizedText": "we introduce cacheback a cache aware speculative decoding method",
+          "confidence": 0.94,
+          "sectionLabel": "Method",
+          "sectionPath": "method",
+          "sourceExcerpt": "We introduce CacheBack, a cache-aware speculative decoding method.",
+          "excerptHash": "7264a89b64292dfa05b96d8035aff4d153427f8379b87cc8491a2011d40ccb74",
+          "sourceSpan": null,
+          "citationAnchors": null,
+          "evidenceType": "PRIMARY",
+          "orderIndex": 0
+        },
+        {
+          "claimType": "evaluative",
+          "rhetoricalRole": "RESULT",
+          "facet": "RESULT",
+          "polarity": "ASSERTIVE",
+          "stance": {
+            "subjectText": "CacheBack",
+            "predicateText": "improves",
+            "objectText": "throughput",
+            "qualifierText": "on speculative decoding"
+          },
+          "evaluationContext": {
+            "task": "speculative decoding",
+            "dataset": "Llama-2 13B benchmark",
+            "metric": "throughput",
+            "comparator": "baseline speculative decoding"
+          },
+          "text": "CacheBack improves throughput by 18% on Llama-2 13B.",
+          "normalizedText": "cacheback improves throughput by 18 on llama 2 13b",
+          "confidence": 0.91,
+          "sectionLabel": "Results",
+          "sectionPath": "results",
+          "sourceExcerpt": "CacheBack improves throughput by 18% on Llama-2 13B.",
+          "excerptHash": "6bf57db2de51b17ea6e503c482d76fea2da718c237590bec0457afe0d2f3cfa8",
+          "sourceSpan": null,
+          "citationAnchors": null,
+          "evidenceType": "PRIMARY",
+          "orderIndex": 1
+        }
+      ]
+    },
+    {
+      "paperId": "fixture-paper-2",
+      "claims": [
+        {
+          "claimType": "evaluative",
+          "rhetoricalRole": "LIMITATION",
+          "facet": "LIMITATION",
+          "polarity": "ASSERTIVE",
+          "stance": null,
+          "evaluationContext": null,
+          "text": "The method degrades on long-context code generation tasks.",
+          "normalizedText": "the method degrades on long context code generation tasks",
+          "confidence": 0.88,
+          "sectionLabel": "Limitations",
+          "sectionPath": "limitations",
+          "sourceExcerpt": "The method degrades on long-context code generation tasks.",
+          "excerptHash": "01876116eb81b537fb3f0ea8e5ca25f7d118ed5089650d0b96b0ebc6a971839b",
+          "sourceSpan": null,
+          "citationAnchors": null,
+          "evidenceType": "PRIMARY",
+          "orderIndex": 0
+        },
+        {
+          "claimType": "contextual",
+          "rhetoricalRole": "FUTURE_WORK",
+          "facet": "RESOURCE",
+          "polarity": "SPECULATIVE",
+          "stance": null,
+          "evaluationContext": null,
+          "text": "Future work will evaluate the method on multilingual code benchmarks.",
+          "normalizedText": "future work will evaluate the method on multilingual code benchmarks",
+          "confidence": 0.83,
+          "sectionLabel": "Future Work",
+          "sectionPath": "future_work",
+          "sourceExcerpt": "Future work will evaluate the method on multilingual code benchmarks.",
+          "excerptHash": "32a7236d71db2547966ecb5a929d09937f27cd9795ab4a6a07d777ba21d44922",
+          "sourceSpan": null,
+          "citationAnchors": null,
+          "evidenceType": "PRIMARY",
+          "orderIndex": 1
+        }
+      ]
+    }
+  ]
+}

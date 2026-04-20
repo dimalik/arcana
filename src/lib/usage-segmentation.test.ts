@@ -5,6 +5,7 @@ import {
   getProviderUsageSegment,
 } from "./usage-segmentation";
 import {
+  PAPER_ANALYSIS_LLM_OPERATION_VALUES,
   PAPER_INTERACTIVE_LLM_OPERATION_VALUES,
   PAPER_REFERENCE_ENRICHMENT_LLM_OPERATION_VALUES,
 } from "./llm/paper-llm-operations";
@@ -12,6 +13,9 @@ import {
 describe("usage segmentation", () => {
   it("maps every committed interactive paper operation to the interactive segment", () => {
     for (const operation of PAPER_INTERACTIVE_LLM_OPERATION_VALUES) {
+      expect(getProviderUsageSegment(operation)).toBe("interactive");
+    }
+    for (const operation of PAPER_ANALYSIS_LLM_OPERATION_VALUES) {
       expect(getProviderUsageSegment(operation)).toBe("interactive");
     }
   });

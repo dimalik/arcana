@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { extractClaimsRuntimeOutputSchema } from "@/lib/papers/analysis/extract-claims-schema";
 
 const nullableString = z.string().nullable().optional();
 const optionalStringArray = z.array(z.string()).optional();
@@ -83,6 +84,7 @@ export const distillRuntimeOutputSchema = z
 
 export const PROCESSING_RUNTIME_OUTPUT_SCHEMAS = {
   extract: extractRuntimeOutputSchema,
+  extractClaims: extractClaimsRuntimeOutputSchema,
   categorize: categorizeRuntimeOutputSchema,
   extractReferences: extractReferencesRuntimeOutputSchema,
   detectContradictions: detectContradictionsRuntimeOutputSchema,
@@ -96,6 +98,9 @@ export type ProcessingRuntimeStructuredPromptType =
 export type ExtractRuntimeOutput = z.infer<typeof extractRuntimeOutputSchema>;
 export type CategorizeRuntimeOutput = z.infer<
   typeof categorizeRuntimeOutputSchema
+>;
+export type ExtractClaimsRuntimeOutput = z.infer<
+  typeof extractClaimsRuntimeOutputSchema
 >;
 export type ExtractReferencesRuntimeOutput = z.infer<
   typeof extractReferencesRuntimeOutputSchema
