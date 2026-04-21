@@ -2,6 +2,9 @@
   "task": "claims",
   "split": "dev",
   "status": "draft",
+  "backlog": true,
+  "deferredAt": "2026-04-21",
+  "deferredReason": "Moved back to backlog during PR 9 closeout. Claims labeling and adjudication remain out of scope for this tranche.",
   "cases": [
     {
       "id": "claims-attention-is-all-you-need",

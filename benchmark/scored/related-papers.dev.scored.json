@@ -1,6 +1,7 @@
 {
   "task": "related-papers",
   "split": "dev",
+  "requestedBackendId": "feature_v1",
   "backend": {
     "id": "feature_v1",
     "family": "feature-ranker"
@@ -25,12 +26,12 @@
     "subtopicCoverageAt10": 0.258929
   },
   "reranked": {
-    "ndcgAt10": 0.333916,
-    "recallAt20": 0.391667,
-    "ilsAt10": 0.522616,
-    "subtopicCoverageAt10": 0.416071
+    "ndcgAt10": 0.399198,
+    "recallAt20": 0.591667,
+    "ilsAt10": 0.695953,
+    "subtopicCoverageAt10": 0.478571
   },
-  "latencyP95Ms": 0.103667,
+  "latencyP95Ms": 0.22725,
   "costP95UsdAmortized": 0,
   "floorChecks": {
     "ndcgAt10": false,
@@ -44,7 +45,7 @@
       "caseClass": "hub",
       "seedPaperId": "e1fb60a8-7834-4e0e-a98b-db34fb239029",
       "seedTitle": "Attention Is All You Need",
-      "latencyMs": 0.062083,
+      "latencyMs": 0.060458,
       "budgetPass": true,
       "baseline": {
         "top10": [
@@ -72,19 +73,20 @@
           "family": "feature-ranker"
         },
         "top10": [
+          "SpAtten: Efficient Sparse Attention Architecture with Cascade Token and Head Pruning",
           "TransMLA: MLA Is All You Need"
         ],
         "metrics": {
-          "ndcgAt10": 0.132161,
+          "ndcgAt10": 0.083384,
           "recallAt20": 0.166667,
-          "ilsAt10": 0,
+          "ilsAt10": 0.66343,
           "subtopicCoverageAt10": 0.142857
         }
       },
       "lift": {
-        "ndcgAt10": 0.132161,
+        "ndcgAt10": 0.083384,
         "recallAt20": 0.166667,
-        "ilsAt10": -0.68308,
+        "ilsAt10": -0.01965,
         "subtopicCoverageAt10": 0.142857
       }
     },
@@ -93,7 +95,7 @@
       "caseClass": "ambiguous-title",
       "seedPaperId": "1543790c-3c77-4b75-b2eb-aacb6de79893",
       "seedTitle": "FlashAttention: Fast and Memory-Efficient Exact Attention with IO-Awareness",
-      "latencyMs": 0.103667,
+      "latencyMs": 0.095667,
       "budgetPass": true,
       "baseline": {
         "top10": [
@@ -125,24 +127,24 @@
           "Generating Long Sequences with Sparse Transformers",
           "Efficient Streaming Language Models with Attention Sinks",
           "Drop-in efficient self-attention approximation method",
-          "PackInfer: Compute- and I/O-Efficient Attention for Batched LLM Inference",
-          "VORTA: Efficient Video Diffusion via Routing Sparse Attention",
-          "Reformer: The Efficient Transformer",
           "FlashAttention-3: Fast and Accurate Attention with Asynchrony and Low-precision",
           "Longformer: The Long-Document Transformer",
-          "EvolKV: Evolutionary KV Cache Compression for LLM Inference"
+          "PackInfer: Compute- and I/O-Efficient Attention for Batched LLM Inference",
+          "Reformer: The Efficient Transformer",
+          "Kangaroo: Lossless Self-Speculative Decoding for Accelerating LLMs via Double Early Exiting",
+          "DuoAttention: Efficient Long-Context LLM Inference with Retrieval and Streaming Heads"
         ],
         "metrics": {
-          "ndcgAt10": 0.45782,
+          "ndcgAt10": 0.465473,
           "recallAt20": 0.8,
-          "ilsAt10": 0.706281,
+          "ilsAt10": 0.709359,
           "subtopicCoverageAt10": 0.571429
         }
       },
       "lift": {
-        "ndcgAt10": 0.404167,
+        "ndcgAt10": 0.41182,
         "recallAt20": 0.2,
-        "ilsAt10": 0.027229,
+        "ilsAt10": 0.030307,
         "subtopicCoverageAt10": 0.285715
       }
     },
@@ -151,7 +153,7 @@
       "caseClass": "cross-community",
       "seedPaperId": "e0bb6d74-0eb1-4500-b7fb-a8cef418c9a0",
       "seedTitle": "LaRA: Benchmarking Retrieval-Augmented Generation and Long-Context LLMs - No Silver Bullet for LC or RAG Routing",
-      "latencyMs": 0.085208,
+      "latencyMs": 0.22725,
       "budgetPass": true,
       "baseline": {
         "top10": [
@@ -173,27 +175,27 @@
         "top10": [
           "Stronger Baselines for Retrieval-Augmented Generation with Long-Context Language Models",
           "Agri-Query: A Case Study on RAG vs. Long-Context LLMs for Cross-Lingual Technical Question Answering",
+          "LongRAG: Enhancing Retrieval-Augmented Generation with Long-context LLMs",
+          "Mindscape-Aware Retrieval Augmented Generation for Improved Long Context Understanding",
+          "VideoRAG: Retrieval-Augmented Generation with Extreme Long-Context Videos",
+          "SafeRAG: Benchmarking Security in Retrieval-Augmented Generation of Large Language Model",
+          "Hierarchical Document Refinement for Long-context Retrieval-augmented Generation",
+          "LongLLMLingua: Accelerating and Enhancing LLMs in Long Context Scenarios via Prompt Compression",
           "Retrieval-Augmented Code Generation: A Survey with Focus on Repository-Level Approaches",
-          "SWAA: Sliding Window Attention Adaptation for Efficient Long-Context LLMs Without Pretraining",
-          "Long Context, Less Focus: A Scaling Gap in LLMs Revealed through Privacy and Personalization",
-          "CLOVER: A Test Case Generation Benchmark with Coverage, Long-Context, and Verification",
-          "Exploring Fine-Tuning for In-Context Retrieval and Efficient KV-Caching in Long-Context Language Models",
-          "Long Code Arena: a Set of Benchmarks for Long-Context Code Models",
-          "Faithfulness-Aware Uncertainty Quantification for Fact-Checking the Output of Retrieval-Augmented Generation",
-          "Halo: Domain-Aware Query Optimization for Long-Context Question Answering"
+          "Multimodal Needle in a Haystack: Benchmarking Long-Context Capability of Multimodal Large Language Models"
         ],
         "metrics": {
-          "ndcgAt10": 0.584661,
-          "recallAt20": 0.4,
-          "ilsAt10": 0.694598,
-          "subtopicCoverageAt10": 0.75
+          "ndcgAt10": 0.895543,
+          "recallAt20": 1,
+          "ilsAt10": 0.716221,
+          "subtopicCoverageAt10": 1
         }
       },
       "lift": {
-        "ndcgAt10": 0,
-        "recallAt20": 0,
-        "ilsAt10": -0.069538,
-        "subtopicCoverageAt10": 0
+        "ndcgAt10": 0.310882,
+        "recallAt20": 0.6,
+        "ilsAt10": -0.047915,
+        "subtopicCoverageAt10": 0.25
       }
     },
     {
@@ -201,7 +203,7 @@
       "caseClass": "niche",
       "seedPaperId": "32f497db-0e0f-4045-8c15-401c032cec4c",
       "seedTitle": "EdgeLLM: Fast On-Device LLM Inference With Speculative Decoding",
-      "latencyMs": 0.023417,
+      "latencyMs": 0.095,
       "budgetPass": true,
       "baseline": {
         "top10": [
@@ -226,23 +228,23 @@
           "Joint Continual Learning of Local Language Models and Cloud Offloading Decisions with Budget Constraints",
           "Tensor Product Attention Is All You Need",
           "DART: Diffusion-Inspired Speculative Decoding for Fast LLM Inference",
+          "Kangaroo: Lossless Self-Speculative Decoding for Accelerating LLMs via Double Early Exiting",
           "SpecExec: Massively Parallel Speculative Decoding for Interactive LLM Inference on Consumer Devices",
           "DYSPEC: Faster Speculative Decoding with Dynamic Token Tree Structure",
-          "EasySpec: Layer-Parallel Speculative Decoding for Efficient Multi-GPU Utilization",
           "Mirror Speculative Decoding: Breaking the Serial Barrier in LLM Inference",
-          "SWIFT: On-the-Fly Self-Speculative Decoding for LLM Inference Acceleration"
+          "EasySpec: Layer-Parallel Speculative Decoding for Efficient Multi-GPU Utilization"
         ],
         "metrics": {
-          "ndcgAt10": 0.161022,
-          "recallAt20": 0.2,
-          "ilsAt10": 0.689585,
+          "ndcgAt10": 0.152391,
+          "recallAt20": 0.4,
+          "ilsAt10": 0.694801,
           "subtopicCoverageAt10": 0.2
         }
       },
       "lift": {
-        "ndcgAt10": 0.161022,
-        "recallAt20": 0.2,
-        "ilsAt10": 0.002614,
+        "ndcgAt10": 0.152391,
+        "recallAt20": 0.4,
+        "ilsAt10": 0.00783,
         "subtopicCoverageAt10": 0.2
       }
     }
