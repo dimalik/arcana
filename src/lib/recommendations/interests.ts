@@ -157,6 +157,10 @@ function round(value: number): number {
   return Number(value.toFixed(6));
 }
 
+function clamp(value: number, min = 0, max = 1): number {
+  return Math.min(max, Math.max(min, value));
+}
+
 function accumulateWeight(
   bucket: Map<string, number>,
   value: string,
@@ -464,7 +468,10 @@ async function loadSourcePapers(
         take: 16,
       },
     },
-    orderBy: [{ isLiked: "desc" }, { engagementScore: "desc" }, { updatedAt: "desc" }],
+    orderBy:
+      tagIds && tagIds.length > 0
+        ? [{ citationCount: "desc" }, { year: "desc" }, { updatedAt: "desc" }]
+        : [{ isLiked: "desc" }, { engagementScore: "desc" }, { updatedAt: "desc" }],
     take: 28,
   }) as Promise<ProfileSourcePaper[]>;
 }
@@ -565,6 +572,13 @@ export async function buildRecommendationProfile(
 
   const paperWeights = new Map<string, number>();
   const relatedConsumptionPaperIds: string[] = [];
+  const newestYear = sourcePapers.reduce<number | null>(
+    (maxYear, paper) => {
+      if (paper.year == null) return maxYear;
+      return maxYear == null ? paper.year : Math.max(maxYear, paper.year);
+    },
+    null,
+  );
 
   for (const paper of sourcePapers) {
     const conversationSignals = conversationByPaper.get(paper.id);
@@ -580,7 +594,7 @@ export async function buildRecommendationProfile(
       relatedConsumptionPaperIds.push(paper.id);
     }
 
-    const weight =
+    const engagementWeight =
       Math.min(paper.engagementScore, 12) * 0.55
       + (paper.isLiked ? 2.5 : 0)
       + computeEngagementBoost(paperEngagements)
@@ -588,6 +602,19 @@ export async function buildRecommendationProfile(
       + (conversationSignals?.messageCount ?? 0) * 0.05
       + (conversationSignals?.artifactCount ?? 0) * 0.25
       + relatedConsumptionScore;
+
+    const filteredBaselineWeight =
+      tagIds && tagIds.length > 0
+        ? 1
+          + clamp(Math.log1p(Math.max(0, paper.citationCount ?? 0)) / 7) * 0.8
+          + (paper.year != null && newestYear != null
+            ? clamp((paper.year - (newestYear - 6)) / 6) * 0.45
+            : 0.15)
+        : 0;
+
+    const weight = tagIds && tagIds.length > 0
+      ? Math.max(filteredBaselineWeight, engagementWeight)
+      : engagementWeight;
 
     paperWeights.set(paper.id, weight);
   }
