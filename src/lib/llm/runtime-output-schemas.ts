@@ -179,34 +179,23 @@ export const distillRuntimeOutputSchema = z
   })
   .passthrough();
 
-export const paperAnswerAgentActionRuntimeOutputSchema = z.discriminatedUnion(
-  "type",
-  [
-    z.object({
-      type: z.literal("read_section"),
-      section: z.enum(["overview", "methodology", "results"]),
-    }),
-    z.object({
-      type: z.literal("search_claims"),
-      query: z.string().min(1).max(160),
-      limit: z.coerce.number().int().min(1).max(6).default(4),
-    }),
-    z.object({
-      type: z.literal("list_figures"),
-      kind: z.enum(["figure", "table", "any"]).default("any"),
-      query: z.string().max(120).optional(),
-      limit: z.coerce.number().int().min(1).max(8).default(5),
-    }),
-    z.object({
-      type: z.literal("open_figure"),
-      target: z.string().min(1).max(120),
-    }),
-    z.object({
-      type: z.literal("finish"),
-      answerPlan: z.string().min(1).max(240),
-    }),
-  ],
-);
+export const paperAnswerAgentActionRuntimeOutputSchema = z
+  .object({
+    type: z.enum([
+      "read_section",
+      "search_claims",
+      "list_figures",
+      "open_figure",
+      "finish",
+    ]),
+    section: z.enum(["overview", "methodology", "results"]).optional(),
+    query: z.string().optional(),
+    limit: z.number().optional(),
+    kind: z.enum(["figure", "table", "any"]).optional(),
+    target: z.string().optional(),
+    answerPlan: z.string().optional(),
+  })
+  .passthrough();
 
 export const paperAnswerCodeArtifactRuntimeOutputSchema = z
   .object({

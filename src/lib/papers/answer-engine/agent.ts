@@ -86,6 +86,31 @@ export interface PreparedPaperAgentEvidence {
 
 type SummarySectionName = "overview" | "methodology" | "results";
 
+type PaperAgentAction =
+  | {
+      type: "read_section";
+      section: SummarySectionName;
+    }
+  | {
+      type: "search_claims";
+      query: string;
+      limit: number;
+    }
+  | {
+      type: "list_figures";
+      kind: "figure" | "table" | "any";
+      query?: string;
+      limit: number;
+    }
+  | {
+      type: "open_figure";
+      target: string;
+    }
+  | {
+      type: "finish";
+      answerPlan: string;
+    };
+
 interface SectionSnapshot {
   section: SummarySectionName;
   text: string;
@@ -510,6 +535,111 @@ Current observations:
 ${formatObservations(params.observations)}`;
 }
 
+function clampInteger(value: unknown, min: number, max: number, fallback: number): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) return fallback;
+  const normalized = Math.trunc(value);
+  if (normalized < min) return min;
+  if (normalized > max) return max;
+  return normalized;
+}
+
+function normalizeOptionalText(value: unknown, maxChars: number): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  return trimmed.slice(0, maxChars);
+}
+
+function fallbackAgentAction(params: {
+  intent: PaperAnswerIntent;
+  observations: AgentObservation[];
+  question: string;
+}): PaperAgentAction {
+  if (params.observations.length > 0) {
+    return {
+      type: "finish",
+      answerPlan: "Use the gathered evidence to answer directly and keep the response grounded.",
+    };
+  }
+
+  switch (params.intent) {
+    case "results":
+      return { type: "read_section", section: "results" };
+    case "figures":
+      return { type: "list_figures", kind: "figure", limit: 4 };
+    case "tables":
+      return { type: "list_figures", kind: "table", limit: 4 };
+    case "code":
+      return { type: "read_section", section: "methodology" };
+    case "claims":
+      return {
+        type: "search_claims",
+        query: params.question.slice(0, 160),
+        limit: 4,
+      };
+    default:
+      return { type: "read_section", section: "overview" };
+  }
+}
+
+function normalizePlannerAction(
+  raw: PaperAnswerAgentActionRuntimeOutput,
+  params: {
+    intent: PaperAnswerIntent;
+    observations: AgentObservation[];
+    question: string;
+  },
+): PaperAgentAction {
+  switch (raw.type) {
+    case "read_section":
+      if (
+        raw.section === "overview" ||
+        raw.section === "methodology" ||
+        raw.section === "results"
+      ) {
+        return { type: "read_section", section: raw.section };
+      }
+      break;
+    case "search_claims": {
+      const query = normalizeOptionalText(raw.query, 160);
+      if (query) {
+        return {
+          type: "search_claims",
+          query,
+          limit: clampInteger(raw.limit, 1, 6, 4),
+        };
+      }
+      break;
+    }
+    case "list_figures":
+      return {
+        type: "list_figures",
+        kind:
+          raw.kind === "figure" || raw.kind === "table" || raw.kind === "any"
+            ? raw.kind
+            : "any",
+        query: normalizeOptionalText(raw.query, 120),
+        limit: clampInteger(raw.limit, 1, 8, 5),
+      };
+    case "open_figure": {
+      const target = normalizeOptionalText(raw.target, 120);
+      if (target) {
+        return { type: "open_figure", target };
+      }
+      break;
+    }
+    case "finish":
+      return {
+        type: "finish",
+        answerPlan:
+          normalizeOptionalText(raw.answerPlan, 240) ??
+          "Use the gathered evidence to answer directly.",
+      };
+  }
+
+  return fallbackAgentAction(params);
+}
+
 async function chooseNextAgentAction(params: {
   paper: PaperAgentPaperContext;
   question: string;
@@ -522,8 +652,9 @@ async function chooseNextAgentAction(params: {
   modelId: string;
   proxyConfig?: ProxyConfig | null;
   userId?: string;
-}): Promise<PaperAnswerAgentActionRuntimeOutput> {
-  return withPaperLlmContext(
+}): Promise<PaperAgentAction> {
+  try {
+    return await withPaperLlmContext(
     {
       operation: PAPER_INTERACTIVE_LLM_OPERATIONS.CHAT_AGENT_PLAN,
       paperId: params.paper.id,
@@ -547,9 +678,21 @@ async function chooseNextAgentAction(params: {
           "Return only the next tool action as structured output. Never answer the user directly here.",
         prompt: buildPlannerPrompt(params),
       });
-      return object;
+      return normalizePlannerAction(object, {
+        intent: params.intent,
+        observations: params.observations,
+        question: params.question,
+      });
     },
   );
+  } catch (error) {
+    console.warn("[answer-engine] planner fallback:", error);
+    return fallbackAgentAction({
+      intent: params.intent,
+      observations: params.observations,
+      question: params.question,
+    });
+  }
 }
 
 async function loadPaperFigures(paperId: string): Promise<PaperFigureView[]> {
