@@ -4,32 +4,11 @@ import { useMemo, useState } from "react";
 import { Check, ChevronDown, ChevronRight, Copy, Download, Save } from "lucide-react";
 import { toast } from "sonner";
 import { highlightCode } from "@/lib/highlight";
-
-const LANG_EXT: Record<string, string> = {
-  latex: ".tex",
-  tex: ".tex",
-  python: ".py",
-  py: ".py",
-  javascript: ".js",
-  js: ".js",
-  typescript: ".ts",
-  ts: ".ts",
-  json: ".json",
-  yaml: ".yaml",
-  yml: ".yaml",
-  markdown: ".md",
-  md: ".md",
-  bash: ".sh",
-  sh: ".sh",
-  sql: ".sql",
-  csv: ".csv",
-  html: ".html",
-  css: ".css",
-  r: ".R",
-  julia: ".jl",
-  bibtex: ".bib",
-  bib: ".bib",
-};
+import {
+  CHAT_ARTIFACT_LANG_EXT as LANG_EXT,
+  extractFencedArtifacts,
+  type FencedArtifact,
+} from "@/lib/chat/fenced-artifacts";
 
 const LANG_LABEL: Record<string, string> = {
   latex: "LaTeX",
@@ -45,12 +24,7 @@ const LANG_LABEL: Record<string, string> = {
   bib: "BibTeX",
 };
 
-export interface CodeArtifact {
-  language: string;
-  code: string;
-  filename: string | null;
-  lineCount: number;
-}
+export type CodeArtifact = FencedArtifact;
 
 /**
  * Parse assistant message content and extract large code blocks as artifacts.
@@ -58,40 +32,9 @@ export interface CodeArtifact {
  */
 export function extractArtifacts(
   content: string,
-  minLines: number = 8,
+  minLines: number = 1,
 ): { prose: string; artifacts: CodeArtifact[] } {
-  const artifacts: CodeArtifact[] = [];
-  const fencePattern = /```(\w+)?\s*\n([\s\S]*?)```/g;
-
-  const prose = content.replace(fencePattern, (match, lang, code) => {
-    const trimmed = code.trimEnd();
-    const lines = trimmed.split("\n").length;
-    const language = (lang || "").toLowerCase();
-
-    if (lines < minLines) {
-      return match; // Keep small code blocks inline
-    }
-
-    // Try to derive filename from first comment line or language
-    let filename: string | null = null;
-    const firstLine = trimmed.split("\n")[0];
-    // Patterns: # filename.py, // filename.js, % filename.tex, -- filename.sql
-    const commentFile = firstLine.match(/^(?:#|\/\/|%|--)\s*(\S+\.\w+)/);
-    if (commentFile) {
-      filename = commentFile[1];
-    }
-
-    if (!filename && language) {
-      const ext = LANG_EXT[language] || `.${language}`;
-      const dateStr = new Date().toISOString().slice(0, 10);
-      filename = `artifact-${dateStr}${ext}`;
-    }
-
-    artifacts.push({ language, code: trimmed, filename, lineCount: lines });
-    return ""; // Remove from prose
-  });
-
-  return { prose: prose.trim(), artifacts };
+  return extractFencedArtifacts(content, minLines);
 }
 
 /** Segment types for streaming content */
@@ -107,7 +50,7 @@ export type StreamSegment =
  */
 export function parseStreamingSegments(
   content: string,
-  minLines: number = 8,
+  minLines: number = 1,
 ): StreamSegment[] {
   const segments: StreamSegment[] = [];
   // Split on code fences, keeping the delimiters

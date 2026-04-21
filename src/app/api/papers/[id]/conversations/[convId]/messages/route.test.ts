@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 
 const hoisted = vi.hoisted(() => ({
@@ -82,6 +82,10 @@ vi.mock("@/lib/paper-auth", () => ({
 import { POST } from "./route";
 
 describe("POST /api/papers/[id]/conversations/[convId]/messages", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it("persists assistant metadata and typed artifacts from the shared answer engine", async () => {
     hoisted.requirePaperAccess.mockResolvedValue({
       userId: "user-1",
@@ -176,6 +180,72 @@ describe("POST /api/papers/[id]/conversations/[convId]/messages", () => {
           messageId: "assistant-msg",
           kind: "TIMELINE",
           title: "Idea timeline",
+        }),
+      }),
+    );
+  });
+
+  it("extracts fenced blocks into conversation artifacts", async () => {
+    hoisted.requirePaperAccess.mockResolvedValue({
+      userId: "user-1",
+      paper: {
+        id: "paper-1",
+        title: "Seed paper",
+        fullText: "Some full text",
+        abstract: null,
+      },
+      setDuplicateStateHeaders(response: Response) {
+        return response;
+      },
+    });
+    hoisted.resolveModelConfig.mockResolvedValue({
+      provider: "openai",
+      modelId: "gpt-test",
+      proxyConfig: null,
+    });
+    hoisted.preparePaperAnswer.mockResolvedValue({
+      intent: "generated_artifact",
+      systemPrompt: "prepared-system",
+      citations: [],
+      artifacts: [],
+    });
+    hoisted.withPaperLlmContext.mockImplementation(async (_context, callback) => callback());
+    hoisted.streamLLMResponse.mockResolvedValue({
+      text: Promise.resolve("Here it is:\n\n```latex\n\\\\begin{table}\nfoo\n\\\\end{table}\n```"),
+      toTextStreamResponse: () => new Response("stream"),
+    });
+    hoisted.chatMessageCreate
+      .mockResolvedValueOnce({ id: "user-msg" })
+      .mockResolvedValueOnce({ id: "assistant-msg" });
+    hoisted.conversationFindUnique.mockResolvedValue({ id: "conv-1", title: "Artifact chat" });
+
+    await POST(
+      new NextRequest("http://localhost/api/papers/paper-1/conversations/conv-1/messages", {
+        method: "POST",
+        body: JSON.stringify({
+          messages: [{ role: "user", content: "Write the table as tex" }],
+        }),
+      }),
+      { params: Promise.resolve({ id: "paper-1", convId: "conv-1" }) },
+    );
+
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(hoisted.chatMessageCreate).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        data: expect.objectContaining({
+          content: "Here it is:",
+        }),
+      }),
+    );
+    expect(hoisted.conversationArtifactCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          kind: "CODE_SNIPPET",
+          title: expect.stringMatching(/artifact-.*\.tex|Artifact 1/),
+          payloadJson: expect.stringContaining("\"language\":\"latex\""),
         }),
       }),
     );
