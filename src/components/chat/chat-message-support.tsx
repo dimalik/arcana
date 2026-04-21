@@ -1,7 +1,7 @@
 "use client";
 
+import type { AgentActionSummary, AnswerCitation } from "@/lib/papers/answer-engine/metadata";
 import { Badge } from "@/components/ui/badge";
-import type { AnswerCitation } from "@/lib/papers/answer-engine/metadata";
 
 interface ConversationArtifactRecord {
   id?: string;
@@ -12,6 +12,7 @@ interface ConversationArtifactRecord {
 
 interface ChatMessageSupportProps {
   citations?: AnswerCitation[];
+  agentActions?: AgentActionSummary[];
   artifacts?: ConversationArtifactRecord[];
   compact?: boolean;
 }
@@ -32,6 +33,18 @@ function ArtifactPreview({
   compact: boolean;
 }) {
   const baseClass = compact ? "text-[11px]" : "text-xs";
+
+  const downloadCode = (filename: string, code: string) => {
+    const blob = new Blob([code], { type: "text/plain" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  };
 
   if (artifact.kind === "RESULT_SUMMARY") {
     const payload = parseJson<{
@@ -252,19 +265,49 @@ function ArtifactPreview({
       summary?: string | null;
       code?: string | null;
       filename?: string | null;
+      language?: string | null;
+      assumptions?: string[] | null;
     }>(artifact.payloadJson);
     return (
-      <div className="space-y-1">
+      <div className="space-y-2">
         {payload?.summary ? (
           <p className={`${baseClass} text-muted-foreground`}>{payload.summary}</p>
         ) : null}
-        {payload?.filename ? (
-          <p className={`${baseClass} text-muted-foreground`}>{payload.filename}</p>
-        ) : null}
+        <div className="flex items-center gap-2">
+          {payload?.filename ? (
+            <p className={`${baseClass} text-muted-foreground`}>{payload.filename}</p>
+          ) : null}
+          {payload?.language ? (
+            <Badge variant="secondary" className="h-4 px-1.5 text-[10px]">
+              {payload.language}
+            </Badge>
+          ) : null}
+          {payload?.code && payload?.filename ? (
+            <button
+              type="button"
+              onClick={() => downloadCode(payload.filename!, payload.code!)}
+              className="text-[10px] font-medium text-foreground/70 underline-offset-2 hover:text-foreground hover:underline"
+            >
+              Download
+            </button>
+          ) : null}
+        </div>
         {payload?.code ? (
           <pre className="overflow-x-auto rounded border bg-muted/40 p-2 text-[10px] text-muted-foreground">
             {payload.code}
           </pre>
+        ) : null}
+        {(payload?.assumptions ?? []).length > 0 ? (
+          <div className="space-y-1">
+            {(payload?.assumptions ?? []).slice(0, compact ? 2 : 3).map((assumption, index) => (
+              <p
+                key={`${artifact.id ?? artifact.title}-assumption-${index}`}
+                className={`${baseClass} text-muted-foreground`}
+              >
+                Assumption: {assumption}
+              </p>
+            ))}
+          </div>
         ) : null}
       </div>
     );
@@ -279,10 +322,11 @@ function ArtifactPreview({
 
 export function ChatMessageSupport({
   citations = [],
+  agentActions = [],
   artifacts = [],
   compact = false,
 }: ChatMessageSupportProps) {
-  if (citations.length === 0 && artifacts.length === 0) return null;
+  if (citations.length === 0 && agentActions.length === 0 && artifacts.length === 0) return null;
 
   const wrapperClass = compact ? "mt-2 space-y-2" : "mt-3 space-y-3";
 
@@ -309,6 +353,34 @@ export function ChatMessageSupport({
                 </div>
                 <p className={compact ? "text-[10px] text-muted-foreground" : "text-[11px] text-muted-foreground"}>
                   {citation.snippet}
+                </p>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      {agentActions.length > 0 ? (
+        <div className="space-y-1.5">
+          <p className={compact ? "text-[10px] font-medium text-muted-foreground" : "text-[11px] font-medium text-muted-foreground"}>
+            Agent Actions
+          </p>
+          <div className="space-y-1.5">
+            {agentActions.map((action) => (
+              <div
+                key={`${action.step}-${action.action}`}
+                className="rounded-md border bg-background/70 px-2.5 py-2"
+              >
+                <div className="mb-1 flex items-center gap-1.5">
+                  <Badge variant="outline" className="h-4 px-1.5 text-[10px]">
+                    step {action.step}
+                  </Badge>
+                  <p className={compact ? "text-[10px] font-medium" : "text-[11px] font-medium"}>
+                    {action.action}
+                  </p>
+                </div>
+                <p className={compact ? "text-[10px] text-muted-foreground" : "text-[11px] text-muted-foreground"}>
+                  {action.detail}
                 </p>
               </div>
             ))}

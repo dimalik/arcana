@@ -340,10 +340,11 @@ export function ConversationView({
                         content={messageText}
                         className="text-sm"
                       />
-                      <ChatMessageSupport
-                        citations={message.metadata?.citations}
-                        artifacts={message.metadata?.artifacts}
-                      />
+                            <ChatMessageSupport
+                              citations={message.metadata?.citations}
+                              agentActions={message.metadata?.agentActions}
+                              artifacts={message.metadata?.artifacts}
+                            />
                       <button
                         onClick={() =>
                           saveToNotebook({

@@ -25,9 +25,18 @@ export const answerCitationSchema = z.object({
 
 export type AnswerCitation = z.infer<typeof answerCitationSchema>;
 
+export const agentActionSummarySchema = z.object({
+  step: z.number().int(),
+  action: z.string(),
+  detail: z.string(),
+});
+
+export type AgentActionSummary = z.infer<typeof agentActionSummarySchema>;
+
 export const chatMessageMetadataSchema = z.object({
   intent: paperAnswerIntentSchema,
   citations: z.array(answerCitationSchema),
+  agentActions: z.array(agentActionSummarySchema).optional(),
   artifacts: z
     .array(
       z.object({

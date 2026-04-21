@@ -93,6 +93,7 @@ export async function POST(
       buildChatMessageMetadata({
         intent: prepared.intent,
         citations: prepared.citations,
+        agentActions: prepared.agentActions,
         artifacts: prepared.artifacts,
       }),
     );

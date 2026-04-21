@@ -187,4 +187,39 @@ describe("preparePaperAgentEvidence", () => {
     expect(result.artifacts[0]?.kind).toBe("FIGURE_CARD");
     expect(result.citations[0]?.snippet).toContain("Figure 2");
   });
+
+  it("generates a code snippet artifact for implementation-style questions", async () => {
+    hoisted.paperFigureFindMany.mockResolvedValue([]);
+    hoisted.generateStructuredObject
+      .mockResolvedValueOnce({
+        object: { type: "read_section", section: "methodology" },
+      })
+      .mockResolvedValueOnce({
+        object: { type: "search_claims", query: "training recipe", limit: 2 },
+      })
+      .mockResolvedValueOnce({
+        object: { type: "finish", answerPlan: "Provide a derived implementation sketch." },
+      })
+      .mockResolvedValueOnce({
+        object: {
+          summary: "Derived PyTorch sketch for the training recipe.",
+          filename: "seed_paper_recipe.py",
+          language: "python",
+          code: "def train_step(batch):\n    return batch\n",
+          assumptions: ["Optimizer details were not specified in the paper excerpt."],
+        },
+      });
+
+    const result = await preparePaperAgentEvidence({
+      paper: makePaper(),
+      question: "Generate a code snippet for the method in this paper.",
+      intent: "code",
+      selectedText: null,
+      provider: "openai",
+      modelId: "gpt-test",
+    });
+
+    expect(result.artifacts.map((artifact) => artifact.kind)).toContain("CODE_SNIPPET");
+    expect(result.actions.some((action) => action.action === "generate_code_snippet")).toBe(true);
+  });
 });

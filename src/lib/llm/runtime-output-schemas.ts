@@ -208,6 +208,16 @@ export const paperAnswerAgentActionRuntimeOutputSchema = z.discriminatedUnion(
   ],
 );
 
+export const paperAnswerCodeArtifactRuntimeOutputSchema = z
+  .object({
+    summary: z.string(),
+    filename: z.string(),
+    language: z.string(),
+    code: z.string(),
+    assumptions: z.array(z.string()).default([]),
+  })
+  .passthrough();
+
 export const PROCESSING_RUNTIME_OUTPUT_SCHEMAS = {
   extract: extractRuntimeOutputSchema,
   extractClaims: extractClaimsRuntimeOutputSchema,
@@ -222,6 +232,7 @@ export const PROCESSING_RUNTIME_OUTPUT_SCHEMAS = {
   rerankRelatedPapers: rerankRelatedPapersRuntimeOutputSchema,
   scoreRelatedPapersPointwise: scoreRelatedPapersPointwiseRuntimeOutputSchema,
   paperAnswerAgentAction: paperAnswerAgentActionRuntimeOutputSchema,
+  paperAnswerCodeArtifact: paperAnswerCodeArtifactRuntimeOutputSchema,
 } as const;
 
 export type ProcessingRuntimeStructuredPromptType =
@@ -253,6 +264,9 @@ export type ExtractCitationContextsRuntimeOutput = z.infer<
 export type DistillRuntimeOutput = z.infer<typeof distillRuntimeOutputSchema>;
 export type PaperAnswerAgentActionRuntimeOutput = z.infer<
   typeof paperAnswerAgentActionRuntimeOutputSchema
+>;
+export type PaperAnswerCodeArtifactRuntimeOutput = z.infer<
+  typeof paperAnswerCodeArtifactRuntimeOutputSchema
 >;
 export type RerankRelatedPapersRuntimeOutput = z.infer<
   typeof rerankRelatedPapersRuntimeOutputSchema

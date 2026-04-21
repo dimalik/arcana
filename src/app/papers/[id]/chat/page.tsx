@@ -211,6 +211,7 @@ export default function ChatPage() {
                             />
                             <ChatMessageSupport
                               citations={message.metadata?.citations}
+                              agentActions={message.metadata?.agentActions}
                               artifacts={message.metadata?.artifacts}
                             />
                           </>

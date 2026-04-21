@@ -12,7 +12,9 @@ import {
 } from "@/lib/llm/provider";
 import {
   paperAnswerAgentActionRuntimeOutputSchema,
+  paperAnswerCodeArtifactRuntimeOutputSchema,
   type PaperAnswerAgentActionRuntimeOutput,
+  type PaperAnswerCodeArtifactRuntimeOutput,
 } from "@/lib/llm/runtime-output-schemas";
 import type { LLMProvider } from "@/lib/llm/models";
 import type { ProxyConfig } from "@/lib/llm/proxy-settings";
@@ -22,7 +24,11 @@ import { prisma } from "@/lib/prisma";
 
 import type { PaperClaimView } from "../analysis/store";
 
-import type { AnswerCitation, PaperAnswerIntent } from "./metadata";
+import type {
+  AgentActionSummary,
+  AnswerCitation,
+  PaperAnswerIntent,
+} from "./metadata";
 
 const NON_ASSERTIVE_EVIDENCE_TYPES = new Set<PaperClaimEvidenceType>(["CITING"]);
 const STOP_WORDS = new Set([
@@ -75,6 +81,7 @@ export interface PaperAgentArtifactDraft {
 export interface PreparedPaperAgentEvidence {
   citations: AnswerCitation[];
   artifacts: PaperAgentArtifactDraft[];
+  actions: AgentActionSummary[];
 }
 
 type SummarySectionName = "overview" | "methodology" | "results";
@@ -88,6 +95,14 @@ interface AgentObservation {
   step: number;
   action: string;
   detail: string;
+}
+
+interface CodeSnippetArtifactPayload {
+  summary: string;
+  filename: string;
+  language: string;
+  code: string;
+  assumptions: string[];
 }
 
 function tokenize(value: string): string[] {
@@ -412,6 +427,16 @@ function buildFigureArtifact(
   };
 }
 
+function buildCodeArtifact(
+  payload: CodeSnippetArtifactPayload,
+): PaperAgentArtifactDraft {
+  return {
+    kind: "CODE_SNIPPET",
+    title: payload.filename,
+    payloadJson: JSON.stringify(payload),
+  };
+}
+
 function formatFigureInventory(figures: PaperFigureView[]): string {
   if (figures.length === 0) return "none";
   return figures
@@ -537,6 +562,87 @@ async function loadPaperFigures(paperId: string): Promise<PaperFigureView[]> {
     orderBy: [{ pdfPage: "asc" }, { figureIndex: "asc" }],
   });
   return mapPaperFiguresToView(figures);
+}
+
+function buildCodeArtifactPrompt(params: {
+  paper: PaperAgentPaperContext;
+  question: string;
+  selectedText: string | null;
+  citations: AnswerCitation[];
+  artifacts: PaperAgentArtifactDraft[];
+  observations: AgentObservation[];
+}): string {
+  const evidenceLines = params.citations
+    .slice(0, 8)
+    .map(
+      (citation, index) =>
+        `[S${index + 1}] ${citation.paperTitle}${citation.sectionPath ? ` / ${citation.sectionPath}` : ""}\n${citation.snippet}`,
+    )
+    .join("\n\n");
+  const artifactLines = params.artifacts
+    .map((artifact, index) => `Artifact ${index + 1} (${artifact.kind}): ${artifact.title}\n${artifact.payloadJson}`)
+    .join("\n\n");
+
+  return `Create a concise, useful code snippet artifact derived from the paper evidence below.
+
+Paper: ${params.paper.title}${params.paper.year ? ` (${params.paper.year})` : ""}
+Question: ${params.question}
+${params.selectedText ? `Selected text:\n${truncate(params.selectedText, 800)}\n\n` : ""}Rules:
+- The code must be a derived implementation sketch, not a claim of verbatim paper code.
+- Keep it compact and runnable-looking.
+- Reference the method or result the snippet is based on in the summary.
+- If critical details are missing, make assumptions explicit in the assumptions array.
+- Prefer Python unless the request strongly implies another language.
+
+Observations:
+${formatObservations(params.observations)}
+
+Retrieved sources:
+${evidenceLines || "No grounded citations were available."}
+
+Structured artifacts:
+${artifactLines || "No structured artifacts attached."}`;
+}
+
+async function generateCodeSnippetArtifact(params: {
+  paper: PaperAgentPaperContext;
+  question: string;
+  selectedText: string | null;
+  citations: AnswerCitation[];
+  artifacts: PaperAgentArtifactDraft[];
+  observations: AgentObservation[];
+  provider: LLMProvider;
+  modelId: string;
+  proxyConfig?: ProxyConfig | null;
+  userId?: string;
+}): Promise<CodeSnippetArtifactPayload | null> {
+  return withPaperLlmContext(
+    {
+      operation: PAPER_INTERACTIVE_LLM_OPERATIONS.CHAT_AGENT_CODE,
+      paperId: params.paper.id,
+      userId: params.userId,
+      runtime: "interactive",
+      source: "papers.answer_engine.code_artifact",
+    },
+    async () => {
+      const { object } = await generateStructuredObject({
+        provider: params.provider,
+        modelId: params.modelId,
+        proxyConfig: params.proxyConfig ?? undefined,
+        schema: paperAnswerCodeArtifactRuntimeOutputSchema,
+        schemaName: "paperAnswerCodeArtifact",
+        maxTokens: 1200,
+        system:
+          "Return one compact code artifact as structured output. Do not add prose outside the schema.",
+        prompt: buildCodeArtifactPrompt(params),
+      });
+
+      if (!object.code?.trim()) {
+        return null;
+      }
+      return object;
+    },
+  );
 }
 
 function dedupeCitations(citations: AnswerCitation[]): AnswerCitation[] {
@@ -723,8 +829,36 @@ export async function preparePaperAgentEvidence(params: {
     }
   }
 
+  if (params.intent === "code") {
+    const codeArtifact = await generateCodeSnippetArtifact({
+      paper: params.paper,
+      question: params.question,
+      selectedText: params.selectedText,
+      citations,
+      artifacts,
+      observations,
+      provider: params.provider,
+      modelId: params.modelId,
+      proxyConfig: params.proxyConfig,
+      userId: params.userId,
+    });
+    if (codeArtifact) {
+      artifacts.push(buildCodeArtifact(codeArtifact));
+      observations.push({
+        step: observations.length + 1,
+        action: "generate_code_snippet",
+        detail: `${codeArtifact.filename}: ${codeArtifact.summary}`,
+      });
+    }
+  }
+
   return {
     citations: dedupeCitations(citations).slice(0, 8),
     artifacts: dedupeArtifacts(artifacts),
+    actions: observations.map((observation) => ({
+      step: observation.step,
+      action: observation.action,
+      detail: observation.detail,
+    })),
   };
 }

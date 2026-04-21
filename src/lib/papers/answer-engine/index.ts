@@ -64,6 +64,11 @@ export interface PreparedPaperAnswer {
   systemPrompt: string;
   citations: AnswerCitation[];
   artifacts: ConversationArtifactDraft[];
+  agentActions?: Array<{
+    step: number;
+    action: string;
+    detail: string;
+  }>;
 }
 
 const AGENT_INTENT_SET = new Set<PaperAnswerIntent>([
@@ -663,6 +668,20 @@ export async function preparePaperAnswer(
       citations.push(...agentEvidence.citations);
       artifacts.push(...agentEvidence.artifacts);
       handledByAgent = true;
+      return {
+        intent,
+        citations: uniqueCitations(citations).slice(0, 8),
+        artifacts,
+        agentActions: agentEvidence.actions,
+        systemPrompt: buildPrompt({
+          paperTitle: seedPaper.title,
+          question: params.question,
+          intent,
+          selectedText,
+          citations: uniqueCitations(citations).slice(0, 8),
+          artifacts,
+        }),
+      };
     } catch (error) {
       console.warn("[answer-engine] paper agent fallback:", error);
     }
@@ -801,6 +820,11 @@ export async function preparePaperAnswer(
 export function buildChatMessageMetadata(params: {
   intent: PaperAnswerIntent;
   citations: AnswerCitation[];
+  agentActions?: Array<{
+    step: number;
+    action: string;
+    detail: string;
+  }>;
   artifacts?: Array<{
     id?: string;
     kind: string;
@@ -811,6 +835,7 @@ export function buildChatMessageMetadata(params: {
   return {
     intent: params.intent,
     citations: params.citations,
+    ...(params.agentActions?.length ? { agentActions: params.agentActions } : {}),
     ...(params.artifacts?.length ? { artifacts: params.artifacts } : {}),
   };
 }

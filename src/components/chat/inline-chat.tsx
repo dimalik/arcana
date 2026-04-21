@@ -59,6 +59,7 @@ export function InlineChat({
   const [collapsed, setCollapsed] = useState(false);
   const [assistantSupport, setAssistantSupport] = useState<{
     citations?: AnswerCitation[];
+    agentActions?: Array<{ step: number; action: string; detail: string }>;
     artifacts?: ConversationArtifactRecord[];
   } | null>(null);
   const { saveToNotebook, saving: notebookSaving } = useNotebook();
@@ -99,6 +100,7 @@ export function InlineChat({
           const metadata = parseChatMessageMetadata(assistant.metadataJson);
           setAssistantSupport({
             citations: metadata?.citations,
+            agentActions: metadata?.agentActions,
             artifacts: assistant.artifacts ?? [],
           });
         })
@@ -232,6 +234,7 @@ export function InlineChat({
             <ChatMessageSupport
               compact
               citations={assistantSupport?.citations}
+              agentActions={assistantSupport?.agentActions}
               artifacts={assistantSupport?.artifacts}
             />
             {!isLoading && (
