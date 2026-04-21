@@ -441,6 +441,7 @@ function buildPrompt(params: {
   citations: AnswerCitation[];
   artifacts: ConversationArtifactDraft[];
 }): string {
+  const hasTableArtifact = params.artifacts.some((artifact) => artifact.kind === "TABLE_CARD");
   const sourceBlock =
     params.citations.length > 0
       ? params.citations.map(formatCitationForPrompt).join("\n\n")
@@ -463,7 +464,7 @@ function buildPrompt(params: {
       : params.intent === "figures" || params.intent === "tables"
         ? "- If a relevant figure or table artifact is attached, anchor the answer in that artifact before generalizing.\n"
         : params.intent === "results"
-          ? "- Prioritize numeric outcomes, ablations, and result tables over broad summary language.\n"
+          ? `- Prioritize numeric outcomes, ablations, and result tables over broad summary language.\n${hasTableArtifact ? "- A matching table artifact is attached. Answer from its matched rows and visible columns before using summary text.\n" : ""}`
           : "";
 
   return `${SYSTEM_PROMPTS.chat}
@@ -472,7 +473,11 @@ You are answering a paper-focused question with a curated evidence packet, not t
 
 Rules:
 - Use only the retrieved sources and attached structured artifacts below.
+- Ignore any general-knowledge allowance from the base chat prompt for this answer.
+- Do not use outside knowledge to fill paper-specific gaps.
 - If the evidence is insufficient, say so plainly.
+- Never write phrases like "likely", "probably", "the paper likely covers", or "based on general knowledge".
+- If a requested detail is not in the evidence packet, say that exact detail is missing from the retrieved evidence and stop there.
 - Cite supporting evidence inline with the source tags like [S1], [S2].
 - If a structured artifact is attached, summarize it instead of reproducing raw JSON.
 - Keep the answer grounded in the paper(s), then add explanation.

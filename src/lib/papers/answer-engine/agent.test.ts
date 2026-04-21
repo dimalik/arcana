@@ -220,6 +220,79 @@ describe("preparePaperAgentEvidence", () => {
     });
   });
 
+  it("forces matching result-table inspection for focused result questions", async () => {
+    hoisted.paperFigureFindMany.mockResolvedValue([
+      {
+        id: "fig-table-4",
+        paperId: "paper-1",
+        publishedFigureHandleId: null,
+        figureLabel: "Table 4",
+        captionText: "Table 4: Safety / RAI results.",
+        captionSource: "html",
+        description:
+          "<table><tr><th>Metric</th><th>phi-3-mini</th></tr><tr><td>Ungroundedness</td><td>0.603</td></tr></table>",
+        sourceMethod: "html",
+        sourceUrl: null,
+        sourceVersion: null,
+        confidence: "high",
+        imagePath: null,
+        assetHash: null,
+        pdfPage: 7,
+        sourcePage: 7,
+        figureIndex: 4,
+        bbox: null,
+        type: "table",
+        parentFigureId: null,
+        isPrimaryExtraction: true,
+        width: null,
+        height: null,
+        gapReason: null,
+        imageSourceMethod: null,
+        createdAt: new Date("2026-04-21T00:00:00Z"),
+      },
+    ]);
+    hoisted.generateStructuredObject
+      .mockResolvedValueOnce({
+        object: { type: "read_section", section: "results" },
+      })
+      .mockResolvedValueOnce({
+        object: { type: "finish", answerPlan: "Answer using the grounded results." },
+      });
+
+    const result = await preparePaperAgentEvidence({
+      paper: makePaper({
+        summary: [
+          "## Summary",
+          "Short overview.",
+          "",
+          "## Results",
+          "Table 4 reports the in-house RAI benchmark results.",
+        ].join("\n"),
+      }),
+      question: "Tell me about the RAI results.",
+      intent: "results",
+      selectedText: null,
+      provider: "openai",
+      modelId: "gpt-test",
+    });
+
+    expect(result.actions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          tool: "read_section",
+          source: "planner",
+        }),
+        expect.objectContaining({
+          tool: "inspect_table",
+          source: "fallback",
+          input: "Table 4",
+          artifactsAdded: 1,
+        }),
+      ]),
+    );
+    expect(result.artifacts.map((artifact) => artifact.kind)).toContain("TABLE_CARD");
+  });
+
   it("generates a code snippet artifact for implementation-style questions", async () => {
     hoisted.paperFigureFindMany.mockResolvedValue([]);
     hoisted.generateStructuredObject

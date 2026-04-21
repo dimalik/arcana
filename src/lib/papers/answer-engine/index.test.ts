@@ -132,4 +132,45 @@ describe("preparePaperAnswer", () => {
       ]),
     );
   });
+
+  it("forbids paper-specific speculation in grounded answer prompts", async () => {
+    hoisted.preparePaperAgentEvidence.mockResolvedValue({
+      citations: [
+        {
+          paperId: "paper-1",
+          paperTitle: "Seed Paper",
+          snippet: "Table 4 reports the in-house RAI benchmark results.",
+          sectionPath: "results",
+          sourceKind: "summary",
+        },
+      ],
+      artifacts: [
+        {
+          kind: "TABLE_CARD",
+          title: "Table 4",
+          payloadJson: JSON.stringify({
+            figureLabel: "Table 4",
+            captionText: "Table 4: Safety / RAI results.",
+            table: {
+              columns: ["Metric", "phi-3-mini"],
+              rows: [["Ungroundedness", "0.603"]],
+              matches: [{ rowIndex: 0, score: 3, values: ["Ungroundedness", "0.603"] }],
+            },
+          }),
+        },
+      ],
+      actions: [],
+    });
+
+    const result = await preparePaperAnswer({
+      paperId: "paper-1",
+      question: "Tell me about the RAI results.",
+      provider: "proxy",
+      modelId: "claude-sonnet-4-6",
+    });
+
+    expect(result.systemPrompt).toContain("Do not use outside knowledge to fill paper-specific gaps.");
+    expect(result.systemPrompt).toContain("Never write phrases like \"likely\", \"probably\", \"the paper likely covers\", or \"based on general knowledge\".");
+    expect(result.systemPrompt).toContain("A matching table artifact is attached. Answer from its matched rows and visible columns before using summary text.");
+  });
 });

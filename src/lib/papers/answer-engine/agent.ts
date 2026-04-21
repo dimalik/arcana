@@ -56,6 +56,26 @@ const STOP_WORDS = new Set([
   "with",
   "would",
 ]);
+const RESULT_TABLE_FOCUS_TERMS = [
+  "rai",
+  "responsible ai",
+  "safety",
+  "harm",
+  "harmful",
+  "jailbreak",
+  "bias",
+  "fairness",
+  "ungroundedness",
+  "hallucination",
+  "toxicity",
+  "privacy",
+  "robustness",
+  "ablation",
+  "mmlu",
+  "bbh",
+  "gsm8k",
+  "arena",
+];
 
 const MAX_AGENT_STEPS = 4;
 const MAX_SECTION_CHARS = 1800;
@@ -380,25 +400,110 @@ function filterFigures(
     return filteredKind;
   }
 
-  const queryTokens = tokenize(query);
-  const scored = filteredKind.map((figure) => {
-    const haystack = normalizeAnalysisText(
-      `${figure.figureLabel ?? ""} ${figure.captionText ?? ""} ${figure.description ?? ""}`,
-    );
-    let score = 0;
-    for (const token of queryTokens) {
-      if (haystack.includes(token)) score += 2;
-    }
-    if (kind === "table" && /result|metric|benchmark|ablation|score/.test(query.toLowerCase())) {
-      score += 1;
-    }
-    return { figure, score };
-  });
+  const scored = filteredKind.map((figure) => ({
+    figure,
+    score: scoreFigureQuery(figure, kind, query),
+  }));
 
   const matching = scored.filter((entry) => entry.score > 0);
   return (matching.length > 0 ? matching : scored)
     .sort((left, right) => right.score - left.score || left.figure.figureIndex - right.figure.figureIndex)
     .map((entry) => entry.figure);
+}
+
+function scoreFigureQuery(
+  figure: PaperFigureView,
+  kind: "figure" | "table" | "any",
+  query: string,
+): number {
+  const queryTokens = tokenize(query);
+  const haystack = normalizeAnalysisText(
+    `${figure.figureLabel ?? ""} ${figure.captionText ?? ""} ${figure.description ?? ""}`,
+  );
+  let score = 0;
+  for (const token of queryTokens) {
+    if (haystack.includes(token)) score += 2;
+  }
+  if (
+    kind === "table"
+    && /result|metric|benchmark|ablation|score|safety|rai|harm|jailbreak/i.test(query)
+  ) {
+    score += 1;
+  }
+  return score;
+}
+
+function extractResultTableFocusQuery(question: string): string | null {
+  const normalized = normalizeAnalysisText(question);
+  const matchedTerms = RESULT_TABLE_FOCUS_TERMS.filter((term) =>
+    normalized.includes(term),
+  );
+  const acronymTerms = Array.from(
+    question.matchAll(/\b[A-Z][A-Z0-9-]{1,7}\b/g),
+    (match) => match[0]?.toLowerCase() ?? "",
+  ).filter(Boolean);
+  const focusTerms = Array.from(new Set([...matchedTerms, ...acronymTerms]));
+  if (focusTerms.length === 0) return null;
+  return focusTerms.join(" ");
+}
+
+function chooseDeterministicAction(params: {
+  question: string;
+  intent: PaperAnswerIntent;
+  figures: PaperFigureView[];
+  observations: AgentObservation[];
+}): PaperAgentAction | null {
+  const alreadyReadResults = params.observations.some(
+    (observation) =>
+      observation.tool === "read_section" && observation.input === "results",
+  );
+  const alreadyInspectedTable = params.observations.some((observation) =>
+    observation.tool === "inspect_table"
+    || observation.tool === "open_figure",
+  );
+
+  if (params.intent === "tables" && !alreadyInspectedTable) {
+    const tables = params.figures.filter((figure) => figure.type === "table");
+    if (tables.length === 0) return null;
+    const target =
+      filterFigures(tables, "table", params.question)[0]?.figureLabel
+      ?? filterFigures(tables, "table", params.question)[0]?.id
+      ?? null;
+    if (target) {
+      return {
+        type: "inspect_table",
+        target,
+        query: params.question.slice(0, 160),
+      };
+    }
+  }
+
+  if (params.intent !== "results" || !alreadyReadResults || alreadyInspectedTable) {
+    return null;
+  }
+
+  const focusQuery = extractResultTableFocusQuery(params.question);
+  if (!focusQuery) return null;
+
+  const tables = params.figures.filter((figure) => figure.type === "table");
+  const bestTable = tables
+    .map((figure) => ({
+      figure,
+      score: scoreFigureQuery(figure, "table", focusQuery),
+    }))
+    .filter((entry) => entry.score > 0)
+    .sort(
+      (left, right) =>
+        right.score - left.score || left.figure.figureIndex - right.figure.figureIndex,
+    )[0];
+
+  if (!bestTable) return null;
+
+  return {
+    type: "inspect_table",
+    target: bestTable.figure.figureLabel ?? bestTable.figure.id,
+    query: focusQuery,
+  };
 }
 
 function resolveFigureTarget(
@@ -813,6 +918,16 @@ async function chooseNextAgentAction(params: {
   proxyConfig?: ProxyConfig | null;
   userId?: string;
 }): Promise<ChosenPaperAgentAction> {
+  const deterministicAction = chooseDeterministicAction({
+    question: params.question,
+    intent: params.intent,
+    figures: params.figures,
+    observations: params.observations,
+  });
+  if (deterministicAction) {
+    return { action: deterministicAction, source: "fallback" };
+  }
+
   try {
     const action = await withPaperLlmContext(
     {
