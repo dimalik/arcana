@@ -22,6 +22,26 @@ import {
 } from "@/lib/paper-auth";
 import { prisma } from "@/lib/prisma";
 
+const CHAT_PAPER_ACCESS_SELECT = {
+  id: true,
+  title: true,
+  abstract: true,
+  summary: true,
+  keyFindings: true,
+  fullText: true,
+} as const;
+
+function hasAnswerablePaperText(paper: {
+  fullText?: string | null;
+  abstract?: string | null;
+  summary?: string | null;
+  keyFindings?: string | null;
+}) {
+  return Boolean(
+    paper.fullText || paper.abstract || paper.summary || paper.keyFindings,
+  );
+}
+
 export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string; convId: string }> },
@@ -61,7 +81,10 @@ export async function POST(
 ) {
   try {
     const { id, convId } = await params;
-    const access = await requirePaperAccess(id, { mode: "mutate" });
+    const access = await requirePaperAccess(id, {
+      mode: "mutate",
+      select: CHAT_PAPER_ACCESS_SELECT,
+    });
     if (!access) {
       return new Response(JSON.stringify({ error: "Paper not found" }), {
         status: 404,
@@ -69,12 +92,19 @@ export async function POST(
       });
     }
 
-    const body = await request.json();
-    const { messages } = body;
+    const body = await request.json().catch(() => ({}));
+    const messages = Array.isArray(body.messages) ? body.messages : [];
     const { provider, modelId, proxyConfig } = await resolveModelConfig(body);
 
-    if (!access.paper.fullText && !access.paper.abstract) {
+    if (!hasAnswerablePaperText(access.paper)) {
       return new Response(JSON.stringify({ error: "No text available" }), {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    if (messages.length === 0) {
+      return new Response(JSON.stringify({ error: "No messages provided" }), {
         status: 400,
         headers: { "Content-Type": "application/json" },
       });

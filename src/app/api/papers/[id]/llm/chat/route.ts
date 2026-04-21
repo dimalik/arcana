@@ -20,13 +20,36 @@ import {
 } from "@/lib/papers/answer-engine";
 import { extractChatMessageText } from "@/lib/papers/answer-engine/chat-history";
 
+const CHAT_PAPER_ACCESS_SELECT = {
+  id: true,
+  title: true,
+  abstract: true,
+  summary: true,
+  keyFindings: true,
+  fullText: true,
+} as const;
+
+function hasAnswerablePaperText(paper: {
+  fullText?: string | null;
+  abstract?: string | null;
+  summary?: string | null;
+  keyFindings?: string | null;
+}) {
+  return Boolean(
+    paper.fullText || paper.abstract || paper.summary || paper.keyFindings,
+  );
+}
+
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const { id } = await params;
-    const access = await requirePaperAccess(id, { mode: "mutate" });
+    const access = await requirePaperAccess(id, {
+      mode: "mutate",
+      select: CHAT_PAPER_ACCESS_SELECT,
+    });
     if (!access) {
       return new Response(JSON.stringify({ error: "Paper not found" }), {
         status: 404,
@@ -34,11 +57,11 @@ export async function POST(
       });
     }
 
-    const body = await request.json();
-    const { messages } = body;
+    const body = await request.json().catch(() => ({}));
+    const messages = Array.isArray(body.messages) ? body.messages : [];
     const { provider, modelId, proxyConfig } = await resolveModelConfig(body);
     const paper = access.paper;
-    if (!paper.fullText && !paper.abstract) {
+    if (!hasAnswerablePaperText(paper)) {
       return new Response(
         JSON.stringify({ error: "No text available" }),
         {
@@ -46,6 +69,13 @@ export async function POST(
           headers: { "Content-Type": "application/json" },
         }
       );
+    }
+
+    if (messages.length === 0) {
+      return new Response(JSON.stringify({ error: "No messages provided" }), {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+      });
     }
 
     const lastUserMessage = messages[messages.length - 1];

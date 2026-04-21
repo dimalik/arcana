@@ -115,6 +115,17 @@ describe("POST /api/papers/[id]/llm/chat", () => {
         question: "What are the key claims?",
       }),
     );
+    expect(hoisted.requirePaperAccess).toHaveBeenCalledWith("paper-1", {
+      mode: "mutate",
+      select: {
+        id: true,
+        title: true,
+        abstract: true,
+        summary: true,
+        keyFindings: true,
+        fullText: true,
+      },
+    });
     expect(hoisted.chatMessageCreate).toHaveBeenNthCalledWith(
       2,
       expect.objectContaining({
