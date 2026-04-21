@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { PaperClaimView } from "../analysis/store";
 
 const hoisted = vi.hoisted(() => ({
   paperFigureFindMany: vi.fn(),
@@ -28,6 +29,32 @@ vi.mock("@/lib/llm/paper-llm-context", () => ({
 import { preparePaperAgentEvidence } from "./agent";
 
 function makePaper(overrides: Partial<Parameters<typeof preparePaperAgentEvidence>[0]["paper"]> = {}) {
+  const claims: PaperClaimView[] = [
+    {
+      id: "claim-1",
+      paperId: "paper-1",
+      runId: "run-1",
+      claimType: null,
+      rhetoricalRole: "RESULT",
+      facet: "RESULT",
+      polarity: "ASSERTIVE",
+      stance: null,
+      evaluationContext: null,
+      text: "The method improves accuracy by 4.2 points on the benchmark.",
+      normalizedText: "the method improves accuracy by 4.2 points on the benchmark",
+      confidence: 0.94,
+      sectionLabel: "Results",
+      sectionPath: "results",
+      sourceExcerpt: "The method improves accuracy by 4.2 points on the benchmark.",
+      excerptHash: "hash-1",
+      sourceSpan: null,
+      citationAnchors: [],
+      evidenceType: "PRIMARY",
+      orderIndex: 0,
+      createdAt: new Date("2026-04-21T00:00:00Z"),
+    },
+  ];
+
   return {
     id: "paper-1",
     title: "Seed Paper",
@@ -45,31 +72,7 @@ function makePaper(overrides: Partial<Parameters<typeof preparePaperAgentEvidenc
     ].join("\n"),
     keyFindings: JSON.stringify(["Improves accuracy by 4.2 points."]),
     fullText: null,
-    claims: [
-      {
-        id: "claim-1",
-        paperId: "paper-1",
-        runId: "run-1",
-        claimType: null,
-        rhetoricalRole: "RESULT",
-        facet: "RESULT",
-        polarity: "POSITIVE",
-        stance: null,
-        evaluationContext: null,
-        text: "The method improves accuracy by 4.2 points on the benchmark.",
-        normalizedText: "the method improves accuracy by 4.2 points on the benchmark",
-        confidence: 0.94,
-        sectionLabel: "Results",
-        sectionPath: "results",
-        sourceExcerpt: "The method improves accuracy by 4.2 points on the benchmark.",
-        excerptHash: "hash-1",
-        sourceSpan: null,
-        citationAnchors: [],
-        evidenceType: "PRIMARY",
-        orderIndex: 0,
-        createdAt: new Date("2026-04-21T00:00:00Z"),
-      },
-    ] as any,
+    claims,
     ...overrides,
   };
 }
@@ -115,7 +118,7 @@ describe("preparePaperAgentEvidence", () => {
         object: { type: "read_section", section: "results" },
       })
       .mockResolvedValueOnce({
-        object: { type: "open_figure", target: "Table 1" },
+        object: { type: "inspect_table", target: "Table 1", query: "accuracy benchmark" },
       })
       .mockResolvedValueOnce({
         object: { type: "finish", answerPlan: "Ground the answer in the results text and table." },
@@ -134,6 +137,18 @@ describe("preparePaperAgentEvidence", () => {
     expect(result.artifacts.map((artifact) => artifact.kind)).toEqual(
       expect.arrayContaining(["RESULT_SUMMARY", "TABLE_CARD"]),
     );
+    const tableArtifact = result.artifacts.find((artifact) => artifact.kind === "TABLE_CARD");
+    expect(tableArtifact).toBeDefined();
+    const payload = JSON.parse(tableArtifact!.payloadJson) as {
+      table?: {
+        columns?: string[];
+        rows?: string[][];
+        matches?: Array<{ rowIndex: number; values: string[] }>;
+      } | null;
+    };
+    expect(payload.table?.columns).toEqual(["Column 1", "Column 2"]);
+    expect(payload.table?.rows?.[0]).toEqual(["Accuracy", "91.2"]);
+    expect(payload.table?.matches?.[0]?.values).toEqual(["Accuracy", "91.2"]);
   });
 
   it("opens a matching figure artifact by label", async () => {

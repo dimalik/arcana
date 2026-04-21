@@ -60,6 +60,9 @@ const STOP_WORDS = new Set([
 const MAX_AGENT_STEPS = 4;
 const MAX_SECTION_CHARS = 1800;
 const MAX_CITATION_SNIPPET_CHARS = 320;
+const MAX_TABLE_ROWS = 60;
+const MAX_TABLE_COLUMNS = 12;
+const MAX_TABLE_CELL_CHARS = 120;
 
 export interface PaperAgentPaperContext {
   id: string;
@@ -103,6 +106,11 @@ type PaperAgentAction =
       limit: number;
     }
   | {
+      type: "inspect_table";
+      query?: string;
+      target?: string;
+    }
+  | {
       type: "open_figure";
       target: string;
     }
@@ -128,6 +136,17 @@ interface CodeSnippetArtifactPayload {
   language: string;
   code: string;
   assumptions: string[];
+}
+
+interface ParsedTableData {
+  columns: string[];
+  rows: string[][];
+}
+
+interface TableQueryMatch {
+  rowIndex: number;
+  score: number;
+  values: string[];
 }
 
 function tokenize(value: string): string[] {
@@ -409,6 +428,104 @@ function stripHtml(value: string): string {
     .trim();
 }
 
+function decodeHtmlEntities(value: string): string {
+  return value
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/&#(\d+);/g, (_, code: string) =>
+      String.fromCodePoint(Number.parseInt(code, 10)),
+    );
+}
+
+function sanitizeTableCell(value: string): string {
+  return truncate(decodeHtmlEntities(stripHtml(value)), MAX_TABLE_CELL_CHARS);
+}
+
+function toCsvRow(values: string[]): string {
+  return values.map((value) => `"${value.replace(/"/g, '""')}"`).join(",");
+}
+
+function parseHtmlTable(description: string | null): ParsedTableData | null {
+  if (!description || !/<table[\s>]/i.test(description)) {
+    return null;
+  }
+
+  const rowMatches = Array.from(
+    description.matchAll(/<tr\b[^>]*>([\s\S]*?)<\/tr>/gi),
+  );
+  if (rowMatches.length === 0) return null;
+
+  const parsedRows = rowMatches
+    .map((match) => {
+      const rowHtml = match[1] ?? "";
+      const hasHeader = /<th\b/i.test(rowHtml);
+      const cells = Array.from(
+        rowHtml.matchAll(/<(td|th)\b[^>]*>([\s\S]*?)<\/\1>/gi),
+      )
+        .map((cellMatch) => sanitizeTableCell(cellMatch[2] ?? ""))
+        .filter(Boolean)
+        .slice(0, MAX_TABLE_COLUMNS);
+      return { cells, hasHeader };
+    })
+    .filter((row) => row.cells.length > 0);
+
+  if (parsedRows.length === 0) return null;
+
+  const headerRow = parsedRows[0]?.hasHeader ? parsedRows[0] : null;
+  const columns =
+    headerRow?.cells.length
+      ? headerRow.cells
+      : Array.from(
+          { length: parsedRows[0]?.cells.length ?? 0 },
+          (_, index) => `Column ${index + 1}`,
+        );
+
+  const rows = (headerRow ? parsedRows.slice(1) : parsedRows)
+    .slice(0, MAX_TABLE_ROWS)
+    .map((row) => columns.map((_, index) => row.cells[index] ?? ""));
+
+  if (columns.length === 0 || rows.length === 0) return null;
+
+  return { columns, rows };
+}
+
+function queryParsedTable(
+  table: ParsedTableData,
+  query?: string,
+): TableQueryMatch[] {
+  const queryTokens = query ? tokenize(query) : [];
+  const scored = table.rows
+    .map((row, rowIndex) => {
+      if (queryTokens.length === 0) {
+        return { rowIndex, score: 1, values: row };
+      }
+      const haystack = normalizeAnalysisText(
+        `${table.columns.join(" ")} ${row.join(" ")}`,
+      );
+      let score = 0;
+      for (const token of queryTokens) {
+        if (haystack.includes(token)) score += 1;
+      }
+      return { rowIndex, score, values: row };
+    })
+    .filter((entry) => entry.score > 0)
+    .sort((left, right) => right.score - left.score || left.rowIndex - right.rowIndex);
+
+  if (scored.length > 0) {
+    return scored.slice(0, 4);
+  }
+
+  return table.rows.slice(0, 4).map((row, rowIndex) => ({
+    rowIndex,
+    score: 0,
+    values: row,
+  }));
+}
+
 function buildResultArtifact(
   paper: PaperAgentPaperContext,
   resultsText: string,
@@ -431,7 +548,16 @@ function buildResultArtifact(
 
 function buildFigureArtifact(
   figure: PaperFigureView,
+  options?: {
+    tableQuery?: string;
+  },
 ): PaperAgentArtifactDraft {
+  const parsedTable =
+    figure.type === "table" ? parseHtmlTable(figure.description) : null;
+  const matches =
+    parsedTable && figure.type === "table"
+      ? queryParsedTable(parsedTable, options?.tableQuery)
+      : [];
   return {
     kind: figure.type === "table" ? "TABLE_CARD" : "FIGURE_CARD",
     title: figure.figureLabel || (figure.type === "table" ? "Table" : "Figure"),
@@ -445,6 +571,19 @@ function buildFigureArtifact(
           ? truncate(stripHtml(figure.description || ""), 1200)
           : truncate(figure.description, 600),
       type: figure.type,
+      table:
+        parsedTable && figure.type === "table"
+          ? {
+              columns: parsedTable.columns,
+              rows: parsedTable.rows,
+              query: options?.tableQuery,
+              matches,
+              csvPreview: [
+                toCsvRow(parsedTable.columns),
+                ...parsedTable.rows.map((row) => toCsvRow(row)),
+              ].join("\n"),
+            }
+          : null,
       imagePath: figure.imagePath,
       pdfPage: figure.pdfPage,
       sourceUrl: figure.sourceUrl,
@@ -514,11 +653,13 @@ Available tools:
 - read_section(section): use for overview, methodology, or results
 - search_claims(query, limit): use to recover grounded claim excerpts
 - list_figures(kind, query, limit): use to inspect available figures or tables
+- inspect_table(query, target): use to extract structured rows from a specific or inferred table
 - open_figure(target): use to open one figure/table by label, id, or descriptive target
 - finish(answerPlan): use only after enough evidence is gathered
 
 Tool-use policy:
 - Prefer results and tables for metric/performance questions.
+- Prefer inspect_table when the question asks for a specific number, row, column, metric, or ablation detail.
 - Prefer methodology and claims for implementation or snippet questions.
 - Prefer figures when the user asks to show, inspect, or explain a figure/diagram/table.
 - Do not loop. Gather the minimum evidence required, then finish.
@@ -568,7 +709,7 @@ function fallbackAgentAction(params: {
     case "figures":
       return { type: "list_figures", kind: "figure", limit: 4 };
     case "tables":
-      return { type: "list_figures", kind: "table", limit: 4 };
+      return { type: "inspect_table", query: params.question.slice(0, 160) };
     case "code":
       return { type: "read_section", section: "methodology" };
     case "claims":
@@ -620,6 +761,12 @@ function normalizePlannerAction(
             : "any",
         query: normalizeOptionalText(raw.query, 120),
         limit: clampInteger(raw.limit, 1, 8, 5),
+      };
+    case "inspect_table":
+      return {
+        type: "inspect_table",
+        query: normalizeOptionalText(raw.query, 160),
+        target: normalizeOptionalText(raw.target, 120),
       };
     case "open_figure": {
       const target = normalizeOptionalText(raw.target, 120);
@@ -931,6 +1078,50 @@ export async function preparePaperAgentEvidence(params: {
       continue;
     }
 
+    if (action.type === "inspect_table") {
+      const tableFigures = figures.filter((figure) => figure.type === "table");
+      const figure = action.target
+        ? resolveFigureTarget(tableFigures, action.target)
+        : filterFigures(tableFigures, "table", action.query)[0] ?? null;
+      if (!figure) {
+        observations.push({
+          step,
+          action: `inspect_table(${action.target ?? action.query ?? "table"})`,
+          detail: "No matching table was found.",
+        });
+        continue;
+      }
+
+      const parsedTable = parseHtmlTable(figure.description);
+      const matches = parsedTable
+        ? queryParsedTable(parsedTable, action.query ?? params.question)
+        : [];
+
+      citations.push(citationForFigure(params.paper, figure));
+      if (matches[0]) {
+        citations.push({
+          paperId: params.paper.id,
+          paperTitle: params.paper.title,
+          snippet: `${figure.figureLabel || "Table"} row ${matches[0].rowIndex + 1}: ${matches[0].values.join(" | ")}`,
+          sectionPath: figure.figureLabel,
+          sourceKind: "artifact",
+        });
+      }
+      artifacts.push(
+        buildFigureArtifact(figure, {
+          tableQuery: action.query ?? params.question,
+        }),
+      );
+      observations.push({
+        step,
+        action: `inspect_table(${action.target ?? action.query ?? "table"})`,
+        detail: parsedTable
+          ? `${figure.figureLabel || figure.id}: ${parsedTable.rows.length} extracted rows, ${matches.length} matched preview rows.`
+          : `${figure.figureLabel || figure.id}: table opened, but no structured rows were extracted.`,
+      });
+      continue;
+    }
+
     if (action.type === "open_figure") {
       const figure = resolveFigureTarget(figures, action.target);
       if (!figure) {
@@ -943,7 +1134,11 @@ export async function preparePaperAgentEvidence(params: {
       }
 
       citations.push(citationForFigure(params.paper, figure));
-      artifacts.push(buildFigureArtifact(figure));
+      artifacts.push(
+        buildFigureArtifact(figure, {
+          tableQuery: figure.type === "table" ? params.question : undefined,
+        }),
+      );
       observations.push({
         step,
         action: `open_figure(${action.target})`,

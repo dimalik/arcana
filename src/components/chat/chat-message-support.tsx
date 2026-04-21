@@ -25,6 +25,28 @@ function parseJson<T>(value: string): T | null {
   }
 }
 
+function downloadText(filename: string, content: string, type = "text/plain") {
+  const blob = new Blob([content], { type });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+function tableToCsv(table: {
+  columns?: string[];
+  rows?: string[][];
+} | null | undefined): string | null {
+  if (!table?.columns?.length || !table.rows?.length) return null;
+  const toCsvRow = (values: string[]) =>
+    values.map((value) => `"${value.replace(/"/g, '""')}"`).join(",");
+  return [toCsvRow(table.columns), ...table.rows.map((row) => toCsvRow(row))].join("\n");
+}
+
 function ArtifactPreview({
   artifact,
   compact,
@@ -33,18 +55,6 @@ function ArtifactPreview({
   compact: boolean;
 }) {
   const baseClass = compact ? "text-[11px]" : "text-xs";
-
-  const downloadCode = (filename: string, code: string) => {
-    const blob = new Blob([code], { type: "text/plain" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
-  };
 
   if (artifact.kind === "RESULT_SUMMARY") {
     const payload = parseJson<{
@@ -192,12 +202,21 @@ function ArtifactPreview({
     return (
       <div className="space-y-2">
         {imageSrc ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={imageSrc}
-            alt={payload?.captionText || payload?.figureLabel || artifact.title}
-            className="max-h-40 rounded border object-contain bg-muted/30"
-          />
+          <div className="space-y-2">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={imageSrc}
+              alt={payload?.captionText || payload?.figureLabel || artifact.title}
+              className="max-h-40 rounded border object-contain bg-muted/30"
+            />
+            <button
+              type="button"
+              onClick={() => window.open(imageSrc, "_blank", "noopener,noreferrer")}
+              className="text-[10px] font-medium text-foreground/70 underline-offset-2 hover:text-foreground hover:underline"
+            >
+              Open image
+            </button>
+          </div>
         ) : null}
         {payload?.captionText ? (
           <p className={`${baseClass} text-muted-foreground`}>
@@ -225,12 +244,19 @@ function ArtifactPreview({
       description?: string | null;
       imagePath?: string | null;
       pdfPage?: number | null;
+      table?: {
+        columns?: string[];
+        rows?: string[][];
+        query?: string | null;
+        matches?: Array<{ rowIndex: number; score: number; values: string[] }>;
+      } | null;
     }>(artifact.payloadJson);
     const imageSrc = payload?.imagePath
       ? payload.imagePath.startsWith("/")
         ? payload.imagePath
         : `/${payload.imagePath}`
       : null;
+    const csv = tableToCsv(payload?.table);
     return (
       <div className="space-y-2">
         {payload?.captionText ? (
@@ -238,18 +264,85 @@ function ArtifactPreview({
             {payload.captionText}
           </p>
         ) : null}
+        {payload?.table?.matches?.length ? (
+          <div className="space-y-1">
+            <p className={`${baseClass} font-medium text-foreground/80`}>
+              Matched rows{payload.table.query ? ` for "${payload.table.query}"` : ""}
+            </p>
+            {payload.table.matches.slice(0, compact ? 1 : 3).map((match, index) => (
+              <p
+                key={`${artifact.id ?? artifact.title}-match-${index}`}
+                className={`${baseClass} text-muted-foreground`}
+              >
+                Row {match.rowIndex + 1}: {match.values.join(" | ")}
+              </p>
+            ))}
+          </div>
+        ) : null}
+        {payload?.table?.columns?.length && payload?.table?.rows?.length ? (
+          <div className="space-y-2">
+            <div className="overflow-x-auto rounded border bg-muted/20">
+              <table className="min-w-full border-collapse text-[10px]">
+                <thead className="bg-muted/40">
+                  <tr>
+                    {payload.table.columns.map((column, index) => (
+                      <th key={`${artifact.id ?? artifact.title}-col-${index}`} className="border-b px-2 py-1 text-left font-medium">
+                        {column}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {payload.table.rows.slice(0, compact ? 3 : 6).map((row, rowIndex) => (
+                    <tr key={`${artifact.id ?? artifact.title}-row-${rowIndex}`} className="border-b last:border-b-0">
+                      {row.map((value, cellIndex) => (
+                        <td key={`${artifact.id ?? artifact.title}-cell-${rowIndex}-${cellIndex}`} className="px-2 py-1 text-muted-foreground">
+                          {value}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {csv ? (
+              <button
+                type="button"
+                onClick={() =>
+                  downloadText(
+                    `${(payload?.figureLabel || artifact.title || "table").replace(/\s+/g, "_").toLowerCase()}.csv`,
+                    csv,
+                    "text/csv",
+                  )
+                }
+                className="text-[10px] font-medium text-foreground/70 underline-offset-2 hover:text-foreground hover:underline"
+              >
+                Download CSV
+              </button>
+            ) : null}
+          </div>
+        ) : null}
         {payload?.description ? (
           <p className={`${baseClass} text-muted-foreground`}>
             {payload.description}
           </p>
         ) : null}
         {imageSrc ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={imageSrc}
-            alt={payload?.captionText || payload?.figureLabel || artifact.title}
-            className="max-h-40 rounded border object-contain bg-muted/30"
-          />
+          <div className="space-y-2">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={imageSrc}
+              alt={payload?.captionText || payload?.figureLabel || artifact.title}
+              className="max-h-40 rounded border object-contain bg-muted/30"
+            />
+            <button
+              type="button"
+              onClick={() => window.open(imageSrc, "_blank", "noopener,noreferrer")}
+              className="text-[10px] font-medium text-foreground/70 underline-offset-2 hover:text-foreground hover:underline"
+            >
+              Open image
+            </button>
+          </div>
         ) : null}
         {payload?.pdfPage ? (
           <p className={`${baseClass} text-muted-foreground`}>
@@ -285,7 +378,7 @@ function ArtifactPreview({
           {payload?.code && payload?.filename ? (
             <button
               type="button"
-              onClick={() => downloadCode(payload.filename!, payload.code!)}
+              onClick={() => downloadText(payload.filename!, payload.code!)}
               className="text-[10px] font-medium text-foreground/70 underline-offset-2 hover:text-foreground hover:underline"
             >
               Download

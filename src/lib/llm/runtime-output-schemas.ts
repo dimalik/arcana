@@ -185,6 +185,7 @@ export const paperAnswerAgentActionRuntimeOutputSchema = z
       "read_section",
       "search_claims",
       "list_figures",
+      "inspect_table",
       "open_figure",
       "finish",
     ]),
