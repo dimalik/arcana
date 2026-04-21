@@ -33,8 +33,10 @@ python training/related_reranker/train_cross_encoder.py \
 
 - The script trains a 3-way relevance classifier: `0`, `1`, `2`.
 - Judged pairs are weighted more heavily than weak labels.
-- `score_open_reranker.py` is the lightweight inference entrypoint used by the
-  app-side `qwen3_reranker_v1` / `bge_reranker_v1` backends.
+- `score_open_reranker.py` is the inference worker used by the app-side
+  `qwen3_reranker_v1` / `bge_reranker_v1` backends.
+- `qwen3_reranker_v1` is treated as GPU-first by default and falls back to
+  `bge_reranker_v1` when the Qwen worker cannot start or times out.
 - Dev metrics include grouped reranker-style metrics:
   - `ndcg_at_10`
   - `mrr_at_10`

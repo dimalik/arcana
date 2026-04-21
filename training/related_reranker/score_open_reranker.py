@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Score related-paper candidates with an open reranker model.
 
-Reads a JSON request from stdin and emits JSON scores to stdout.
+Supports one-shot stdin mode and a long-lived server mode.
 """
 
 from __future__ import annotations
@@ -10,7 +10,7 @@ import argparse
 import json
 import sys
 from dataclasses import dataclass
-from typing import Dict, List, TypeVar
+from typing import Dict, List, Optional, TypeVar
 
 import torch
 from transformers import (
@@ -28,6 +28,7 @@ class RequestDocument:
 
 @dataclass
 class RerankerRequest:
+    request_id: str
     model_id: str
     model_type: str
     instruction: str
@@ -39,22 +40,36 @@ class RerankerRequest:
     documents: List[RequestDocument]
 
 
+@dataclass
+class LoadedRunner:
+    model_id: str
+    model_type: str
+    trust_remote_code: bool
+    resolved_device: str
+    tokenizer: AutoTokenizer
+    model: object
+
+
+RUNNER: Optional[LoadedRunner] = None
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Score related-paper candidates.")
-    parser.add_argument("--stdin", action="store_true", help="Read JSON request from stdin.")
+    parser.add_argument("--stdin", action="store_true", help="Read a single JSON request from stdin.")
+    parser.add_argument("--server", action="store_true", help="Serve newline-delimited JSON requests from stdin.")
     return parser.parse_args()
 
 
-def parse_request() -> RerankerRequest:
-    payload = json.loads(sys.stdin.read())
+def parse_request_payload(payload: Dict[str, object]) -> RerankerRequest:
     documents = [
         RequestDocument(
             id=str(document["id"]),
             text=str(document["text"]),
         )
-        for document in payload["documents"]
+        for document in payload["documents"]  # type: ignore[index]
     ]
     return RerankerRequest(
+        request_id=str(payload.get("requestId") or "single-request"),
         model_id=str(payload["modelId"]),
         model_type=str(payload["modelType"]),
         instruction=str(payload.get("instruction") or "").strip(),
@@ -90,21 +105,71 @@ def batched(values: List[T], batch_size: int) -> List[List[T]]:
     return [values[index : index + batch_size] for index in range(0, len(values), batch_size)]
 
 
-def score_sequence_classification(request: RerankerRequest) -> Dict[str, float]:
-    device = resolve_device(request)
-    dtype = resolve_dtype(device)
-    tokenizer = AutoTokenizer.from_pretrained(
-        request.model_id,
-        trust_remote_code=request.trust_remote_code,
-    )
-    model = AutoModelForSequenceClassification.from_pretrained(
-        request.model_id,
-        trust_remote_code=request.trust_remote_code,
-        torch_dtype=dtype,
-    ).eval()
-    model.to(device)
+def load_runner(request: RerankerRequest) -> LoadedRunner:
+    global RUNNER
 
+    if (
+        RUNNER
+        and RUNNER.model_id == request.model_id
+        and RUNNER.model_type == request.model_type
+        and RUNNER.trust_remote_code == request.trust_remote_code
+    ):
+        return RUNNER
+
+    resolved_device = resolve_device(request)
+    dtype = resolve_dtype(resolved_device)
+
+    if request.model_type == "sequence_classification":
+        tokenizer = AutoTokenizer.from_pretrained(
+            request.model_id,
+            trust_remote_code=request.trust_remote_code,
+        )
+        model = AutoModelForSequenceClassification.from_pretrained(
+            request.model_id,
+            trust_remote_code=request.trust_remote_code,
+            torch_dtype=dtype,
+        ).eval()
+    elif request.model_type == "qwen3":
+        tokenizer = AutoTokenizer.from_pretrained(
+            request.model_id,
+            padding_side="left",
+        )
+        if tokenizer.pad_token_id is None and tokenizer.eos_token_id is not None:
+            tokenizer.pad_token = tokenizer.eos_token
+        model = AutoModelForCausalLM.from_pretrained(
+            request.model_id,
+            torch_dtype=dtype,
+        ).eval()
+    else:
+        raise RuntimeError(f"Unsupported model_type: {request.model_type}")
+
+    model.to(resolved_device)
+
+    RUNNER = LoadedRunner(
+        model_id=request.model_id,
+        model_type=request.model_type,
+        trust_remote_code=request.trust_remote_code,
+        resolved_device=resolved_device,
+        tokenizer=tokenizer,
+        model=model,
+    )
+    print(
+        f"[score_open_reranker] loaded {request.model_type} model {request.model_id} on {resolved_device}",
+        file=sys.stderr,
+        flush=True,
+    )
+    return RUNNER
+
+
+def score_sequence_classification(
+    request: RerankerRequest,
+    runner: LoadedRunner,
+) -> Dict[str, float]:
     scores: Dict[str, float] = {}
+    model = runner.model
+    tokenizer = runner.tokenizer
+    device = runner.resolved_device
+
     for batch in batched(request.documents, request.batch_size):
         documents = [document.text for document in batch]
         queries = [request.query] * len(batch)
@@ -119,7 +184,7 @@ def score_sequence_classification(request: RerankerRequest) -> Dict[str, float]:
         encoded = {key: value.to(device) for key, value in encoded.items()}
 
         with torch.inference_mode():
-            logits = model(**encoded).logits.float()
+            logits = model(**encoded).logits.float()  # type: ignore[operator]
 
         if logits.ndim == 1:
             batch_scores = torch.sigmoid(logits)
@@ -145,23 +210,18 @@ def build_qwen_input(request: RerankerRequest, document_text: str) -> str:
     return (
         f"<Instruct>: {request.instruction}\n"
         f"<Query>: {request.query}\n"
-        f"<Document>: {document_text}"
+        f"<Document>: {document_text}\n"
+        "Respond with exactly one token: yes or no."
     )
 
 
-def score_qwen3(request: RerankerRequest) -> Dict[str, float]:
-    device = resolve_device(request)
-    dtype = resolve_dtype(device)
-    tokenizer = AutoTokenizer.from_pretrained(request.model_id, padding_side="left")
-    if tokenizer.pad_token_id is None and tokenizer.eos_token_id is not None:
-        tokenizer.pad_token = tokenizer.eos_token
-
-    model = AutoModelForCausalLM.from_pretrained(
-        request.model_id,
-        torch_dtype=dtype,
-    ).eval()
-    model.to(device)
-
+def score_qwen3(
+    request: RerankerRequest,
+    runner: LoadedRunner,
+) -> Dict[str, float]:
+    model = runner.model
+    tokenizer = runner.tokenizer
+    device = runner.resolved_device
     yes_token_id = encode_yes_no_token(tokenizer, "yes")
     no_token_id = encode_yes_no_token(tokenizer, "no")
 
@@ -178,7 +238,7 @@ def score_qwen3(request: RerankerRequest) -> Dict[str, float]:
         encoded = {key: value.to(device) for key, value in encoded.items()}
 
         with torch.inference_mode():
-            logits = model(**encoded).logits[:, -1, :].float()
+            logits = model(**encoded).logits[:, -1, :].float()  # type: ignore[operator]
 
         yes_no_logits = torch.stack(
             [logits[:, no_token_id], logits[:, yes_token_id]],
@@ -192,30 +252,60 @@ def score_qwen3(request: RerankerRequest) -> Dict[str, float]:
     return scores
 
 
+def handle_request(request: RerankerRequest) -> Dict[str, object]:
+    runner = load_runner(request)
+    if request.model_type == "qwen3":
+        scores = score_qwen3(request, runner)
+    elif request.model_type == "sequence_classification":
+        scores = score_sequence_classification(request, runner)
+    else:
+        raise RuntimeError(f"Unsupported model_type: {request.model_type}")
+
+    return {
+        "requestId": request.request_id,
+        "modelId": request.model_id,
+        "resolvedDevice": runner.resolved_device,
+        "scores": [
+            {"id": document.id, "score": scores.get(document.id, 0.0)}
+            for document in request.documents
+        ],
+    }
+
+
+def emit(payload: Dict[str, object]) -> None:
+    print(json.dumps(payload), flush=True)
+
+
+def serve_forever() -> None:
+    for raw_line in sys.stdin:
+        line = raw_line.strip()
+        if not line:
+            continue
+        try:
+            payload = json.loads(line)
+            request = parse_request_payload(payload)
+            emit(handle_request(request))
+        except Exception as error:
+            request_id = "unknown"
+            try:
+                request_id = str(json.loads(line).get("requestId") or "unknown")
+            except Exception:
+                pass
+            emit({"requestId": request_id, "error": str(error)})
+
+
 def main() -> None:
     args = parse_args()
-    if not args.stdin:
-        raise SystemExit("Use --stdin and pipe a JSON request into this script.")
+    if args.server:
+        serve_forever()
+        return
 
-    request = parse_request()
-    if request.model_type == "qwen3":
-        scores = score_qwen3(request)
-    elif request.model_type == "sequence_classification":
-        scores = score_sequence_classification(request)
-    else:
-        raise SystemExit(f"Unsupported model_type: {request.model_type}")
+    if args.stdin:
+        request = parse_request_payload(json.loads(sys.stdin.read()))
+        emit(handle_request(request))
+        return
 
-    print(
-        json.dumps(
-            {
-                "modelId": request.model_id,
-                "scores": [
-                    {"id": document.id, "score": scores.get(document.id, 0.0)}
-                    for document in request.documents
-                ],
-            }
-        )
-    )
+    raise SystemExit("Use --stdin or --server.")
 
 
 if __name__ == "__main__":

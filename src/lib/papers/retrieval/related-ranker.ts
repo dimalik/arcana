@@ -171,7 +171,8 @@ const RELATED_LLM_POINTWISE_CANDIDATE_LIMIT = 18;
 const RELATED_LLM_POINTWISE_RESULT_LIMIT = 10;
 const RELATED_LLM_POINTWISE_MAX_TOKENS = 2_800;
 const RELATED_LLM_ABSTRACT_SNIPPET_CHARS = 260;
-const RELATED_OPEN_RERANKER_CANDIDATE_LIMIT = 24;
+const RELATED_OPEN_RERANKER_CANDIDATE_LIMIT = 18;
+const RELATED_OPEN_RERANKER_QWEN_CANDIDATE_LIMIT = 8;
 const RELATED_OPEN_RERANKER_RESULT_LIMIT = 10;
 const RELATED_OPEN_RERANKER_BLEND_WEIGHT = 0.62;
 const RELATED_CONTENT_EXPANSION_LIMIT = 80;
@@ -1629,8 +1630,8 @@ function buildOpenRerankerQuery(params: {
     `Seed year: ${params.seedPaper.year ?? "unknown"}`,
     `Seed venue: ${params.seedPaper.venue ?? "unknown"}`,
     `Seed tags: ${(metadata?.tagNames ?? []).slice(0, 10).join(", ") || "none"}`,
-    `Seed abstract: ${truncateSnippet(params.seedPaper.abstract, 700) ?? "none"}`,
-    `Seed summary: ${truncateSnippet(params.seedPaper.summary, 700) ?? "none"}`,
+    `Seed abstract: ${truncateSnippet(params.seedPaper.abstract, 420) ?? "none"}`,
+    `Seed summary: ${truncateSnippet(params.seedPaper.summary, 420) ?? "none"}`,
   ].join("\n");
 }
 
@@ -1647,9 +1648,17 @@ function buildOpenRerankerDocument(params: {
     `Candidate venue: ${context?.venue ?? "unknown"}`,
     `Candidate authors: ${parseStringArray(context?.authors ?? params.row.relatedPaper.authors).join(", ") || "unknown"}`,
     `Candidate tags: ${(metadata?.tagNames ?? []).slice(0, 10).join(", ") || "none"}`,
-    `Candidate abstract: ${truncateSnippet(context?.abstract, 700) ?? "none"}`,
-    `Candidate summary: ${truncateSnippet(context?.summary, 700) ?? "none"}`,
+    `Candidate abstract: ${truncateSnippet(context?.abstract, 420) ?? "none"}`,
+    `Candidate summary: ${truncateSnippet(context?.summary, 420) ?? "none"}`,
   ].join("\n");
+}
+
+function getOpenRerankerCandidateLimit(
+  backendId: OpenRelatedRerankerBackendId,
+): number {
+  return backendId === "qwen3_reranker_v1"
+    ? RELATED_OPEN_RERANKER_QWEN_CANDIDATE_LIMIT
+    : RELATED_OPEN_RERANKER_CANDIDATE_LIMIT;
 }
 
 function buildBaselineRelatedRerankResult(
@@ -2580,7 +2589,7 @@ async function buildOpenModelRelatedRerankResult(
   const shortlistRows = sortShortlistRows(
     buildLlmShortlistRows(prepared),
     prepared.diagnosticsByPaperId,
-  ).slice(0, RELATED_OPEN_RERANKER_CANDIDATE_LIMIT);
+  ).slice(0, getOpenRerankerCandidateLimit(backendId));
 
   if (shortlistRows.length <= 2) {
     return {
