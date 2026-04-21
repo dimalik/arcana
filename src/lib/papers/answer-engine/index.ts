@@ -278,6 +278,33 @@ async function ensureClaimsForPaper(
   return result.claims;
 }
 
+async function loadClaimsForPaper(
+  paper: Omit<AnswerPaperContext, "claims">,
+  params: {
+    provider: LLMProvider;
+    modelId: string;
+    proxyConfig?: ProxyConfig | null;
+    userId?: string;
+  },
+  options?: {
+    fallbackToEmpty?: boolean;
+  },
+): Promise<PaperClaimView[]> {
+  try {
+    return await ensureClaimsForPaper(paper, params);
+  } catch (error) {
+    if (options?.fallbackToEmpty === false) {
+      throw error;
+    }
+    console.warn("[answer-engine] claim extraction fallback:", error);
+    return [];
+  }
+}
+
+function shouldPreloadClaimsForIntent(intent: PaperAnswerIntent): boolean {
+  return intent === "claims";
+}
+
 async function loadConversationContext(conversationId: string | undefined): Promise<{
   selectedText: string | null;
   additionalPapers: Array<Omit<AnswerPaperContext, "claims">>;
@@ -305,7 +332,11 @@ async function loadConversationContext(conversationId: string | undefined): Prom
   };
 }
 
-async function loadAnswerContext(params: PreparePaperAnswerParams): Promise<{
+async function loadAnswerContextForIntent(
+  params: PreparePaperAnswerParams,
+  intent: PaperAnswerIntent,
+  conversationContext: Awaited<ReturnType<typeof loadConversationContext>>,
+): Promise<{
   seedPaper: AnswerPaperContext;
   selectedText: string | null;
   additionalPapers: AnswerPaperContext[];
@@ -318,15 +349,9 @@ async function loadAnswerContext(params: PreparePaperAnswerParams): Promise<{
     throw new Error("Paper not found");
   }
 
-  const conversationContext = await loadConversationContext(params.conversationId);
-  const seedClaims = await ensureClaimsForPaper(seedPaperBase, params);
-
-  const additionalPapers = await Promise.all(
-    conversationContext.additionalPapers.map(async (paper) => ({
-      ...paper,
-      claims: await ensureClaimsForPaper(paper, params),
-    })),
-  );
+  const seedClaims = shouldPreloadClaimsForIntent(intent)
+    ? await loadClaimsForPaper(seedPaperBase, params, { fallbackToEmpty: true })
+    : [];
 
   return {
     seedPaper: {
@@ -334,7 +359,10 @@ async function loadAnswerContext(params: PreparePaperAnswerParams): Promise<{
       claims: seedClaims,
     },
     selectedText: conversationContext.selectedText,
-    additionalPapers,
+    additionalPapers: conversationContext.additionalPapers.map((paper) => ({
+      ...paper,
+      claims: [],
+    })),
   };
 }
 
@@ -641,11 +669,13 @@ function buildMethodologyArtifacts(
 export async function preparePaperAnswer(
   params: PreparePaperAnswerParams,
 ): Promise<PreparedPaperAnswer> {
-  const { seedPaper, selectedText, additionalPapers } = await loadAnswerContext(params);
+  const conversationContext = await loadConversationContext(params.conversationId);
   const intent = classifyPaperAnswerIntent({
     question: params.question,
-    additionalPaperCount: additionalPapers.length,
+    additionalPaperCount: conversationContext.additionalPapers.length,
   });
+  const { seedPaper, selectedText, additionalPapers } =
+    await loadAnswerContextForIntent(params, intent, conversationContext);
 
   const citations: AnswerCitation[] = [];
   const artifacts: ConversationArtifactDraft[] = [];
