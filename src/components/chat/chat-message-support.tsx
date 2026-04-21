@@ -1,14 +1,20 @@
 "use client";
 
+import Link from "next/link";
 import type { AgentActionSummary, AnswerCitation } from "@/lib/papers/answer-engine/metadata";
 import { Badge } from "@/components/ui/badge";
 import {
+  ArrowUpRight,
   Bot,
+  Braces,
+  Download,
   FileSearch,
   FileText,
   ImageIcon,
+  Quote,
   Sparkles,
   TableProperties,
+  Waypoints,
 } from "lucide-react";
 
 interface ConversationArtifactRecord {
@@ -23,6 +29,29 @@ interface ChatMessageSupportProps {
   agentActions?: AgentActionSummary[];
   artifacts?: ConversationArtifactRecord[];
   compact?: boolean;
+}
+
+interface VisualArtifactPayload {
+  paperId?: string | null;
+  figureLabel?: string | null;
+  captionText?: string | null;
+  description?: string | null;
+  imagePath?: string | null;
+  pdfPage?: number | null;
+  table?: {
+    columns?: string[];
+    rows?: string[][];
+    query?: string | null;
+    matches?: Array<{ rowIndex: number; score: number; values: string[] }>;
+  } | null;
+}
+
+interface CodeArtifactPayload {
+  summary?: string | null;
+  code?: string | null;
+  filename?: string | null;
+  language?: string | null;
+  assumptions?: string[] | null;
 }
 
 function parseJson<T>(value: string): T | null {
@@ -41,8 +70,10 @@ function downloadText(filename: string, content: string, type = "text/plain") {
   a.download = filename;
   document.body.appendChild(a);
   a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
+  window.setTimeout(() => {
+    a.remove();
+    URL.revokeObjectURL(url);
+  }, 1000);
 }
 
 function tableToCsv(table: {
@@ -53,6 +84,48 @@ function tableToCsv(table: {
   const toCsvRow = (values: string[]) =>
     values.map((value) => `"${value.replace(/"/g, '""')}"`).join(",");
   return [toCsvRow(table.columns), ...table.rows.map((row) => toCsvRow(row))].join("\n");
+}
+
+function buildPaperContextHref(
+  paperId: string | null | undefined,
+  options?: {
+    pdfPage?: number | null;
+    view?: "results" | "review" | "methodology" | "connections" | "analyze";
+  },
+): string | null {
+  if (!paperId) return null;
+  const params = new URLSearchParams();
+  params.set("view", options?.view ?? "results");
+  if (options?.pdfPage) {
+    params.set("pdf", "1");
+    params.set("page", String(options.pdfPage));
+  }
+  return `/papers/${paperId}?${params.toString()}`;
+}
+
+function buildPaperAssetUrl(
+  paperId: string | null | undefined,
+  assetPath: string | null | undefined,
+  options?: { download?: boolean },
+): string | null {
+  if (!paperId || !assetPath) return null;
+  const params = new URLSearchParams({
+    path: assetPath,
+  });
+  if (options?.download) {
+    params.set("download", "true");
+  }
+  return `/api/papers/${paperId}/assets?${params.toString()}`;
+}
+
+function sectionTitleClass(compact: boolean) {
+  return compact
+    ? "text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground/70"
+    : "text-[11px] font-semibold uppercase tracking-[0.2em] text-muted-foreground/70";
+}
+
+function sectionBodyClass(compact: boolean) {
+  return compact ? "rounded-xl border border-border/50 bg-muted/15 p-2.5" : "rounded-2xl border border-border/50 bg-muted/15 p-3";
 }
 
 function ArtifactPreview({
@@ -195,92 +268,89 @@ function ArtifactPreview({
   }
 
   if (artifact.kind === "FIGURE_CARD") {
-    const payload = parseJson<{
-      figureLabel?: string | null;
-      captionText?: string | null;
-      description?: string | null;
-      imagePath?: string | null;
-      pdfPage?: number | null;
-    }>(artifact.payloadJson);
-    const imageSrc = payload?.imagePath
-      ? payload.imagePath.startsWith("/")
-        ? payload.imagePath
-        : `/${payload.imagePath}`
-      : null;
+    const payload = parseJson<VisualArtifactPayload>(artifact.payloadJson);
+    const imageSrc = buildPaperAssetUrl(payload?.paperId, payload?.imagePath);
+    const paperHref = buildPaperContextHref(payload?.paperId, {
+      pdfPage: payload?.pdfPage,
+      view: "results",
+    });
     return (
-      <div className="space-y-2">
+      <div className="space-y-3">
         {imageSrc ? (
           <div className="space-y-2">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src={imageSrc}
               alt={payload?.captionText || payload?.figureLabel || artifact.title}
-              className="max-h-40 rounded border object-contain bg-muted/30"
+              className="max-h-44 w-full rounded-xl border border-border/60 object-contain bg-background/80"
             />
-            <button
-              type="button"
-              onClick={() => window.open(imageSrc, "_blank", "noopener,noreferrer")}
-              className="text-[10px] font-medium text-foreground/70 underline-offset-2 hover:text-foreground hover:underline"
-            >
-              Open image
-            </button>
           </div>
         ) : null}
         {payload?.captionText ? (
-          <p className={`${baseClass} text-muted-foreground`}>
+          <p className={`${baseClass} leading-5 text-muted-foreground`}>
             {payload.captionText}
           </p>
         ) : null}
         {payload?.description ? (
-          <p className={`${baseClass} text-muted-foreground`}>
+          <p className={`${baseClass} leading-5 text-muted-foreground`}>
             {payload.description}
           </p>
         ) : null}
-        {payload?.pdfPage ? (
-          <p className={`${baseClass} text-muted-foreground`}>
-            PDF page {payload.pdfPage}
-          </p>
-        ) : null}
+        <div className="flex flex-wrap items-center gap-2">
+          {payload?.pdfPage ? (
+            <Badge variant="secondary" className="h-5 rounded-full px-2 text-[10px]">
+              PDF page {payload.pdfPage}
+            </Badge>
+          ) : null}
+          {paperHref ? (
+            <Link
+              href={paperHref}
+              className="inline-flex items-center gap-1 rounded-full border border-border/60 bg-background px-2.5 py-1 text-[10px] font-medium text-foreground/75 transition-colors hover:bg-accent hover:text-foreground"
+            >
+              <ArrowUpRight className="h-3 w-3" />
+              Open in paper
+            </Link>
+          ) : null}
+          {imageSrc ? (
+            <a
+              href={imageSrc}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 rounded-full border border-border/60 bg-background px-2.5 py-1 text-[10px] font-medium text-foreground/75 transition-colors hover:bg-accent hover:text-foreground"
+            >
+              <ImageIcon className="h-3 w-3" />
+              Open image
+            </a>
+          ) : null}
+        </div>
       </div>
     );
   }
 
   if (artifact.kind === "TABLE_CARD") {
-    const payload = parseJson<{
-      figureLabel?: string | null;
-      captionText?: string | null;
-      description?: string | null;
-      imagePath?: string | null;
-      pdfPage?: number | null;
-      table?: {
-        columns?: string[];
-        rows?: string[][];
-        query?: string | null;
-        matches?: Array<{ rowIndex: number; score: number; values: string[] }>;
-      } | null;
-    }>(artifact.payloadJson);
-    const imageSrc = payload?.imagePath
-      ? payload.imagePath.startsWith("/")
-        ? payload.imagePath
-        : `/${payload.imagePath}`
-      : null;
+    const payload = parseJson<VisualArtifactPayload>(artifact.payloadJson);
+    const imageSrc = buildPaperAssetUrl(payload?.paperId, payload?.imagePath);
+    const paperHref = buildPaperContextHref(payload?.paperId, {
+      pdfPage: payload?.pdfPage,
+      view: "results",
+    });
     const csv = tableToCsv(payload?.table);
     return (
-      <div className="space-y-2">
+      <div className="space-y-3">
         {payload?.captionText ? (
-          <p className={`${baseClass} text-muted-foreground`}>
+          <p className={`${baseClass} leading-5 text-muted-foreground`}>
             {payload.captionText}
           </p>
         ) : null}
         {payload?.table?.matches?.length ? (
-          <div className="space-y-1">
+          <div className="space-y-1.5 rounded-xl border border-amber-500/20 bg-amber-500/5 p-2.5">
             <p className={`${baseClass} font-medium text-foreground/80`}>
               Matched rows{payload.table.query ? ` for "${payload.table.query}"` : ""}
             </p>
             {payload.table.matches.slice(0, compact ? 1 : 3).map((match, index) => (
               <p
                 key={`${artifact.id ?? artifact.title}-match-${index}`}
-                className={`${baseClass} text-muted-foreground`}
+                className={`${baseClass} leading-5 text-muted-foreground`}
               >
                 Row {match.rowIndex + 1}: {match.values.join(" | ")}
               </p>
@@ -289,12 +359,12 @@ function ArtifactPreview({
         ) : null}
         {payload?.table?.columns?.length && payload?.table?.rows?.length ? (
           <div className="space-y-2">
-            <div className="overflow-x-auto rounded border bg-muted/20">
+            <div className="overflow-x-auto rounded-xl border border-border/60 bg-background/80">
               <table className="min-w-full border-collapse text-[10px]">
-                <thead className="bg-muted/40">
+                <thead className="bg-muted/30">
                   <tr>
                     {payload.table.columns.map((column, index) => (
-                      <th key={`${artifact.id ?? artifact.title}-col-${index}`} className="border-b px-2 py-1 text-left font-medium">
+                      <th key={`${artifact.id ?? artifact.title}-col-${index}`} className="border-b border-border/60 px-2 py-1.5 text-left font-medium text-foreground/80">
                         {column}
                       </th>
                     ))}
@@ -302,9 +372,9 @@ function ArtifactPreview({
                 </thead>
                 <tbody>
                   {payload.table.rows.slice(0, compact ? 3 : 6).map((row, rowIndex) => (
-                    <tr key={`${artifact.id ?? artifact.title}-row-${rowIndex}`} className="border-b last:border-b-0">
+                    <tr key={`${artifact.id ?? artifact.title}-row-${rowIndex}`} className="border-b border-border/40 last:border-b-0">
                       {row.map((value, cellIndex) => (
-                        <td key={`${artifact.id ?? artifact.title}-cell-${rowIndex}-${cellIndex}`} className="px-2 py-1 text-muted-foreground">
+                        <td key={`${artifact.id ?? artifact.title}-cell-${rowIndex}-${cellIndex}`} className="px-2 py-1.5 align-top text-muted-foreground">
                           {value}
                         </td>
                       ))}
@@ -313,25 +383,10 @@ function ArtifactPreview({
                 </tbody>
               </table>
             </div>
-            {csv ? (
-              <button
-                type="button"
-                onClick={() =>
-                  downloadText(
-                    `${(payload?.figureLabel || artifact.title || "table").replace(/\s+/g, "_").toLowerCase()}.csv`,
-                    csv,
-                    "text/csv",
-                  )
-                }
-                className="text-[10px] font-medium text-foreground/70 underline-offset-2 hover:text-foreground hover:underline"
-              >
-                Download CSV
-              </button>
-            ) : null}
           </div>
         ) : null}
         {payload?.description ? (
-          <p className={`${baseClass} text-muted-foreground`}>
+          <p className={`${baseClass} leading-5 text-muted-foreground`}>
             {payload.description}
           </p>
         ) : null}
@@ -341,45 +396,70 @@ function ArtifactPreview({
             <img
               src={imageSrc}
               alt={payload?.captionText || payload?.figureLabel || artifact.title}
-              className="max-h-40 rounded border object-contain bg-muted/30"
+              className="max-h-44 w-full rounded-xl border border-border/60 object-contain bg-background/80"
             />
-            <button
-              type="button"
-              onClick={() => window.open(imageSrc, "_blank", "noopener,noreferrer")}
-              className="text-[10px] font-medium text-foreground/70 underline-offset-2 hover:text-foreground hover:underline"
-            >
-              Open image
-            </button>
           </div>
         ) : null}
-        {payload?.pdfPage ? (
-          <p className={`${baseClass} text-muted-foreground`}>
-            PDF page {payload.pdfPage}
-          </p>
-        ) : null}
+        <div className="flex flex-wrap items-center gap-2">
+          {payload?.pdfPage ? (
+            <Badge variant="secondary" className="h-5 rounded-full px-2 text-[10px]">
+              PDF page {payload.pdfPage}
+            </Badge>
+          ) : null}
+          {paperHref ? (
+            <Link
+              href={paperHref}
+              className="inline-flex items-center gap-1 rounded-full border border-border/60 bg-background px-2.5 py-1 text-[10px] font-medium text-foreground/75 transition-colors hover:bg-accent hover:text-foreground"
+            >
+              <ArrowUpRight className="h-3 w-3" />
+              Open in paper
+            </Link>
+          ) : null}
+          {imageSrc ? (
+            <a
+              href={imageSrc}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 rounded-full border border-border/60 bg-background px-2.5 py-1 text-[10px] font-medium text-foreground/75 transition-colors hover:bg-accent hover:text-foreground"
+            >
+              <ImageIcon className="h-3 w-3" />
+              Open image
+            </a>
+          ) : null}
+          {csv ? (
+            <button
+              type="button"
+              onClick={() =>
+                downloadText(
+                  `${(payload?.figureLabel || artifact.title || "table").replace(/\s+/g, "_").toLowerCase()}.csv`,
+                  csv,
+                  "text/csv",
+                )
+              }
+              className="inline-flex items-center gap-1 rounded-full border border-border/60 bg-background px-2.5 py-1 text-[10px] font-medium text-foreground/75 transition-colors hover:bg-accent hover:text-foreground"
+            >
+              <Download className="h-3 w-3" />
+              Download CSV
+            </button>
+          ) : null}
+        </div>
       </div>
     );
   }
 
   if (artifact.kind === "CODE_SNIPPET") {
-    const payload = parseJson<{
-      summary?: string | null;
-      code?: string | null;
-      filename?: string | null;
-      language?: string | null;
-      assumptions?: string[] | null;
-    }>(artifact.payloadJson);
+    const payload = parseJson<CodeArtifactPayload>(artifact.payloadJson);
     return (
-      <div className="space-y-2">
+      <div className="space-y-3">
         {payload?.summary ? (
-          <p className={`${baseClass} text-muted-foreground`}>{payload.summary}</p>
+          <p className={`${baseClass} leading-5 text-muted-foreground`}>{payload.summary}</p>
         ) : null}
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           {payload?.filename ? (
             <p className={`${baseClass} text-muted-foreground`}>{payload.filename}</p>
           ) : null}
           {payload?.language ? (
-            <Badge variant="secondary" className="h-4 px-1.5 text-[10px]">
+            <Badge variant="secondary" className="h-5 rounded-full px-2 text-[10px]">
               {payload.language}
             </Badge>
           ) : null}
@@ -387,23 +467,24 @@ function ArtifactPreview({
             <button
               type="button"
               onClick={() => downloadText(payload.filename!, payload.code!)}
-              className="text-[10px] font-medium text-foreground/70 underline-offset-2 hover:text-foreground hover:underline"
+              className="inline-flex items-center gap-1 rounded-full border border-border/60 bg-background px-2.5 py-1 text-[10px] font-medium text-foreground/75 transition-colors hover:bg-accent hover:text-foreground"
             >
+              <Download className="h-3 w-3" />
               Download
             </button>
           ) : null}
         </div>
         {payload?.code ? (
-          <pre className="overflow-x-auto rounded border bg-muted/40 p-2 text-[10px] text-muted-foreground">
+          <pre className="overflow-x-auto rounded-xl border border-border/60 bg-background/90 p-3 text-[10px] leading-5 text-muted-foreground">
             {payload.code}
           </pre>
         ) : null}
         {(payload?.assumptions ?? []).length > 0 ? (
-          <div className="space-y-1">
+          <div className="space-y-1.5 rounded-xl border border-border/50 bg-muted/20 p-2.5">
             {(payload?.assumptions ?? []).slice(0, compact ? 2 : 3).map((assumption, index) => (
               <p
                 key={`${artifact.id ?? artifact.title}-assumption-${index}`}
-                className={`${baseClass} text-muted-foreground`}
+                className={`${baseClass} leading-5 text-muted-foreground`}
               >
                 Assumption: {assumption}
               </p>
@@ -472,30 +553,39 @@ export function ChatMessageSupport({
 }: ChatMessageSupportProps) {
   if (citations.length === 0 && agentActions.length === 0 && artifacts.length === 0) return null;
 
-  const wrapperClass = compact ? "mt-2 space-y-2" : "mt-3 space-y-3";
+  const wrapperClass = compact ? "mt-2 space-y-2.5" : "mt-3 space-y-3.5";
 
   return (
     <div className={wrapperClass}>
       {citations.length > 0 ? (
-        <div className="space-y-1.5">
-          <p className={compact ? "text-[10px] font-medium text-muted-foreground" : "text-[11px] font-medium text-muted-foreground"}>
-            Sources
-          </p>
-          <div className="space-y-1.5">
+        <div className="space-y-2">
+          <div className="flex items-center gap-2 px-1">
+            <Quote className="h-3.5 w-3.5 text-muted-foreground/70" />
+            <p className={sectionTitleClass(compact)}>Sources</p>
+            <Badge variant="secondary" className="h-5 rounded-full px-2 text-[10px]">
+              {citations.length}
+            </Badge>
+          </div>
+          <div className={`${sectionBodyClass(compact)} space-y-2`}>
             {citations.map((citation, index) => (
               <div
                 key={`${citation.paperId}-${index}`}
-                className="rounded-md border bg-background/70 px-2.5 py-2"
+                className="rounded-xl border border-border/50 bg-background/80 px-3 py-2.5 shadow-[0_1px_0_rgba(0,0,0,0.02)]"
               >
-                <div className="mb-1 flex items-center gap-1.5">
-                  <Badge variant="secondary" className="h-4 px-1.5 text-[10px]">
+                <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
+                  <Badge variant="secondary" className="h-5 rounded-full px-2 text-[10px]">
                     S{index + 1}
                   </Badge>
-                  <p className={compact ? "text-[10px] font-medium" : "text-[11px] font-medium"}>
+                  {citation.sectionPath ? (
+                    <Badge variant="outline" className="h-5 rounded-full px-2 text-[10px]">
+                      {citation.sectionPath}
+                    </Badge>
+                  ) : null}
+                  <p className={compact ? "text-[10px] font-medium text-foreground/85" : "text-[11px] font-medium text-foreground/85"}>
                     {citation.paperTitle}
                   </p>
                 </div>
-                <p className={compact ? "text-[10px] text-muted-foreground" : "text-[11px] text-muted-foreground"}>
+                <p className={compact ? "text-[10px] leading-5 text-muted-foreground" : "text-[11px] leading-5 text-muted-foreground"}>
                   {citation.snippet}
                 </p>
               </div>
@@ -506,11 +596,15 @@ export function ChatMessageSupport({
 
       {agentActions.length > 0 ? (
         <div className="space-y-2">
-          <p className={compact ? "text-[10px] font-medium text-muted-foreground" : "text-[11px] font-medium text-muted-foreground"}>
-            Agent Timeline
-          </p>
-          <div className="relative space-y-2">
-            <div className="absolute bottom-0 left-[11px] top-1 hidden w-px bg-border/80 sm:block" />
+          <div className="flex items-center gap-2 px-1">
+            <Waypoints className="h-3.5 w-3.5 text-muted-foreground/70" />
+            <p className={sectionTitleClass(compact)}>Agent Timeline</p>
+            <Badge variant="secondary" className="h-5 rounded-full px-2 text-[10px]">
+              {agentActions.length}
+            </Badge>
+          </div>
+          <div className={`${sectionBodyClass(compact)} relative space-y-2`}>
+            <div className="absolute bottom-3 left-[17px] top-3 hidden w-px bg-border/60 sm:block" />
             {agentActions.map((action) => {
               const Icon = timelineIcon(action);
               const evidenceDelta = evidenceDeltaLabel(action);
@@ -520,47 +614,47 @@ export function ChatMessageSupport({
                 && action.detail !== action.outputPreview
                 && !compact;
               return (
-                <div key={`${action.step}-${action.action}`} className="relative pl-0 sm:pl-7">
-                  <div className="absolute left-0 top-2 hidden h-6 w-6 items-center justify-center rounded-full border bg-background sm:flex">
-                    <Icon className="h-3.5 w-3.5 text-muted-foreground" />
+                <div key={`${action.step}-${action.action}`} className="relative pl-0 sm:pl-10">
+                  <div className="absolute left-0 top-2 hidden h-8 w-8 items-center justify-center rounded-full border border-border/60 bg-background sm:flex">
+                    <Icon className="h-3.5 w-3.5 text-muted-foreground/75" />
                   </div>
-                  <div className="rounded-md border bg-background/70 px-2.5 py-2">
-                    <div className="mb-1 flex flex-wrap items-center gap-1.5">
-                      <Badge variant="outline" className="h-4 px-1.5 text-[10px]">
+                  <div className="rounded-xl border border-border/50 bg-background/80 px-3 py-2.5 shadow-[0_1px_0_rgba(0,0,0,0.02)]">
+                    <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
+                      <Badge variant="outline" className="h-5 rounded-full px-2 text-[10px]">
                         step {action.step}
                       </Badge>
                       {phaseLabel ? (
-                        <Badge variant="secondary" className="h-4 px-1.5 text-[10px]">
+                        <Badge variant="secondary" className="h-5 rounded-full px-2 text-[10px]">
                           {phaseLabel}
                         </Badge>
                       ) : null}
                       {action.source === "fallback" ? (
-                        <Badge variant="secondary" className="h-4 px-1.5 text-[10px]">
+                        <Badge variant="secondary" className="h-5 rounded-full px-2 text-[10px]">
                           fallback
                         </Badge>
                       ) : null}
                       {action.status === "missing" ? (
-                        <Badge variant="outline" className="h-4 px-1.5 text-[10px]">
+                        <Badge variant="outline" className="h-5 rounded-full px-2 text-[10px]">
                           no hit
                         </Badge>
                       ) : null}
-                      <p className={compact ? "text-[10px] font-medium" : "text-[11px] font-medium"}>
+                      <p className={compact ? "text-[10px] font-medium text-foreground/85" : "text-[11px] font-medium text-foreground/85"}>
                         {action.action}
                       </p>
                     </div>
 
                     {action.input ? (
-                      <p className={compact ? "mb-1 text-[10px] text-muted-foreground" : "mb-1 text-[11px] text-muted-foreground"}>
+                      <p className={compact ? "mb-1 text-[10px] leading-5 text-muted-foreground" : "mb-1 text-[11px] leading-5 text-muted-foreground"}>
                         Input: {action.input}
                       </p>
                     ) : null}
 
-                    <p className={compact ? "text-[10px] text-muted-foreground" : "text-[11px] text-muted-foreground"}>
+                    <p className={compact ? "text-[10px] leading-5 text-muted-foreground" : "text-[11px] leading-5 text-muted-foreground"}>
                       {action.outputPreview || action.detail}
                     </p>
 
                     {evidenceDelta ? (
-                      <p className={compact ? "mt-1 text-[10px] text-muted-foreground" : "mt-1 text-[11px] text-muted-foreground"}>
+                      <p className={compact ? "mt-1.5 text-[10px] text-muted-foreground/80" : "mt-1.5 text-[11px] text-muted-foreground/80"}>
                         {evidenceDelta}
                       </p>
                     ) : null}
@@ -570,7 +664,7 @@ export function ChatMessageSupport({
                         <summary className={compact ? "cursor-pointer text-[10px] text-muted-foreground" : "cursor-pointer text-[11px] text-muted-foreground"}>
                           Show step details
                         </summary>
-                        <pre className="mt-2 whitespace-pre-wrap rounded border bg-muted/20 p-2 text-[10px] text-muted-foreground">
+                        <pre className="mt-2 whitespace-pre-wrap rounded-xl border border-border/50 bg-muted/20 p-2.5 text-[10px] leading-5 text-muted-foreground">
                           {action.detail}
                         </pre>
                       </details>
@@ -584,21 +678,25 @@ export function ChatMessageSupport({
       ) : null}
 
       {artifacts.length > 0 ? (
-        <div className="space-y-1.5">
-          <p className={compact ? "text-[10px] font-medium text-muted-foreground" : "text-[11px] font-medium text-muted-foreground"}>
-            Artifacts
-          </p>
-          <div className="space-y-1.5">
+        <div className="space-y-2">
+          <div className="flex items-center gap-2 px-1">
+            <Braces className="h-3.5 w-3.5 text-muted-foreground/70" />
+            <p className={sectionTitleClass(compact)}>Artifacts</p>
+            <Badge variant="secondary" className="h-5 rounded-full px-2 text-[10px]">
+              {artifacts.length}
+            </Badge>
+          </div>
+          <div className={`${sectionBodyClass(compact)} space-y-2`}>
             {artifacts.map((artifact) => (
               <div
                 key={artifact.id ?? `${artifact.kind}-${artifact.title}`}
-                className="rounded-md border bg-background/70 px-2.5 py-2"
+                className="rounded-xl border border-border/50 bg-background/80 px-3 py-2.5 shadow-[0_1px_0_rgba(0,0,0,0.02)]"
               >
-                <div className="mb-1 flex items-center gap-1.5">
-                  <Badge variant="outline" className="h-4 px-1.5 text-[10px]">
-                    {artifact.kind.toLowerCase()}
+                <div className="mb-2 flex flex-wrap items-center gap-1.5">
+                  <Badge variant="outline" className="h-5 rounded-full px-2 text-[10px]">
+                    {artifact.kind.toLowerCase().replace(/_/g, " ")}
                   </Badge>
-                  <p className={compact ? "text-[10px] font-medium" : "text-[11px] font-medium"}>
+                  <p className={compact ? "text-[10px] font-medium text-foreground/85" : "text-[11px] font-medium text-foreground/85"}>
                     {artifact.title}
                   </p>
                 </div>

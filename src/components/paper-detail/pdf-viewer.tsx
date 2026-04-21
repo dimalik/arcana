@@ -19,6 +19,7 @@ interface PdfViewerProps {
   showOpenInNewTab?: boolean;
   /** Increment to trigger a fit-to-width recalculation */
   fitSignal?: number;
+  targetPage?: number | null;
 }
 
 type SelectMode = "text" | "area";
@@ -166,7 +167,7 @@ function AreaSelectionPopup({
 
 // ── Main component ────────────────────────────────────────────────
 
-export function PdfViewer({ paperId, showOpenInNewTab, fitSignal }: PdfViewerProps) {
+export function PdfViewer({ paperId, showOpenInNewTab, fitSignal, targetPage }: PdfViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const pagesScrollRef = useRef<HTMLDivElement>(null);
   const [loading, setLoading] = useState(true);
@@ -296,6 +297,28 @@ export function PdfViewer({ paperId, showOpenInNewTab, fitSignal }: PdfViewerPro
       renderAllPages(pdfDocRef.current, scale).then(() => setLoading(false));
     }
   }, [scale, renderAllPages]);
+
+  useEffect(() => {
+    if (loading || !targetPage || targetPage < 1) return;
+    const container = containerRef.current;
+    if (!container) return;
+
+    const timer = window.setTimeout(() => {
+      const pageWrapper = container.querySelector<HTMLElement>(
+        `[data-page-wrapper="${targetPage}"]`,
+      );
+      if (!pageWrapper) return;
+
+      pageWrapper.scrollIntoView({ behavior: "smooth", block: "start" });
+      pageWrapper.style.boxShadow = "0 0 0 2px color-mix(in srgb, var(--primary) 55%, transparent)";
+      pageWrapper.style.borderRadius = "10px";
+      window.setTimeout(() => {
+        pageWrapper.style.boxShadow = "";
+      }, 1800);
+    }, 100);
+
+    return () => window.clearTimeout(timer);
+  }, [loading, targetPage]);
 
   // Recompute fit-to-width when layout changes
   useEffect(() => {

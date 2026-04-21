@@ -131,6 +131,13 @@ export default function PaperDetailPage() {
   const searchParams = useSearchParams();
   const id = params.id as string;
   const initialConversationId = searchParams.get("conv") || undefined;
+  const requestedView = searchParams.get("view");
+  const requestedPdfPage = (() => {
+    const raw = searchParams.get("page");
+    if (!raw) return null;
+    const parsed = Number.parseInt(raw, 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+  })();
   const [paper, setPaper] = useState<Paper | null>(null);
   const [loading, setLoading] = useState(true);
   const [reprocessing, setReprocessing] = useState(false);
@@ -290,6 +297,16 @@ export default function PaperDetailPage() {
     fetchPaper();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
+
+  useEffect(() => {
+    if (requestedView && viewTabs.some((tab) => tab.value === requestedView)) {
+      setActiveView(requestedView as ViewTab);
+    }
+
+    if (searchParams.get("pdf") === "1" || requestedPdfPage) {
+      setPdfVisible(true);
+    }
+  }, [requestedPdfPage, requestedView, searchParams]);
 
   useEffect(() => {
     if (!paper) return;
@@ -886,7 +903,12 @@ export default function PaperDetailPage() {
               <GripVertical className="h-4 w-4 text-muted-foreground/50" />
             </div>
             <div style={{ width: `${100 - splitRatio}%` }} className="min-h-0">
-              <PdfViewer paperId={paper.id} showOpenInNewTab fitSignal={chatOpen ? 1 : 0} />
+              <PdfViewer
+                paperId={paper.id}
+                showOpenInNewTab
+                fitSignal={chatOpen ? 1 : 0}
+                targetPage={requestedPdfPage}
+              />
             </div>
           </div>
         ) : (
