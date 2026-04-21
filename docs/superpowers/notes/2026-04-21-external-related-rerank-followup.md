@@ -28,6 +28,8 @@ This note parks the external-model work for related-paper reranking so it can be
 - `embed-rerank` is a viable service seam for external reranking, but cold start and model download behavior need to be handled explicitly.
 - Its packaged MLX reranker implementation is not a full transformer cross-encoder; it is a lighter MLX-native approximation. Treat it as an experiment, not a guaranteed quality win.
 - For a first serious service-backed evaluation, a torch/MPS cross-encoder is the safer baseline than assuming the MLX path will be better.
+- The OpenAI-compatible related-paper rerankers produced somewhat better results in spot checks, but they are still too slow for the current interactive product surface.
+- **Current product decision:** keep `feature_v1` as the live default until reranking is made fast enough via caching, service-backed warm models, or a cheaper model family.
 
 ### Resume Plan
 
@@ -36,6 +38,7 @@ When bandwidth is stable again:
 1. Start a local rerank service with Xet disabled.
 2. Validate the transport path with small models first.
 3. Then compare stronger rerankers on the judged related-papers set.
+4. Only reconsider making it live if latency is acceptable for the interactive related-papers surface.
 
 Suggested startup sequence:
 
@@ -72,6 +75,7 @@ After the path is proven, try stronger models:
 - The judged related-papers benchmark beats `feature_v1`.
 - Live canaries improve:
   - `Attention Is All You Need`
-  - `Phi-3 Technical Report`
-  - reward-shaping papers
+- `Phi-3 Technical Report`
+- reward-shaping papers
 - Failure mode stays safe: short list or empty, never confident junk.
+- Interactive latency is good enough that the related-papers panel no longer feels sluggish on first view.
