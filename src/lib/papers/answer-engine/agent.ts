@@ -387,6 +387,19 @@ function normalizeFigureTarget(value: string): string {
     .trim();
 }
 
+function parseFigureReference(
+  value: string | null | undefined,
+): { kind: "figure" | "table"; ordinal: string } | null {
+  if (!value) return null;
+  const normalized = normalizeFigureTarget(value);
+  const match = normalized.match(/\b(figure|table)\s+([a-z0-9][a-z0-9.-]*)\b/);
+  if (!match?.[1] || !match[2]) return null;
+  return {
+    kind: match[1] === "table" ? "table" : "figure",
+    ordinal: match[2],
+  };
+}
+
 function filterFigures(
   figures: PaperFigureView[],
   kind: "figure" | "table" | "any",
@@ -536,6 +549,18 @@ function resolveFigureTarget(
   target: string,
 ): PaperFigureView | null {
   const normalizedTarget = normalizeFigureTarget(target);
+  const targetReference = parseFigureReference(target);
+  if (targetReference) {
+    const exactLabel = figures.find((figure) => {
+      const figureReference = parseFigureReference(figure.figureLabel);
+      return (
+        figureReference?.kind === targetReference.kind
+        && figureReference.ordinal === targetReference.ordinal
+      );
+    });
+    if (exactLabel) return exactLabel;
+  }
+
   const exact = figures.find((figure) =>
     normalizeFigureTarget(
       `${figure.figureLabel ?? ""} ${figure.captionText ?? ""}`,
@@ -546,13 +571,26 @@ function resolveFigureTarget(
 
   const candidates = figures
     .map((figure) => {
-      const haystack = normalizeFigureTarget(
-        `${figure.figureLabel ?? ""} ${figure.captionText ?? ""} ${figure.description ?? ""}`,
+      const figureReference = parseFigureReference(figure.figureLabel);
+      if (
+        targetReference
+        && (
+          figureReference?.kind !== targetReference.kind
+          || figureReference.ordinal !== targetReference.ordinal
+        )
+      ) {
+        return { figure, score: -1 };
+      }
+
+      const labelHaystack = normalizeFigureTarget(figure.figureLabel ?? "");
+      const contextHaystack = normalizeFigureTarget(
+        `${figure.captionText ?? ""} ${figure.description ?? ""}`,
       );
       let score = 0;
       for (const token of normalizedTarget.split(" ")) {
         if (!token) continue;
-        if (haystack.includes(token)) score += 1;
+        if (labelHaystack.includes(token)) score += 3;
+        else if (contextHaystack.includes(token)) score += 1;
       }
       return { figure, score };
     })
@@ -592,9 +630,127 @@ function toCsvRow(values: string[]): string {
   return values.map((value) => `"${value.replace(/"/g, '""')}"`).join(",");
 }
 
-function parseHtmlTable(description: string | null): ParsedTableData | null {
-  if (!description || !/<table[\s>]/i.test(description)) {
+function isNumericLikeCell(value: string): boolean {
+  const normalized = value
+    .trim()
+    .toLowerCase()
+    .replace(/[,()%]/g, "")
+    .replace(/\s+/g, " ");
+  if (!normalized) return false;
+  return /^[-+]?(\d+(\.\d+)?|\.\d+)(e[-+]?\d+)?([a-z]+)?$/i.test(normalized);
+}
+
+function shouldUseFirstRowAsHeader(rows: Array<{ cells: string[]; hasHeader: boolean }>): boolean {
+  if (rows.length < 2) return false;
+  const first = rows[0]?.cells.filter(Boolean) ?? [];
+  const second = rows[1]?.cells.filter(Boolean) ?? [];
+  if (first.length === 0 || second.length === 0) return false;
+
+  const firstNumericRatio =
+    first.filter(isNumericLikeCell).length / Math.max(first.length, 1);
+  const secondNumericRatio =
+    second.filter(isNumericLikeCell).length / Math.max(second.length, 1);
+
+  return firstNumericRatio < 0.5 && secondNumericRatio >= firstNumericRatio;
+}
+
+function buildParsedTableData(
+  parsedRows: Array<{ cells: string[]; hasHeader: boolean }>,
+): ParsedTableData | null {
+  if (parsedRows.length === 0) return null;
+
+  const headerRow =
+    parsedRows[0]?.hasHeader || shouldUseFirstRowAsHeader(parsedRows)
+      ? parsedRows[0]
+      : null;
+  const columns =
+    headerRow?.cells.length
+      ? headerRow.cells.map((value, index) => value || `Column ${index + 1}`)
+      : Array.from(
+          { length: parsedRows[0]?.cells.length ?? 0 },
+          (_, index) => `Column ${index + 1}`,
+        );
+
+  const rows = (headerRow ? parsedRows.slice(1) : parsedRows)
+    .slice(0, MAX_TABLE_ROWS)
+    .map((row) => columns.map((_, index) => row.cells[index] ?? ""));
+
+  if (columns.length === 0 || rows.length === 0) return null;
+
+  return { columns, rows };
+}
+
+function extractElementsByClass(
+  html: string,
+  classToken: string,
+): string[] {
+  const results: string[] = [];
+  const openTagRegex = /<(span|div)\b[^>]*class=(["'])([^"']*)\2[^>]*>/gi;
+  let openMatch: RegExpExecArray | null;
+
+  while ((openMatch = openTagRegex.exec(html)) !== null) {
+    const classValue = openMatch[3] ?? "";
+    const classTokens = classValue.split(/\s+/).filter(Boolean);
+    if (!classTokens.includes(classToken)) {
+      continue;
+    }
+
+    const tagName = openMatch[1] ?? "span";
+    const scanRegex = new RegExp(`<${tagName}\\b[^>]*>|</${tagName}>`, "gi");
+    scanRegex.lastIndex = openTagRegex.lastIndex;
+    let depth = 1;
+    let scanMatch: RegExpExecArray | null;
+
+    while ((scanMatch = scanRegex.exec(html)) !== null) {
+      const token = scanMatch[0] ?? "";
+      if (token.startsWith(`</${tagName}`)) {
+        depth -= 1;
+      } else if (!token.endsWith("/>")) {
+        depth += 1;
+      }
+
+      if (depth === 0) {
+        results.push(html.slice(openTagRegex.lastIndex, scanMatch.index));
+        openTagRegex.lastIndex = scanRegex.lastIndex;
+        break;
+      }
+    }
+  }
+
+  return results;
+}
+
+function parseLtxTable(description: string): ParsedTableData | null {
+  if (!/\bltx_tabular\b/i.test(description)) {
     return null;
+  }
+
+  const tabularContent = extractElementsByClass(description, "ltx_tabular")[0];
+  if (!tabularContent) return null;
+
+  const parsedRows = extractElementsByClass(tabularContent, "ltx_tr")
+    .map((rowHtml) => {
+      const cells = extractElementsByClass(rowHtml, "ltx_td")
+        .map((cellHtml) => sanitizeTableCell(cellHtml))
+        .filter(Boolean)
+        .slice(0, MAX_TABLE_COLUMNS);
+      return {
+        cells,
+        hasHeader: /class=(["'])[^"']*\bltx_th\b/i.test(rowHtml),
+      };
+    })
+    .filter((row) => row.cells.length > 0);
+
+  return buildParsedTableData(parsedRows);
+}
+
+function parseHtmlTable(description: string | null): ParsedTableData | null {
+  if (!description) {
+    return null;
+  }
+
+  if (!/<table[\s>]/i.test(description)) {
+    return parseLtxTable(description);
   }
 
   const rowMatches = Array.from(
@@ -616,24 +772,7 @@ function parseHtmlTable(description: string | null): ParsedTableData | null {
     })
     .filter((row) => row.cells.length > 0);
 
-  if (parsedRows.length === 0) return null;
-
-  const headerRow = parsedRows[0]?.hasHeader ? parsedRows[0] : null;
-  const columns =
-    headerRow?.cells.length
-      ? headerRow.cells
-      : Array.from(
-          { length: parsedRows[0]?.cells.length ?? 0 },
-          (_, index) => `Column ${index + 1}`,
-        );
-
-  const rows = (headerRow ? parsedRows.slice(1) : parsedRows)
-    .slice(0, MAX_TABLE_ROWS)
-    .map((row) => columns.map((_, index) => row.cells[index] ?? ""));
-
-  if (columns.length === 0 || rows.length === 0) return null;
-
-  return { columns, rows };
+  return buildParsedTableData(parsedRows);
 }
 
 function queryParsedTable(

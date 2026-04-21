@@ -258,7 +258,32 @@ describe("preparePaperAgentEvidence", () => {
         captionText: "Table 4: Safety / RAI results.",
         captionSource: "html",
         description:
-          "<table><tr><th>Metric</th><th>phi-3-mini</th></tr><tr><td>Ungroundedness</td><td>0.603</td></tr></table>",
+          [
+            "<div class=\"ltx_logical-block\">",
+            "<span class=\"ltx_tabular ltx_align_middle\">",
+            "<span class=\"ltx_tr\">",
+            "<span class=\"ltx_td\">Metric</span>",
+            "<span class=\"ltx_td\">",
+            "<span class=\"ltx_tabular ltx_align_middle\">",
+            "<span class=\"ltx_tr\"><span class=\"ltx_td\">Phi-3-mini</span></span>",
+            "<span class=\"ltx_tr\"><span class=\"ltx_td\">3.8b</span></span>",
+            "</span>",
+            "</span>",
+            "<span class=\"ltx_td\">Llama-3-In 8B</span>",
+            "</span>",
+            "<span class=\"ltx_tr\">",
+            "<span class=\"ltx_td\">Ungroundedness</span>",
+            "<span class=\"ltx_td\">0.603</span>",
+            "<span class=\"ltx_td\">0.328</span>",
+            "</span>",
+            "<span class=\"ltx_tr\">",
+            "<span class=\"ltx_td\">Jailbreak DR-1</span>",
+            "<span class=\"ltx_td\">0.123</span>",
+            "<span class=\"ltx_td\">0.114</span>",
+            "</span>",
+            "</span>",
+            "</div>",
+          ].join(""),
         sourceMethod: "html",
         sourceUrl: null,
         sourceVersion: null,
@@ -318,6 +343,22 @@ describe("preparePaperAgentEvidence", () => {
     expect(result.artifacts.map((artifact) => artifact.kind)).toContain("TABLE_CARD");
     const tableArtifact = result.artifacts.find((artifact) => artifact.kind === "TABLE_CARD");
     expect(tableArtifact?.title).toBe("Table 4");
+    const payload = JSON.parse(tableArtifact!.payloadJson) as {
+      table?: {
+        columns?: string[];
+        matches?: Array<{ values: string[] }>;
+      } | null;
+    };
+    expect(payload.table?.columns).toEqual([
+      "Metric",
+      "Phi-3-mini 3.8b",
+      "Llama-3-In 8B",
+    ]);
+    expect(payload.table?.matches?.[0]?.values).toEqual([
+      "Ungroundedness",
+      "0.603",
+      "0.328",
+    ]);
   });
 
   it("generates a code snippet artifact for implementation-style questions", async () => {
