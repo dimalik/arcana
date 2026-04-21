@@ -48,9 +48,9 @@ export const PAPER_CLAIM_RHETORICAL_ROLE_VALUES = [
 // constraints, so the runtime extraction schema must avoid them.
 const paperClaimSourceSpanRuntimeSchema = z
   .object({
-    charStart: z.number().int(),
-    charEnd: z.number().int(),
-    page: z.number().int().optional(),
+    charStart: z.number(),
+    charEnd: z.number(),
+    page: z.number().optional(),
   })
   .passthrough();
 

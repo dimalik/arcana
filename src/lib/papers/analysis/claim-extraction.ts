@@ -343,29 +343,33 @@ function normalizeSourceSpan(
 
   const charStart =
     typeof candidate.charStart === "number" &&
-    Number.isInteger(candidate.charStart) &&
-    candidate.charStart >= 0
-      ? candidate.charStart
+    Number.isFinite(candidate.charStart)
+      ? Math.trunc(candidate.charStart)
       : null;
   const charEnd =
     typeof candidate.charEnd === "number" &&
-    Number.isInteger(candidate.charEnd) &&
-    candidate.charEnd >= 0
-      ? candidate.charEnd
+    Number.isFinite(candidate.charEnd)
+      ? Math.trunc(candidate.charEnd)
       : null;
 
-  if (charStart == null || charEnd == null || charEnd < charStart) {
+  if (
+    charStart == null ||
+    charEnd == null ||
+    charStart < 0 ||
+    charEnd < 0 ||
+    charEnd < charStart
+  ) {
     return null;
   }
 
   const page =
-    typeof candidate.page === "number" &&
-    Number.isInteger(candidate.page) &&
-    candidate.page > 0
-      ? candidate.page
+    typeof candidate.page === "number" && Number.isFinite(candidate.page)
+      ? Math.trunc(candidate.page)
       : undefined;
 
-  return page == null ? { charStart, charEnd } : { charStart, charEnd, page };
+  return page == null || page <= 0
+    ? { charStart, charEnd }
+    : { charStart, charEnd, page };
 }
 
 export function materializeStoredClaim(
