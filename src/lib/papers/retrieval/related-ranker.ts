@@ -29,10 +29,7 @@ import {
   type RelatedPaperListwiseSelection,
   type RelatedPaperPointwiseAssessment,
 } from "./related-rerank-schema";
-import {
-  runOpenRelatedReranker,
-  type OpenRelatedRerankerBackendId,
-} from "./open-reranker";
+import type { OpenRelatedRerankerBackendId } from "./open-reranker";
 
 type RelatedRerankDb = Pick<
   typeof prisma,
@@ -171,10 +168,6 @@ const RELATED_LLM_POINTWISE_CANDIDATE_LIMIT = 18;
 const RELATED_LLM_POINTWISE_RESULT_LIMIT = 10;
 const RELATED_LLM_POINTWISE_MAX_TOKENS = 2_800;
 const RELATED_LLM_ABSTRACT_SNIPPET_CHARS = 260;
-const RELATED_OPEN_RERANKER_CANDIDATE_LIMIT = 18;
-const RELATED_OPEN_RERANKER_QWEN_CANDIDATE_LIMIT = 8;
-const RELATED_OPEN_RERANKER_RESULT_LIMIT = 10;
-const RELATED_OPEN_RERANKER_BLEND_WEIGHT = 0.62;
 const RELATED_CONTENT_EXPANSION_LIMIT = 80;
 const RELATED_CONTENT_EXPANSION_SCORE_FLOOR = 0.18;
 const RELATED_S2_EXPANSION_LIMIT = 12;
@@ -642,14 +635,14 @@ function describeRelatedRerankerBackend(
   if (backendId === "qwen3_reranker_v1") {
     return {
       id: "qwen3_reranker_v1",
-      family: "cross-encoder",
+      family: "llm-pointwise",
     };
   }
 
   if (backendId === "bge_reranker_v1") {
     return {
       id: "bge_reranker_v1",
-      family: "cross-encoder",
+      family: "llm-pointwise",
     };
   }
 
@@ -1620,47 +1613,6 @@ function finalizeSafeRelatedOutput(params: {
   };
 }
 
-function buildOpenRerankerQuery(params: {
-  seedPaper: RelatedPaperContext;
-  representationMap: PreparedFeatureRelatedRerankState["representationMap"];
-}): string {
-  const metadata = params.representationMap.get(params.seedPaper.id)?.metadata;
-  return [
-    `Seed title: ${params.seedPaper.title}`,
-    `Seed year: ${params.seedPaper.year ?? "unknown"}`,
-    `Seed venue: ${params.seedPaper.venue ?? "unknown"}`,
-    `Seed tags: ${(metadata?.tagNames ?? []).slice(0, 10).join(", ") || "none"}`,
-    `Seed abstract: ${truncateSnippet(params.seedPaper.abstract, 420) ?? "none"}`,
-    `Seed summary: ${truncateSnippet(params.seedPaper.summary, 420) ?? "none"}`,
-  ].join("\n");
-}
-
-function buildOpenRerankerDocument(params: {
-  row: GraphRelationRow;
-  paperContexts: Map<string, RelatedPaperContext>;
-  representationMap: PreparedFeatureRelatedRerankState["representationMap"];
-}): string {
-  const context = params.paperContexts.get(params.row.relatedPaper.id);
-  const metadata = params.representationMap.get(params.row.relatedPaper.id)?.metadata;
-  return [
-    `Candidate title: ${params.row.relatedPaper.title}`,
-    `Candidate year: ${context?.year ?? params.row.relatedPaper.year ?? "unknown"}`,
-    `Candidate venue: ${context?.venue ?? "unknown"}`,
-    `Candidate authors: ${parseStringArray(context?.authors ?? params.row.relatedPaper.authors).join(", ") || "unknown"}`,
-    `Candidate tags: ${(metadata?.tagNames ?? []).slice(0, 10).join(", ") || "none"}`,
-    `Candidate abstract: ${truncateSnippet(context?.abstract, 420) ?? "none"}`,
-    `Candidate summary: ${truncateSnippet(context?.summary, 420) ?? "none"}`,
-  ].join("\n");
-}
-
-function getOpenRerankerCandidateLimit(
-  backendId: OpenRelatedRerankerBackendId,
-): number {
-  return backendId === "qwen3_reranker_v1"
-    ? RELATED_OPEN_RERANKER_QWEN_CANDIDATE_LIMIT
-    : RELATED_OPEN_RERANKER_CANDIDATE_LIMIT;
-}
-
 function buildBaselineRelatedRerankResult(
   rows: GraphRelationRow[],
   backendId: RelatedRerankerBackendId = "baseline_v1",
@@ -2556,149 +2508,23 @@ async function buildLlmPointwiseRelatedRerankResult(
   }
 }
 
-async function buildOpenModelRelatedRerankResult(
+async function buildOpenAiAliasRelatedRerankResult(
   paperId: string,
   userId: string,
   rows: GraphRelationRow[],
   backendId: OpenRelatedRerankerBackendId,
   db: RelatedRerankDb = prisma,
 ): Promise<RelatedRerankResult> {
-  const baselineRows = sortRelatedRowsBaseline(rows);
-  const cacheKey = buildCacheKey(backendId, paperId, userId, baselineRows);
-  const cached = relatedRerankCache.get(cacheKey);
-  if (cached && cached.expiresAt > Date.now()) {
-    return cached.result;
-  }
-
-  const prepared = await prepareFeatureRelatedRerankState(
+  const aliasResult = await buildLlmPointwiseRelatedRerankResult(
     paperId,
     userId,
-    baselineRows,
+    rows,
     db,
   );
-  const featureResult = buildFeatureRelatedRerankResultFromPrepared(prepared);
-  if (!prepared.seedPaper || prepared.candidateRows.length === 0) {
-    return {
-      backend: describeRelatedRerankerBackend(backendId),
-      baselineRows,
-      rerankedRows: [],
-      diagnostics: [],
-    };
-  }
-
-  const shortlistRows = sortShortlistRows(
-    buildLlmShortlistRows(prepared),
-    prepared.diagnosticsByPaperId,
-  ).slice(0, getOpenRerankerCandidateLimit(backendId));
-
-  if (shortlistRows.length <= 2) {
-    return {
-      backend: describeRelatedRerankerBackend(backendId),
-      baselineRows,
-      rerankedRows: featureResult.rerankedRows,
-      diagnostics: featureResult.diagnostics,
-    };
-  }
-
-  try {
-    const openScores = await runOpenRelatedReranker(backendId, {
-      query: buildOpenRerankerQuery({
-        seedPaper: prepared.seedPaper,
-        representationMap: prepared.representationMap,
-      }),
-      documents: shortlistRows.map((row) => ({
-        id: row.relatedPaper.id,
-        text: buildOpenRerankerDocument({
-          row,
-          paperContexts: prepared.paperContexts,
-          representationMap: prepared.representationMap,
-        }),
-      })),
-    });
-
-    if (openScores.size === 0) {
-      return featureResult;
-    }
-
-    const includedRows = shortlistRows.filter((row) => {
-      const openScore = openScores.get(row.relatedPaper.id) ?? 0;
-      if (openScore >= 0.18) return true;
-      const diagnostics = prepared.diagnosticsByPaperId.get(row.relatedPaper.id);
-      if (!diagnostics) return false;
-      return (
-        hasSharedCitationEvidence(diagnostics.deterministicSignals) &&
-        diagnostics.rerankScore >= 0.48 &&
-        openScore >= 0.08
-      );
-    });
-
-    if (includedRows.length === 0) {
-      return featureResult;
-    }
-
-    const finalized = finalizeRelatedRows({
-      rows: includedRows,
-      diagnosticsByPaperId: prepared.diagnosticsByPaperId,
-      representationMap: prepared.representationMap,
-      scoreForPaperId: (candidatePaperId) => {
-        const featureScore =
-          prepared.diagnosticsByPaperId.get(candidatePaperId)?.rerankScore ?? 0;
-        const openScore = openScores.get(candidatePaperId) ?? 0;
-        return Number(
-          Math.max(
-            0,
-            Math.min(
-              1,
-              featureScore * (1 - RELATED_OPEN_RERANKER_BLEND_WEIGHT) +
-                openScore * RELATED_OPEN_RERANKER_BLEND_WEIGHT,
-            ),
-          ).toFixed(6),
-        );
-      },
-      limit: Math.min(RELATED_OPEN_RERANKER_RESULT_LIMIT, includedRows.length),
-    });
-
-    const diagnostics = finalized.rerankedDiagnostics.map((diagnostic) => {
-      const openScore = openScores.get(diagnostic.paperId) ?? 0;
-      return {
-        ...diagnostic,
-        rerankScore: Number(
-          Math.max(
-            0,
-            Math.min(
-              1,
-              diagnostic.rerankScore * (1 - RELATED_OPEN_RERANKER_BLEND_WEIGHT) +
-                openScore * RELATED_OPEN_RERANKER_BLEND_WEIGHT,
-            ),
-          ).toFixed(6),
-        ),
-      };
-    });
-    const safeOutput = finalizeSafeRelatedOutput({
-      seedPaper: prepared.seedPaper,
-      rerankedRows: finalized.rerankedRows,
-      rerankedDiagnostics: diagnostics,
-    });
-
-    const result = {
-      backend: describeRelatedRerankerBackend(backendId),
-      baselineRows,
-      rerankedRows: safeOutput.rerankedRows,
-      diagnostics: safeOutput.rerankedDiagnostics,
-    } satisfies RelatedRerankResult;
-
-    relatedRerankCache.set(cacheKey, {
-      expiresAt: Date.now() + RELATED_RERANK_CACHE_TTL_MS,
-      result,
-    });
-    return result;
-  } catch (error) {
-    console.warn(
-      `[related-ranker] ${backendId} backend fell back to feature ranking:`,
-      error,
-    );
-    return featureResult;
-  }
+  return {
+    ...aliasResult,
+    backend: describeRelatedRerankerBackend(backendId),
+  };
 }
 
 export async function buildRelatedRerankResult(
@@ -2723,7 +2549,7 @@ export async function buildRelatedRerankResult(
   }
 
   if (backendId === "qwen3_reranker_v1") {
-    return buildOpenModelRelatedRerankResult(
+    return buildOpenAiAliasRelatedRerankResult(
       paperId,
       userId,
       rows,
@@ -2733,7 +2559,7 @@ export async function buildRelatedRerankResult(
   }
 
   if (backendId === "bge_reranker_v1") {
-    return buildOpenModelRelatedRerankResult(
+    return buildOpenAiAliasRelatedRerankResult(
       paperId,
       userId,
       rows,
