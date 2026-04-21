@@ -1,6 +1,4 @@
 "use client";
-
-import Link from "next/link";
 import type { AgentActionSummary, AnswerCitation } from "@/lib/papers/answer-engine/metadata";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -101,6 +99,15 @@ function buildPaperContextHref(
     params.set("page", String(options.pdfPage));
   }
   return `/papers/${paperId}?${params.toString()}`;
+}
+
+function buildPaperPdfHref(
+  paperId: string | null | undefined,
+  pdfPage?: number | null,
+): string | null {
+  if (!paperId) return null;
+  const suffix = pdfPage ? `#page=${pdfPage}` : "";
+  return `/api/papers/${paperId}/file${suffix}`;
 }
 
 function buildPaperAssetUrl(
@@ -303,13 +310,24 @@ function ArtifactPreview({
             </Badge>
           ) : null}
           {paperHref ? (
-            <Link
+            <a
               href={paperHref}
               className="inline-flex items-center gap-1 rounded-full border border-border/60 bg-background px-2.5 py-1 text-[10px] font-medium text-foreground/75 transition-colors hover:bg-accent hover:text-foreground"
             >
               <ArrowUpRight className="h-3 w-3" />
               Open in paper
-            </Link>
+            </a>
+          ) : null}
+          {payload?.paperId ? (
+            <a
+              href={buildPaperPdfHref(payload.paperId, payload.pdfPage) ?? undefined}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 rounded-full border border-border/60 bg-background px-2.5 py-1 text-[10px] font-medium text-foreground/75 transition-colors hover:bg-accent hover:text-foreground"
+            >
+              <FileText className="h-3 w-3" />
+              Open PDF
+            </a>
           ) : null}
           {imageSrc ? (
             <a
@@ -407,13 +425,24 @@ function ArtifactPreview({
             </Badge>
           ) : null}
           {paperHref ? (
-            <Link
+            <a
               href={paperHref}
               className="inline-flex items-center gap-1 rounded-full border border-border/60 bg-background px-2.5 py-1 text-[10px] font-medium text-foreground/75 transition-colors hover:bg-accent hover:text-foreground"
             >
               <ArrowUpRight className="h-3 w-3" />
               Open in paper
-            </Link>
+            </a>
+          ) : null}
+          {payload?.paperId ? (
+            <a
+              href={buildPaperPdfHref(payload.paperId, payload.pdfPage) ?? undefined}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 rounded-full border border-border/60 bg-background px-2.5 py-1 text-[10px] font-medium text-foreground/75 transition-colors hover:bg-accent hover:text-foreground"
+            >
+              <FileText className="h-3 w-3" />
+              Open PDF
+            </a>
           ) : null}
           {imageSrc ? (
             <a

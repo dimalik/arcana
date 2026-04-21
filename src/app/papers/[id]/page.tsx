@@ -166,7 +166,9 @@ export default function PaperDetailPage() {
   const [locatingPdf, setLocatingPdf] = useState(false);
   const [activeView, setActiveView] = useState<ViewTab>("review");
   const [relatedPaperMap, setRelatedPaperMap] = useState<Record<string, string>>({});
-  const [pdfVisible, setPdfVisible] = useState(false);
+  const [pdfVisible, setPdfVisible] = useState(
+    () => searchParams.get("pdf") === "1" || Boolean(requestedPdfPage),
+  );
   const [splitRatio, setSplitRatio] = useState(50);
   const [duplicateBannerBusy, setDuplicateBannerBusy] = useState(false);
   const processingDisplay = paper
