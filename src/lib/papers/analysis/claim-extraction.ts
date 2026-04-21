@@ -324,6 +324,50 @@ function serializeEvaluationContextKey(
   ].join("|");
 }
 
+function normalizeConfidence(value: unknown): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return 0.7;
+  }
+  return Math.max(0, Math.min(value, 1));
+}
+
+function normalizeSourceSpan(
+  value: unknown,
+): PaperClaimSourceSpan | null {
+  if (!value || typeof value !== "object") return null;
+  const candidate = value as {
+    charStart?: unknown;
+    charEnd?: unknown;
+    page?: unknown;
+  };
+
+  const charStart =
+    typeof candidate.charStart === "number" &&
+    Number.isInteger(candidate.charStart) &&
+    candidate.charStart >= 0
+      ? candidate.charStart
+      : null;
+  const charEnd =
+    typeof candidate.charEnd === "number" &&
+    Number.isInteger(candidate.charEnd) &&
+    candidate.charEnd >= 0
+      ? candidate.charEnd
+      : null;
+
+  if (charStart == null || charEnd == null || charEnd < charStart) {
+    return null;
+  }
+
+  const page =
+    typeof candidate.page === "number" &&
+    Number.isInteger(candidate.page) &&
+    candidate.page > 0
+      ? candidate.page
+      : undefined;
+
+  return page == null ? { charStart, charEnd } : { charStart, charEnd, page };
+}
+
 export function materializeStoredClaim(
   raw: ExtractedPaperClaim,
   fallbackSectionLabel: string | null,
@@ -343,12 +387,12 @@ export function materializeStoredClaim(
     evaluationContext: raw.evaluationContext ?? null,
     text: normalizeWhitespace(raw.text),
     normalizedText,
-    confidence: Math.max(0, Math.min(raw.confidence ?? 0.7, 1)),
+    confidence: normalizeConfidence(raw.confidence),
     sectionLabel,
     sectionPath,
     sourceExcerpt,
     excerptHash: sha256(normalizeClaimText(sourceExcerpt)),
-    sourceSpan: (raw.sourceSpan as PaperClaimSourceSpan | null | undefined) ?? null,
+    sourceSpan: normalizeSourceSpan(raw.sourceSpan),
     citationAnchors:
       (raw.citationAnchors as PaperClaimCitationAnchor[] | null | undefined) ??
       null,

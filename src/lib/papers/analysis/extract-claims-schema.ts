@@ -3,7 +3,6 @@ import { z } from "zod";
 import {
   paperClaimCitationAnchorsSchema,
   paperClaimEvaluationContextSchema,
-  paperClaimSourceSpanSchema,
   paperClaimStanceSchema,
 } from "./types";
 
@@ -45,6 +44,16 @@ export const PAPER_CLAIM_RHETORICAL_ROLE_VALUES = [
   "contribution",
 ] as const;
 
+// Anthropic's structured-output transport rejects integer/number minimum/maximum
+// constraints, so the runtime extraction schema must avoid them.
+const paperClaimSourceSpanRuntimeSchema = z
+  .object({
+    charStart: z.number().int(),
+    charEnd: z.number().int(),
+    page: z.number().int().optional(),
+  })
+  .passthrough();
+
 export const extractedPaperClaimSchema = z
   .object({
     claimType: z.string().min(1).nullable().optional(),
@@ -59,13 +68,13 @@ export const extractedPaperClaimSchema = z
     text: z.string().min(1),
     sectionLabel: z.string().min(1).nullable().optional(),
     sourceExcerpt: z.string().min(1),
-    sourceSpan: paperClaimSourceSpanSchema.nullable().optional(),
+    sourceSpan: paperClaimSourceSpanRuntimeSchema.nullable().optional(),
     citationAnchors: paperClaimCitationAnchorsSchema.nullable().optional(),
     evidenceType: z
       .enum(PAPER_CLAIM_EVIDENCE_TYPE_VALUES)
       .nullable()
       .optional(),
-    confidence: z.number().min(0).max(1).nullable().optional(),
+    confidence: z.number().nullable().optional(),
   })
   .passthrough();
 

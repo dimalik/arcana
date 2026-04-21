@@ -299,4 +299,24 @@ describe("claim extraction", () => {
     expect(deduped[0]?.orderIndex).toBe(0);
     expect(deduped[0]?.sectionPath).toBe("method");
   });
+
+  it("normalizes relaxed transport fields before persistence", () => {
+    const materialized = materializeStoredClaim(
+      {
+        text: "The model improves accuracy.",
+        sourceExcerpt: "The model improves accuracy.",
+        confidence: 1.7,
+        sourceSpan: {
+          charStart: -4,
+          charEnd: 20,
+          page: 0,
+        },
+      },
+      "Results",
+      0,
+    );
+
+    expect(materialized.confidence).toBe(1);
+    expect(materialized.sourceSpan).toBeNull();
+  });
 });
