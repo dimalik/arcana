@@ -9,7 +9,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { X, Send, Loader2, ArrowUpRight, BookmarkPlus } from "lucide-react";
 import { useNotebook } from "@/hooks/use-notebook";
 import { MarkdownRenderer } from "@/components/ui/markdown-renderer";
-import { ChatMessageSupport } from "./chat-message-support";
+import { ChatMessageSupport, linkifyPaperAnswerContent } from "./chat-message-support";
 import {
   parseChatMessageMetadata,
   type AnswerCitation,
@@ -127,6 +127,10 @@ export function InlineChat({
         .map((p) => p.text)
         .join("") || ""
     : "";
+  const linkedResponseText = linkifyPaperAnswerContent(responseText, {
+    citations: assistantSupport?.citations,
+    artifacts: assistantSupport?.artifacts,
+  });
 
   const displayText =
     selectedText.length > 150
@@ -230,7 +234,7 @@ export function InlineChat({
         {/* Streaming response */}
         {responseText && (
           <div className="px-2.5 py-1.5">
-            <MarkdownRenderer content={responseText} className="text-xs" />
+            <MarkdownRenderer content={linkedResponseText} className="text-xs" />
             <ChatMessageSupport
               compact
               citations={assistantSupport?.citations}

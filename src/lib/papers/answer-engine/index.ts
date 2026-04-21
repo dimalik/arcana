@@ -74,7 +74,7 @@ const AGENT_INTENT_SET = new Set<PaperAnswerIntent>([
   "results",
   "figures",
   "tables",
-  "code",
+  "generated_artifact",
 ]);
 
 interface PreparePaperAnswerParams {
@@ -459,7 +459,7 @@ function buildPrompt(params: {
     ? `Selected passage from the conversation:\n${params.selectedText}\n\n`
     : "";
   const intentSpecificRules =
-    params.intent === "code"
+    params.intent === "generated_artifact"
       ? "- If you provide code, present it as a derived implementation sketch unless the evidence explicitly supports exact code.\n- Call out any assumptions or missing implementation details.\n"
       : params.intent === "figures" || params.intent === "tables"
         ? "- If a relevant figure or table artifact is attached, anchor the answer in that artifact before generalizing.\n"

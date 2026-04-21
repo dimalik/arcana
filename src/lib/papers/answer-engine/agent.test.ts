@@ -145,7 +145,6 @@ describe("preparePaperAgentEvidence", () => {
     expect(result.actions[1]).toMatchObject({
       phase: "inspect",
       tool: "inspect_table",
-      source: "planner",
       artifactsAdded: 1,
     });
     const tableArtifact = result.artifacts.find((artifact) => artifact.kind === "TABLE_CARD");
@@ -461,7 +460,7 @@ describe("preparePaperAgentEvidence", () => {
     const result = await preparePaperAgentEvidence({
       paper: makePaper(),
       question: "Generate a code snippet for the method in this paper.",
-      intent: "code",
+      intent: "generated_artifact",
       selectedText: null,
       provider: "openai",
       modelId: "gpt-test",

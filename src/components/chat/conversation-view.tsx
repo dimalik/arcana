@@ -22,7 +22,7 @@ import {
 import { useNotebook } from "@/hooks/use-notebook";
 import { MarkdownRenderer } from "@/components/ui/markdown-renderer";
 import { PaperPicker } from "./paper-picker";
-import { ChatMessageSupport } from "./chat-message-support";
+import { ChatMessageSupport, linkifyPaperAnswerContent } from "./chat-message-support";
 import {
   parseChatMessageMetadata,
   type ChatMessageMetadata,
@@ -320,6 +320,13 @@ export function ConversationView({
                 )
                 .map((p) => p.text)
                 .join("") || "";
+            const linkedMessageText =
+              message.role === "assistant"
+                ? linkifyPaperAnswerContent(messageText, {
+                    citations: message.metadata?.citations,
+                    artifacts: message.metadata?.artifacts,
+                  })
+                : messageText;
             return (
               <div
                 key={message.id}
@@ -337,7 +344,7 @@ export function ConversationView({
                   {message.role === "assistant" ? (
                     <>
                       <MarkdownRenderer
-                        content={messageText}
+                        content={linkedMessageText}
                         className="text-sm"
                       />
                             <ChatMessageSupport

@@ -6,7 +6,7 @@ export const paperAnswerIntentSchema = z.enum([
   "results",
   "figures",
   "tables",
-  "code",
+  "generated_artifact",
   "contradictions",
   "gaps",
   "timeline",
@@ -59,12 +59,24 @@ export const chatMessageMetadataSchema = z.object({
 
 export type ChatMessageMetadata = z.infer<typeof chatMessageMetadataSchema>;
 
+function normalizeLegacyIntent(value: unknown): unknown {
+  if (!value || typeof value !== "object") return value;
+  const record = value as Record<string, unknown>;
+  if (record.intent === "code") {
+    return {
+      ...record,
+      intent: "generated_artifact",
+    };
+  }
+  return value;
+}
+
 export function parseChatMessageMetadata(
   value: string | null | undefined,
 ): ChatMessageMetadata | null {
   if (!value) return null;
   try {
-    const parsed = JSON.parse(value);
+    const parsed = normalizeLegacyIntent(JSON.parse(value));
     const result = chatMessageMetadataSchema.safeParse(parsed);
     return result.success ? result.data : null;
   } catch {

@@ -110,9 +110,16 @@ export function classifyPaperAnswerIntent(params: {
       "implement",
       "pseudo",
       "pseudocode",
+      "latex",
+      "write it as tex",
+      "write it as latex",
+      "write this as tex",
+      "write this as latex",
+      "tex file",
+      "latex file",
     ])
   ) {
-    return "code";
+    return "generated_artifact";
   }
 
   if (

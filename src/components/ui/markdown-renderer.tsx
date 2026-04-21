@@ -58,8 +58,8 @@ const components: Components = {
   a: ({ href, children }) => (
     <a
       href={href}
-      target="_blank"
-      rel="noopener noreferrer"
+      target={href && (href.startsWith("/") || href.startsWith("#")) ? undefined : "_blank"}
+      rel={href && (href.startsWith("/") || href.startsWith("#")) ? undefined : "noopener noreferrer"}
       className="text-primary underline underline-offset-2 hover:text-primary/80"
     >
       {children}

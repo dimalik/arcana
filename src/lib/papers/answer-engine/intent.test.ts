@@ -28,6 +28,14 @@ describe("classifyPaperAnswerIntent", () => {
     ).toBe("compare_methodologies");
   });
 
+  it("routes requested output formats to generated artifacts", () => {
+    expect(
+      classifyPaperAnswerIntent({
+        question: "Write it as LaTeX",
+      }),
+    ).toBe("generated_artifact");
+  });
+
   it("falls back to direct qa for ordinary paper questions", () => {
     expect(
       classifyPaperAnswerIntent({

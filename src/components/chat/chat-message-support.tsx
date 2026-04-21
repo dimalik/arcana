@@ -5,6 +5,7 @@ import {
   ArrowUpRight,
   Bot,
   Braces,
+  ChevronDown,
   Download,
   FileSearch,
   FileText,
@@ -15,7 +16,7 @@ import {
   Waypoints,
 } from "lucide-react";
 
-interface ConversationArtifactRecord {
+export interface ConversationArtifactRecord {
   id?: string;
   kind: string;
   title: string;
@@ -131,6 +132,71 @@ function buildPaperAssetUrl(
   return `/api/papers/${paperId}/assets?${params.toString()}`;
 }
 
+function inferCitationView(sectionPath: string | null | undefined):
+  "results" | "review" | "methodology" | "connections" | "analyze" {
+  const normalized = (sectionPath ?? "").toLowerCase();
+  if (normalized.includes("result") || normalized.includes("table") || normalized.includes("figure")) {
+    return "results";
+  }
+  if (normalized.includes("method")) {
+    return "methodology";
+  }
+  return "review";
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function replacePlainTextWithMarkdownLink(
+  content: string,
+  label: string,
+  href: string,
+): string {
+  if (!label.trim()) return content;
+  const pattern = new RegExp(`(^|[^\\[])(${escapeRegExp(label)})(?!\\]\\()`, "g");
+  return content.replace(pattern, (_match, prefix: string, matched: string) =>
+    `${prefix}[${matched}](${href})`,
+  );
+}
+
+export function linkifyPaperAnswerContent(
+  content: string,
+  params: {
+    citations?: AnswerCitation[];
+    artifacts?: ConversationArtifactRecord[];
+  },
+): string {
+  let nextContent = content;
+
+  const citations = params.citations ?? [];
+  nextContent = nextContent.replace(/\[S(\d+)\](?!\()/g, (match, rawIndex: string) => {
+    const index = Number.parseInt(rawIndex, 10) - 1;
+    const citation = citations[index];
+    if (!citation) return match;
+    const href = buildPaperContextHref(citation.paperId, {
+      view: inferCitationView(citation.sectionPath),
+    });
+    return href ? `[S${rawIndex}](${href})` : match;
+  });
+
+  for (const artifact of params.artifacts ?? []) {
+    if (artifact.kind !== "FIGURE_CARD" && artifact.kind !== "TABLE_CARD") {
+      continue;
+    }
+    const payload = parseJson<VisualArtifactPayload>(artifact.payloadJson);
+    const href = buildPaperContextHref(payload?.paperId, {
+      view: "results",
+      pdfPage: payload?.pdfPage,
+    });
+    const label = payload?.figureLabel ?? artifact.title;
+    if (!href || !label) continue;
+    nextContent = replacePlainTextWithMarkdownLink(nextContent, label, href);
+  }
+
+  return nextContent;
+}
+
 function openPaperContextInPlace(
   detail: PaperArtifactNavigationDetail,
   fallbackHref: string,
@@ -181,6 +247,36 @@ function sectionTitleClass(compact: boolean) {
 
 function sectionBodyClass(compact: boolean) {
   return compact ? "rounded-xl border border-border/50 bg-muted/15 p-2.5" : "rounded-2xl border border-border/50 bg-muted/15 p-3";
+}
+
+function SupportSection({
+  compact,
+  title,
+  count,
+  icon: Icon,
+  children,
+}: {
+  compact: boolean;
+  title: string;
+  count: number;
+  icon: typeof Quote;
+  children: React.ReactNode;
+}) {
+  return (
+    <details className="group rounded-2xl border border-border/50 bg-muted/10">
+      <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2.5">
+        <Icon className="h-3.5 w-3.5 text-muted-foreground/70" />
+        <p className={sectionTitleClass(compact)}>{title}</p>
+        <Badge variant="secondary" className="h-5 rounded-full px-2 text-[10px]">
+          {count}
+        </Badge>
+        <ChevronDown className="ml-auto h-3.5 w-3.5 text-muted-foreground/70 transition-transform group-open:rotate-180" />
+      </summary>
+      <div className="px-3 pb-3">
+        {children}
+      </div>
+    </details>
+  );
 }
 
 function ArtifactPreview({
@@ -619,18 +715,12 @@ export function ChatMessageSupport({
   return (
     <div className={wrapperClass}>
       {citations.length > 0 ? (
-        <div className="space-y-2">
-          <div className="flex items-center gap-2 px-1">
-            <Quote className="h-3.5 w-3.5 text-muted-foreground/70" />
-            <p className={sectionTitleClass(compact)}>Sources</p>
-            <Badge variant="secondary" className="h-5 rounded-full px-2 text-[10px]">
-              {citations.length}
-            </Badge>
-          </div>
+        <SupportSection compact={compact} title="Sources" count={citations.length} icon={Quote}>
           <div className={`${sectionBodyClass(compact)} space-y-2`}>
             {citations.map((citation, index) => (
               <div
                 key={`${citation.paperId}-${index}`}
+                id={`source-${index + 1}`}
                 className="rounded-xl border border-border/50 bg-background/80 px-3 py-2.5 shadow-[0_1px_0_rgba(0,0,0,0.02)]"
               >
                 <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
@@ -652,18 +742,11 @@ export function ChatMessageSupport({
               </div>
             ))}
           </div>
-        </div>
+        </SupportSection>
       ) : null}
 
       {agentActions.length > 0 ? (
-        <div className="space-y-2">
-          <div className="flex items-center gap-2 px-1">
-            <Waypoints className="h-3.5 w-3.5 text-muted-foreground/70" />
-            <p className={sectionTitleClass(compact)}>Agent Timeline</p>
-            <Badge variant="secondary" className="h-5 rounded-full px-2 text-[10px]">
-              {agentActions.length}
-            </Badge>
-          </div>
+        <SupportSection compact={compact} title="Agent Timeline" count={agentActions.length} icon={Waypoints}>
           <div className={`${sectionBodyClass(compact)} relative space-y-2`}>
             <div className="absolute bottom-3 left-[17px] top-3 hidden w-px bg-border/60 sm:block" />
             {agentActions.map((action) => {
@@ -735,22 +818,16 @@ export function ChatMessageSupport({
               );
             })}
           </div>
-        </div>
+        </SupportSection>
       ) : null}
 
       {artifacts.length > 0 ? (
-        <div className="space-y-2">
-          <div className="flex items-center gap-2 px-1">
-            <Braces className="h-3.5 w-3.5 text-muted-foreground/70" />
-            <p className={sectionTitleClass(compact)}>Artifacts</p>
-            <Badge variant="secondary" className="h-5 rounded-full px-2 text-[10px]">
-              {artifacts.length}
-            </Badge>
-          </div>
+        <SupportSection compact={compact} title="Artifacts" count={artifacts.length} icon={Braces}>
           <div className={`${sectionBodyClass(compact)} space-y-2`}>
-            {artifacts.map((artifact) => (
+            {artifacts.map((artifact, index) => (
               <div
                 key={artifact.id ?? `${artifact.kind}-${artifact.title}`}
+                id={`artifact-${index + 1}`}
                 className="rounded-xl border border-border/50 bg-background/80 px-3 py-2.5 shadow-[0_1px_0_rgba(0,0,0,0.02)]"
               >
                 <div className="mb-2 flex flex-wrap items-center gap-1.5">
@@ -765,7 +842,7 @@ export function ChatMessageSupport({
               </div>
             ))}
           </div>
-        </div>
+        </SupportSection>
       ) : null}
     </div>
   );

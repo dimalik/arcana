@@ -18,7 +18,7 @@ import {
 } from "lucide-react";
 import { useNotebook } from "@/hooks/use-notebook";
 import { MarkdownRenderer } from "@/components/ui/markdown-renderer";
-import { ChatMessageSupport } from "./chat-message-support";
+import { ChatMessageSupport, linkifyPaperAnswerContent } from "./chat-message-support";
 import {
   parseChatMessageMetadata,
   type AnswerCitation,
@@ -499,10 +499,14 @@ function QuickChatStream({
   }
 
   if (!responseText) return null;
+  const linkedResponseText = linkifyPaperAnswerContent(responseText, {
+    citations: assistantSupport?.citations,
+    artifacts: assistantSupport?.artifacts,
+  });
 
   return (
     <div className="max-h-40 overflow-y-auto rounded bg-muted/40 px-2.5 py-1.5 highlight-tooltip-scroll text-xs [&_p]:mb-1 [&_p]:leading-snug [&_h1]:text-sm [&_h2]:text-xs [&_h3]:text-xs [&_ul]:mb-1 [&_ol]:mb-1 [&_pre]:my-1 [&_blockquote]:my-1">
-      <MarkdownRenderer content={responseText} className="text-xs" />
+      <MarkdownRenderer content={linkedResponseText} className="text-xs" />
       <ChatMessageSupport
         compact
         citations={assistantSupport?.citations}

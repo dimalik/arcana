@@ -562,6 +562,87 @@ function extractResultTableFocusQuery(question: string): string | null {
   return focusTerms.join(" ");
 }
 
+type ResultTableCategory = "core" | "multimodal" | "safety" | "other";
+
+function classifyResultTableCategory(figure: PaperFigureView): ResultTableCategory {
+  const haystack = normalizeAnalysisText(
+    `${figure.figureLabel ?? ""} ${figure.captionText ?? ""} ${figure.description ?? ""}`,
+  );
+
+  if (
+    /\brai\b|\bsafety\b|\bharm\b|\bharmful\b|\bjailbreak\b|\bungroundedness\b|\bvlguard\b/.test(
+      haystack,
+    )
+  ) {
+    return "safety";
+  }
+
+  if (
+    /\bmultimodal\b|\bmllm\b|\bvision\b|\bvideo\b|\bmulti image\b|\bmulti-image\b|\bimage\b/.test(
+      haystack,
+    )
+  ) {
+    return "multimodal";
+  }
+
+  if (
+    /\bbenchmark\b|\bmodel quality\b|\brepresentative\b|\bcomparison results\b|\bpublic\b/.test(
+      haystack,
+    )
+  ) {
+    return "core";
+  }
+
+  return "other";
+}
+
+function scoreGenericResultsTable(
+  figure: PaperFigureView,
+  question: string,
+): number {
+  const haystack = normalizeAnalysisText(
+    `${figure.figureLabel ?? ""} ${figure.captionText ?? ""} ${figure.description ?? ""}`,
+  );
+  const category = classifyResultTableCategory(figure);
+  let score = scoreFigureQuery(figure, "table", question);
+
+  if (category === "core") score += 4;
+  if (category === "multimodal") score += 3;
+  if (category === "safety") score += 2;
+  if (/\brepoqa\b|\bruler\b/.test(haystack)) score -= 3;
+  if (/\bpublic\b/.test(haystack)) score += 1;
+  if (/\brepresentative\b|\bmodel quality\b/.test(haystack)) score += 2;
+
+  return score;
+}
+
+function chooseGenericResultsTable(
+  candidates: PaperFigureView[],
+  question: string,
+  preferredCategories?: ResultTableCategory[],
+): PaperFigureView | null {
+  if (candidates.length === 0) return null;
+
+  const scored = candidates
+    .map((figure) => {
+      const category = classifyResultTableCategory(figure);
+      let score = scoreGenericResultsTable(figure, question);
+
+      if (preferredCategories?.length) {
+        const categoryRank = preferredCategories.indexOf(category);
+        score += categoryRank >= 0 ? (preferredCategories.length - categoryRank) * 3 : 0;
+      }
+
+      return { figure, score, category };
+    })
+    .sort(
+      (left, right) =>
+        right.score - left.score || left.figure.figureIndex - right.figure.figureIndex,
+    );
+
+  return scored[0]?.figure ?? null;
+}
+
 function chooseDeterministicAction(params: {
   question: string;
   intent: PaperAnswerIntent;
@@ -654,6 +735,45 @@ function chooseDeterministicAction(params: {
         target: nextReferencedTable.figureLabel ?? nextReferencedTable.id,
         query: focusQuery,
       };
+    }
+  }
+
+  if (!focusQuery && inspectedTables.length < 2) {
+    const remainingTables = tableFigures.filter((figure) =>
+      !hasObservedFigure(figure, observedFigureKeys),
+    );
+
+    if (remainingTables.length > 0) {
+      const preferredCategories =
+        inspectedTables.length === 0
+          ? (["core", "multimodal", "safety", "other"] as ResultTableCategory[])
+          : ((): ResultTableCategory[] => {
+              const firstCategory = classifyResultTableCategory(inspectedTables[0]!);
+              if (firstCategory === "core") {
+                return ["multimodal", "safety", "other", "core"];
+              }
+              if (firstCategory === "multimodal") {
+                return ["core", "safety", "other", "multimodal"];
+              }
+              if (firstCategory === "safety") {
+                return ["core", "multimodal", "other", "safety"];
+              }
+              return ["core", "multimodal", "safety", "other"];
+            })();
+
+      const genericTable = chooseGenericResultsTable(
+        remainingTables,
+        params.question,
+        preferredCategories,
+      );
+
+      if (genericTable) {
+        return {
+          type: "inspect_table",
+          target: genericTable.figureLabel ?? genericTable.id,
+          query: params.question.slice(0, 160),
+        };
+      }
     }
   }
 
@@ -1150,7 +1270,7 @@ function fallbackAgentAction(params: {
       return { type: "list_figures", kind: "figure", limit: 4 };
     case "tables":
       return { type: "inspect_table", query: params.question.slice(0, 160) };
-    case "code":
+    case "generated_artifact":
       return { type: "read_section", section: "methodology" };
     case "claims":
       return {
@@ -1338,6 +1458,7 @@ ${params.selectedText ? `Selected text:\n${truncate(params.selectedText, 800)}\n
 - Reference the method or result the snippet is based on in the summary.
 - If critical details are missing, make assumptions explicit in the assumptions array.
 - Prefer Python unless the request strongly implies another language.
+- If the user explicitly asks for a specific output format or language, honor that request in the artifact.
 
 Observations:
 ${formatObservations(params.observations)}
@@ -1701,7 +1822,7 @@ export async function preparePaperAgentEvidence(params: {
     }
   }
 
-  if (params.intent === "code") {
+  if (params.intent === "generated_artifact") {
     const codeArtifact = await generateCodeSnippetArtifact({
       paper: params.paper,
       question: params.question,
