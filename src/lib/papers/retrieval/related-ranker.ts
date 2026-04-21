@@ -161,9 +161,9 @@ const RELATED_SIGNAL_WEIGHTS = {
 
 const RELATED_RERANK_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const RELATED_RERANK_CACHE_VERSION = "2026-04-21-hub-filter-v4-bm25";
-const RELATED_LLM_LISTWISE_CANDIDATE_LIMIT = 16;
+const RELATED_LLM_LISTWISE_CANDIDATE_LIMIT = 8;
 const RELATED_LLM_LISTWISE_RESULT_LIMIT = 8;
-const RELATED_LLM_LISTWISE_MAX_TOKENS = 2_200;
+const RELATED_LLM_LISTWISE_MAX_TOKENS = 1_200;
 const RELATED_LLM_POINTWISE_CANDIDATE_LIMIT = 18;
 const RELATED_LLM_POINTWISE_RESULT_LIMIT = 10;
 const RELATED_LLM_POINTWISE_MAX_TOKENS = 2_800;
@@ -2515,7 +2515,7 @@ async function buildOpenAiAliasRelatedRerankResult(
   backendId: OpenRelatedRerankerBackendId,
   db: RelatedRerankDb = prisma,
 ): Promise<RelatedRerankResult> {
-  const aliasResult = await buildLlmPointwiseRelatedRerankResult(
+  const aliasResult = await buildLlmListwiseRelatedRerankResult(
     paperId,
     userId,
     rows,
