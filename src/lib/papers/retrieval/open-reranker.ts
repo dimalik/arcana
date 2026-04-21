@@ -203,13 +203,17 @@ function resolveOpenRelatedRerankerServiceConfig():
 
 function buildServiceRequestBody(
   config: OpenRelatedRerankerServiceConfig,
+  backendId: OpenRelatedRerankerBackendId,
   request: OpenRelatedRerankerRequest,
 ): Record<string, unknown> {
+  const backendConfig = resolveOpenRelatedRerankerConfig(backendId);
+
   if (config.mode === "native") {
     return {
       query: request.query,
       documents: request.documents.map((document) => document.text),
       top_n: request.documents.length,
+      model: backendConfig.modelId,
     };
   }
 
@@ -217,9 +221,10 @@ function buildServiceRequestBody(
     query: request.query,
     documents: request.documents.map((document) => ({
       id: document.id,
-      text: document.text,
-    })),
+        text: document.text,
+      })),
     top_n: request.documents.length,
+    model: backendConfig.modelId,
   };
 }
 
@@ -230,26 +235,43 @@ function parseServiceScores(
   const parsed = z
     .object({
       results: z.array(z.any()).optional(),
+      data: z.array(z.any()).optional(),
       output: z
         .object({
           results: z.array(z.any()).optional(),
+          data: z.array(z.any()).optional(),
         })
         .optional(),
     })
     .passthrough()
     .parse(payload);
 
-  const results = parsed.results ?? parsed.output?.results ?? [];
+  const results =
+    parsed.results ??
+    parsed.output?.results ??
+    parsed.data ??
+    parsed.output?.data ??
+    [];
   const scores = new Map<string, number>();
   for (const result of results) {
     const index =
       typeof result?.index === "number" ? result.index : null;
-    const relevance =
+    const rawScore =
       typeof result?.relevance_score === "number"
         ? result.relevance_score
         : typeof result?.relevanceScore === "number"
           ? result.relevanceScore
-          : null;
+          : typeof result?.score === "number"
+            ? result.score
+            : typeof result?.similarity === "number"
+              ? result.similarity
+              : null;
+    const relevance =
+      rawScore == null
+        ? null
+        : rawScore >= 0 && rawScore <= 1
+          ? rawScore
+          : 1 / (1 + Math.exp(-rawScore));
     if (index == null || relevance == null) continue;
     const document = request.documents[index];
     if (!document) continue;
@@ -264,6 +286,7 @@ function parseServiceScores(
 
 async function runServiceReranker(
   config: OpenRelatedRerankerServiceConfig,
+  backendId: OpenRelatedRerankerBackendId,
   request: OpenRelatedRerankerRequest,
 ): Promise<Map<string, number>> {
   const controller = new AbortController();
@@ -279,7 +302,7 @@ async function runServiceReranker(
     const response = await fetch(`${config.baseUrl}${config.path}`, {
       method: "POST",
       headers,
-      body: JSON.stringify(buildServiceRequestBody(config, request)),
+      body: JSON.stringify(buildServiceRequestBody(config, backendId, request)),
       signal: controller.signal,
     });
 
@@ -455,7 +478,11 @@ export async function runOpenRelatedReranker(
   const serviceConfig = resolveOpenRelatedRerankerServiceConfig();
   if (serviceConfig) {
     try {
-      const serviceScores = await runServiceReranker(serviceConfig, request);
+      const serviceScores = await runServiceReranker(
+        serviceConfig,
+        backendId,
+        request,
+      );
       if (serviceScores.size > 0) {
         return serviceScores;
       }
