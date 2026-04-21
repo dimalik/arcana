@@ -71,13 +71,44 @@ function PaperCard({
   isImporting: boolean;
   onImport: (paper: RecommendedPaper) => void;
 }) {
+  const [previewAbstract, setPreviewAbstract] = useState<string | null>(paper.abstract);
+  const [previewResolved, setPreviewResolved] = useState(Boolean(paper.abstract));
+  const [previewLoading, setPreviewLoading] = useState(false);
   const authorStr =
     paper.authors.length > 2
       ? `${paper.authors[0]} et al.`
       : paper.authors.join(", ");
 
+  const ensurePreviewAbstract = useCallback(async () => {
+    if (previewResolved || previewLoading) return;
+
+    setPreviewLoading(true);
+    try {
+      const params = new URLSearchParams({ title: paper.title });
+      if (paper.doi) params.set("doi", paper.doi);
+      if (paper.year != null) params.set("year", String(paper.year));
+
+      const res = await fetch(`/api/recommendations/preview?${params.toString()}`);
+      if (!res.ok) return;
+
+      const data = await res.json();
+      setPreviewAbstract(typeof data.abstract === "string" ? data.abstract : null);
+      setPreviewResolved(true);
+    } catch {
+      setPreviewResolved(true);
+    } finally {
+      setPreviewLoading(false);
+    }
+  }, [paper.doi, paper.title, paper.year, previewLoading, previewResolved]);
+
+  const abstractPreview = previewAbstract ?? paper.abstract;
+  const shouldRenderPreview = previewLoading || Boolean(abstractPreview);
+
   return (
-    <div className="group p-2.5 rounded-lg border border-border/30 hover:border-border/60 hover:bg-accent/30 transition-colors">
+    <div
+      className="group p-2.5 rounded-lg border border-border/30 hover:border-border/60 hover:bg-accent/30 transition-colors"
+      onMouseEnter={ensurePreviewAbstract}
+    >
       <a
         href={paper.externalUrl}
         target="_blank"
@@ -92,11 +123,11 @@ function PaperCard({
         {authorStr}
         {paper.year ? ` · ${paper.year}` : ""}
       </p>
-      {paper.abstract && (
+      {shouldRenderPreview && (
         <div className="grid grid-rows-[0fr] transition-[grid-template-rows] duration-200 group-hover:grid-rows-[1fr]">
           <div className="overflow-hidden">
             <p className="mt-1.5 line-clamp-4 text-xs leading-relaxed text-muted-foreground/80">
-              {paper.abstract}
+              {previewLoading ? "Loading abstract…" : abstractPreview}
             </p>
           </div>
         </div>
