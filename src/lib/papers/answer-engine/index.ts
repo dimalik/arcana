@@ -25,6 +25,7 @@ import { normalizeAnalysisText } from "../analysis/normalization/text";
 import { preparePaperAgentEvidence } from "./agent";
 
 import {
+  type AgentActionSummary,
   type AnswerCitation,
   type ChatMessageMetadata,
   type PaperAnswerIntent,
@@ -64,11 +65,7 @@ export interface PreparedPaperAnswer {
   systemPrompt: string;
   citations: AnswerCitation[];
   artifacts: ConversationArtifactDraft[];
-  agentActions?: Array<{
-    step: number;
-    action: string;
-    detail: string;
-  }>;
+  agentActions?: AgentActionSummary[];
 }
 
 const AGENT_INTENT_SET = new Set<PaperAnswerIntent>([
@@ -850,11 +847,7 @@ export async function preparePaperAnswer(
 export function buildChatMessageMetadata(params: {
   intent: PaperAnswerIntent;
   citations: AnswerCitation[];
-  agentActions?: Array<{
-    step: number;
-    action: string;
-    detail: string;
-  }>;
+  agentActions?: AgentActionSummary[];
   artifacts?: Array<{
     id?: string;
     kind: string;

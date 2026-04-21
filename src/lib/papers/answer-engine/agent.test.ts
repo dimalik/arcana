@@ -137,6 +137,17 @@ describe("preparePaperAgentEvidence", () => {
     expect(result.artifacts.map((artifact) => artifact.kind)).toEqual(
       expect.arrayContaining(["RESULT_SUMMARY", "TABLE_CARD"]),
     );
+    expect(result.actions[0]).toMatchObject({
+      phase: "retrieve",
+      tool: "read_section",
+      source: "planner",
+    });
+    expect(result.actions[1]).toMatchObject({
+      phase: "inspect",
+      tool: "inspect_table",
+      source: "planner",
+      artifactsAdded: 1,
+    });
     const tableArtifact = result.artifacts.find((artifact) => artifact.kind === "TABLE_CARD");
     expect(tableArtifact).toBeDefined();
     const payload = JSON.parse(tableArtifact!.payloadJson) as {
@@ -201,6 +212,12 @@ describe("preparePaperAgentEvidence", () => {
     expect(result.artifacts).toHaveLength(1);
     expect(result.artifacts[0]?.kind).toBe("FIGURE_CARD");
     expect(result.citations[0]?.snippet).toContain("Figure 2");
+    expect(result.actions[0]).toMatchObject({
+      phase: "inspect",
+      tool: "open_figure",
+      source: "planner",
+      artifactsAdded: 1,
+    });
   });
 
   it("generates a code snippet artifact for implementation-style questions", async () => {
@@ -235,6 +252,16 @@ describe("preparePaperAgentEvidence", () => {
     });
 
     expect(result.artifacts.map((artifact) => artifact.kind)).toContain("CODE_SNIPPET");
-    expect(result.actions.some((action) => action.action === "generate_code_snippet")).toBe(true);
+    expect(result.actions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: "Generate code snippet",
+          phase: "synthesize",
+          tool: "generate_code_snippet",
+          source: "system",
+          artifactsAdded: 1,
+        }),
+      ]),
+    );
   });
 });

@@ -29,6 +29,14 @@ export const agentActionSummarySchema = z.object({
   step: z.number().int(),
   action: z.string(),
   detail: z.string(),
+  phase: z.enum(["retrieve", "inspect", "synthesize"]).optional(),
+  status: z.enum(["completed", "missing"]).optional(),
+  source: z.enum(["planner", "fallback", "system"]).optional(),
+  tool: z.string().optional(),
+  input: z.string().nullable().optional(),
+  outputPreview: z.string().nullable().optional(),
+  citationsAdded: z.number().int().optional(),
+  artifactsAdded: z.number().int().optional(),
 });
 
 export type AgentActionSummary = z.infer<typeof agentActionSummarySchema>;

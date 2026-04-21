@@ -128,6 +128,19 @@ interface AgentObservation {
   step: number;
   action: string;
   detail: string;
+  phase: "retrieve" | "inspect" | "synthesize";
+  status: "completed" | "missing";
+  source: "planner" | "fallback" | "system";
+  tool: string;
+  input?: string | null;
+  outputPreview?: string | null;
+  citationsAdded?: number;
+  artifactsAdded?: number;
+}
+
+interface ChosenPaperAgentAction {
+  action: PaperAgentAction;
+  source: "planner" | "fallback";
 }
 
 interface CodeSnippetArtifactPayload {
@@ -799,9 +812,9 @@ async function chooseNextAgentAction(params: {
   modelId: string;
   proxyConfig?: ProxyConfig | null;
   userId?: string;
-}): Promise<PaperAgentAction> {
+}): Promise<ChosenPaperAgentAction> {
   try {
-    return await withPaperLlmContext(
+    const action = await withPaperLlmContext(
     {
       operation: PAPER_INTERACTIVE_LLM_OPERATIONS.CHAT_AGENT_PLAN,
       paperId: params.paper.id,
@@ -832,13 +845,17 @@ async function chooseNextAgentAction(params: {
       });
     },
   );
+    return { action, source: "planner" };
   } catch (error) {
     console.warn("[answer-engine] planner fallback:", error);
-    return fallbackAgentAction({
-      intent: params.intent,
-      observations: params.observations,
-      question: params.question,
-    });
+    return {
+      action: fallbackAgentAction({
+        intent: params.intent,
+        observations: params.observations,
+        question: params.question,
+      }),
+      source: "fallback",
+    };
   }
 }
 
@@ -977,7 +994,7 @@ export async function preparePaperAgentEvidence(params: {
   const observations: AgentObservation[] = [];
 
   for (let step = 1; step <= MAX_AGENT_STEPS; step += 1) {
-    const action = await chooseNextAgentAction({
+    const chosen = await chooseNextAgentAction({
       paper: params.paper,
       question: params.question,
       intent: params.intent,
@@ -990,23 +1007,37 @@ export async function preparePaperAgentEvidence(params: {
       proxyConfig: params.proxyConfig,
       userId: params.userId,
     });
+    const action = chosen.action;
 
     if (action.type === "finish") {
       observations.push({
         step,
-        action: "finish",
+        action: "Finish answer",
         detail: action.answerPlan,
+        phase: "synthesize",
+        status: "completed",
+        source: chosen.source,
+        tool: "finish",
+        outputPreview: action.answerPlan,
       });
       break;
     }
 
     if (action.type === "read_section") {
+      const citationsBefore = citations.length;
+      const artifactsBefore = artifacts.length;
       const sectionText = sections[action.section];
       if (!sectionText) {
         observations.push({
           step,
-          action: `read_section(${action.section})`,
+          action: `Read ${action.section} section`,
           detail: "Section was not available.",
+          phase: "retrieve",
+          status: "missing",
+          source: chosen.source,
+          tool: "read_section",
+          input: action.section,
+          outputPreview: "Section not available in extracted paper text.",
         });
         continue;
       }
@@ -1024,13 +1055,22 @@ export async function preparePaperAgentEvidence(params: {
 
       observations.push({
         step,
-        action: `read_section(${action.section})`,
+        action: `Read ${action.section} section`,
         detail: truncate(sectionText, 600),
+        phase: "retrieve",
+        status: "completed",
+        source: chosen.source,
+        tool: "read_section",
+        input: action.section,
+        outputPreview: `Loaded ${action.section} evidence.`,
+        citationsAdded: citations.length - citationsBefore,
+        artifactsAdded: artifacts.length - artifactsBefore,
       });
       continue;
     }
 
     if (action.type === "search_claims") {
+      const citationsBefore = citations.length;
       const rankedClaims = rankClaimsForQuery(
         params.paper.claims,
         action.query,
@@ -1039,8 +1079,14 @@ export async function preparePaperAgentEvidence(params: {
       if (rankedClaims.length === 0) {
         observations.push({
           step,
-          action: `search_claims(${action.query})`,
+          action: "Search claims",
           detail: "No relevant claims found.",
+          phase: "retrieve",
+          status: "missing",
+          source: chosen.source,
+          tool: "search_claims",
+          input: action.query,
+          outputPreview: "No relevant claims matched the question.",
         });
         continue;
       }
@@ -1050,8 +1096,15 @@ export async function preparePaperAgentEvidence(params: {
       );
       observations.push({
         step,
-        action: `search_claims(${action.query})`,
+        action: "Search claims",
         detail: rankedClaims.map((claim) => `- ${claim.text}`).join("\n"),
+        phase: "retrieve",
+        status: "completed",
+        source: chosen.source,
+        tool: "search_claims",
+        input: action.query,
+        outputPreview: `${rankedClaims.length} grounded claim${rankedClaims.length === 1 ? "" : "s"} matched.`,
+        citationsAdded: citations.length - citationsBefore,
       });
       continue;
     }
@@ -1064,7 +1117,7 @@ export async function preparePaperAgentEvidence(params: {
       ).slice(0, action.limit);
       observations.push({
         step,
-        action: `list_figures(${action.kind}${action.query ? `, ${action.query}` : ""})`,
+        action: `List ${action.kind === "any" ? "visual artifacts" : `${action.kind}s`}`,
         detail:
           visibleFigures.length > 0
             ? visibleFigures
@@ -1074,11 +1127,22 @@ export async function preparePaperAgentEvidence(params: {
                 )
                 .join("\n")
             : "No matching figures or tables were found.",
+        phase: "retrieve",
+        status: visibleFigures.length > 0 ? "completed" : "missing",
+        source: chosen.source,
+        tool: "list_figures",
+        input: action.query ?? action.kind,
+        outputPreview:
+          visibleFigures.length > 0
+            ? `${visibleFigures.length} candidate ${action.kind === "any" ? "artifacts" : `${action.kind}${visibleFigures.length === 1 ? "" : "s"}`} found.`
+            : "No matching figures or tables were found.",
       });
       continue;
     }
 
     if (action.type === "inspect_table") {
+      const citationsBefore = citations.length;
+      const artifactsBefore = artifacts.length;
       const tableFigures = figures.filter((figure) => figure.type === "table");
       const figure = action.target
         ? resolveFigureTarget(tableFigures, action.target)
@@ -1086,8 +1150,14 @@ export async function preparePaperAgentEvidence(params: {
       if (!figure) {
         observations.push({
           step,
-          action: `inspect_table(${action.target ?? action.query ?? "table"})`,
+          action: "Inspect table",
           detail: "No matching table was found.",
+          phase: "inspect",
+          status: "missing",
+          source: chosen.source,
+          tool: "inspect_table",
+          input: action.target ?? action.query ?? "table",
+          outputPreview: "No matching table was found.",
         });
         continue;
       }
@@ -1114,21 +1184,39 @@ export async function preparePaperAgentEvidence(params: {
       );
       observations.push({
         step,
-        action: `inspect_table(${action.target ?? action.query ?? "table"})`,
+        action: `Inspect ${figure.figureLabel || "table"}`,
         detail: parsedTable
           ? `${figure.figureLabel || figure.id}: ${parsedTable.rows.length} extracted rows, ${matches.length} matched preview rows.`
           : `${figure.figureLabel || figure.id}: table opened, but no structured rows were extracted.`,
+        phase: "inspect",
+        status: "completed",
+        source: chosen.source,
+        tool: "inspect_table",
+        input: action.target ?? action.query ?? "table",
+        outputPreview: parsedTable
+          ? `${matches.length} matched row${matches.length === 1 ? "" : "s"} from ${figure.figureLabel || "the table"}.`
+          : `Opened ${figure.figureLabel || "table"}, but structured rows were unavailable.`,
+        citationsAdded: citations.length - citationsBefore,
+        artifactsAdded: artifacts.length - artifactsBefore,
       });
       continue;
     }
 
     if (action.type === "open_figure") {
+      const citationsBefore = citations.length;
+      const artifactsBefore = artifacts.length;
       const figure = resolveFigureTarget(figures, action.target);
       if (!figure) {
         observations.push({
           step,
-          action: `open_figure(${action.target})`,
+          action: "Open figure",
           detail: "No matching figure or table was found.",
+          phase: "inspect",
+          status: "missing",
+          source: chosen.source,
+          tool: "open_figure",
+          input: action.target,
+          outputPreview: "No matching figure or table was found.",
         });
         continue;
       }
@@ -1141,8 +1229,16 @@ export async function preparePaperAgentEvidence(params: {
       );
       observations.push({
         step,
-        action: `open_figure(${action.target})`,
+        action: `Open ${figure.figureLabel || figure.id}`,
         detail: `${figure.figureLabel || figure.id}: ${figure.captionText || figure.description || "Opened without caption."}`,
+        phase: "inspect",
+        status: "completed",
+        source: chosen.source,
+        tool: "open_figure",
+        input: action.target,
+        outputPreview: `${figure.figureLabel || figure.id} opened for inspection.`,
+        citationsAdded: citations.length - citationsBefore,
+        artifactsAdded: artifacts.length - artifactsBefore,
       });
     }
   }
@@ -1181,11 +1277,18 @@ export async function preparePaperAgentEvidence(params: {
       userId: params.userId,
     });
     if (codeArtifact) {
+      const artifactsBefore = artifacts.length;
       artifacts.push(buildCodeArtifact(codeArtifact));
       observations.push({
         step: observations.length + 1,
-        action: "generate_code_snippet",
+        action: "Generate code snippet",
         detail: `${codeArtifact.filename}: ${codeArtifact.summary}`,
+        phase: "synthesize",
+        status: "completed",
+        source: "system",
+        tool: "generate_code_snippet",
+        outputPreview: `${codeArtifact.filename} is ready to download.`,
+        artifactsAdded: artifacts.length - artifactsBefore,
       });
     }
   }
@@ -1197,6 +1300,14 @@ export async function preparePaperAgentEvidence(params: {
       step: observation.step,
       action: observation.action,
       detail: observation.detail,
+      phase: observation.phase,
+      status: observation.status,
+      source: observation.source,
+      tool: observation.tool,
+      input: observation.input ?? null,
+      outputPreview: observation.outputPreview ?? null,
+      citationsAdded: observation.citationsAdded,
+      artifactsAdded: observation.artifactsAdded,
     })),
   };
 }

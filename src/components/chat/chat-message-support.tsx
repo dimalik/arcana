@@ -2,6 +2,14 @@
 
 import type { AgentActionSummary, AnswerCitation } from "@/lib/papers/answer-engine/metadata";
 import { Badge } from "@/components/ui/badge";
+import {
+  Bot,
+  FileSearch,
+  FileText,
+  ImageIcon,
+  Sparkles,
+  TableProperties,
+} from "lucide-react";
 
 interface ConversationArtifactRecord {
   id?: string;
@@ -413,6 +421,49 @@ function ArtifactPreview({
   );
 }
 
+function timelineIcon(action: AgentActionSummary) {
+  switch (action.tool) {
+    case "read_section":
+      return FileText;
+    case "search_claims":
+      return FileSearch;
+    case "inspect_table":
+      return TableProperties;
+    case "open_figure":
+    case "list_figures":
+      return ImageIcon;
+    case "generate_code_snippet":
+    case "finish":
+      return Sparkles;
+    default:
+      return Bot;
+  }
+}
+
+function phaseBadgeLabel(phase: AgentActionSummary["phase"]): string | null {
+  switch (phase) {
+    case "retrieve":
+      return "retrieve";
+    case "inspect":
+      return "inspect";
+    case "synthesize":
+      return "synthesize";
+    default:
+      return null;
+  }
+}
+
+function evidenceDeltaLabel(action: AgentActionSummary): string | null {
+  const parts: string[] = [];
+  if ((action.citationsAdded ?? 0) > 0) {
+    parts.push(`+${action.citationsAdded} source${action.citationsAdded === 1 ? "" : "s"}`);
+  }
+  if ((action.artifactsAdded ?? 0) > 0) {
+    parts.push(`+${action.artifactsAdded} artifact${action.artifactsAdded === 1 ? "" : "s"}`);
+  }
+  return parts.length > 0 ? parts.join("  ") : null;
+}
+
 export function ChatMessageSupport({
   citations = [],
   agentActions = [],
@@ -454,29 +505,80 @@ export function ChatMessageSupport({
       ) : null}
 
       {agentActions.length > 0 ? (
-        <div className="space-y-1.5">
+        <div className="space-y-2">
           <p className={compact ? "text-[10px] font-medium text-muted-foreground" : "text-[11px] font-medium text-muted-foreground"}>
-            Agent Actions
+            Agent Timeline
           </p>
-          <div className="space-y-1.5">
-            {agentActions.map((action) => (
-              <div
-                key={`${action.step}-${action.action}`}
-                className="rounded-md border bg-background/70 px-2.5 py-2"
-              >
-                <div className="mb-1 flex items-center gap-1.5">
-                  <Badge variant="outline" className="h-4 px-1.5 text-[10px]">
-                    step {action.step}
-                  </Badge>
-                  <p className={compact ? "text-[10px] font-medium" : "text-[11px] font-medium"}>
-                    {action.action}
-                  </p>
+          <div className="relative space-y-2">
+            <div className="absolute bottom-0 left-[11px] top-1 hidden w-px bg-border/80 sm:block" />
+            {agentActions.map((action) => {
+              const Icon = timelineIcon(action);
+              const evidenceDelta = evidenceDeltaLabel(action);
+              const phaseLabel = phaseBadgeLabel(action.phase);
+              const hasExpandedDetail =
+                Boolean(action.detail)
+                && action.detail !== action.outputPreview
+                && !compact;
+              return (
+                <div key={`${action.step}-${action.action}`} className="relative pl-0 sm:pl-7">
+                  <div className="absolute left-0 top-2 hidden h-6 w-6 items-center justify-center rounded-full border bg-background sm:flex">
+                    <Icon className="h-3.5 w-3.5 text-muted-foreground" />
+                  </div>
+                  <div className="rounded-md border bg-background/70 px-2.5 py-2">
+                    <div className="mb-1 flex flex-wrap items-center gap-1.5">
+                      <Badge variant="outline" className="h-4 px-1.5 text-[10px]">
+                        step {action.step}
+                      </Badge>
+                      {phaseLabel ? (
+                        <Badge variant="secondary" className="h-4 px-1.5 text-[10px]">
+                          {phaseLabel}
+                        </Badge>
+                      ) : null}
+                      {action.source === "fallback" ? (
+                        <Badge variant="secondary" className="h-4 px-1.5 text-[10px]">
+                          fallback
+                        </Badge>
+                      ) : null}
+                      {action.status === "missing" ? (
+                        <Badge variant="outline" className="h-4 px-1.5 text-[10px]">
+                          no hit
+                        </Badge>
+                      ) : null}
+                      <p className={compact ? "text-[10px] font-medium" : "text-[11px] font-medium"}>
+                        {action.action}
+                      </p>
+                    </div>
+
+                    {action.input ? (
+                      <p className={compact ? "mb-1 text-[10px] text-muted-foreground" : "mb-1 text-[11px] text-muted-foreground"}>
+                        Input: {action.input}
+                      </p>
+                    ) : null}
+
+                    <p className={compact ? "text-[10px] text-muted-foreground" : "text-[11px] text-muted-foreground"}>
+                      {action.outputPreview || action.detail}
+                    </p>
+
+                    {evidenceDelta ? (
+                      <p className={compact ? "mt-1 text-[10px] text-muted-foreground" : "mt-1 text-[11px] text-muted-foreground"}>
+                        {evidenceDelta}
+                      </p>
+                    ) : null}
+
+                    {hasExpandedDetail ? (
+                      <details className="mt-2">
+                        <summary className={compact ? "cursor-pointer text-[10px] text-muted-foreground" : "cursor-pointer text-[11px] text-muted-foreground"}>
+                          Show step details
+                        </summary>
+                        <pre className="mt-2 whitespace-pre-wrap rounded border bg-muted/20 p-2 text-[10px] text-muted-foreground">
+                          {action.detail}
+                        </pre>
+                      </details>
+                    ) : null}
+                  </div>
                 </div>
-                <p className={compact ? "text-[10px] text-muted-foreground" : "text-[11px] text-muted-foreground"}>
-                  {action.detail}
-                </p>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       ) : null}
