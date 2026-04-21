@@ -117,6 +117,12 @@ type ViewTab =
   | "connections"
   | "analyze";
 
+interface PaperArtifactNavigationDetail {
+  paperId: string;
+  view?: ViewTab;
+  pdfPage?: number | null;
+}
+
 const viewTabs: { value: ViewTab; icon: typeof ClipboardCheck; label: string }[] = [
   { value: "review", icon: ClipboardCheck, label: "Review" },
   { value: "methodology", icon: FlaskConical, label: "Methodology" },
@@ -169,6 +175,13 @@ export default function PaperDetailPage() {
   const [pdfVisible, setPdfVisible] = useState(
     () => searchParams.get("pdf") === "1" || Boolean(requestedPdfPage),
   );
+  const [viewerTargetPage, setViewerTargetPage] = useState<{
+    page: number | null;
+    signal: number;
+  }>(() => ({
+    page: requestedPdfPage,
+    signal: 0,
+  }));
   const [splitRatio, setSplitRatio] = useState(50);
   const [duplicateBannerBusy, setDuplicateBannerBusy] = useState(false);
   const processingDisplay = paper
@@ -301,6 +314,16 @@ export default function PaperDetailPage() {
   }, [id]);
 
   useEffect(() => {
+    setViewerTargetPage((current) => {
+      if (current.page === requestedPdfPage) return current;
+      return {
+        page: requestedPdfPage,
+        signal: current.signal + 1,
+      };
+    });
+  }, [requestedPdfPage]);
+
+  useEffect(() => {
     if (requestedView && viewTabs.some((tab) => tab.value === requestedView)) {
       setActiveView(requestedView as ViewTab);
     }
@@ -309,6 +332,41 @@ export default function PaperDetailPage() {
       setPdfVisible(true);
     }
   }, [requestedPdfPage, requestedView, searchParams]);
+
+  useEffect(() => {
+    const handleArtifactOpen = (event: Event) => {
+      const detail = (event as CustomEvent<PaperArtifactNavigationDetail>).detail;
+      if (!detail || detail.paperId !== id) return;
+
+      if (detail.view && viewTabs.some((tab) => tab.value === detail.view)) {
+        setActiveView(detail.view);
+      }
+
+      if (detail.pdfPage && detail.pdfPage > 0) {
+        setPdfVisible(true);
+        setViewerTargetPage((current) => ({
+          page: detail.pdfPage ?? null,
+          signal: current.signal + 1,
+        }));
+      }
+
+      const nextParams = new URLSearchParams(searchParams.toString());
+      if (detail.view) {
+        nextParams.set("view", detail.view);
+      }
+      if (detail.pdfPage && detail.pdfPage > 0) {
+        nextParams.set("pdf", "1");
+        nextParams.set("page", String(detail.pdfPage));
+      }
+
+      router.replace(`/papers/${id}?${nextParams.toString()}`, { scroll: false });
+    };
+
+    window.addEventListener("paper:open-artifact", handleArtifactOpen);
+    return () => {
+      window.removeEventListener("paper:open-artifact", handleArtifactOpen);
+    };
+  }, [id, router, searchParams]);
 
   useEffect(() => {
     if (!paper) return;
@@ -909,7 +967,8 @@ export default function PaperDetailPage() {
                 paperId={paper.id}
                 showOpenInNewTab
                 fitSignal={chatOpen ? 1 : 0}
-                targetPage={requestedPdfPage}
+                targetPage={viewerTargetPage.page}
+                targetPageSignal={viewerTargetPage.signal}
               />
             </div>
           </div>

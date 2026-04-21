@@ -20,6 +20,7 @@ interface PdfViewerProps {
   /** Increment to trigger a fit-to-width recalculation */
   fitSignal?: number;
   targetPage?: number | null;
+  targetPageSignal?: number;
 }
 
 type SelectMode = "text" | "area";
@@ -167,7 +168,13 @@ function AreaSelectionPopup({
 
 // ── Main component ────────────────────────────────────────────────
 
-export function PdfViewer({ paperId, showOpenInNewTab, fitSignal, targetPage }: PdfViewerProps) {
+export function PdfViewer({
+  paperId,
+  showOpenInNewTab,
+  fitSignal,
+  targetPage,
+  targetPageSignal,
+}: PdfViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const pagesScrollRef = useRef<HTMLDivElement>(null);
   const [loading, setLoading] = useState(true);
@@ -318,7 +325,7 @@ export function PdfViewer({ paperId, showOpenInNewTab, fitSignal, targetPage }: 
     }, 100);
 
     return () => window.clearTimeout(timer);
-  }, [loading, targetPage]);
+  }, [loading, targetPage, targetPageSignal]);
 
   // Recompute fit-to-width when layout changes
   useEffect(() => {

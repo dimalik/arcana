@@ -52,6 +52,12 @@ interface CodeArtifactPayload {
   assumptions?: string[] | null;
 }
 
+interface PaperArtifactNavigationDetail {
+  paperId: string;
+  view: "results" | "review" | "methodology" | "connections" | "analyze";
+  pdfPage?: number | null;
+}
+
 function parseJson<T>(value: string): T | null {
   try {
     return JSON.parse(value) as T;
@@ -123,6 +129,48 @@ function buildPaperAssetUrl(
     params.set("download", "true");
   }
   return `/api/papers/${paperId}/assets?${params.toString()}`;
+}
+
+function openPaperContextInPlace(
+  detail: PaperArtifactNavigationDetail,
+  fallbackHref: string,
+) {
+  if (typeof window === "undefined") return;
+
+  if (window.location.pathname === `/papers/${detail.paperId}`) {
+    window.dispatchEvent(
+      new CustomEvent<PaperArtifactNavigationDetail>("paper:open-artifact", {
+        detail,
+      }),
+    );
+    return;
+  }
+
+  window.location.assign(fallbackHref);
+}
+
+function OpenInPaperButton({
+  paperId,
+  pdfPage,
+  view = "results",
+}: {
+  paperId: string | null | undefined;
+  pdfPage?: number | null;
+  view?: "results" | "review" | "methodology" | "connections" | "analyze";
+}) {
+  const href = buildPaperContextHref(paperId, { pdfPage, view });
+  if (!paperId || !href) return null;
+
+  return (
+    <button
+      type="button"
+      onClick={() => openPaperContextInPlace({ paperId, pdfPage, view }, href)}
+      className="inline-flex items-center gap-1 rounded-full border border-border/60 bg-background px-2.5 py-1 text-[10px] font-medium text-foreground/75 transition-colors hover:bg-accent hover:text-foreground"
+    >
+      <ArrowUpRight className="h-3 w-3" />
+      Open in paper
+    </button>
+  );
 }
 
 function sectionTitleClass(compact: boolean) {
@@ -277,10 +325,6 @@ function ArtifactPreview({
   if (artifact.kind === "FIGURE_CARD") {
     const payload = parseJson<VisualArtifactPayload>(artifact.payloadJson);
     const imageSrc = buildPaperAssetUrl(payload?.paperId, payload?.imagePath);
-    const paperHref = buildPaperContextHref(payload?.paperId, {
-      pdfPage: payload?.pdfPage,
-      view: "results",
-    });
     return (
       <div className="space-y-3">
         {imageSrc ? (
@@ -309,15 +353,11 @@ function ArtifactPreview({
               PDF page {payload.pdfPage}
             </Badge>
           ) : null}
-          {paperHref ? (
-            <a
-              href={paperHref}
-              className="inline-flex items-center gap-1 rounded-full border border-border/60 bg-background px-2.5 py-1 text-[10px] font-medium text-foreground/75 transition-colors hover:bg-accent hover:text-foreground"
-            >
-              <ArrowUpRight className="h-3 w-3" />
-              Open in paper
-            </a>
-          ) : null}
+          <OpenInPaperButton
+            paperId={payload?.paperId}
+            pdfPage={payload?.pdfPage}
+            view="results"
+          />
           {payload?.paperId ? (
             <a
               href={buildPaperPdfHref(payload.paperId, payload.pdfPage) ?? undefined}
@@ -348,10 +388,6 @@ function ArtifactPreview({
   if (artifact.kind === "TABLE_CARD") {
     const payload = parseJson<VisualArtifactPayload>(artifact.payloadJson);
     const imageSrc = buildPaperAssetUrl(payload?.paperId, payload?.imagePath);
-    const paperHref = buildPaperContextHref(payload?.paperId, {
-      pdfPage: payload?.pdfPage,
-      view: "results",
-    });
     const csv = tableToCsv(payload?.table);
     return (
       <div className="space-y-3">
@@ -424,15 +460,11 @@ function ArtifactPreview({
               PDF page {payload.pdfPage}
             </Badge>
           ) : null}
-          {paperHref ? (
-            <a
-              href={paperHref}
-              className="inline-flex items-center gap-1 rounded-full border border-border/60 bg-background px-2.5 py-1 text-[10px] font-medium text-foreground/75 transition-colors hover:bg-accent hover:text-foreground"
-            >
-              <ArrowUpRight className="h-3 w-3" />
-              Open in paper
-            </a>
-          ) : null}
+          <OpenInPaperButton
+            paperId={payload?.paperId}
+            pdfPage={payload?.pdfPage}
+            view="results"
+          />
           {payload?.paperId ? (
             <a
               href={buildPaperPdfHref(payload.paperId, payload.pdfPage) ?? undefined}

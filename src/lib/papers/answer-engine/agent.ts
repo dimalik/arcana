@@ -77,7 +77,7 @@ const RESULT_TABLE_FOCUS_TERMS = [
   "arena",
 ];
 
-const MAX_AGENT_STEPS = 4;
+const MAX_AGENT_STEPS = 5;
 const MAX_SECTION_CHARS = 1800;
 const MAX_CITATION_SNIPPET_CHARS = 320;
 const MAX_TABLE_ROWS = 60;
@@ -470,6 +470,84 @@ function scoreFigureQuery(
   return score;
 }
 
+function buildFocusedFigureQuery(
+  question: string,
+  focusQuery: string | null,
+): string {
+  const normalizedQuestion = normalizeAnalysisText(question);
+  const extraTerms = new Set<string>();
+
+  if (
+    /\brai\b|\bresponsible ai\b|\bsafety\b|\bharm\b|\bharmful\b|\bjailbreak\b|\bungroundedness\b/.test(
+      normalizedQuestion,
+    )
+  ) {
+    [
+      "red",
+      "team",
+      "alignment",
+      "safety",
+      "harmful",
+      "response",
+      "evaluation",
+    ].forEach((term) => extraTerms.add(term));
+  }
+
+  return Array.from(
+    new Set([
+      ...tokenize(focusQuery ?? ""),
+      ...tokenize(question),
+      ...Array.from(extraTerms),
+    ]),
+  ).join(" ");
+}
+
+function collectObservedFigureKeys(observations: AgentObservation[]): Set<string> {
+  const keys = new Set<string>();
+
+  for (const observation of observations) {
+    if (
+      observation.tool !== "inspect_table"
+      && observation.tool !== "open_figure"
+    ) {
+      continue;
+    }
+
+    for (const value of [
+      observation.action,
+      observation.input ?? null,
+      observation.outputPreview ?? null,
+      observation.detail,
+    ]) {
+      if (!value) continue;
+      for (const reference of extractFigureReferences(value)) {
+        keys.add(`${reference.kind}:${reference.ordinal}`);
+      }
+    }
+
+    if (observation.input) {
+      keys.add(`target:${normalizeFigureTarget(observation.input)}`);
+    }
+  }
+
+  return keys;
+}
+
+function hasObservedFigure(
+  figure: PaperFigureView,
+  observedFigureKeys: Set<string>,
+): boolean {
+  const figureReference = parseFigureReference(figure.figureLabel);
+  if (
+    figureReference
+    && observedFigureKeys.has(`${figureReference.kind}:${figureReference.ordinal}`)
+  ) {
+    return true;
+  }
+
+  return observedFigureKeys.has(`target:${normalizeFigureTarget(figure.figureLabel ?? figure.id)}`);
+}
+
 function extractResultTableFocusQuery(question: string): string | null {
   const normalized = normalizeAnalysisText(question);
   const matchedTerms = RESULT_TABLE_FOCUS_TERMS.filter((term) =>
@@ -495,21 +573,25 @@ function chooseDeterministicAction(params: {
     (observation) =>
       observation.tool === "read_section" && observation.input === "results",
   );
-  const alreadyInspectedTable = params.observations.some((observation) =>
-    observation.tool === "inspect_table",
-  );
-  const alreadyOpenedFigure = params.observations.some((observation) =>
-    observation.tool === "open_figure",
-  );
   const focusQuery = extractResultTableFocusQuery(params.question);
+  const observedFigureKeys = collectObservedFigureKeys(params.observations);
+  const tableFigures = params.figures.filter((figure) => figure.type === "table");
+  const nonTableFigures = params.figures.filter((figure) => figure.type !== "table");
+  const inspectedTables = tableFigures.filter((figure) =>
+    hasObservedFigure(figure, observedFigureKeys),
+  );
+  const openedFigures = nonTableFigures.filter((figure) =>
+    hasObservedFigure(figure, observedFigureKeys),
+  );
+  const alreadyInspectedTable = inspectedTables.length > 0;
+  const alreadyOpenedFigure = openedFigures.length > 0;
 
   if (params.intent === "results" && focusQuery && !alreadyInspectedTable) {
     if (!alreadyReadResults) {
       return { type: "read_section", section: "results" };
     }
 
-    const tables = params.figures.filter((figure) => figure.type === "table");
-    const bestTable = tables
+    const bestTable = tableFigures
       .map((figure) => ({
         figure,
         score: scoreFigureQuery(figure, "table", focusQuery),
@@ -530,11 +612,10 @@ function chooseDeterministicAction(params: {
   }
 
   if (params.intent === "tables" && !alreadyInspectedTable) {
-    const tables = params.figures.filter((figure) => figure.type === "table");
-    if (tables.length === 0) return null;
+    if (tableFigures.length === 0) return null;
     const target =
-      filterFigures(tables, "table", params.question)[0]?.figureLabel
-      ?? filterFigures(tables, "table", params.question)[0]?.id
+      filterFigures(tableFigures, "table", params.question)[0]?.figureLabel
+      ?? filterFigures(tableFigures, "table", params.question)[0]?.id
       ?? null;
     if (target) {
       return {
@@ -549,49 +630,71 @@ function chooseDeterministicAction(params: {
     return null;
   }
 
-  if (!alreadyInspectedTable && focusQuery) {
-    const tables = params.figures.filter((figure) => figure.type === "table");
-    const bestTable = tables
+  const resultsReferences = extractFigureReferences(params.sections.results);
+  const referencedTables = resultsReferences
+    .filter((reference) => reference.kind === "table")
+    .map((reference) => resolveFigureTarget(params.figures, reference.label))
+    .filter((figure): figure is PaperFigureView => Boolean(figure))
+    .filter((figure) => figure.type === "table" && !hasObservedFigure(figure, observedFigureKeys));
+
+  if (focusQuery && inspectedTables.length < 2 && referencedTables.length > 0) {
+    const nextReferencedTable = referencedTables
       .map((figure) => ({
         figure,
         score: scoreFigureQuery(figure, "table", focusQuery),
-      }))
-      .filter((entry) => entry.score > 0)
-      .sort(
-        (left, right) =>
-          right.score - left.score || left.figure.figureIndex - right.figure.figureIndex,
-      )[0];
-
-    if (bestTable) {
-      return {
-        type: "inspect_table",
-        target: bestTable.figure.figureLabel ?? bestTable.figure.id,
-        query: focusQuery,
-      };
-    }
-  }
-
-  if (!alreadyOpenedFigure) {
-    const referencedFigures = extractFigureReferences(params.sections.results)
-      .filter((reference) => reference.kind === "figure")
-      .map((reference) => resolveFigureTarget(params.figures, reference.label))
-      .filter((figure): figure is PaperFigureView => Boolean(figure))
-      .filter((figure) => figure.type !== "table");
-
-    const bestReferencedFigure = referencedFigures
-      .map((figure) => ({
-        figure,
-        score: focusQuery ? scoreFigureQuery(figure, "figure", focusQuery) : 0,
       }))
       .sort(
         (left, right) =>
           right.score - left.score || left.figure.figureIndex - right.figure.figureIndex,
       )[0]?.figure;
 
-    if (bestReferencedFigure) {
+    if (nextReferencedTable) {
+      return {
+        type: "inspect_table",
+        target: nextReferencedTable.figureLabel ?? nextReferencedTable.id,
+        query: focusQuery,
+      };
+    }
+  }
+
+  if (!alreadyOpenedFigure) {
+    const figureQuery = buildFocusedFigureQuery(params.question, focusQuery);
+    const referencedFigures = resultsReferences
+      .filter((reference) => reference.kind === "figure")
+      .map((reference) => resolveFigureTarget(params.figures, reference.label))
+      .filter((figure): figure is PaperFigureView => Boolean(figure))
+      .filter((figure) => figure.type !== "table" && !hasObservedFigure(figure, observedFigureKeys));
+
+    const bestReferencedFigure = referencedFigures
+      .map((figure) => ({
+        figure,
+        score: figureQuery ? scoreFigureQuery(figure, "figure", figureQuery) : 0,
+      }))
+      .sort(
+        (left, right) =>
+          right.score - left.score || left.figure.figureIndex - right.figure.figureIndex,
+      )[0]?.figure;
+
+    const fallbackFigure =
+      bestReferencedFigure
+      ?? (figureQuery
+        ? nonTableFigures
+            .filter((figure) => !hasObservedFigure(figure, observedFigureKeys))
+            .map((figure) => ({
+              figure,
+              score: scoreFigureQuery(figure, "figure", figureQuery),
+            }))
+            .filter((entry) => entry.score > 0)
+            .sort(
+              (left, right) =>
+                right.score - left.score || left.figure.figureIndex - right.figure.figureIndex,
+            )[0]?.figure
+        : null);
+
+    if (fallbackFigure) {
       return {
         type: "open_figure",
-        target: bestReferencedFigure.figureLabel ?? bestReferencedFigure.id,
+        target: fallbackFigure.figureLabel ?? fallbackFigure.id,
       };
     }
   }

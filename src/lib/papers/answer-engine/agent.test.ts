@@ -220,7 +220,7 @@ describe("preparePaperAgentEvidence", () => {
     });
   });
 
-  it("forces matching result-table inspection for focused result questions", async () => {
+  it("attaches the focused result packet for focused result questions", async () => {
     hoisted.paperFigureFindMany.mockResolvedValue([
       {
         id: "fig-table-1",
@@ -240,6 +240,34 @@ describe("preparePaperAgentEvidence", () => {
         pdfPage: 5,
         sourcePage: 5,
         figureIndex: 1,
+        bbox: null,
+        type: "table",
+        parentFigureId: null,
+        isPrimaryExtraction: true,
+        width: null,
+        height: null,
+        gapReason: null,
+        imageSourceMethod: null,
+        createdAt: new Date("2026-04-21T00:00:00Z"),
+      },
+      {
+        id: "fig-table-3",
+        paperId: "paper-1",
+        publishedFigureHandleId: null,
+        figureLabel: "Table 3",
+        captionText: "Table 3: Core benchmark comparisons.",
+        captionSource: "html",
+        description:
+          "<table><tr><th>Benchmark</th><th>Phi-3-mini</th></tr><tr><td>MMLU</td><td>78.2</td></tr></table>",
+        sourceMethod: "html",
+        sourceUrl: null,
+        sourceVersion: null,
+        confidence: "high",
+        imagePath: null,
+        assetHash: null,
+        pdfPage: 6,
+        sourcePage: 6,
+        figureIndex: 3,
         bbox: null,
         type: "table",
         parentFigureId: null,
@@ -343,7 +371,7 @@ describe("preparePaperAgentEvidence", () => {
         "Short overview.",
         "",
         "## Results",
-        "Table 4 reports the in-house RAI benchmark results. Figure 5 shows the red-team evaluation after safety alignment.",
+        "Table 3 compares the core academic benchmarks. Table 4 reports the in-house RAI benchmark results. Figure 5 shows the red-team evaluation after safety alignment.",
       ].join("\n"),
       }),
       question: "Tell me about the RAI results.",
@@ -366,6 +394,12 @@ describe("preparePaperAgentEvidence", () => {
           artifactsAdded: 1,
         }),
         expect.objectContaining({
+          tool: "inspect_table",
+          source: "fallback",
+          input: "Table 3",
+          artifactsAdded: 1,
+        }),
+        expect.objectContaining({
           tool: "open_figure",
           source: "fallback",
           input: "Figure 5",
@@ -373,12 +407,16 @@ describe("preparePaperAgentEvidence", () => {
         }),
       ]),
     );
-    expect(result.artifacts.map((artifact) => artifact.kind)).toEqual(
-      expect.arrayContaining(["TABLE_CARD", "FIGURE_CARD"]),
-    );
-    const tableArtifact = result.artifacts.find((artifact) => artifact.kind === "TABLE_CARD");
-    expect(tableArtifact?.title).toBe("Table 4");
-    const payload = JSON.parse(tableArtifact!.payloadJson) as {
+    expect(result.artifacts.map((artifact) => artifact.kind)).toEqual([
+      "RESULT_SUMMARY",
+      "TABLE_CARD",
+      "TABLE_CARD",
+      "FIGURE_CARD",
+    ]);
+    const tableArtifacts = result.artifacts.filter((artifact) => artifact.kind === "TABLE_CARD");
+    expect(tableArtifacts).toHaveLength(2);
+    expect(tableArtifacts.map((artifact) => artifact.title)).toEqual(["Table 4", "Table 3"]);
+    const payload = JSON.parse(tableArtifacts[0]!.payloadJson) as {
       table?: {
         columns?: string[];
         matches?: Array<{ values: string[] }>;
