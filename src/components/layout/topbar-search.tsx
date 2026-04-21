@@ -8,6 +8,7 @@ import { toast } from "sonner";
 interface LocalPaperResult {
   id: string;
   title: string;
+  abstract: string | null;
   authors: string | null;
   year: number | null;
 }
@@ -379,6 +380,11 @@ export function TopbarSearch({ wide = false }: { wide?: boolean }) {
                             {paper.year && ` \u00b7 ${paper.year}`}
                           </div>
                         )}
+                        {selected === idx && paper.abstract && (
+                          <p className="mt-1 line-clamp-3 text-[11px] leading-relaxed text-muted-foreground">
+                            {paper.abstract}
+                          </p>
+                        )}
                       </div>
                     </button>
                   );
@@ -438,6 +444,11 @@ export function TopbarSearch({ wide = false }: { wide?: boolean }) {
                           {result.authors.length > 2 && " et al."}
                           {result.year && ` \u00b7 ${result.year}`}
                         </div>
+                        {selected === idx && result.abstract && (
+                          <p className="mt-1 line-clamp-3 text-[11px] leading-relaxed text-muted-foreground">
+                            {result.abstract}
+                          </p>
+                        )}
                       </div>
                       <div className="shrink-0 ml-1">
                         {importState === "done" ? (

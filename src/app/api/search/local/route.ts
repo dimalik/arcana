@@ -31,6 +31,7 @@ export async function GET(request: NextRequest) {
     papers: result.papers.map((paper) => ({
       id: paper.id,
       title: paper.title,
+      abstract: paper.abstract,
       authors: paper.authors,
       year: paper.year,
     })),

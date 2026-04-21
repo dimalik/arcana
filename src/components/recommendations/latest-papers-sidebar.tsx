@@ -92,6 +92,15 @@ function PaperCard({
         {authorStr}
         {paper.year ? ` · ${paper.year}` : ""}
       </p>
+      {paper.abstract && (
+        <div className="grid grid-rows-[0fr] transition-[grid-template-rows] duration-200 group-hover:grid-rows-[1fr]">
+          <div className="overflow-hidden">
+            <p className="mt-1.5 line-clamp-4 text-xs leading-relaxed text-muted-foreground/80">
+              {paper.abstract}
+            </p>
+          </div>
+        </div>
+      )}
       <div className="flex items-center justify-between mt-1.5">
         <div className="flex items-center gap-1 min-w-0">
           <span
