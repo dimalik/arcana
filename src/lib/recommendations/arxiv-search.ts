@@ -1,5 +1,5 @@
 import { XMLParser } from "fast-xml-parser";
-import type { RecommendedPaper } from "./engine";
+import type { RecommendedPaper } from "./types";
 
 const ARXIV_API = "https://export.arxiv.org/api/query";
 const DELAY_MS = 3000; // arXiv rate limit: 3s between requests

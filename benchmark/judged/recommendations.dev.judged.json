@@ -15,7 +15,39 @@
           "title": "BERT: Pre-training of Deep Bidirectional Transformers for Language Understanding"
         }
       ],
-      "judgments": [],
+      "judgments": [
+        {
+          "title": "RoBERTa: A Robustly Optimized BERT Pretraining Approach",
+          "relevance": 2,
+          "subtopics": ["encoder-pretraining", "transformer-lms"],
+          "novelty": 0.34,
+          "notes": "Direct continuation of transformer pretraining, highly relevant but not very novel."
+        },
+        {
+          "title": "XLNet: Generalized Autoregressive Pretraining for Language Understanding",
+          "relevance": 2,
+          "subtopics": ["autoregressive-pretraining", "transformer-lms"],
+          "novelty": 0.46
+        },
+        {
+          "title": "T5: Exploring the Limits of Transfer Learning with a Unified Text-to-Text Transformer",
+          "relevance": 2,
+          "subtopics": ["text-to-text", "transformer-lms"],
+          "novelty": 0.58
+        },
+        {
+          "title": "Transformer-XL: Attentive Language Models Beyond a Fixed-Length Context",
+          "relevance": 1,
+          "subtopics": ["long-context", "sequence-modeling"],
+          "novelty": 0.67
+        },
+        {
+          "title": "ALBERT: A Lite BERT for Self-supervised Learning of Language Representations",
+          "relevance": 1,
+          "subtopics": ["efficient-models", "encoder-pretraining"],
+          "novelty": 0.72
+        }
+      ],
       "notes": "Should produce useful adjacent work without repeating the same clique."
     },
     {
@@ -30,7 +62,38 @@
           "title": "Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks"
         }
       ],
-      "judgments": [],
+      "judgments": [
+        {
+          "title": "BLIP-2: Bootstrapping Language-Image Pre-training with Frozen Image Encoders and Large Language Models",
+          "relevance": 2,
+          "subtopics": ["multimodal", "vision-language"],
+          "novelty": 0.48
+        },
+        {
+          "title": "Flamingo: a Visual Language Model for Few-Shot Learning",
+          "relevance": 2,
+          "subtopics": ["multimodal", "few-shot"],
+          "novelty": 0.54
+        },
+        {
+          "title": "Atlas: Few-shot Learning with Retrieval Augmented Language Models",
+          "relevance": 2,
+          "subtopics": ["retrieval-augmented-generation", "knowledge-intensive-nlp"],
+          "novelty": 0.41
+        },
+        {
+          "title": "REALM: Retrieval-Augmented Language Model Pre-Training",
+          "relevance": 1,
+          "subtopics": ["retrieval-augmented-generation", "pretraining"],
+          "novelty": 0.45
+        },
+        {
+          "title": "LLaVA: Visual Instruction Tuning",
+          "relevance": 1,
+          "subtopics": ["multimodal", "instruction-tuning"],
+          "novelty": 0.61
+        }
+      ],
       "notes": "Tests multi-interest blending."
     },
     {
@@ -48,7 +111,38 @@
           "title": "Language Models are Few-Shot Learners"
         }
       ],
-      "judgments": [],
+      "judgments": [
+        {
+          "title": "Chinchilla: Training Compute-Optimal Large Language Models",
+          "relevance": 2,
+          "subtopics": ["scaling-laws", "foundation-models"],
+          "novelty": 0.31
+        },
+        {
+          "title": "PaLM: Scaling Language Modeling with Pathways",
+          "relevance": 1,
+          "subtopics": ["foundation-models", "scaling"],
+          "novelty": 0.29
+        },
+        {
+          "title": "GLaM: Efficient Scaling of Language Models with Mixture-of-Experts",
+          "relevance": 1,
+          "subtopics": ["mixture-of-experts", "scaling"],
+          "novelty": 0.57
+        },
+        {
+          "title": "FlashAttention: Fast and Memory-Efficient Exact Attention with IO-Awareness",
+          "relevance": 1,
+          "subtopics": ["efficient-attention", "systems"],
+          "novelty": 0.83
+        },
+        {
+          "title": "Efficient Memory Management for Large Language Model Serving with PagedAttention",
+          "relevance": 1,
+          "subtopics": ["serving", "systems"],
+          "novelty": 0.86
+        }
+      ],
       "notes": "Should not devolve into only the most popular hubs."
     },
     {
@@ -60,7 +154,38 @@
           "title": "LoRA: Low-Rank Adaptation of Large Language Models"
         }
       ],
-      "judgments": [],
+      "judgments": [
+        {
+          "title": "QLoRA: Efficient Finetuning of Quantized LLMs",
+          "relevance": 2,
+          "subtopics": ["parameter-efficient-finetuning", "quantization"],
+          "novelty": 0.43
+        },
+        {
+          "title": "AdaLoRA: Adaptive Budget Allocation for Parameter-Efficient Fine-Tuning",
+          "relevance": 2,
+          "subtopics": ["parameter-efficient-finetuning", "adaptive-rank"],
+          "novelty": 0.57
+        },
+        {
+          "title": "Prefix-Tuning: Optimizing Continuous Prompts for Generation",
+          "relevance": 1,
+          "subtopics": ["parameter-efficient-finetuning", "prompt-tuning"],
+          "novelty": 0.63
+        },
+        {
+          "title": "LLM.int8(): 8-bit Matrix Multiplication for Transformers at Scale",
+          "relevance": 1,
+          "subtopics": ["quantization", "inference-efficiency"],
+          "novelty": 0.72
+        },
+        {
+          "title": "BitFit: Simple Parameter-efficient Fine-tuning for Transformer-based Masked Language-models",
+          "relevance": 1,
+          "subtopics": ["parameter-efficient-finetuning", "lightweight-adaptation"],
+          "novelty": 0.66
+        }
+      ],
       "notes": "Should balance relevance with onboarding novelty."
     }
   ]
