@@ -18,7 +18,11 @@ import {
 } from "lucide-react";
 import { useNotebook } from "@/hooks/use-notebook";
 import { MarkdownRenderer } from "@/components/ui/markdown-renderer";
-import { ChatMessageSupport, linkifyPaperAnswerContent } from "./chat-message-support";
+import {
+  ChatArtifactsInline,
+  ChatMessageSupport,
+  linkifyPaperAnswerContent,
+} from "./chat-message-support";
 import {
   parseChatMessageMetadata,
   type AnswerCitation,
@@ -488,8 +492,9 @@ function QuickChatStream({
         .map((p) => p.text)
         .join("") || ""
     : "";
+  const hasInlineArtifacts = Boolean(assistantSupport?.artifacts?.length);
 
-  if (isLoading && !responseText) {
+  if (isLoading && !responseText && !hasInlineArtifacts) {
     return (
       <div className="flex items-center gap-2 text-xs text-muted-foreground py-1">
         <Loader2 className="h-3 w-3 animate-spin" />
@@ -498,19 +503,24 @@ function QuickChatStream({
     );
   }
 
-  if (!responseText) return null;
+  if (!responseText && !hasInlineArtifacts) return null;
   const linkedResponseText = linkifyPaperAnswerContent(responseText, {
     citations: assistantSupport?.citations,
     artifacts: assistantSupport?.artifacts,
   });
+  const hasAssistantText = linkedResponseText.trim().length > 0;
 
   return (
     <div className="max-h-40 overflow-y-auto rounded bg-muted/40 px-2.5 py-1.5 highlight-tooltip-scroll text-xs [&_p]:mb-1 [&_p]:leading-snug [&_h1]:text-sm [&_h2]:text-xs [&_h3]:text-xs [&_ul]:mb-1 [&_ol]:mb-1 [&_pre]:my-1 [&_blockquote]:my-1">
-      <MarkdownRenderer content={linkedResponseText} className="text-xs" />
+      <ChatArtifactsInline compact artifacts={assistantSupport?.artifacts} />
+      {hasAssistantText ? (
+        <MarkdownRenderer content={linkedResponseText} className="text-xs" />
+      ) : null}
       <ChatMessageSupport
         compact
         citations={assistantSupport?.citations}
         artifacts={assistantSupport?.artifacts}
+        showArtifacts={false}
       />
       {isLoading && (
         <Loader2 className="inline h-3 w-3 animate-spin text-muted-foreground ml-1" />

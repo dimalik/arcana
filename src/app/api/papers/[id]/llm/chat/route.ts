@@ -1,7 +1,6 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { streamLLMResponse } from "@/lib/llm/provider";
-import { extractFencedArtifacts } from "@/lib/chat/fenced-artifacts";
 import {
   PAPER_INTERACTIVE_LLM_OPERATIONS,
   withPaperLlmContext,
@@ -17,8 +16,8 @@ import {
   normalizeChatHistory,
   preparePaperAnswer,
   serializeChatMessageMetadata,
-  type ChatMessageMetadata,
 } from "@/lib/papers/answer-engine";
+import { finalizePaperChatArtifacts } from "@/lib/papers/answer-engine/chat-artifacts";
 import { extractChatMessageText } from "@/lib/papers/answer-engine/chat-history";
 
 const CHAT_PAPER_ACCESS_SELECT = {
@@ -29,23 +28,6 @@ const CHAT_PAPER_ACCESS_SELECT = {
   keyFindings: true,
   fullText: true,
 } as const;
-
-function buildArtifactDraftsFromFences(
-  content: string,
-): Array<{ kind: "CODE_SNIPPET"; title: string; payloadJson: string }> {
-  const { artifacts } = extractFencedArtifacts(content, 1);
-  return artifacts.map((artifact, index) => ({
-    kind: "CODE_SNIPPET",
-    title: artifact.filename || `Artifact ${index + 1}`,
-    payloadJson: JSON.stringify({
-      summary: null,
-      code: artifact.code,
-      filename: artifact.filename || `artifact-${index + 1}${artifact.language ? `.${artifact.language}` : ".txt"}`,
-      language: artifact.language || "text",
-      assumptions: [],
-    }),
-  }));
-}
 
 function hasAnswerablePaperText(paper: {
   fullText?: string | null;
@@ -138,21 +120,17 @@ export async function POST(
     );
 
     result.text.then(async (fullText) => {
-      const parsed = extractFencedArtifacts(fullText, 1);
-      const generatedArtifacts = buildArtifactDraftsFromFences(fullText);
-      const persistedArtifacts =
-        generatedArtifacts.length > 0
-          ? [
-              ...prepared.artifacts.filter((artifact) => artifact.kind !== "CODE_SNIPPET"),
-              ...generatedArtifacts,
-            ]
-          : prepared.artifacts;
+      const finalized = finalizePaperChatArtifacts({
+        content: fullText,
+        intent: prepared.intent,
+        preparedArtifacts: prepared.artifacts,
+      });
       const metadataJson = serializeChatMessageMetadata(
         buildChatMessageMetadata({
           intent: prepared.intent,
           citations: prepared.citations,
           agentActions: prepared.agentActions,
-          artifacts: persistedArtifacts,
+          artifacts: finalized.artifacts,
         }),
       );
 
@@ -160,7 +138,7 @@ export async function POST(
         data: {
           paperId: id,
           role: "assistant",
-          content: parsed.prose || fullText,
+          content: finalized.content,
           metadataJson,
           provider,
           model: modelId,

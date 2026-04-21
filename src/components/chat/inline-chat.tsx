@@ -9,7 +9,11 @@ import { Textarea } from "@/components/ui/textarea";
 import { X, Send, Loader2, ArrowUpRight, BookmarkPlus } from "lucide-react";
 import { useNotebook } from "@/hooks/use-notebook";
 import { MarkdownRenderer } from "@/components/ui/markdown-renderer";
-import { ChatMessageSupport, linkifyPaperAnswerContent } from "./chat-message-support";
+import {
+  ChatArtifactsInline,
+  ChatMessageSupport,
+  linkifyPaperAnswerContent,
+} from "./chat-message-support";
 import {
   parseChatMessageMetadata,
   type AnswerCitation,
@@ -131,6 +135,8 @@ export function InlineChat({
     citations: assistantSupport?.citations,
     artifacts: assistantSupport?.artifacts,
   });
+  const hasInlineArtifacts = Boolean(assistantSupport?.artifacts?.length);
+  const hasAssistantText = linkedResponseText.trim().length > 0;
 
   const displayText =
     selectedText.length > 150
@@ -232,14 +238,18 @@ export function InlineChat({
         )}
 
         {/* Streaming response */}
-        {responseText && (
+        {(hasAssistantText || hasInlineArtifacts) && (
           <div className="px-2.5 py-1.5">
-            <MarkdownRenderer content={linkedResponseText} className="text-xs" />
+            <ChatArtifactsInline compact artifacts={assistantSupport?.artifacts} />
+            {hasAssistantText ? (
+              <MarkdownRenderer content={linkedResponseText} className="text-xs" />
+            ) : null}
             <ChatMessageSupport
               compact
               citations={assistantSupport?.citations}
               agentActions={assistantSupport?.agentActions}
               artifacts={assistantSupport?.artifacts}
+              showArtifacts={false}
             />
             {!isLoading && (
               <div className="mt-1.5 flex justify-end">

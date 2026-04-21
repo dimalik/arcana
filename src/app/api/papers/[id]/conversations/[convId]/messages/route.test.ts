@@ -185,7 +185,7 @@ describe("POST /api/papers/[id]/conversations/[convId]/messages", () => {
     );
   });
 
-  it("extracts fenced blocks into conversation artifacts", async () => {
+  it("prefers prepared code artifacts over split fenced blocks", async () => {
     hoisted.requirePaperAccess.mockResolvedValue({
       userId: "user-1",
       paper: {
@@ -207,11 +207,25 @@ describe("POST /api/papers/[id]/conversations/[convId]/messages", () => {
       intent: "generated_artifact",
       systemPrompt: "prepared-system",
       citations: [],
-      artifacts: [],
+      artifacts: [
+        {
+          kind: "CODE_SNIPPET",
+          title: "Table 4 as LaTeX",
+          payloadJson: JSON.stringify({
+            summary: "Standalone LaTeX table for Table 4.",
+            code: "\\begin{table}\n...\\end{table}",
+            filename: "table-4.tex",
+            language: "latex",
+            assumptions: [],
+          }),
+        },
+      ],
     });
     hoisted.withPaperLlmContext.mockImplementation(async (_context, callback) => callback());
     hoisted.streamLLMResponse.mockResolvedValue({
-      text: Promise.resolve("Here it is:\n\n```latex\n\\\\begin{table}\nfoo\n\\\\end{table}\n```"),
+      text: Promise.resolve(
+        "Here is Table 4 written in LaTeX:\n\n```latex\n% header.tex\n\\\\usepackage{booktabs}\n```\n\nInclude the following packages in your preamble:\n\n```latex\n% body.tex\n\\\\begin{table}\nfoo\n\\\\end{table}\n```",
+      ),
       toTextStreamResponse: () => new Response("stream"),
     });
     hoisted.chatMessageCreate
@@ -236,7 +250,7 @@ describe("POST /api/papers/[id]/conversations/[convId]/messages", () => {
       2,
       expect.objectContaining({
         data: expect.objectContaining({
-          content: "Here it is:",
+          content: "",
         }),
       }),
     );
@@ -244,10 +258,11 @@ describe("POST /api/papers/[id]/conversations/[convId]/messages", () => {
       expect.objectContaining({
         data: expect.objectContaining({
           kind: "CODE_SNIPPET",
-          title: expect.stringMatching(/artifact-.*\.tex|Artifact 1/),
-          payloadJson: expect.stringContaining("\"language\":\"latex\""),
+          title: "Table 4 as LaTeX",
+          payloadJson: expect.stringContaining("\"filename\":\"table-4.tex\""),
         }),
       }),
     );
+    expect(hoisted.conversationArtifactCreate).toHaveBeenCalledTimes(1);
   });
 });

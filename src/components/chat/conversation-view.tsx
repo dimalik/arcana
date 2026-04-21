@@ -22,7 +22,11 @@ import {
 import { useNotebook } from "@/hooks/use-notebook";
 import { MarkdownRenderer } from "@/components/ui/markdown-renderer";
 import { PaperPicker } from "./paper-picker";
-import { ChatMessageSupport, linkifyPaperAnswerContent } from "./chat-message-support";
+import {
+  ChatArtifactsInline,
+  ChatMessageSupport,
+  linkifyPaperAnswerContent,
+} from "./chat-message-support";
 import {
   parseChatMessageMetadata,
   type ChatMessageMetadata,
@@ -327,6 +331,7 @@ export function ConversationView({
                     artifacts: message.metadata?.artifacts,
                   })
                 : messageText;
+            const hasAssistantText = linkedMessageText.trim().length > 0;
             return (
               <div
                 key={message.id}
@@ -343,15 +348,19 @@ export function ConversationView({
                 >
                   {message.role === "assistant" ? (
                     <>
-                      <MarkdownRenderer
-                        content={linkedMessageText}
-                        className="text-sm"
+                      <ChatArtifactsInline artifacts={message.metadata?.artifacts} />
+                      {hasAssistantText ? (
+                        <MarkdownRenderer
+                          content={linkedMessageText}
+                          className="text-sm"
+                        />
+                      ) : null}
+                      <ChatMessageSupport
+                        citations={message.metadata?.citations}
+                        agentActions={message.metadata?.agentActions}
+                        artifacts={message.metadata?.artifacts}
+                        showArtifacts={false}
                       />
-                            <ChatMessageSupport
-                              citations={message.metadata?.citations}
-                              agentActions={message.metadata?.agentActions}
-                              artifacts={message.metadata?.artifacts}
-                            />
                       <button
                         onClick={() =>
                           saveToNotebook({

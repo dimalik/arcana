@@ -28,6 +28,7 @@ interface ChatMessageSupportProps {
   agentActions?: AgentActionSummary[];
   artifacts?: ConversationArtifactRecord[];
   compact?: boolean;
+  showArtifacts?: boolean;
 }
 
 interface VisualArtifactPayload {
@@ -247,6 +248,10 @@ function sectionTitleClass(compact: boolean) {
 
 function sectionBodyClass(compact: boolean) {
   return compact ? "rounded-xl border border-border/50 bg-muted/15 p-2.5" : "rounded-2xl border border-border/50 bg-muted/15 p-3";
+}
+
+function artifactKindLabel(kind: string) {
+  return kind.toLowerCase().replace(/_/g, " ");
 }
 
 function SupportSection({
@@ -659,6 +664,41 @@ function ArtifactPreview({
   );
 }
 
+export function ChatArtifactsInline({
+  artifacts = [],
+  compact = false,
+}: {
+  artifacts?: ConversationArtifactRecord[];
+  compact?: boolean;
+}) {
+  if (artifacts.length === 0) return null;
+
+  return (
+    <div className={compact ? "mb-2 space-y-2" : "mb-3 space-y-2.5"}>
+      {artifacts.map((artifact) => (
+        <div
+          key={artifact.id ?? `${artifact.kind}-${artifact.title}`}
+          className={
+            compact
+              ? "rounded-xl border border-border/50 bg-background/85 px-3 py-2.5 shadow-[0_1px_0_rgba(0,0,0,0.02)]"
+              : "rounded-2xl border border-border/50 bg-background/85 px-3.5 py-3 shadow-[0_1px_0_rgba(0,0,0,0.02)]"
+          }
+        >
+          <div className="mb-2 flex flex-wrap items-center gap-1.5">
+            <Badge variant="outline" className="h-5 rounded-full px-2 text-[10px]">
+              {artifactKindLabel(artifact.kind)}
+            </Badge>
+            <p className={compact ? "text-[10px] font-medium text-foreground/85" : "text-[11px] font-medium text-foreground/85"}>
+              {artifact.title}
+            </p>
+          </div>
+          <ArtifactPreview artifact={artifact} compact={compact} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function timelineIcon(action: AgentActionSummary) {
   switch (action.tool) {
     case "read_section":
@@ -707,8 +747,10 @@ export function ChatMessageSupport({
   agentActions = [],
   artifacts = [],
   compact = false,
+  showArtifacts = true,
 }: ChatMessageSupportProps) {
-  if (citations.length === 0 && agentActions.length === 0 && artifacts.length === 0) return null;
+  const visibleArtifacts = showArtifacts ? artifacts : [];
+  if (citations.length === 0 && agentActions.length === 0 && visibleArtifacts.length === 0) return null;
 
   const wrapperClass = compact ? "mt-2 space-y-2.5" : "mt-3 space-y-3.5";
 
@@ -821,10 +863,10 @@ export function ChatMessageSupport({
         </SupportSection>
       ) : null}
 
-      {artifacts.length > 0 ? (
-        <SupportSection compact={compact} title="Artifacts" count={artifacts.length} icon={Braces}>
+      {visibleArtifacts.length > 0 ? (
+        <SupportSection compact={compact} title="Artifacts" count={visibleArtifacts.length} icon={Braces}>
           <div className={`${sectionBodyClass(compact)} space-y-2`}>
-            {artifacts.map((artifact, index) => (
+            {visibleArtifacts.map((artifact, index) => (
               <div
                 key={artifact.id ?? `${artifact.kind}-${artifact.title}`}
                 id={`artifact-${index + 1}`}
@@ -832,7 +874,7 @@ export function ChatMessageSupport({
               >
                 <div className="mb-2 flex flex-wrap items-center gap-1.5">
                   <Badge variant="outline" className="h-5 rounded-full px-2 text-[10px]">
-                    {artifact.kind.toLowerCase().replace(/_/g, " ")}
+                    {artifactKindLabel(artifact.kind)}
                   </Badge>
                   <p className={compact ? "text-[10px] font-medium text-foreground/85" : "text-[11px] font-medium text-foreground/85"}>
                     {artifact.title}
