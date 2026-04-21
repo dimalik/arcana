@@ -1,10 +1,17 @@
 "use client";
 
+import type { MouseEvent } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import type { Components } from "react-markdown";
+
+interface PaperArtifactNavigationDetail {
+  paperId: string;
+  view?: "results" | "review" | "methodology" | "connections" | "analyze";
+  pdfPage?: number | null;
+}
 
 /**
  * Normalize LaTeX delimiters so remark-math can parse them.
@@ -14,6 +21,40 @@ function normalizeLatex(text: string): string {
   return text
     .replace(/\\\((.+?)\\\)/g, (_, math) => `$${math}$`)
     .replace(/\\\[([\s\S]+?)\\\]/g, (_, math) => `$$${math}$$`);
+}
+
+function handleInternalMarkdownLinkClick(
+  event: MouseEvent<HTMLAnchorElement>,
+  href: string | undefined,
+) {
+  if (typeof window === "undefined" || !href || event.defaultPrevented) return;
+  if (!href.startsWith("/")) return;
+
+  const url = new URL(href, window.location.origin);
+  const match = url.pathname.match(/^\/papers\/([^/]+)$/);
+  if (!match?.[1]) return;
+
+  if (window.location.pathname !== url.pathname) {
+    return;
+  }
+
+  event.preventDefault();
+  window.dispatchEvent(
+    new CustomEvent<PaperArtifactNavigationDetail>("paper:open-artifact", {
+      detail: {
+        paperId: match[1],
+        view:
+          (url.searchParams.get("view") as PaperArtifactNavigationDetail["view"])
+          ?? undefined,
+        pdfPage: (() => {
+          const raw = url.searchParams.get("page");
+          if (!raw) return null;
+          const parsed = Number.parseInt(raw, 10);
+          return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+        })(),
+      },
+    }),
+  );
 }
 
 const components: Components = {
@@ -58,6 +99,7 @@ const components: Components = {
   a: ({ href, children }) => (
     <a
       href={href}
+      onClick={(event) => handleInternalMarkdownLinkClick(event, href)}
       target={href && (href.startsWith("/") || href.startsWith("#")) ? undefined : "_blank"}
       rel={href && (href.startsWith("/") || href.startsWith("#")) ? undefined : "noopener noreferrer"}
       className="text-primary underline underline-offset-2 hover:text-primary/80"
