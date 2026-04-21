@@ -154,7 +154,7 @@ const RELATED_SIGNAL_WEIGHTS = {
 } as const;
 
 const RELATED_RERANK_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
-const RELATED_RERANK_CACHE_VERSION = "2026-04-20-hub-filter-v3";
+const RELATED_RERANK_CACHE_VERSION = "2026-04-21-hub-filter-v4-bm25";
 const RELATED_LLM_LISTWISE_CANDIDATE_LIMIT = 16;
 const RELATED_LLM_LISTWISE_RESULT_LIMIT = 8;
 const RELATED_LLM_LISTWISE_MAX_TOKENS = 2_200;
@@ -166,6 +166,13 @@ const RELATED_CONTENT_EXPANSION_LIMIT = 80;
 const RELATED_CONTENT_EXPANSION_SCORE_FLOOR = 0.18;
 const RELATED_LLM_SELECTION_BOOST_WEIGHT = 0.14;
 const RELATED_LLM_POINTWISE_SCORE_WEIGHT = 0.22;
+const RELATED_BM25_K1 = 1.35;
+const RELATED_BM25_B = 0.72;
+const RELATED_BM25_FIELD_WEIGHTS = {
+  title: 2.6,
+  abstract: 1.15,
+  summary: 0.95,
+} as const;
 const relatedRerankCache = new Map<
   string,
   { expiresAt: number; result: RelatedRerankResult }
@@ -412,6 +419,64 @@ function sharedTokenCount(source: string[], candidate: string[]): number {
     if (sourceSet.has(token)) overlap += 1;
   }
   return overlap;
+}
+
+function buildTermFrequency(tokens: string[]): Map<string, number> {
+  const frequencies = new Map<string, number>();
+  for (const token of tokens) {
+    frequencies.set(token, (frequencies.get(token) ?? 0) + 1);
+  }
+  return frequencies;
+}
+
+function computeBm25InverseDocumentFrequency(
+  documentCount: number,
+  documentFrequency: number,
+): number {
+  if (documentCount <= 0) return 0;
+  return Math.log(
+    1 + (documentCount - documentFrequency + 0.5) / (documentFrequency + 0.5),
+  );
+}
+
+function computeBm25TermWeight(params: {
+  term: string;
+  termWeight: number;
+  fields: Array<{
+    weight: number;
+    frequencies: Map<string, number>;
+    fieldLength: number;
+    averageFieldLength: number;
+  }>;
+  documentCount: number;
+  documentFrequency: Map<string, number>;
+}): number {
+  let weightedFrequency = 0;
+  for (const field of params.fields) {
+    const termFrequency = field.frequencies.get(params.term) ?? 0;
+    if (termFrequency <= 0) continue;
+    const normalizedFieldLength =
+      1 -
+      RELATED_BM25_B +
+      RELATED_BM25_B *
+        (field.fieldLength / Math.max(1, field.averageFieldLength));
+    weightedFrequency +=
+      (field.weight * termFrequency) /
+      Math.max(0.1, normalizedFieldLength);
+  }
+  if (weightedFrequency <= 0) return 0;
+
+  const inverseDocumentFrequency = computeBm25InverseDocumentFrequency(
+    params.documentCount,
+    params.documentFrequency.get(params.term) ?? 0,
+  );
+
+  return (
+    params.termWeight *
+    inverseDocumentFrequency *
+    ((weightedFrequency * (RELATED_BM25_K1 + 1)) /
+      (weightedFrequency + RELATED_BM25_K1))
+  );
 }
 
 function normalizeVenue(value: string | null | undefined): string {
@@ -847,78 +912,172 @@ async function loadLexicalExpansionRows(
   },
   db: RelatedRerankDb,
 ): Promise<GraphRelationRow[]> {
-  if (params.seedSignature.queryTerms.length === 0) return [];
+  if (params.seedSignature.terms.length === 0) return [];
 
-  const candidates = new Map<
-    string,
-    {
-      id: string;
-      entityId: string | null;
-      title: string;
-      year: number | null;
-      authors: string | null;
-      abstract: string | null;
-      summary: string | null;
-      lexicalScore: number;
-    }
-  >();
+  const rows = await db.paper.findMany({
+    where: {
+      userId: params.userId,
+      duplicateState: "ACTIVE",
+      id: { notIn: [params.paperId, ...params.excludePaperIds] },
+    },
+    select: {
+      id: true,
+      entityId: true,
+      title: true,
+      year: true,
+      authors: true,
+      abstract: true,
+      summary: true,
+    },
+  });
 
-  for (const term of params.seedSignature.queryTerms) {
-    const rows = await db.paper.findMany({
-      where: {
-        userId: params.userId,
-        duplicateState: "ACTIVE",
-        id: { notIn: [params.paperId, ...params.excludePaperIds] },
-        OR: [
-          { title: { contains: term } },
-          { abstract: { contains: term } },
-          { summary: { contains: term } },
-          { tags: { some: { tag: { name: { contains: term } } } } },
-        ],
-      },
-      select: {
-        id: true,
-        entityId: true,
-        title: true,
-        year: true,
-        authors: true,
-        abstract: true,
-        summary: true,
-      },
-      orderBy: [
-        { year: "desc" },
-        { citationCount: "desc" },
-        { createdAt: "desc" },
-      ],
-      take: RELATED_LEXICAL_EXPANSION_LIMIT,
-    });
+  if (rows.length === 0) return [];
 
-    for (const row of rows) {
-      const titleOverlap = tokenOverlapScore(params.seedSignature.terms, row.title);
-      const bodyOverlap = Math.max(
-        tokenOverlapScore(params.seedSignature.terms, row.abstract),
-        tokenOverlapScore(params.seedSignature.terms, row.summary),
-      );
-      const phraseHit = Math.max(
-        phraseContainmentScore(params.seedSignature.phrases, row.title),
-        phraseContainmentScore(params.seedSignature.phrases, row.abstract),
-      );
-      const lexicalScore = Number(
-        (titleOverlap * 0.64 + bodyOverlap * 0.24 + phraseHit * 0.12).toFixed(6),
-      );
-      if (lexicalScore < 0.16) continue;
+  const queryTerms = params.seedSignature.terms;
+  const queryTermWeights = new Map<string, number>(
+    queryTerms.map((term, index) => [
+      term,
+      Number(Math.max(0.8, 1.6 - index * 0.12).toFixed(3)),
+    ]),
+  );
 
-      const current = candidates.get(row.id);
-      if (!current || lexicalScore > current.lexicalScore) {
-        candidates.set(row.id, {
-          ...row,
-          lexicalScore,
-        });
-      }
+  const documents = rows.map((row) => {
+    const titleTokens = tokenizeRelatedSignatureText(row.title);
+    const abstractTokens = tokenizeRelatedSignatureText(row.abstract);
+    const summaryTokens = tokenizeRelatedSignatureText(row.summary);
+    const uniqueTerms = new Set([
+      ...titleTokens,
+      ...abstractTokens,
+      ...summaryTokens,
+    ]);
+
+    return {
+      row,
+      titleTokens,
+      abstractTokens,
+      summaryTokens,
+      titleFrequencies: buildTermFrequency(titleTokens),
+      abstractFrequencies: buildTermFrequency(abstractTokens),
+      summaryFrequencies: buildTermFrequency(summaryTokens),
+      uniqueTerms,
+    };
+  });
+
+  const averageTitleLength =
+    documents.reduce((sum, document) => sum + document.titleTokens.length, 0) /
+      Math.max(1, documents.length) || 1;
+  const averageAbstractLength =
+    documents.reduce((sum, document) => sum + document.abstractTokens.length, 0) /
+      Math.max(1, documents.length) || 1;
+  const averageSummaryLength =
+    documents.reduce((sum, document) => sum + document.summaryTokens.length, 0) /
+      Math.max(1, documents.length) || 1;
+
+  const documentFrequency = new Map<string, number>();
+  for (const document of documents) {
+    for (const term of Array.from(document.uniqueTerms)) {
+      documentFrequency.set(term, (documentFrequency.get(term) ?? 0) + 1);
     }
   }
 
-  return Array.from(candidates.values())
+  const scoredCandidates = documents
+    .map((document) => {
+      let bm25Score = 0;
+      for (const [term, termWeight] of Array.from(queryTermWeights.entries())) {
+        bm25Score += computeBm25TermWeight({
+          term,
+          termWeight,
+          fields: [
+            {
+              weight: RELATED_BM25_FIELD_WEIGHTS.title,
+              frequencies: document.titleFrequencies,
+              fieldLength: document.titleTokens.length,
+              averageFieldLength: averageTitleLength,
+            },
+            {
+              weight: RELATED_BM25_FIELD_WEIGHTS.abstract,
+              frequencies: document.abstractFrequencies,
+              fieldLength: document.abstractTokens.length,
+              averageFieldLength: averageAbstractLength,
+            },
+            {
+              weight: RELATED_BM25_FIELD_WEIGHTS.summary,
+              frequencies: document.summaryFrequencies,
+              fieldLength: document.summaryTokens.length,
+              averageFieldLength: averageSummaryLength,
+            },
+          ],
+          documentCount: documents.length,
+          documentFrequency,
+        });
+      }
+
+      const titleOverlap = tokenOverlapScore(queryTerms, document.row.title);
+      const bodyOverlap = Math.max(
+        tokenOverlapScore(queryTerms, document.row.abstract),
+        tokenOverlapScore(queryTerms, document.row.summary),
+      );
+      const phraseTitleHit = phraseContainmentScore(
+        params.seedSignature.phrases,
+        document.row.title,
+      );
+      const phraseBodyHit = Math.max(
+        phraseContainmentScore(params.seedSignature.phrases, document.row.abstract),
+        phraseContainmentScore(params.seedSignature.phrases, document.row.summary),
+      );
+
+      return {
+        ...document.row,
+        bm25Score,
+        titleOverlap,
+        bodyOverlap,
+        phraseTitleHit,
+        phraseBodyHit,
+      };
+    })
+    .filter(
+      (candidate) =>
+        candidate.bm25Score > 0 ||
+        candidate.phraseTitleHit > 0 ||
+        candidate.phraseBodyHit > 0,
+    );
+
+  if (scoredCandidates.length === 0) return [];
+
+  const maxBm25Score = Math.max(
+    1e-6,
+    ...scoredCandidates.map((candidate) => candidate.bm25Score),
+  );
+
+  const candidates = scoredCandidates
+    .map((candidate) => {
+      const normalizedBm25 = Number(
+        (candidate.bm25Score / maxBm25Score).toFixed(6),
+      );
+      const lexicalScore = Number(
+        (
+          normalizedBm25 * 0.62 +
+          candidate.titleOverlap * 0.16 +
+          candidate.bodyOverlap * 0.08 +
+          candidate.phraseTitleHit * 0.1 +
+          candidate.phraseBodyHit * 0.04
+        ).toFixed(6),
+      );
+      return {
+        ...candidate,
+        lexicalScore,
+      };
+    })
+    .filter(
+      (candidate) =>
+        candidate.lexicalScore >= 0.14 &&
+        (candidate.titleOverlap >= 0.12 ||
+          candidate.phraseTitleHit > 0 ||
+          candidate.phraseBodyHit > 0 ||
+          candidate.bodyOverlap >= 0.18),
+    );
+
+  return candidates
     .sort((left, right) => {
       if (right.lexicalScore !== left.lexicalScore) {
         return right.lexicalScore - left.lexicalScore;
@@ -937,7 +1096,8 @@ async function loadLexicalExpansionRows(
         duplicateState: "ACTIVE",
       },
       relationType: "related",
-      description: "Related via shared topical terms in title, abstract, or tags.",
+      description:
+        "Recovered by sparse lexical relatedness over title, abstract, and summary terms.",
       confidence: Number((0.18 + candidate.lexicalScore * 0.52).toFixed(6)),
       isAutoGenerated: true,
     }));

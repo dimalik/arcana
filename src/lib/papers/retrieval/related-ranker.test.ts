@@ -513,4 +513,212 @@ describe("related-ranker", () => {
       "cand-b",
     ]);
   });
+
+  it("recovers exact terminology matches through sparse lexical expansion", async () => {
+    const papers = new Map<string, MockPaperRow>([
+      [
+        "seed",
+        {
+          id: "seed",
+          userId: "user-1",
+          entityId: "entity-seed",
+          title:
+            "Reward Shaping Signals for Alignment in Reinforcement Learning Agents",
+          abstract:
+            "We study reward shaping, assistant rewards, and reinforcement learning credit assignment.",
+          summary: null,
+          authors: JSON.stringify(["Seed Author"]),
+          year: 2025,
+          venue: null,
+          citationCount: 12,
+          duplicateState: "ACTIVE",
+          _count: {
+            sourceRelations: 0,
+            targetRelations: 0,
+          },
+        },
+      ],
+      [
+        "exact",
+        {
+          id: "exact",
+          userId: "user-1",
+          entityId: "entity-exact",
+          title:
+            "Reward Shaping for Reinforcement Learning with An Assistant Reward Agent",
+          abstract:
+            "Assistant reward modeling and reward shaping for reinforcement learning agents.",
+          summary: null,
+          authors: JSON.stringify(["Exact Match Author"]),
+          year: 2024,
+          venue: null,
+          citationCount: 6,
+          duplicateState: "ACTIVE",
+          _count: {
+            sourceRelations: 0,
+            targetRelations: 0,
+          },
+        },
+      ],
+      [
+        "generic",
+        {
+          id: "generic",
+          userId: "user-1",
+          entityId: "entity-generic",
+          title: "Practical Alignment Tuning for Reinforcement Learning Agents",
+          abstract:
+            "Generic reinforcement learning alignment and preference optimization techniques.",
+          summary: null,
+          authors: JSON.stringify(["Generic Author"]),
+          year: 2024,
+          venue: null,
+          citationCount: 40,
+          duplicateState: "ACTIVE",
+          _count: {
+            sourceRelations: 0,
+            targetRelations: 0,
+          },
+        },
+      ],
+      [
+        "unrelated",
+        {
+          id: "unrelated",
+          userId: "user-1",
+          entityId: "entity-unrelated",
+          title: "Fast Boundary Detection for High-Resolution Remote Sensing",
+          abstract:
+            "Boundary detection and vision pipelines for satellite image segmentation.",
+          summary: null,
+          authors: JSON.stringify(["Vision Author"]),
+          year: 2024,
+          venue: null,
+          citationCount: 55,
+          duplicateState: "ACTIVE",
+          _count: {
+            sourceRelations: 0,
+            targetRelations: 0,
+          },
+        },
+      ],
+    ]);
+
+    const representations = new Map([
+      ["seed", createRepresentationRow("seed", [1, 0, 0], ["reward shaping", "reinforcement learning"])],
+      ["exact", createRepresentationRow("exact", [0.72, 0.28, 0], ["assistant reward", "reinforcement learning"])],
+      ["generic", createRepresentationRow("generic", [0.91, 0.09, 0], ["alignment", "reinforcement learning"])],
+      ["unrelated", createRepresentationRow("unrelated", [0.18, 0.82, 0], ["vision"])],
+    ]);
+
+    const db = {
+      paper: {
+        findUnique: async ({ where }: { where: { id: string } }) =>
+          papers.get(where.id) ?? null,
+        findMany: async ({
+          where,
+          take,
+        }: {
+          where: {
+            id?: { in?: string[]; not?: string; notIn?: string[] };
+            userId?: string;
+            duplicateState?: string;
+            OR?: Array<
+              | { title: { contains: string } }
+              | { abstract: { contains: string } }
+              | { summary: { contains: string } }
+              | { tags: { some: { tag: { name: { contains: string } } } } }
+            >;
+            representations?: unknown;
+          };
+          take?: number;
+        }) => {
+          const allPapers = Array.from(papers.values()) as MockPaperRow[];
+          if (where.id?.in) {
+            return allPapers.filter((paper) => where.id?.in?.includes(paper.id));
+          }
+
+          return allPapers
+            .filter((paper) => (where.userId ? paper.userId === where.userId : true))
+            .filter((paper) =>
+              where.duplicateState ? paper.duplicateState === where.duplicateState : true,
+            )
+            .filter((paper) => (where.id?.not ? paper.id !== where.id.not : true))
+            .filter((paper) =>
+              where.id?.notIn ? !where.id.notIn.includes(paper.id) : true,
+            )
+            .filter((paper) => {
+              if (where.OR?.length) {
+                return where.OR.some((clause) => {
+                  if ("title" in clause) {
+                    return paper.title
+                      .toLowerCase()
+                      .includes(clause.title.contains.toLowerCase());
+                  }
+                  if ("abstract" in clause) {
+                    return (paper.abstract ?? "")
+                      .toLowerCase()
+                      .includes(clause.abstract.contains.toLowerCase());
+                  }
+                  if ("summary" in clause) {
+                    return (paper.summary ?? "")
+                      .toLowerCase()
+                      .includes(clause.summary.contains.toLowerCase());
+                  }
+                  return false;
+                });
+              }
+              if (where.representations) {
+                return representations.has(paper.id);
+              }
+              return true;
+            })
+            .map((paper) => ({
+              ...paper,
+              representations: representations.has(paper.id)
+                ? [representations.get(paper.id)]
+                : [],
+            }))
+            .slice(0, take ?? allPapers.length);
+        },
+      },
+      paperRepresentation: {
+        findUnique: async ({
+          where,
+        }: {
+          where: { paperId_representationKind: { paperId: string } };
+        }) => representations.get(where.paperId_representationKind.paperId) ?? null,
+        findMany: async ({
+          where,
+        }: {
+          where: { paperId?: { in?: string[] } };
+        }) =>
+          Array.from(representations.values()).filter((row) =>
+            where.paperId?.in ? where.paperId.in.includes(row.paperId) : true,
+          ),
+        upsert: async () => {
+          throw new Error("upsert should not be called in this test");
+        },
+      },
+      paperRelation: {
+        findMany: async () => [],
+      },
+      relationAssertion: {
+        findMany: async () => [],
+      },
+    };
+
+    const result = await buildRelatedRerankResult(
+      "seed",
+      "user-1",
+      [],
+      db as never,
+    );
+
+    expect(result.rerankedRows.map((row) => row.relatedPaper.id)).toContain("exact");
+    expect(result.rerankedRows[0]?.relatedPaper.id).toBe("exact");
+    expect(result.rerankedRows.map((row) => row.relatedPaper.id)).not.toContain(
+      "unrelated",
+    );
+  });
 });
