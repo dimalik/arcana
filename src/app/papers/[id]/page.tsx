@@ -328,8 +328,12 @@ export default function PaperDetailPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [paper?.processingStatus, id]);
 
-  // Fetch related paper titles for clickable links in Analyze tab
+  // Fetch related paper titles lazily when Analyze is opened.
   useEffect(() => {
+    if (activeView !== "analyze") return;
+    if (Object.keys(relatedPaperMap).length > 0) return;
+
+    let cancelled = false;
     (async () => {
       try {
         const res = await fetch(`/api/papers/${id}/relations`);
@@ -339,15 +343,24 @@ export default function PaperDetailPage() {
           for (const r of rels) {
             map[r.relatedPaper.id] = r.relatedPaper.title;
           }
-          setRelatedPaperMap(map);
+          if (!cancelled) {
+            setRelatedPaperMap(map);
+          }
         }
       } catch {
         // ignore
       }
     })();
-  }, [id]);
+    return () => {
+      cancelled = true;
+    };
+  }, [activeView, id, relatedPaperMap]);
 
   const processingStatus = paper?.processingStatus;
+  useEffect(() => {
+    setRelatedPaperMap({});
+  }, [id]);
+
   useEffect(() => {
     if (
       reprocessing &&

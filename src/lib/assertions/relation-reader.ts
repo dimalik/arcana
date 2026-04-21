@@ -186,23 +186,41 @@ export async function listAggregatedRelationRowsForPaper(
   db: RelationReaderDb = prisma,
 ): Promise<GraphRelationRow[]> {
   const aggregated = await getAggregatedRelationsForPaper(paperId, entityId, userId, db);
+  if (aggregated.length === 0) return [];
+
+  const peerEntityIds = aggregated.map((aggregate) => aggregate.peerEntityId);
+  const localPapers = await db.paper.findMany({
+    where: {
+      ...paperVisibilityWhere(userId),
+      entityId: { in: peerEntityIds },
+    },
+    orderBy: [
+      { citationCount: "desc" },
+      { year: "desc" },
+      { createdAt: "desc" },
+    ],
+    select: GRAPH_RELATED_PAPER_SELECT,
+  });
+
+  const localPaperByEntityId = new Map<string, GraphRelatedPaperSummary>();
+  for (const paper of localPapers) {
+    if (!paper.entityId || localPaperByEntityId.has(paper.entityId)) continue;
+    localPaperByEntityId.set(
+      paper.entityId,
+      paper as GraphRelatedPaperSummary,
+    );
+  }
+
   const rows: GraphRelationRow[] = [];
 
   for (const aggregate of aggregated) {
-    const localPaper = await db.paper.findFirst({
-      where: {
-        ...paperVisibilityWhere(userId),
-        entityId: aggregate.peerEntityId,
-      },
-      select: GRAPH_RELATED_PAPER_SELECT,
-    });
-
+    const localPaper = localPaperByEntityId.get(aggregate.peerEntityId);
     if (!localPaper) continue;
 
     rows.push(
       mapAggregateRowToRelation(
         aggregate,
-        localPaper as GraphRelatedPaperSummary,
+        localPaper,
       ),
     );
   }
