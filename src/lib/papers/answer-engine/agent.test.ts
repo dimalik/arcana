@@ -303,6 +303,33 @@ describe("preparePaperAgentEvidence", () => {
         imageSourceMethod: null,
         createdAt: new Date("2026-04-21T00:00:00Z"),
       },
+      {
+        id: "fig-5",
+        paperId: "paper-1",
+        publishedFigureHandleId: null,
+        figureLabel: "Figure 5",
+        captionText: "Figure 5: Microsoft AI Red Team evaluation before and after safety alignment.",
+        captionSource: "html",
+        description: "The harmful response rate decreases after alignment under adversarial red-team conversations.",
+        sourceMethod: "html",
+        sourceUrl: null,
+        sourceVersion: null,
+        confidence: "high",
+        imagePath: "uploads/figures/paper-1/figure-5.png",
+        assetHash: null,
+        pdfPage: 8,
+        sourcePage: 8,
+        figureIndex: 5,
+        bbox: null,
+        type: "figure",
+        parentFigureId: null,
+        isPrimaryExtraction: true,
+        width: 1200,
+        height: 800,
+        gapReason: null,
+        imageSourceMethod: "html",
+        createdAt: new Date("2026-04-21T00:00:00Z"),
+      },
     ]);
     hoisted.generateStructuredObject
       .mockResolvedValueOnce({
@@ -312,12 +339,12 @@ describe("preparePaperAgentEvidence", () => {
     const result = await preparePaperAgentEvidence({
       paper: makePaper({
         summary: [
-          "## Summary",
-          "Short overview.",
-          "",
-          "## Results",
-          "Table 4 reports the in-house RAI benchmark results.",
-        ].join("\n"),
+        "## Summary",
+        "Short overview.",
+        "",
+        "## Results",
+        "Table 4 reports the in-house RAI benchmark results. Figure 5 shows the red-team evaluation after safety alignment.",
+      ].join("\n"),
       }),
       question: "Tell me about the RAI results.",
       intent: "results",
@@ -338,9 +365,17 @@ describe("preparePaperAgentEvidence", () => {
           input: "Table 4",
           artifactsAdded: 1,
         }),
+        expect.objectContaining({
+          tool: "open_figure",
+          source: "fallback",
+          input: "Figure 5",
+          artifactsAdded: 1,
+        }),
       ]),
     );
-    expect(result.artifacts.map((artifact) => artifact.kind)).toContain("TABLE_CARD");
+    expect(result.artifacts.map((artifact) => artifact.kind)).toEqual(
+      expect.arrayContaining(["TABLE_CARD", "FIGURE_CARD"]),
+    );
     const tableArtifact = result.artifacts.find((artifact) => artifact.kind === "TABLE_CARD");
     expect(tableArtifact?.title).toBe("Table 4");
     const payload = JSON.parse(tableArtifact!.payloadJson) as {
@@ -359,6 +394,8 @@ describe("preparePaperAgentEvidence", () => {
       "0.603",
       "0.328",
     ]);
+    const figureArtifact = result.artifacts.find((artifact) => artifact.kind === "FIGURE_CARD");
+    expect(figureArtifact?.title).toBe("Figure 5");
   });
 
   it("generates a code snippet artifact for implementation-style questions", async () => {

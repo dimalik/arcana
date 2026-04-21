@@ -400,6 +400,30 @@ function parseFigureReference(
   };
 }
 
+function extractFigureReferences(
+  value: string | null | undefined,
+): Array<{ kind: "figure" | "table"; ordinal: string; label: string }> {
+  if (!value) return [];
+  const seen = new Set<string>();
+  const matches = Array.from(
+    value.matchAll(/\b(Figure|Table)\s+([A-Za-z0-9][A-Za-z0-9.-]*)\b/g),
+  );
+  return matches
+    .map((match) => {
+      const kind = match[1]?.toLowerCase() === "table" ? "table" as const : "figure" as const;
+      const ordinal = match[2] ?? "";
+      const label = `${kind === "table" ? "Table" : "Figure"} ${ordinal}`;
+      return { kind, ordinal, label };
+    })
+    .filter((reference) => {
+      if (!reference.ordinal) return false;
+      const key = `${reference.kind}:${reference.ordinal}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+}
+
 function filterFigures(
   figures: PaperFigureView[],
   kind: "figure" | "table" | "any",
@@ -463,6 +487,7 @@ function extractResultTableFocusQuery(question: string): string | null {
 function chooseDeterministicAction(params: {
   question: string;
   intent: PaperAnswerIntent;
+  sections: Record<SummarySectionName, string>;
   figures: PaperFigureView[];
   observations: AgentObservation[];
 }): PaperAgentAction | null {
@@ -471,8 +496,10 @@ function chooseDeterministicAction(params: {
       observation.tool === "read_section" && observation.input === "results",
   );
   const alreadyInspectedTable = params.observations.some((observation) =>
-    observation.tool === "inspect_table"
-    || observation.tool === "open_figure",
+    observation.tool === "inspect_table",
+  );
+  const alreadyOpenedFigure = params.observations.some((observation) =>
+    observation.tool === "open_figure",
   );
   const focusQuery = extractResultTableFocusQuery(params.question);
 
@@ -518,30 +545,58 @@ function chooseDeterministicAction(params: {
     }
   }
 
-  if (params.intent !== "results" || !alreadyReadResults || alreadyInspectedTable) {
+  if (params.intent !== "results" || !alreadyReadResults) {
     return null;
   }
-  if (!focusQuery) return null;
 
-  const tables = params.figures.filter((figure) => figure.type === "table");
-  const bestTable = tables
-    .map((figure) => ({
-      figure,
-      score: scoreFigureQuery(figure, "table", focusQuery),
-    }))
-    .filter((entry) => entry.score > 0)
-    .sort(
-      (left, right) =>
-        right.score - left.score || left.figure.figureIndex - right.figure.figureIndex,
-    )[0];
+  if (!alreadyInspectedTable && focusQuery) {
+    const tables = params.figures.filter((figure) => figure.type === "table");
+    const bestTable = tables
+      .map((figure) => ({
+        figure,
+        score: scoreFigureQuery(figure, "table", focusQuery),
+      }))
+      .filter((entry) => entry.score > 0)
+      .sort(
+        (left, right) =>
+          right.score - left.score || left.figure.figureIndex - right.figure.figureIndex,
+      )[0];
 
-  if (!bestTable) return null;
+    if (bestTable) {
+      return {
+        type: "inspect_table",
+        target: bestTable.figure.figureLabel ?? bestTable.figure.id,
+        query: focusQuery,
+      };
+    }
+  }
 
-  return {
-    type: "inspect_table",
-    target: bestTable.figure.figureLabel ?? bestTable.figure.id,
-    query: focusQuery,
-  };
+  if (!alreadyOpenedFigure) {
+    const referencedFigures = extractFigureReferences(params.sections.results)
+      .filter((reference) => reference.kind === "figure")
+      .map((reference) => resolveFigureTarget(params.figures, reference.label))
+      .filter((figure): figure is PaperFigureView => Boolean(figure))
+      .filter((figure) => figure.type !== "table");
+
+    const bestReferencedFigure = referencedFigures
+      .map((figure) => ({
+        figure,
+        score: focusQuery ? scoreFigureQuery(figure, "figure", focusQuery) : 0,
+      }))
+      .sort(
+        (left, right) =>
+          right.score - left.score || left.figure.figureIndex - right.figure.figureIndex,
+      )[0]?.figure;
+
+    if (bestReferencedFigure) {
+      return {
+        type: "open_figure",
+        target: bestReferencedFigure.figureLabel ?? bestReferencedFigure.id,
+      };
+    }
+  }
+
+  return null;
 }
 
 function resolveFigureTarget(
@@ -1085,6 +1140,7 @@ async function chooseNextAgentAction(params: {
   const deterministicAction = chooseDeterministicAction({
     question: params.question,
     intent: params.intent,
+    sections: params.sections,
     figures: params.figures,
     observations: params.observations,
   });
