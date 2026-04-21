@@ -209,7 +209,10 @@ export default function ChatPage() {
                               }
                               className="text-sm"
                             />
-                            <ChatMessageSupport citations={message.metadata?.citations} />
+                            <ChatMessageSupport
+                              citations={message.metadata?.citations}
+                              artifacts={message.metadata?.artifacts}
+                            />
                           </>
                         ) : (
                           <p className="text-sm whitespace-pre-wrap">

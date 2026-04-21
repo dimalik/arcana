@@ -29,7 +29,7 @@ import {
 } from "@/lib/papers/answer-engine/metadata";
 
 interface ConversationArtifactRecord {
-  id: string;
+  id?: string;
   kind: string;
   title: string;
   payloadJson: string;

@@ -179,6 +179,35 @@ export const distillRuntimeOutputSchema = z
   })
   .passthrough();
 
+export const paperAnswerAgentActionRuntimeOutputSchema = z.discriminatedUnion(
+  "type",
+  [
+    z.object({
+      type: z.literal("read_section"),
+      section: z.enum(["overview", "methodology", "results"]),
+    }),
+    z.object({
+      type: z.literal("search_claims"),
+      query: z.string().min(1).max(160),
+      limit: z.coerce.number().int().min(1).max(6).default(4),
+    }),
+    z.object({
+      type: z.literal("list_figures"),
+      kind: z.enum(["figure", "table", "any"]).default("any"),
+      query: z.string().max(120).optional(),
+      limit: z.coerce.number().int().min(1).max(8).default(5),
+    }),
+    z.object({
+      type: z.literal("open_figure"),
+      target: z.string().min(1).max(120),
+    }),
+    z.object({
+      type: z.literal("finish"),
+      answerPlan: z.string().min(1).max(240),
+    }),
+  ],
+);
+
 export const PROCESSING_RUNTIME_OUTPUT_SCHEMAS = {
   extract: extractRuntimeOutputSchema,
   extractClaims: extractClaimsRuntimeOutputSchema,
@@ -192,6 +221,7 @@ export const PROCESSING_RUNTIME_OUTPUT_SCHEMAS = {
   distill: distillRuntimeOutputSchema,
   rerankRelatedPapers: rerankRelatedPapersRuntimeOutputSchema,
   scoreRelatedPapersPointwise: scoreRelatedPapersPointwiseRuntimeOutputSchema,
+  paperAnswerAgentAction: paperAnswerAgentActionRuntimeOutputSchema,
 } as const;
 
 export type ProcessingRuntimeStructuredPromptType =
@@ -221,6 +251,9 @@ export type ExtractCitationContextsRuntimeOutput = z.infer<
   typeof extractCitationContextsRuntimeOutputSchema
 >;
 export type DistillRuntimeOutput = z.infer<typeof distillRuntimeOutputSchema>;
+export type PaperAnswerAgentActionRuntimeOutput = z.infer<
+  typeof paperAnswerAgentActionRuntimeOutputSchema
+>;
 export type RerankRelatedPapersRuntimeOutput = z.infer<
   typeof rerankRelatedPapersRuntimeOutputSchema
 >;

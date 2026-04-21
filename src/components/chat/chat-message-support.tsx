@@ -4,7 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import type { AnswerCitation } from "@/lib/papers/answer-engine/metadata";
 
 interface ConversationArtifactRecord {
-  id: string;
+  id?: string;
   kind: string;
   title: string;
   payloadJson: string;
@@ -32,6 +32,30 @@ function ArtifactPreview({
   compact: boolean;
 }) {
   const baseClass = compact ? "text-[11px]" : "text-xs";
+
+  if (artifact.kind === "RESULT_SUMMARY") {
+    const payload = parseJson<{
+      excerpt?: string;
+      claims?: Array<{ text: string; sectionPath?: string | null }>;
+    }>(artifact.payloadJson);
+    return (
+      <div className="space-y-1">
+        {payload?.excerpt ? (
+          <p className={`${baseClass} text-muted-foreground`}>
+            {payload.excerpt}
+          </p>
+        ) : null}
+        {(payload?.claims ?? []).slice(0, compact ? 1 : 2).map((claim, index) => (
+          <p
+            key={`${artifact.id ?? artifact.title}-result-claim-${index}`}
+            className={`${baseClass} text-muted-foreground`}
+          >
+            {claim.text}
+          </p>
+        ))}
+      </div>
+    );
+  }
 
   if (artifact.kind === "CLAIM_LIST") {
     const payload = parseJson<{
@@ -139,6 +163,113 @@ function ArtifactPreview({
     );
   }
 
+  if (artifact.kind === "FIGURE_CARD") {
+    const payload = parseJson<{
+      figureLabel?: string | null;
+      captionText?: string | null;
+      description?: string | null;
+      imagePath?: string | null;
+      pdfPage?: number | null;
+    }>(artifact.payloadJson);
+    const imageSrc = payload?.imagePath
+      ? payload.imagePath.startsWith("/")
+        ? payload.imagePath
+        : `/${payload.imagePath}`
+      : null;
+    return (
+      <div className="space-y-2">
+        {imageSrc ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={imageSrc}
+            alt={payload?.captionText || payload?.figureLabel || artifact.title}
+            className="max-h-40 rounded border object-contain bg-muted/30"
+          />
+        ) : null}
+        {payload?.captionText ? (
+          <p className={`${baseClass} text-muted-foreground`}>
+            {payload.captionText}
+          </p>
+        ) : null}
+        {payload?.description ? (
+          <p className={`${baseClass} text-muted-foreground`}>
+            {payload.description}
+          </p>
+        ) : null}
+        {payload?.pdfPage ? (
+          <p className={`${baseClass} text-muted-foreground`}>
+            PDF page {payload.pdfPage}
+          </p>
+        ) : null}
+      </div>
+    );
+  }
+
+  if (artifact.kind === "TABLE_CARD") {
+    const payload = parseJson<{
+      figureLabel?: string | null;
+      captionText?: string | null;
+      description?: string | null;
+      imagePath?: string | null;
+      pdfPage?: number | null;
+    }>(artifact.payloadJson);
+    const imageSrc = payload?.imagePath
+      ? payload.imagePath.startsWith("/")
+        ? payload.imagePath
+        : `/${payload.imagePath}`
+      : null;
+    return (
+      <div className="space-y-2">
+        {payload?.captionText ? (
+          <p className={`${baseClass} text-muted-foreground`}>
+            {payload.captionText}
+          </p>
+        ) : null}
+        {payload?.description ? (
+          <p className={`${baseClass} text-muted-foreground`}>
+            {payload.description}
+          </p>
+        ) : null}
+        {imageSrc ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={imageSrc}
+            alt={payload?.captionText || payload?.figureLabel || artifact.title}
+            className="max-h-40 rounded border object-contain bg-muted/30"
+          />
+        ) : null}
+        {payload?.pdfPage ? (
+          <p className={`${baseClass} text-muted-foreground`}>
+            PDF page {payload.pdfPage}
+          </p>
+        ) : null}
+      </div>
+    );
+  }
+
+  if (artifact.kind === "CODE_SNIPPET") {
+    const payload = parseJson<{
+      summary?: string | null;
+      code?: string | null;
+      filename?: string | null;
+    }>(artifact.payloadJson);
+    return (
+      <div className="space-y-1">
+        {payload?.summary ? (
+          <p className={`${baseClass} text-muted-foreground`}>{payload.summary}</p>
+        ) : null}
+        {payload?.filename ? (
+          <p className={`${baseClass} text-muted-foreground`}>{payload.filename}</p>
+        ) : null}
+        {payload?.code ? (
+          <pre className="overflow-x-auto rounded border bg-muted/40 p-2 text-[10px] text-muted-foreground">
+            {payload.code}
+          </pre>
+        ) : null}
+      </div>
+    );
+  }
+
   return (
     <p className={`${baseClass} text-muted-foreground`}>
       Structured artifact attached.
@@ -193,7 +324,7 @@ export function ChatMessageSupport({
           <div className="space-y-1.5">
             {artifacts.map((artifact) => (
               <div
-                key={artifact.id}
+                key={artifact.id ?? `${artifact.kind}-${artifact.title}`}
                 className="rounded-md border bg-background/70 px-2.5 py-2"
               >
                 <div className="mb-1 flex items-center gap-1.5">

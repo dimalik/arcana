@@ -3,6 +3,10 @@ import { z } from "zod";
 export const paperAnswerIntentSchema = z.enum([
   "direct_qa",
   "claims",
+  "results",
+  "figures",
+  "tables",
+  "code",
   "contradictions",
   "gaps",
   "timeline",
@@ -24,6 +28,16 @@ export type AnswerCitation = z.infer<typeof answerCitationSchema>;
 export const chatMessageMetadataSchema = z.object({
   intent: paperAnswerIntentSchema,
   citations: z.array(answerCitationSchema),
+  artifacts: z
+    .array(
+      z.object({
+        id: z.string().optional(),
+        kind: z.string(),
+        title: z.string(),
+        payloadJson: z.string(),
+      }),
+    )
+    .optional(),
 });
 
 export type ChatMessageMetadata = z.infer<typeof chatMessageMetadataSchema>;

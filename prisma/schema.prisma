@@ -337,6 +337,10 @@ enum ConversationArtifactKind {
   GAP_LIST
   TIMELINE
   METHODOLOGY_COMPARE
+  RESULT_SUMMARY
+  FIGURE_CARD
+  TABLE_CARD
+  CODE_SNIPPET
 }
 
 model Paper {

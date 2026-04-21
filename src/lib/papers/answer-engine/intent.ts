@@ -43,19 +43,6 @@ export function classifyPaperAnswerIntent(params: {
 
   if (
     hasAnyToken(normalizedQuestion, [
-      "timeline",
-      "history",
-      "evolution",
-      "chronolog",
-      "progression",
-      "how did this develop",
-    ])
-  ) {
-    return "timeline";
-  }
-
-  if (
-    hasAnyToken(normalizedQuestion, [
       "compare",
       "versus",
       "vs ",
@@ -68,6 +55,77 @@ export function classifyPaperAnswerIntent(params: {
       hasAnyToken(normalizedQuestion, ["paper", "papers", "method", "methods"]))
   ) {
     return "compare_methodologies";
+  }
+
+  if (
+    hasAnyToken(normalizedQuestion, [
+      "result",
+      "results",
+      "performance",
+      "metric",
+      "metrics",
+      "benchmark",
+      "ablation",
+      "accuracy",
+      "f1",
+      "bleu",
+      "rouge",
+      "score",
+      "scores",
+    ])
+  ) {
+    return "results";
+  }
+
+  if (
+    hasAnyToken(normalizedQuestion, [
+      "figure",
+      "fig.",
+      "diagram",
+      "plot",
+      "visual",
+      "architecture figure",
+      "show me the figure",
+    ])
+  ) {
+    return "figures";
+  }
+
+  if (
+    hasAnyToken(normalizedQuestion, [
+      "table",
+      "tab.",
+      "ablation table",
+      "results table",
+    ])
+  ) {
+    return "tables";
+  }
+
+  if (
+    hasAnyToken(normalizedQuestion, [
+      "code",
+      "snippet",
+      "implementation",
+      "implement",
+      "pseudo",
+      "pseudocode",
+    ])
+  ) {
+    return "code";
+  }
+
+  if (
+    hasAnyToken(normalizedQuestion, [
+      "timeline",
+      "history",
+      "evolution",
+      "chronolog",
+      "progression",
+      "how did this develop",
+    ])
+  ) {
+    return "timeline";
   }
 
   if (

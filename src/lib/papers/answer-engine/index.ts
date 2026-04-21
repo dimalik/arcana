@@ -22,6 +22,7 @@ import {
   type PaperClaimView,
 } from "../analysis/store";
 import { normalizeAnalysisText } from "../analysis/normalization/text";
+import { preparePaperAgentEvidence } from "./agent";
 
 import {
   type AnswerCitation,
@@ -64,6 +65,15 @@ export interface PreparedPaperAnswer {
   citations: AnswerCitation[];
   artifacts: ConversationArtifactDraft[];
 }
+
+const AGENT_INTENT_SET = new Set<PaperAnswerIntent>([
+  "direct_qa",
+  "claims",
+  "results",
+  "figures",
+  "tables",
+  "code",
+]);
 
 interface PreparePaperAnswerParams {
   paperId: string;
@@ -417,6 +427,14 @@ function buildPrompt(params: {
   const selectedTextBlock = params.selectedText
     ? `Selected passage from the conversation:\n${params.selectedText}\n\n`
     : "";
+  const intentSpecificRules =
+    params.intent === "code"
+      ? "- If you provide code, present it as a derived implementation sketch unless the evidence explicitly supports exact code.\n- Call out any assumptions or missing implementation details.\n"
+      : params.intent === "figures" || params.intent === "tables"
+        ? "- If a relevant figure or table artifact is attached, anchor the answer in that artifact before generalizing.\n"
+        : params.intent === "results"
+          ? "- Prioritize numeric outcomes, ablations, and result tables over broad summary language.\n"
+          : "";
 
   return `${SYSTEM_PROMPTS.chat}
 
@@ -428,6 +446,7 @@ Rules:
 - Cite supporting evidence inline with the source tags like [S1], [S2].
 - If a structured artifact is attached, summarize it instead of reproducing raw JSON.
 - Keep the answer grounded in the paper(s), then add explanation.
+${intentSpecificRules}
 
 Primary paper: "${params.paperTitle}"
 Intent: ${params.intent}
@@ -628,7 +647,28 @@ export async function preparePaperAnswer(
   const selectedTextCitation = buildSelectedTextCitation(seedPaper, selectedText);
   if (selectedTextCitation) citations.push(selectedTextCitation);
 
-  if (intent === "claims") {
+  let handledByAgent = false;
+  if (AGENT_INTENT_SET.has(intent)) {
+    try {
+      const agentEvidence = await preparePaperAgentEvidence({
+        paper: seedPaper,
+        question: params.question,
+        intent,
+        selectedText,
+        provider: params.provider,
+        modelId: params.modelId,
+        proxyConfig: params.proxyConfig,
+        userId: params.userId,
+      });
+      citations.push(...agentEvidence.citations);
+      artifacts.push(...agentEvidence.artifacts);
+      handledByAgent = true;
+    } catch (error) {
+      console.warn("[answer-engine] paper agent fallback:", error);
+    }
+  }
+
+  if (!handledByAgent && intent === "claims") {
     const filters = buildPreferredClaimFilters(intent, params.question);
     const relevantClaims = rankClaimsForQuestion(seedPaper.claims, params.question, {
       ...filters,
@@ -637,7 +677,7 @@ export async function preparePaperAnswer(
     citations.push(...buildClaimCitations(seedPaper, relevantClaims));
     const artifact = buildClaimArtifact(seedPaper, relevantClaims);
     if (artifact) artifacts.push(artifact);
-  } else if (intent === "contradictions") {
+  } else if (!handledByAgent && intent === "contradictions") {
     const payload = detectContradictionsRuntimeOutputSchema.parse(
       await runCrossPaperAnalysisCapability({
         capability: "contradictions",
@@ -662,7 +702,7 @@ export async function preparePaperAnswer(
     });
     citations.push(...contradictionArtifacts.citations);
     artifacts.push(...contradictionArtifacts.artifacts);
-  } else if (intent === "gaps") {
+  } else if (!handledByAgent && intent === "gaps") {
     const payload = findGapsRuntimeOutputSchema.parse(
       await runCrossPaperAnalysisCapability({
         capability: "gaps",
@@ -685,7 +725,7 @@ export async function preparePaperAnswer(
     const gapArtifacts = buildGapArtifacts({ papersById, payload });
     citations.push(...gapArtifacts.citations);
     artifacts.push(...gapArtifacts.artifacts);
-  } else if (intent === "timeline") {
+  } else if (!handledByAgent && intent === "timeline") {
     const payload = buildTimelineRuntimeOutputSchema.parse(
       await runCrossPaperAnalysisCapability({
         capability: "timeline",
@@ -708,7 +748,7 @@ export async function preparePaperAnswer(
     const timelineArtifacts = buildTimelineArtifacts({ papersById, payload });
     citations.push(...timelineArtifacts.citations);
     artifacts.push(...timelineArtifacts.artifacts);
-  } else if (intent === "compare_methodologies") {
+  } else if (!handledByAgent && intent === "compare_methodologies") {
     const payload = compareMethodologiesRuntimeOutputSchema.parse(
       await runCrossPaperAnalysisCapability({
         capability: "compare_methodologies",
@@ -723,7 +763,7 @@ export async function preparePaperAnswer(
     const methodologyArtifacts = buildMethodologyArtifacts(payload);
     citations.push(...methodologyArtifacts.citations);
     artifacts.push(...methodologyArtifacts.artifacts);
-  } else {
+  } else if (!handledByAgent) {
     const filters = buildPreferredClaimFilters(intent, params.question);
     const relevantClaims = rankClaimsForQuestion(seedPaper.claims, params.question, {
       ...filters,
@@ -761,9 +801,16 @@ export async function preparePaperAnswer(
 export function buildChatMessageMetadata(params: {
   intent: PaperAnswerIntent;
   citations: AnswerCitation[];
+  artifacts?: Array<{
+    id?: string;
+    kind: string;
+    title: string;
+    payloadJson: string;
+  }>;
 }): ChatMessageMetadata {
   return {
     intent: params.intent,
     citations: params.citations,
+    ...(params.artifacts?.length ? { artifacts: params.artifacts } : {}),
   };
 }
