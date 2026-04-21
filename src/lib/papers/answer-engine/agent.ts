@@ -461,6 +461,33 @@ function chooseDeterministicAction(params: {
     observation.tool === "inspect_table"
     || observation.tool === "open_figure",
   );
+  const focusQuery = extractResultTableFocusQuery(params.question);
+
+  if (params.intent === "results" && focusQuery && !alreadyInspectedTable) {
+    if (!alreadyReadResults) {
+      return { type: "read_section", section: "results" };
+    }
+
+    const tables = params.figures.filter((figure) => figure.type === "table");
+    const bestTable = tables
+      .map((figure) => ({
+        figure,
+        score: scoreFigureQuery(figure, "table", focusQuery),
+      }))
+      .filter((entry) => entry.score > 0)
+      .sort(
+        (left, right) =>
+          right.score - left.score || left.figure.figureIndex - right.figure.figureIndex,
+      )[0];
+
+    if (bestTable) {
+      return {
+        type: "inspect_table",
+        target: bestTable.figure.figureLabel ?? bestTable.figure.id,
+        query: focusQuery,
+      };
+    }
+  }
 
   if (params.intent === "tables" && !alreadyInspectedTable) {
     const tables = params.figures.filter((figure) => figure.type === "table");
@@ -481,8 +508,6 @@ function chooseDeterministicAction(params: {
   if (params.intent !== "results" || !alreadyReadResults || alreadyInspectedTable) {
     return null;
   }
-
-  const focusQuery = extractResultTableFocusQuery(params.question);
   if (!focusQuery) return null;
 
   const tables = params.figures.filter((figure) => figure.type === "table");

@@ -223,6 +223,34 @@ describe("preparePaperAgentEvidence", () => {
   it("forces matching result-table inspection for focused result questions", async () => {
     hoisted.paperFigureFindMany.mockResolvedValue([
       {
+        id: "fig-table-1",
+        paperId: "paper-1",
+        publishedFigureHandleId: null,
+        figureLabel: "Table 1",
+        captionText: "Table 1: Comparison results on RepoQA benchmark.",
+        captionSource: "html",
+        description:
+          "<table><tr><th>Language</th><th>Pass@1</th></tr><tr><td>Python</td><td>52.0</td></tr></table>",
+        sourceMethod: "html",
+        sourceUrl: null,
+        sourceVersion: null,
+        confidence: "high",
+        imagePath: null,
+        assetHash: null,
+        pdfPage: 5,
+        sourcePage: 5,
+        figureIndex: 1,
+        bbox: null,
+        type: "table",
+        parentFigureId: null,
+        isPrimaryExtraction: true,
+        width: null,
+        height: null,
+        gapReason: null,
+        imageSourceMethod: null,
+        createdAt: new Date("2026-04-21T00:00:00Z"),
+      },
+      {
         id: "fig-table-4",
         paperId: "paper-1",
         publishedFigureHandleId: null,
@@ -253,9 +281,6 @@ describe("preparePaperAgentEvidence", () => {
     ]);
     hoisted.generateStructuredObject
       .mockResolvedValueOnce({
-        object: { type: "read_section", section: "results" },
-      })
-      .mockResolvedValueOnce({
         object: { type: "finish", answerPlan: "Answer using the grounded results." },
       });
 
@@ -280,7 +305,7 @@ describe("preparePaperAgentEvidence", () => {
       expect.arrayContaining([
         expect.objectContaining({
           tool: "read_section",
-          source: "planner",
+          source: "fallback",
         }),
         expect.objectContaining({
           tool: "inspect_table",
@@ -291,6 +316,8 @@ describe("preparePaperAgentEvidence", () => {
       ]),
     );
     expect(result.artifacts.map((artifact) => artifact.kind)).toContain("TABLE_CARD");
+    const tableArtifact = result.artifacts.find((artifact) => artifact.kind === "TABLE_CARD");
+    expect(tableArtifact?.title).toBe("Table 4");
   });
 
   it("generates a code snippet artifact for implementation-style questions", async () => {
