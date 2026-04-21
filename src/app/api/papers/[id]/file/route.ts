@@ -5,6 +5,7 @@ import { processingQueue } from "@/lib/processing/queue";
 import { trackEngagement } from "@/lib/engagement/track";
 import { paperAccessErrorToResponse, requirePaperAccess } from "@/lib/paper-auth";
 import { setProcessingProjection } from "@/lib/processing/runtime-ledger";
+import { resolveStorageCandidates } from "@/lib/storage-paths";
 
 export async function GET(
   _request: NextRequest,
@@ -27,16 +28,27 @@ export async function GET(
   try {
     // Dynamic imports avoid Turbopack TP1004 path-analysis warnings for fs access.
     const fs = await import("fs/promises");
-    const pathModule = await import("path");
-    const absolutePath = pathModule.isAbsolute(paper.filePath)
-      ? paper.filePath
-      : pathModule.join(process.cwd(), paper.filePath);
-    const buffer = await fs.readFile(absolutePath);
+    let buffer: Buffer | null = null;
+    for (const candidatePath of resolveStorageCandidates(paper.filePath)) {
+      try {
+        buffer = await fs.readFile(candidatePath);
+        break;
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code !== "ENOENT") {
+          throw error;
+        }
+      }
+    }
+
+    if (!buffer) {
+      throw Object.assign(new Error("PDF file not found on disk"), { code: "ENOENT" });
+    }
     const filename = `${paper.title?.replace(/[^a-zA-Z0-9-_ ]/g, "").slice(0, 100) || "paper"}.pdf`;
 
     trackEngagement(params.id, "pdf_open").catch(() => {});
 
-    return access.setDuplicateStateHeaders(new NextResponse(buffer, {
+    return access.setDuplicateStateHeaders(new NextResponse(new Uint8Array(buffer), {
       headers: {
         "Content-Type": "application/pdf",
         "Content-Disposition": `inline; filename="${filename}"`,

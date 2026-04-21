@@ -3,6 +3,7 @@ import path from "path";
 
 import { requirePaperAccess } from "@/lib/paper-auth";
 import { isPathWithinRoot } from "@/lib/research/path-safety";
+import { getDatabaseProjectRoot, resolveStorageCandidates } from "@/lib/storage-paths";
 
 const MIME_TYPES: Record<string, string> = {
   ".png": "image/png",
@@ -36,29 +37,51 @@ export async function GET(
   }
 
   const normalizedRelativePath = pathParam.replace(/^\/+/, "");
-  const absolutePath = path.isAbsolute(normalizedRelativePath)
-    ? path.normalize(normalizedRelativePath)
-    : path.normalize(path.join(process.cwd(), normalizedRelativePath));
-  const uploadsRoot = path.join(process.cwd(), "uploads");
-
-  if (!isPathWithinRoot(uploadsRoot, absolutePath)) {
+  const candidatePaths = resolveStorageCandidates(normalizedRelativePath);
+  if (candidatePaths.length === 0) {
     return NextResponse.json({ error: "Invalid path" }, { status: 400 });
   }
+  const allowedRoots = [
+    path.join(process.cwd(), "uploads"),
+    ...(getDatabaseProjectRoot() ? [path.join(getDatabaseProjectRoot()!, "uploads")] : []),
+  ];
 
   try {
     const fs = await import("fs/promises");
-    const stat = await fs.stat(absolutePath);
-    if (!stat.isFile()) {
-      return NextResponse.json({ error: "Not a file" }, { status: 400 });
+    let resolvedPath: string | null = null;
+    let stat: Awaited<ReturnType<typeof fs.stat>> | null = null;
+
+    for (const candidatePath of candidatePaths) {
+      if (!allowedRoots.some((root) => isPathWithinRoot(root, candidatePath))) {
+        continue;
+      }
+      try {
+        const candidateStat = await fs.stat(candidatePath);
+        if (!candidateStat.isFile()) {
+          continue;
+        }
+        resolvedPath = candidatePath;
+        stat = candidateStat;
+        break;
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code !== "ENOENT") {
+          throw error;
+        }
+      }
     }
 
-    const buffer = await fs.readFile(absolutePath);
-    const extension = path.extname(absolutePath).toLowerCase();
+    if (!resolvedPath || !stat) {
+      return NextResponse.json({ error: "File not found" }, { status: 404 });
+    }
+
+    const buffer = await fs.readFile(resolvedPath);
+    const extension = path.extname(resolvedPath).toLowerCase();
     const mimeType = MIME_TYPES[extension] || "application/octet-stream";
-    const filename = path.basename(absolutePath);
+    const filename = path.basename(resolvedPath);
     const asAttachment = request.nextUrl.searchParams.get("download") === "true";
 
-    return access.setDuplicateStateHeaders(new NextResponse(buffer, {
+    return access.setDuplicateStateHeaders(new NextResponse(new Uint8Array(buffer), {
       headers: {
         "Content-Type": mimeType,
         "Content-Disposition": `${asAttachment ? "attachment" : "inline"}; filename="${filename}"`,
