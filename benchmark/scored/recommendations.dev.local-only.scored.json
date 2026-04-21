@@ -1,0 +1,507 @@
+{
+  "task": "recommendations",
+  "split": "dev",
+  "retrievalConfig": {
+    "localOnly": true,
+    "internalProfileRetrieval": true,
+    "externalSources": [],
+    "rerankerFamily": "recommendation_feature_reranker_v1",
+    "diversificationStage": "shared_recommendations_diversify_high_lambda"
+  },
+  "budgets": {
+    "freshnessSlaHours": 24,
+    "readP95Ms": 200,
+    "costP95UsdPerUserDay": 0.1,
+    "degradedPath": "previous_cached_ranking"
+  },
+  "floors": {
+    "ndcgAt10": null,
+    "noveltyAt10": null,
+    "ilsAt10": null,
+    "subtopicCoverageAt10": null
+  },
+  "metrics": {
+    "ndcgAt10": 0,
+    "noveltyAt10": 0,
+    "ilsAt10": 0.421571,
+    "subtopicCoverageAt10": 0
+  },
+  "latencyP95Ms": 606.681709,
+  "costP95UsdPerUserDay": 0,
+  "floorChecks": {
+    "ndcgAt10": null,
+    "noveltyAt10": null,
+    "ilsAt10": null,
+    "subtopicCoverageAt10": null
+  },
+  "cases": [
+    {
+      "id": "recommendations-single-interest-transformers",
+      "caseClass": "single-interest",
+      "profileDescription": "Library centered on foundational transformer and language-model papers.",
+      "latencyMs": 606.681709,
+      "budgetPass": false,
+      "metrics": {
+        "ndcgAt10": 0,
+        "noveltyAt10": 0,
+        "ilsAt10": 0.386526,
+        "subtopicCoverageAt10": 0
+      },
+      "recommendedTop10": [
+        {
+          "title": "Causally-Enhanced Reinforcement Policy Optimization",
+          "source": "internal-profile",
+          "matchReason": "Internal profile match: Causally-Enhanced Reinforcement Policy Optimization"
+        },
+        {
+          "title": "Resonate: Reinforcing Text-to-Audio Generation via Online Feedback from Large Audio Language Models",
+          "source": "internal-profile",
+          "matchReason": "Internal profile match: Resonate: Reinforcing Text-to-Audio Generation via Online Feedback from Large Audio Language Models"
+        },
+        {
+          "title": "VOCABTRIM: Vocabulary Pruning for Efficient Speculative Decoding in LLMs",
+          "source": "internal-profile",
+          "matchReason": "Internal profile match: VOCABTRIM: Vocabulary Pruning for Efficient Speculative Decoding in LLMs"
+        },
+        {
+          "title": "Transformers Discover Molecular Structure Without Graph Priors",
+          "source": "internal-profile",
+          "matchReason": "Internal profile match: Transformers Discover Molecular Structure Without Graph Priors"
+        },
+        {
+          "title": "Text Detoxification: Data Efficiency, Semantic Preservation and Model Generalization",
+          "source": "internal-profile",
+          "matchReason": "Internal profile match: Text Detoxification: Data Efficiency, Semantic Preservation and Model Generalization"
+        },
+        {
+          "title": "Detecting LLM-Generated Text with Performance Guarantees",
+          "source": "internal-profile",
+          "matchReason": "Internal profile match: Detecting LLM-Generated Text with Performance Guarantees"
+        },
+        {
+          "title": "RAIDAR: Generative AI Detection via Rewriting",
+          "source": "internal-profile",
+          "matchReason": "Internal profile match: RAIDAR: Generative AI Detection via Rewriting"
+        },
+        {
+          "title": "HiBerNAC: Hierarchical Brain-emulated Robotic Neural Agent Collective for Disentangling Complex Manipulation",
+          "source": "internal-profile",
+          "matchReason": "Internal profile match: HiBerNAC: Hierarchical Brain-emulated Robotic Neural Agent Collective for Disentangling Complex Manipulation"
+        },
+        {
+          "title": "Human Texts Are Outliers: Detecting LLM-generated Texts via Out-of-distribution Detection",
+          "source": "internal-profile",
+          "matchReason": "Internal profile match: Human Texts Are Outliers: Detecting LLM-generated Texts via Out-of-distribution Detection"
+        },
+        {
+          "title": "Hopfield Networks Is All You Need",
+          "source": "internal-profile",
+          "matchReason": "Internal profile match: Hopfield Networks Is All You Need"
+        }
+      ],
+      "latestTop10": [
+        {
+          "title": "Ask a Strong LLM Judge when Your Reward Model is Uncertain",
+          "source": "internal-profile",
+          "matchReason": "Internal profile match: Ask a Strong LLM Judge when Your Reward Model is Uncertain"
+        },
+        {
+          "title": "Do We Really Need SFT? Prompt-as-Policy over Knowledge Graphs for Cold-start Next POI Recommendation",
+          "source": "internal-profile",
+          "matchReason": "Internal profile match: Do We Really Need SFT? Prompt-as-Policy over Knowledge Graphs for Cold-start Next POI Recommendation"
+        },
+        {
+          "title": "GraphKV: Breaking the Static Selection Paradigm with Graph-Based KV Cache Eviction",
+          "source": "internal-profile",
+          "matchReason": "Internal profile match: GraphKV: Breaking the Static Selection Paradigm with Graph-Based KV Cache Eviction"
+        },
+        {
+          "title": "STAIR: Improving Safety Alignment with Introspective Reasoning",
+          "source": "internal-profile",
+          "matchReason": "Internal profile match: STAIR: Improving Safety Alignment with Introspective Reasoning"
+        },
+        {
+          "title": "AI-Generated Text is Non-Stationary: Detection via Temporal Tomography",
+          "source": "internal-profile",
+          "matchReason": "Internal profile match: AI-Generated Text is Non-Stationary: Detection via Temporal Tomography"
+        },
+        {
+          "title": "Controllable Text Generation for Large Language Models: A Survey",
+          "source": "internal-profile",
+          "matchReason": "Internal profile match: Controllable Text Generation for Large Language Models: A Survey"
+        },
+        {
+          "title": "GPSFormer: A Global Perception and Local Structure Fitting-based Transformer for Point Cloud Understanding",
+          "source": "internal-profile",
+          "matchReason": "Internal profile match: GPSFormer: A Global Perception and Local Structure Fitting-based Transformer for Point Cloud Understanding"
+        },
+        {
+          "title": "EdgeLLM: Fast On-Device LLM Inference With Speculative Decoding",
+          "source": "internal-profile",
+          "matchReason": "Internal profile match: EdgeLLM: Fast On-Device LLM Inference With Speculative Decoding"
+        },
+        {
+          "title": "COCO: Coherence-Enhanced Machine-Generated Text Detection Under Low Resource With Contrastive Learning",
+          "source": "internal-profile",
+          "matchReason": "Internal profile match: COCO: Coherence-Enhanced Machine-Generated Text Detection Under Low Resource With Contrastive Learning"
+        },
+        {
+          "title": "Paraphrasing evades detectors of AI-generated text, but retrieval is an effective defense",
+          "source": "internal-profile",
+          "matchReason": "Internal profile match: Paraphrasing evades detectors of AI-generated text, but retrieval is an effective defense"
+        }
+      ]
+    },
+    {
+      "id": "recommendations-multi-interest-multimodal-plus-retrieval",
+      "caseClass": "multi-interest",
+      "profileDescription": "Library spans multimodal models and retrieval-augmented generation.",
+      "latencyMs": 558.25125,
+      "budgetPass": false,
+      "metrics": {
+        "ndcgAt10": 0,
+        "noveltyAt10": 0,
+        "ilsAt10": 0.429472,
+        "subtopicCoverageAt10": 0
+      },
+      "recommendedTop10": [
+        {
+          "title": "The Alignment Auditor: A Bayesian Framework for Verifying and Refining LLM Objectives",
+          "source": "internal-profile",
+          "matchReason": "Internal profile match: The Alignment Auditor: A Bayesian Framework for Verifying and Refining LLM Objectives"
+        },
+        {
+          "title": "Beyond Sparse Rewards: Enhancing Reinforcement Learning with Language Model Critique in Text Generation",
+          "source": "internal-profile",
+          "matchReason": "Internal profile match: Beyond Sparse Rewards: Enhancing Reinforcement Learning with Language Model Critique in Text Generation"
+        },
+        {
+          "title": "Agri-Query: A Case Study on RAG vs. Long-Context LLMs for Cross-Lingual Technical Question Answering",
+          "source": "internal-profile",
+          "matchReason": "Internal profile match: Agri-Query: A Case Study on RAG vs. Long-Context LLMs for Cross-Lingual Technical Question Answering"
+        },
+        {
+          "title": "Simplify RLHF as Reward-Weighted SFT: A Variational Method",
+          "source": "internal-profile",
+          "matchReason": "Internal profile match: Simplify RLHF as Reward-Weighted SFT: A Variational Method"
+        },
+        {
+          "title": "DivScore: Zero-Shot Detection of LLM-Generated Text in Specialized Domains",
+          "source": "internal-profile",
+          "matchReason": "Internal profile match: DivScore: Zero-Shot Detection of LLM-Generated Text in Specialized Domains"
+        },
+        {
+          "title": "Is Your Paper Being Reviewed by an LLM? Benchmarking AI Text Detection in Peer Review",
+          "source": "internal-profile",
+          "matchReason": "Internal profile match: Is Your Paper Being Reviewed by an LLM? Benchmarking AI Text Detection in Peer Review"
+        },
+        {
+          "title": "Scalable Multi-Robot Collaboration with Large Language Models: Centralized or Decentralized Systems?",
+          "source": "internal-profile",
+          "matchReason": "Internal profile match: Scalable Multi-Robot Collaboration with Large Language Models: Centralized or Decentralized Systems?"
+        },
+        {
+          "title": "Uncertainty-Penalized Reinforcement Learning from Human Feedback with Diverse Reward LoRA Ensembles",
+          "source": "internal-profile",
+          "matchReason": "Internal profile match: Uncertainty-Penalized Reinforcement Learning from Human Feedback with Diverse Reward LoRA Ensembles"
+        },
+        {
+          "title": "SHAPE: Self-Improved Visual Preference Alignment by Iteratively Generating Holistic Winner",
+          "source": "internal-profile",
+          "matchReason": "Internal profile match: SHAPE: Self-Improved Visual Preference Alignment by Iteratively Generating Holistic Winner"
+        },
+        {
+          "title": "Semantic Evaluation of Multilingual Knowledge Graph-to-Text Generation via NLI Fine-Tuning: Precision, Recall and F1 scores",
+          "source": "internal-profile",
+          "matchReason": "Internal profile match: Semantic Evaluation of Multilingual Knowledge Graph-to-Text Generation via NLI Fine-Tuning: Precision, Recall and F1 scores"
+        }
+      ],
+      "latestTop10": [
+        {
+          "title": "A Large Language Model-Driven Reward Design Framework via Dynamic Feedback for Reinforcement Learning",
+          "source": "internal-profile",
+          "matchReason": "Internal profile match: A Large Language Model-Driven Reward Design Framework via Dynamic Feedback for Reinforcement Learning"
+        },
+        {
+          "title": "LitBench: A Benchmark and Dataset for Reliable Evaluation of Creative Writing",
+          "source": "internal-profile",
+          "matchReason": "Internal profile match: LitBench: A Benchmark and Dataset for Reliable Evaluation of Creative Writing"
+        },
+        {
+          "title": "Beyond Next-Token Prediction: A Standards-Aligned Survey of Autoregressive LLM Failure Modes, Deployment Patterns, and the Potential Role of World Models",
+          "source": "internal-profile",
+          "matchReason": "Internal profile match: Beyond Next-Token Prediction: A Standards-Aligned Survey of Autoregressive LLM Failure Modes, Deployment Patterns, and the Potential Role of World Models"
+        },
+        {
+          "title": "REMOR: Automated Peer Review Generation with LLM Reasoning and Multi-Objective Reinforcement Learning",
+          "source": "internal-profile",
+          "matchReason": "Internal profile match: REMOR: Automated Peer Review Generation with LLM Reasoning and Multi-Objective Reinforcement Learning"
+        },
+        {
+          "title": "Ethics and Persuasion in Reinforcement Learning from Human Feedback: A Procedural Rhetorical Approach",
+          "source": "internal-profile",
+          "matchReason": "Internal profile match: Ethics and Persuasion in Reinforcement Learning from Human Feedback: A Procedural Rhetorical Approach"
+        },
+        {
+          "title": "Detecting LLM-Generated Text with Performance Guarantees",
+          "source": "internal-profile",
+          "matchReason": "Internal profile match: Detecting LLM-Generated Text with Performance Guarantees"
+        },
+        {
+          "title": "Mitigate Position Bias in LLMs via Scaling a Single Hidden States Channel",
+          "source": "internal-profile",
+          "matchReason": "Internal profile match: Mitigate Position Bias in LLMs via Scaling a Single Hidden States Channel"
+        },
+        {
+          "title": "Boosting Lossless Speculative Decoding via Feature Sampling and Partial Alignment Distillation",
+          "source": "internal-profile",
+          "matchReason": "Internal profile match: Boosting Lossless Speculative Decoding via Feature Sampling and Partial Alignment Distillation"
+        },
+        {
+          "title": "Enhancing Machine-Generated Text Detection: Adversarial Fine-Tuning of Pre-Trained Language Models",
+          "source": "internal-profile",
+          "matchReason": "Internal profile match: Enhancing Machine-Generated Text Detection: Adversarial Fine-Tuning of Pre-Trained Language Models"
+        },
+        {
+          "title": "LV-Eval: A Balanced Long-Context Benchmark with 5 Length Levels up to 256K",
+          "source": "internal-profile",
+          "matchReason": "Internal profile match: LV-Eval: A Balanced Long-Context Benchmark with 5 Length Levels up to 256K"
+        }
+      ]
+    },
+    {
+      "id": "recommendations-hub-heavy-foundation-models",
+      "caseClass": "hub-heavy",
+      "profileDescription": "Library is dominated by highly cited foundation-model papers.",
+      "latencyMs": 597.930917,
+      "budgetPass": false,
+      "metrics": {
+        "ndcgAt10": 0,
+        "noveltyAt10": 0,
+        "ilsAt10": 0.423536,
+        "subtopicCoverageAt10": 0
+      },
+      "recommendedTop10": [
+        {
+          "title": "SWattention: designing fast and memory-efficient attention for a new Sunway Supercomputer",
+          "source": "internal-profile",
+          "matchReason": "Internal profile match: SWattention: designing fast and memory-efficient attention for a new Sunway Supercomputer"
+        },
+        {
+          "title": "Simple linear attention language models balance the recall-throughput tradeoff",
+          "source": "internal-profile",
+          "matchReason": "Internal profile match: Simple linear attention language models balance the recall-throughput tradeoff"
+        },
+        {
+          "title": "Causally-Enhanced Reinforcement Policy Optimization",
+          "source": "internal-profile",
+          "matchReason": "Internal profile match: Causally-Enhanced Reinforcement Policy Optimization"
+        },
+        {
+          "title": "AI-Generated Text is Non-Stationary: Detection via Temporal Tomography",
+          "source": "internal-profile",
+          "matchReason": "Internal profile match: AI-Generated Text is Non-Stationary: Detection via Temporal Tomography"
+        },
+        {
+          "title": "NOLIMA: Long-Context Evaluation Beyond Literal Matching",
+          "source": "internal-profile",
+          "matchReason": "Internal profile match: NOLIMA: Long-Context Evaluation Beyond Literal Matching"
+        },
+        {
+          "title": "Transformers Discover Molecular Structure Without Graph Priors",
+          "source": "internal-profile",
+          "matchReason": "Internal profile match: Transformers Discover Molecular Structure Without Graph Priors"
+        },
+        {
+          "title": "InpaintDPO: Mitigating Spatial Relationship Hallucinations in Foreground-conditioned Inpainting via Diverse Preference Optimization",
+          "source": "internal-profile",
+          "matchReason": "Internal profile match: InpaintDPO: Mitigating Spatial Relationship Hallucinations in Foreground-conditioned Inpainting via Diverse Preference Optimization"
+        },
+        {
+          "title": "M4GT-Bench: Evaluation Benchmark for Black-Box Machine-Generated Text Detection",
+          "source": "internal-profile",
+          "matchReason": "Internal profile match: M4GT-Bench: Evaluation Benchmark for Black-Box Machine-Generated Text Detection"
+        },
+        {
+          "title": "Parallel Diffusion Solver via Residual Dirichlet Policy Optimization",
+          "source": "internal-profile",
+          "matchReason": "Internal profile match: Parallel Diffusion Solver via Residual Dirichlet Policy Optimization"
+        },
+        {
+          "title": "RAIDAR: Generative AI Detection via Rewriting",
+          "source": "internal-profile",
+          "matchReason": "Internal profile match: RAIDAR: Generative AI Detection via Rewriting"
+        }
+      ],
+      "latestTop10": [
+        {
+          "title": "Oaken: Fast and Efficient LLM Serving with Online-Offline Hybrid KV Cache Quantization",
+          "source": "internal-profile",
+          "matchReason": "Internal profile match: Oaken: Fast and Efficient LLM Serving with Online-Offline Hybrid KV Cache Quantization"
+        },
+        {
+          "title": "Crossing the Reward Bridge: Expanding RL with Verifiable Rewards Across Diverse Domains",
+          "source": "internal-profile",
+          "matchReason": "Internal profile match: Crossing the Reward Bridge: Expanding RL with Verifiable Rewards Across Diverse Domains"
+        },
+        {
+          "title": "VOCABTRIM: Vocabulary Pruning for Efficient Speculative Decoding in LLMs",
+          "source": "internal-profile",
+          "matchReason": "Internal profile match: VOCABTRIM: Vocabulary Pruning for Efficient Speculative Decoding in LLMs"
+        },
+        {
+          "title": "FlippedRAG: Black-Box Opinion Manipulation Adversarial Attacks to Retrieval-Augmented Generation Models",
+          "source": "internal-profile",
+          "matchReason": "Internal profile match: FlippedRAG: Black-Box Opinion Manipulation Adversarial Attacks to Retrieval-Augmented Generation Models"
+        },
+        {
+          "title": "GALAX: Graph-Augmented Language Model for Explainable Reinforcement-Guided Subgraph Reasoning in Precision Medicine",
+          "source": "internal-profile",
+          "matchReason": "Internal profile match: GALAX: Graph-Augmented Language Model for Explainable Reinforcement-Guided Subgraph Reasoning in Precision Medicine"
+        },
+        {
+          "title": "Modality Gap–Driven Subspace Alignment Training Paradigm For Multimodal Large Language Models",
+          "source": "internal-profile",
+          "matchReason": "Internal profile match: Modality Gap–Driven Subspace Alignment Training Paradigm For Multimodal Large Language Models"
+        },
+        {
+          "title": "Detecting LLM-Generated Text with Performance Guarantees",
+          "source": "internal-profile",
+          "matchReason": "Internal profile match: Detecting LLM-Generated Text with Performance Guarantees"
+        },
+        {
+          "title": "TabNSA: Native Sparse Attention for Efficient Tabular Data Learning",
+          "source": "internal-profile",
+          "matchReason": "Internal profile match: TabNSA: Native Sparse Attention for Efficient Tabular Data Learning"
+        },
+        {
+          "title": "Solving the Cold Start Problem on One's Own as an End User via Preference Transfer",
+          "source": "internal-profile",
+          "matchReason": "Internal profile match: Solving the Cold Start Problem on One's Own as an End User via Preference Transfer"
+        },
+        {
+          "title": "CoLA-Former: Graph Transformer Using Communal Linear Attention for Lightweight Sequential Recommendation",
+          "source": "internal-profile",
+          "matchReason": "Internal profile match: CoLA-Former: Graph Transformer Using Communal Linear Attention for Lightweight Sequential Recommendation"
+        }
+      ]
+    },
+    {
+      "id": "recommendations-new-to-field-efficient-llms",
+      "caseClass": "new-to-field",
+      "profileDescription": "User is new to efficient language models and needs strong starting points.",
+      "latencyMs": 540.651541,
+      "budgetPass": false,
+      "metrics": {
+        "ndcgAt10": 0,
+        "noveltyAt10": 0,
+        "ilsAt10": 0.446752,
+        "subtopicCoverageAt10": 0
+      },
+      "recommendedTop10": [
+        {
+          "title": "MLLM-CTT: A Multimodal Large Language Model for Chart-to-Text Generation Based on LoRA Fine-Tuning",
+          "source": "internal-profile",
+          "matchReason": "Internal profile match: MLLM-CTT: A Multimodal Large Language Model for Chart-to-Text Generation Based on LoRA Fine-Tuning"
+        },
+        {
+          "title": "Improving Low-Resource Translation with Dictionary-Guided Fine-Tuning and RL: A Spanish-to-Wayuunaiki Study",
+          "source": "internal-profile",
+          "matchReason": "Internal profile match: Improving Low-Resource Translation with Dictionary-Guided Fine-Tuning and RL: A Spanish-to-Wayuunaiki Study"
+        },
+        {
+          "title": "Advancing Machine-Generated Text Detection from an Easy to Hard Supervision Perspective",
+          "source": "internal-profile",
+          "matchReason": "Internal profile match: Advancing Machine-Generated Text Detection from an Easy to Hard Supervision Perspective"
+        },
+        {
+          "title": "The SWE-Bench Illusion: When State-of-the-Art LLMs Remember Instead of Reason",
+          "source": "internal-profile",
+          "matchReason": "Internal profile match: The SWE-Bench Illusion: When State-of-the-Art LLMs Remember Instead of Reason"
+        },
+        {
+          "title": "Long-range Sequence Modeling with Predictable Sparse Attention",
+          "source": "internal-profile",
+          "matchReason": "Internal profile match: Long-range Sequence Modeling with Predictable Sparse Attention"
+        },
+        {
+          "title": "Causally-Enhanced Reinforcement Policy Optimization",
+          "source": "internal-profile",
+          "matchReason": "Internal profile match: Causally-Enhanced Reinforcement Policy Optimization"
+        },
+        {
+          "title": "Transformers Discover Molecular Structure Without Graph Priors",
+          "source": "internal-profile",
+          "matchReason": "Internal profile match: Transformers Discover Molecular Structure Without Graph Priors"
+        },
+        {
+          "title": "Reinforcement Learning Fine-Tuning Enhances Activation Intensity and Diversity in the Internal Circuitry of LLMs",
+          "source": "internal-profile",
+          "matchReason": "Internal profile match: Reinforcement Learning Fine-Tuning Enhances Activation Intensity and Diversity in the Internal Circuitry of LLMs"
+        },
+        {
+          "title": "Are AI Detectors Good Enough? A Survey on Quality of Datasets with Machine-Generated Texts",
+          "source": "internal-profile",
+          "matchReason": "Internal profile match: Are AI Detectors Good Enough? A Survey on Quality of Datasets with Machine-Generated Texts"
+        },
+        {
+          "title": "MultiSocial: Multilingual Benchmark of Machine-Generated Text Detection of Social-Media Texts",
+          "source": "internal-profile",
+          "matchReason": "Internal profile match: MultiSocial: Multilingual Benchmark of Machine-Generated Text Detection of Social-Media Texts"
+        }
+      ],
+      "latestTop10": [
+        {
+          "title": "Improving CXR Report Labeling Through LLM Fine-Tuning and Human Feedback",
+          "source": "internal-profile",
+          "matchReason": "Internal profile match: Improving CXR Report Labeling Through LLM Fine-Tuning and Human Feedback"
+        },
+        {
+          "title": "RESEARCHRUBRICS: A Benchmark of Prompts and Rubrics For Evaluating Deep Research Agents",
+          "source": "internal-profile",
+          "matchReason": "Internal profile match: RESEARCHRUBRICS: A Benchmark of Prompts and Rubrics For Evaluating Deep Research Agents"
+        },
+        {
+          "title": "StreamBP: Memory-Efficient Exact Backpropagation for Long Sequence Training of LLMs",
+          "source": "internal-profile",
+          "matchReason": "Internal profile match: StreamBP: Memory-Efficient Exact Backpropagation for Long Sequence Training of LLMs"
+        },
+        {
+          "title": "SWaRL: Safeguard Code Watermarking via Reinforcement Learning",
+          "source": "internal-profile",
+          "matchReason": "Internal profile match: SWaRL: Safeguard Code Watermarking via Reinforcement Learning"
+        },
+        {
+          "title": "Focus-N-Fix: Region-Aware Fine-Tuning for Text-to-Image Generation",
+          "source": "internal-profile",
+          "matchReason": "Internal profile match: Focus-N-Fix: Region-Aware Fine-Tuning for Text-to-Image Generation"
+        },
+        {
+          "title": "Efficient Safety Alignment of Large Language Models via Preference Re-ranking and Representation-based Reward Modeling",
+          "source": "internal-profile",
+          "matchReason": "Internal profile match: Efficient Safety Alignment of Large Language Models via Preference Re-ranking and Representation-based Reward Modeling"
+        },
+        {
+          "title": "Adaptive Threat Mitigation in PoW Blockchains (Part II): A Deep Reinforcement Learning Approach to Countering Evasive Adversaries",
+          "source": "internal-profile",
+          "matchReason": "Internal profile match: Adaptive Threat Mitigation in PoW Blockchains (Part II): A Deep Reinforcement Learning Approach to Countering Evasive Adversaries"
+        },
+        {
+          "title": "reWordBench: Benchmarking and Improving the Robustness of Reward Models with Transformed Inputs",
+          "source": "internal-profile",
+          "matchReason": "Internal profile match: reWordBench: Benchmarking and Improving the Robustness of Reward Models with Transformed Inputs"
+        },
+        {
+          "title": "Fine-Tuned Llama for Multilingual Text-to-Text Coreference Resolution",
+          "source": "internal-profile",
+          "matchReason": "Internal profile match: Fine-Tuned Llama for Multilingual Text-to-Text Coreference Resolution"
+        },
+        {
+          "title": "MentalQLM: A lightweight large language model for mental healthcare based on instruction tuning and dual LoRA modules",
+          "source": "internal-profile",
+          "matchReason": "Internal profile match: MentalQLM: A lightweight large language model for mental healthcare based on instruction tuning and dual LoRA modules"
+        }
+      ]
+    }
+  ]
+}

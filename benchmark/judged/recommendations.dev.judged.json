@@ -1,7 +1,7 @@
 {
   "task": "recommendations",
   "split": "dev",
-  "status": "draft",
+  "status": "ready",
   "cases": [
     {
       "id": "recommendations-single-interest-transformers",

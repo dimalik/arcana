@@ -17,7 +17,11 @@ import {
   buildRecommendationProfileFromSeedPapers,
   type RecommendationProfile,
 } from "./interests";
-import type { RecommendedPaper, RecommendationsCache } from "./types";
+import type {
+  RecommendedPaper,
+  RecommendationBuildOptions,
+  RecommendationsCache,
+} from "./types";
 
 const CACHE_KEY_PREFIX = "recommendations_cache_v4";
 const CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
@@ -136,6 +140,72 @@ async function loadSupportSeedPapers(
   });
 }
 
+async function fetchInternalRecommendationHits(
+  profile: RecommendationProfile,
+): Promise<RecommendationSourceHit[]> {
+  const candidates = await generateRecommendationProfileCandidates({
+    userId: profile.userId,
+    paperIds: profile.paperSeeds.map((seed) => seed.paperId),
+    limit: 48,
+  });
+
+  if (candidates.length === 0) return [];
+
+  const papers = await prisma.paper.findMany({
+    where: mergePaperVisibilityWhere(profile.userId, {
+      id: { in: candidates.map((candidate) => candidate.paperId) },
+    }),
+    select: {
+      id: true,
+      title: true,
+      abstract: true,
+      authors: true,
+      year: true,
+      doi: true,
+      arxivId: true,
+      citationCount: true,
+    },
+  });
+
+  const paperById = new Map(papers.map((paper) => [paper.id, paper]));
+
+  return candidates.flatMap((candidate) => {
+    const paper = paperById.get(candidate.paperId);
+    if (!paper) return [];
+    return [
+      {
+        paper: {
+          title: paper.title,
+          abstract: paper.abstract,
+          authors: (() => {
+            try {
+              return Array.isArray(JSON.parse(paper.authors ?? "[]"))
+                ? JSON.parse(paper.authors ?? "[]")
+                : [];
+            } catch {
+              return [];
+            }
+          })(),
+          year: paper.year,
+          doi: paper.doi,
+          arxivId: paper.arxivId,
+          externalUrl: paper.doi
+            ? `https://doi.org/${paper.doi}`
+            : paper.arxivId
+              ? `https://arxiv.org/abs/${paper.arxivId}`
+              : "",
+          citationCount: paper.citationCount,
+          openAccessPdfUrl: null,
+          source: "internal-profile",
+          matchReason: `Internal profile match: ${candidate.title}`,
+        },
+        sourceKind: "internal" as const,
+        seedHint: null,
+      },
+    ];
+  });
+}
+
 async function fetchS2RecommendationHits(
   profile: RecommendationProfile,
   supportPapers: SupportSeedPaper[],
@@ -219,6 +289,7 @@ async function fetchKeywordRecommendationHits(
 
 async function buildRecommendationsFromProfile(
   profile: RecommendationProfile,
+  options: RecommendationBuildOptions = {},
 ): Promise<RecommendationsCache> {
   if (profile.paperSeeds.length === 0) {
     return {
@@ -229,29 +300,43 @@ async function buildRecommendationsFromProfile(
   }
 
   const supportPapers = await loadSupportSeedPapers(profile);
-  const [s2Hits, arxivHits, keywordHits] = await Promise.all([
-    fetchS2RecommendationHits(profile, supportPapers),
-    fetchArxivRecommendationHits(profile),
-    fetchKeywordRecommendationHits(profile, supportPapers),
+  const includeExternalSources = options.includeExternalSources ?? true;
+  const [internalHits, s2Hits, arxivHits, keywordHits] = await Promise.all([
+    fetchInternalRecommendationHits(profile),
+    includeExternalSources
+      ? fetchS2RecommendationHits(profile, supportPapers)
+      : Promise.resolve([]),
+    includeExternalSources
+      ? fetchArxivRecommendationHits(profile)
+      : Promise.resolve([]),
+    includeExternalSources
+      ? fetchKeywordRecommendationHits(profile, supportPapers)
+      : Promise.resolve([]),
   ]);
 
   const mergedCandidates = mergeRecommendationCandidates([
+    ...internalHits,
     ...s2Hits,
     ...arxivHits,
     ...keywordHits,
   ]);
 
-  const candidatePapers = await excludeLibraryPapers(
-    mergedCandidates.map((candidate) => candidate as RecommendedPaper),
-    profile.userId,
-  );
-  const candidateKeySet = new Set(
-    candidatePapers.map((paper) => normalizeRecommendationKey(paper)),
-  );
-
-  const visibleCandidates = mergedCandidates.filter((candidate) =>
-    candidateKeySet.has(candidate.dedupeKey),
-  );
+  let visibleCandidates = mergedCandidates;
+  if (!options.allowLibraryCandidates) {
+    const candidatePapers = mergedCandidates.map(
+      (candidate) => candidate as RecommendedPaper,
+    );
+    const filteredPapers = await excludeLibraryPapers(
+      candidatePapers,
+      profile.userId,
+    );
+    const candidateKeySet = new Set(
+      filteredPapers.map((paper) => normalizeRecommendationKey(paper)),
+    );
+    visibleCandidates = mergedCandidates.filter((candidate) =>
+      candidateKeySet.has(candidate.dedupeKey),
+    );
+  }
 
   const rankedCandidates = rerankRecommendationCandidates(profile, visibleCandidates);
   const sections = buildRecommendationSections(profile, rankedCandidates);
@@ -296,6 +381,7 @@ export async function getRecommendations(
   forceRefresh = false,
   userId?: string,
   tagIds?: string[],
+  options: RecommendationBuildOptions = {},
 ): Promise<RecommendationsCache> {
   if (!userId) {
     return {
@@ -321,7 +407,7 @@ export async function getRecommendations(
   }
 
   const profile = await buildRecommendationProfile(userId, tagIds);
-  const recommendations = await buildRecommendationsFromProfile(profile);
+  const recommendations = await buildRecommendationsFromProfile(profile, options);
 
   if (!tagIds || tagIds.length === 0) {
     await writeCachedRecommendations(userId, recommendations);
@@ -334,11 +420,12 @@ export async function getRecommendationsForSeedPapers(params: {
   userId: string;
   paperIds: string[];
   profileDescription?: string;
+  options?: RecommendationBuildOptions;
 }): Promise<RecommendationsCache> {
   const profile = await buildRecommendationProfileFromSeedPapers({
     userId: params.userId,
     paperIds: params.paperIds,
     profileDescription: params.profileDescription,
   });
-  return buildRecommendationsFromProfile(profile);
+  return buildRecommendationsFromProfile(profile, params.options);
 }

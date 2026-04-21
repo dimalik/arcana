@@ -27,6 +27,10 @@ function round(value: number): number {
   return Number(value.toFixed(6));
 }
 
+function flagEnabled(argv: string[], flag: string): boolean {
+  return argv.includes(flag);
+}
+
 function discount(rank: number): number {
   return 1 / Math.log2(rank + 2);
 }
@@ -169,11 +173,17 @@ function mergeSeedLocator(
 }
 
 async function main() {
+  const argv = process.argv.slice(2);
+  const localOnly =
+    flagEnabled(argv, "--local-only")
+    || process.env.ARCANA_RECOMMENDATIONS_BENCHMARK_LOCAL_ONLY === "1";
   const outPath = path.join(
     process.cwd(),
     "benchmark",
     "scored",
-    "recommendations.dev.scored.json",
+    localOnly
+      ? "recommendations.dev.local-only.scored.json"
+      : "recommendations.dev.scored.json",
   );
 
   const userId = await resolveUserId();
@@ -205,6 +215,10 @@ async function main() {
       userId,
       paperIds: seedPaperIds,
       profileDescription: caseEntry.profileDescription,
+      options: {
+        includeExternalSources: !localOnly,
+        allowLibraryCandidates: localOnly,
+      },
     });
     const elapsedMs = round(performance.now() - startedAt);
 
@@ -245,6 +259,15 @@ async function main() {
   const summary = {
     task: "recommendations",
     split: "dev",
+    retrievalConfig: {
+      localOnly,
+      internalProfileRetrieval: true,
+      externalSources: localOnly
+        ? []
+        : ["semantic-scholar", "arxiv", "keyword-search"],
+      rerankerFamily: "recommendation_feature_reranker_v1",
+      diversificationStage: "shared_recommendations_diversify_high_lambda",
+    },
     budgets: budgets.recommendations,
     floors: floors.tasks.recommendations.dev,
     metrics: {

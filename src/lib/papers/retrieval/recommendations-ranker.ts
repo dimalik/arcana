@@ -10,7 +10,7 @@ import { diversifyCandidates } from "./diversify";
 
 export interface RecommendationSourceHit {
   paper: RecommendedPaper;
-  sourceKind: "s2" | "arxiv" | "keyword";
+  sourceKind: "internal" | "s2" | "arxiv" | "keyword";
   seedHint?: string | null;
 }
 
@@ -45,6 +45,7 @@ export interface RecommendationSectionResult {
 }
 
 const SOURCE_KIND_WEIGHTS: Record<RecommendationSourceHit["sourceKind"], number> = {
+  internal: 0.9,
   s2: 1,
   arxiv: 0.72,
   keyword: 0.78,

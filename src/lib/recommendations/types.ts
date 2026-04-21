@@ -17,3 +17,8 @@ export interface RecommendationsCache {
   recommended: RecommendedPaper[];
   fetchedAt: string;
 }
+
+export interface RecommendationBuildOptions {
+  includeExternalSources?: boolean;
+  allowLibraryCandidates?: boolean;
+}
