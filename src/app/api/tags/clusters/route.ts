@@ -1,44 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { generateTagClusters } from "@/lib/tags/clustering";
+import { ensureTagClusters, generateTagClusters } from "@/lib/tags/clustering";
 import { requireUserId } from "@/lib/paper-auth";
 import { mergePaperVisibilityWhere } from "@/lib/papers/visibility";
-
-const FALLBACK_CLUSTER_COLOR = "#6B7280";
-
-async function loadFallbackClusters() {
-  const tags = await prisma.tag.findMany({
-    orderBy: [{ score: "desc" }, { name: "asc" }],
-    include: { _count: { select: { papers: true } } },
-  });
-
-  if (tags.length === 0) return [];
-
-  const visibleTags = tags.filter((tag) => tag._count.papers >= 1);
-  if (visibleTags.length === 0) return [];
-
-  return [
-    {
-      id: "fallback-tags",
-      name: "Tags",
-      description: "Tag filters",
-      color: FALLBACK_CLUSTER_COLOR,
-      sortOrder: 0,
-      createdAt: new Date(0),
-      tags: visibleTags.map((tag) => ({
-        ...tag,
-        color: tag.color || FALLBACK_CLUSTER_COLOR,
-      })),
-    },
-  ];
-}
 
 export async function GET(request: NextRequest) {
   try {
     const userId = await requireUserId();
     const filterTagIds = request.nextUrl.searchParams.get("filterTagIds");
 
-    let clusters = await prisma.tagCluster.findMany({
+    await ensureTagClusters();
+
+    const clusters = await prisma.tagCluster.findMany({
       orderBy: { sortOrder: "asc" },
       include: {
         tags: {
@@ -47,10 +20,6 @@ export async function GET(request: NextRequest) {
         },
       },
     });
-
-    if (clusters.length === 0) {
-      clusters = await loadFallbackClusters();
-    }
 
     // When tags are selected, recompute counts to show intersection sizes
     if (filterTagIds) {
