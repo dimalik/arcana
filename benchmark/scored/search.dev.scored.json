@@ -32,11 +32,11 @@
     "recallAt20": 0.85
   },
   "metrics": {
-    "ndcgAt10": 0.879274,
+    "ndcgAt10": 0.879607,
     "mrrAt10": 1,
     "recallAt20": 0.888889
   },
-  "latencyP95Ms": 173.25425,
+  "latencyP95Ms": 170.152333,
   "degraded": false,
   "floorChecks": {
     "ndcgAt10": true,
@@ -49,7 +49,7 @@
       "queryClass": "doi-exact",
       "query": "10.65215/2q58a426",
       "degraded": false,
-      "latencyMs": 16.724834,
+      "latencyMs": 35.332875,
       "budgetPass": true,
       "metrics": {
         "ndcgAt10": 1,
@@ -82,7 +82,7 @@
       "queryClass": "arxiv-exact",
       "query": "2404.14219",
       "degraded": false,
-      "latencyMs": 16.224292,
+      "latencyMs": 16.808792,
       "budgetPass": true,
       "metrics": {
         "ndcgAt10": 1,
@@ -113,7 +113,7 @@
       "queryClass": "full-title",
       "query": "FlashAttention-2: Faster Attention with Better Parallelism and Work Partitioning",
       "degraded": false,
-      "latencyMs": 14.7215,
+      "latencyMs": 15.02325,
       "budgetPass": true,
       "metrics": {
         "ndcgAt10": 0.726229,
@@ -138,7 +138,7 @@
               "tags"
             ],
             "semanticScore": 0,
-            "rerankScore": 1.813735,
+            "rerankScore": 2.593735,
             "diversificationPenalty": 0,
             "authorIndexHits": 0
           }
@@ -150,7 +150,7 @@
       "queryClass": "partial-title",
       "query": "transformer",
       "degraded": false,
-      "latencyMs": 163.611833,
+      "latencyMs": 170.152333,
       "budgetPass": true,
       "metrics": {
         "ndcgAt10": 0.772499,
@@ -385,7 +385,7 @@
       "queryClass": "author",
       "query": "Tri Dao",
       "degraded": false,
-      "latencyMs": 25.180042,
+      "latencyMs": 33.07025,
       "budgetPass": true,
       "metrics": {
         "ndcgAt10": 1,
@@ -492,10 +492,10 @@
       "queryClass": "concept",
       "query": "instruction tuning",
       "degraded": false,
-      "latencyMs": 173.25425,
+      "latencyMs": 167.359458,
       "budgetPass": true,
       "metrics": {
-        "ndcgAt10": 0.776915,
+        "ndcgAt10": 0.778916,
         "mrrAt10": 1,
         "recallAt20": 1
       },
@@ -517,7 +517,7 @@
               "tags"
             ],
             "semanticScore": 0,
-            "rerankScore": 1.01,
+            "rerankScore": 1.57,
             "diversificationPenalty": 0,
             "authorIndexHits": 0
           }
@@ -539,7 +539,7 @@
               "tags"
             ],
             "semanticScore": 0,
-            "rerankScore": 1.01,
+            "rerankScore": 1.57,
             "diversificationPenalty": 0.029412,
             "authorIndexHits": 0
           }
@@ -561,7 +561,7 @@
               "tags"
             ],
             "semanticScore": 0,
-            "rerankScore": 1.01,
+            "rerankScore": 1.57,
             "diversificationPenalty": 0.058824,
             "authorIndexHits": 0
           }
@@ -583,7 +583,7 @@
               "tags"
             ],
             "semanticScore": 0,
-            "rerankScore": 1.01,
+            "rerankScore": 1.57,
             "diversificationPenalty": 0.088235,
             "authorIndexHits": 0
           }
@@ -603,7 +603,7 @@
               "summary"
             ],
             "semanticScore": 0,
-            "rerankScore": 0.922079,
+            "rerankScore": 1.482079,
             "diversificationPenalty": 0.117647,
             "authorIndexHits": 0
           }
@@ -623,7 +623,7 @@
               "summary"
             ],
             "semanticScore": 0,
-            "rerankScore": 0.92,
+            "rerankScore": 1.48,
             "diversificationPenalty": 0.147059,
             "authorIndexHits": 0
           }
@@ -643,28 +643,8 @@
               "summary"
             ],
             "semanticScore": 0,
-            "rerankScore": 0.92,
+            "rerankScore": 1.48,
             "diversificationPenalty": 0.176471,
-            "authorIndexHits": 0
-          }
-        },
-        {
-          "id": "da24639c-4ea2-44cd-b2d8-674d898c1f19",
-          "title": "Fine-Tuning Causal LLMs for Text Classification: Embedding-Based vs. Instruction-Based Approaches",
-          "matchFields": [
-            "abstract",
-            "summary",
-            "title"
-          ],
-          "searchDiagnostics": {
-            "lexicalMatchKinds": [
-              "abstract",
-              "summary",
-              "title"
-            ],
-            "semanticScore": 0,
-            "rerankScore": 0.92,
-            "diversificationPenalty": 0.205882,
             "authorIndexHits": 0
           }
         },
@@ -681,6 +661,26 @@
               "title",
               "abstract",
               "summary"
+            ],
+            "semanticScore": 0,
+            "rerankScore": 1.48,
+            "diversificationPenalty": 0.205882,
+            "authorIndexHits": 0
+          }
+        },
+        {
+          "id": "da24639c-4ea2-44cd-b2d8-674d898c1f19",
+          "title": "Fine-Tuning Causal LLMs for Text Classification: Embedding-Based vs. Instruction-Based Approaches",
+          "matchFields": [
+            "abstract",
+            "summary",
+            "title"
+          ],
+          "searchDiagnostics": {
+            "lexicalMatchKinds": [
+              "abstract",
+              "summary",
+              "title"
             ],
             "semanticScore": 0,
             "rerankScore": 0.92,
