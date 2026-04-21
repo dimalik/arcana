@@ -33,6 +33,14 @@ interface OpenRelatedRerankerConfig {
   fallbackBackendId?: OpenRelatedRerankerBackendId;
 }
 
+interface OpenRelatedRerankerServiceConfig {
+  baseUrl: string;
+  mode: "openai" | "native";
+  path: string;
+  apiKey?: string;
+  timeoutMs: number;
+}
+
 const openRelatedRerankerResponseSchema = z
   .object({
     requestId: z.string(),
@@ -164,6 +172,127 @@ function resolveOpenRelatedRerankerConfig(
     trustRemoteCode:
       process.env.ARCANA_RELATED_BGE_RERANKER_TRUST_REMOTE_CODE === "1",
   };
+}
+
+function resolveOpenRelatedRerankerServiceConfig():
+  | OpenRelatedRerankerServiceConfig
+  | null {
+  const baseUrl =
+    process.env.ARCANA_RELATED_RERANK_SERVICE_URL?.trim() || "";
+  if (!baseUrl) return null;
+
+  const mode =
+    process.env.ARCANA_RELATED_RERANK_SERVICE_MODE === "native"
+      ? "native"
+      : "openai";
+  const defaultPath =
+    mode === "native" ? "/api/v1/rerank/" : "/v1/openai/rerank";
+
+  return {
+    baseUrl: baseUrl.replace(/\/+$/, ""),
+    mode,
+    path:
+      process.env.ARCANA_RELATED_RERANK_SERVICE_PATH?.trim() || defaultPath,
+    apiKey: process.env.ARCANA_RELATED_RERANK_SERVICE_API_KEY?.trim() || undefined,
+    timeoutMs: parsePositiveInteger(
+      process.env.ARCANA_RELATED_RERANK_SERVICE_TIMEOUT_MS,
+      20_000,
+    ),
+  };
+}
+
+function buildServiceRequestBody(
+  config: OpenRelatedRerankerServiceConfig,
+  request: OpenRelatedRerankerRequest,
+): Record<string, unknown> {
+  if (config.mode === "native") {
+    return {
+      query: request.query,
+      documents: request.documents.map((document) => document.text),
+      top_n: request.documents.length,
+    };
+  }
+
+  return {
+    query: request.query,
+    documents: request.documents.map((document) => ({
+      id: document.id,
+      text: document.text,
+    })),
+    top_n: request.documents.length,
+  };
+}
+
+function parseServiceScores(
+  payload: unknown,
+  request: OpenRelatedRerankerRequest,
+): Map<string, number> {
+  const parsed = z
+    .object({
+      results: z.array(z.any()).optional(),
+      output: z
+        .object({
+          results: z.array(z.any()).optional(),
+        })
+        .optional(),
+    })
+    .passthrough()
+    .parse(payload);
+
+  const results = parsed.results ?? parsed.output?.results ?? [];
+  const scores = new Map<string, number>();
+  for (const result of results) {
+    const index =
+      typeof result?.index === "number" ? result.index : null;
+    const relevance =
+      typeof result?.relevance_score === "number"
+        ? result.relevance_score
+        : typeof result?.relevanceScore === "number"
+          ? result.relevanceScore
+          : null;
+    if (index == null || relevance == null) continue;
+    const document = request.documents[index];
+    if (!document) continue;
+    scores.set(
+      document.id,
+      Number(Math.max(0, Math.min(relevance, 1)).toFixed(6)),
+    );
+  }
+
+  return scores;
+}
+
+async function runServiceReranker(
+  config: OpenRelatedRerankerServiceConfig,
+  request: OpenRelatedRerankerRequest,
+): Promise<Map<string, number>> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), config.timeoutMs);
+  try {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
+    if (config.apiKey) {
+      headers.Authorization = `Bearer ${config.apiKey}`;
+    }
+
+    const response = await fetch(`${config.baseUrl}${config.path}`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(buildServiceRequestBody(config, request)),
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      throw new Error(
+        `HTTP ${response.status} ${response.statusText}`,
+      );
+    }
+
+    return parseServiceScores(await response.json(), request);
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 function rejectPending(state: WorkerState, error: Error): void {
@@ -321,6 +450,21 @@ export async function runOpenRelatedReranker(
 ): Promise<Map<string, number>> {
   if (request.documents.length === 0) {
     return new Map();
+  }
+
+  const serviceConfig = resolveOpenRelatedRerankerServiceConfig();
+  if (serviceConfig) {
+    try {
+      const serviceScores = await runServiceReranker(serviceConfig, request);
+      if (serviceScores.size > 0) {
+        return serviceScores;
+      }
+    } catch (error) {
+      console.warn(
+        `[open-reranker:${backendId}] External rerank service failed, falling back to local worker:`,
+        error,
+      );
+    }
   }
 
   const config = resolveOpenRelatedRerankerConfig(backendId);

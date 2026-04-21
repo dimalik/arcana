@@ -37,6 +37,12 @@ python training/related_reranker/train_cross_encoder.py \
   `qwen3_reranker_v1` / `bge_reranker_v1` backends.
 - `qwen3_reranker_v1` is treated as GPU-first by default and falls back to
   `bge_reranker_v1` when the Qwen worker cannot start or times out.
+- If you run an external rerank service such as `embed-rerank`, the app can use
+  it directly via:
+  - `ARCANA_RELATED_RERANK_SERVICE_URL`
+  - `ARCANA_RELATED_RERANK_SERVICE_MODE=openai|native`
+  - optional `ARCANA_RELATED_RERANK_SERVICE_PATH`
+  - optional `ARCANA_RELATED_RERANK_SERVICE_API_KEY`
 - Dev metrics include grouped reranker-style metrics:
   - `ndcg_at_10`
   - `mrr_at_10`
