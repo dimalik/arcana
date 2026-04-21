@@ -331,6 +331,14 @@ export function ConversationView({
                     artifacts: message.metadata?.artifacts,
                   })
                 : messageText;
+            const inlineArtifacts =
+              message.metadata?.artifacts?.filter(
+                (artifact) => artifact.kind === "CODE_SNIPPET",
+              ) ?? [];
+            const supportArtifacts =
+              message.metadata?.artifacts?.filter(
+                (artifact) => artifact.kind !== "CODE_SNIPPET",
+              ) ?? [];
             const hasAssistantText = linkedMessageText.trim().length > 0;
             return (
               <div
@@ -348,7 +356,7 @@ export function ConversationView({
                 >
                   {message.role === "assistant" ? (
                     <>
-                      <ChatArtifactsInline artifacts={message.metadata?.artifacts} />
+                      <ChatArtifactsInline artifacts={inlineArtifacts} />
                       {hasAssistantText ? (
                         <MarkdownRenderer
                           content={linkedMessageText}
@@ -358,8 +366,7 @@ export function ConversationView({
                       <ChatMessageSupport
                         citations={message.metadata?.citations}
                         agentActions={message.metadata?.agentActions}
-                        artifacts={message.metadata?.artifacts}
-                        showArtifacts={false}
+                        artifacts={supportArtifacts}
                       />
                       <button
                         onClick={() =>

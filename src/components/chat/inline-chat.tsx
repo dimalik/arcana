@@ -135,7 +135,15 @@ export function InlineChat({
     citations: assistantSupport?.citations,
     artifacts: assistantSupport?.artifacts,
   });
-  const hasInlineArtifacts = Boolean(assistantSupport?.artifacts?.length);
+  const inlineArtifacts =
+    assistantSupport?.artifacts?.filter(
+      (artifact) => artifact.kind === "CODE_SNIPPET",
+    ) ?? [];
+  const supportArtifacts =
+    assistantSupport?.artifacts?.filter(
+      (artifact) => artifact.kind !== "CODE_SNIPPET",
+    ) ?? [];
+  const hasInlineArtifacts = inlineArtifacts.length > 0;
   const hasAssistantText = linkedResponseText.trim().length > 0;
 
   const displayText =
@@ -240,7 +248,7 @@ export function InlineChat({
         {/* Streaming response */}
         {(hasAssistantText || hasInlineArtifacts) && (
           <div className="px-2.5 py-1.5">
-            <ChatArtifactsInline compact artifacts={assistantSupport?.artifacts} />
+            <ChatArtifactsInline compact artifacts={inlineArtifacts} />
             {hasAssistantText ? (
               <MarkdownRenderer content={linkedResponseText} className="text-xs" />
             ) : null}
@@ -248,8 +256,7 @@ export function InlineChat({
               compact
               citations={assistantSupport?.citations}
               agentActions={assistantSupport?.agentActions}
-              artifacts={assistantSupport?.artifacts}
-              showArtifacts={false}
+              artifacts={supportArtifacts}
             />
             {!isLoading && (
               <div className="mt-1.5 flex justify-end">

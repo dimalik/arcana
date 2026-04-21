@@ -492,7 +492,15 @@ function QuickChatStream({
         .map((p) => p.text)
         .join("") || ""
     : "";
-  const hasInlineArtifacts = Boolean(assistantSupport?.artifacts?.length);
+  const inlineArtifacts =
+    assistantSupport?.artifacts?.filter(
+      (artifact) => artifact.kind === "CODE_SNIPPET",
+    ) ?? [];
+  const supportArtifacts =
+    assistantSupport?.artifacts?.filter(
+      (artifact) => artifact.kind !== "CODE_SNIPPET",
+    ) ?? [];
+  const hasInlineArtifacts = inlineArtifacts.length > 0;
 
   if (isLoading && !responseText && !hasInlineArtifacts) {
     return (
@@ -512,15 +520,14 @@ function QuickChatStream({
 
   return (
     <div className="max-h-40 overflow-y-auto rounded bg-muted/40 px-2.5 py-1.5 highlight-tooltip-scroll text-xs [&_p]:mb-1 [&_p]:leading-snug [&_h1]:text-sm [&_h2]:text-xs [&_h3]:text-xs [&_ul]:mb-1 [&_ol]:mb-1 [&_pre]:my-1 [&_blockquote]:my-1">
-      <ChatArtifactsInline compact artifacts={assistantSupport?.artifacts} />
+      <ChatArtifactsInline compact artifacts={inlineArtifacts} />
       {hasAssistantText ? (
         <MarkdownRenderer content={linkedResponseText} className="text-xs" />
       ) : null}
       <ChatMessageSupport
         compact
         citations={assistantSupport?.citations}
-        artifacts={assistantSupport?.artifacts}
-        showArtifacts={false}
+        artifacts={supportArtifacts}
       />
       {isLoading && (
         <Loader2 className="inline h-3 w-3 animate-spin text-muted-foreground ml-1" />
