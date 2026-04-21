@@ -10,6 +10,7 @@ import { getDefaultModel } from "../../llm/auto-process";
 import { PAPER_INTERACTIVE_LLM_OPERATIONS, withPaperLlmContext } from "../../llm/paper-llm-context";
 import { SYSTEM_PROMPTS } from "../../llm/prompts";
 import { generateStructuredObject } from "../../llm/provider";
+import { getS2Recommendations, searchByTitle } from "../../import/semantic-scholar";
 
 import {
   SHARED_RAW_PAPER_REPRESENTATION_KIND,
@@ -43,6 +44,8 @@ interface RelatedPaperContext {
   authors: string | null;
   year: number | null;
   venue: string | null;
+  doi: string | null;
+  arxivId: string | null;
   citationCount: number | null;
   duplicateState: string | null;
 }
@@ -164,6 +167,8 @@ const RELATED_LLM_POINTWISE_MAX_TOKENS = 2_800;
 const RELATED_LLM_ABSTRACT_SNIPPET_CHARS = 260;
 const RELATED_CONTENT_EXPANSION_LIMIT = 80;
 const RELATED_CONTENT_EXPANSION_SCORE_FLOOR = 0.18;
+const RELATED_S2_EXPANSION_LIMIT = 12;
+const RELATED_S2_TRIGGER_BASELINE_MAX = 8;
 const RELATED_LLM_SELECTION_BOOST_WEIGHT = 0.14;
 const RELATED_LLM_POINTWISE_SCORE_WEIGHT = 0.22;
 const RELATED_BM25_K1 = 1.35;
@@ -483,6 +488,22 @@ function normalizeVenue(value: string | null | undefined): string {
   return normalizeText(value);
 }
 
+function normalizeDoi(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const normalized = normalizeWhitespace(value)
+    .replace(/^https?:\/\/(?:dx\.)?doi\.org\//i, "")
+    .toLowerCase();
+  return normalized || null;
+}
+
+function normalizeArxivId(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const normalized = normalizeWhitespace(value)
+    .replace(/^arxiv:/i, "")
+    .toLowerCase();
+  return normalized || null;
+}
+
 function mergeSignalSummary(
   primary: DeterministicSignalSummary,
   secondary: DeterministicSignalSummary,
@@ -667,6 +688,8 @@ async function loadPaperContexts(
       authors: true,
       year: true,
       venue: true,
+      doi: true,
+      arxivId: true,
       citationCount: true,
       duplicateState: true,
     },
@@ -1103,6 +1126,220 @@ async function loadLexicalExpansionRows(
     }));
 }
 
+async function buildS2PositivePaperIds(
+  seedPaper: RelatedPaperContext,
+): Promise<string[]> {
+  const directIds = stableUnique(
+    [
+      normalizeDoi(seedPaper.doi)
+        ? `DOI:${normalizeDoi(seedPaper.doi)}`
+        : null,
+      normalizeArxivId(seedPaper.arxivId)
+        ? `ArXiv:${normalizeArxivId(seedPaper.arxivId)}`
+        : null,
+    ].filter((value): value is string => Boolean(value)),
+  );
+  if (directIds.length > 0) return directIds;
+
+  try {
+    const resolved = await searchByTitle(seedPaper.title, seedPaper.year);
+    if (!resolved) return [];
+
+    return stableUnique(
+      [
+        normalizeDoi(resolved.doi)
+          ? `DOI:${normalizeDoi(resolved.doi)}`
+          : null,
+        normalizeArxivId(resolved.arxivId)
+          ? `ArXiv:${normalizeArxivId(resolved.arxivId)}`
+          : null,
+      ].filter((value): value is string => Boolean(value)),
+    );
+  } catch (error) {
+    return [];
+  }
+}
+
+async function loadSemanticScholarExpansionRows(
+  params: {
+    paperId: string;
+    userId: string;
+    seedPaper: RelatedPaperContext;
+    baselineCount: number;
+    excludePaperIds: string[];
+  },
+  db: RelatedRerankDb,
+): Promise<GraphRelationRow[]> {
+  if (params.baselineCount > RELATED_S2_TRIGGER_BASELINE_MAX) {
+    return [];
+  }
+
+  const positivePaperIds = await buildS2PositivePaperIds(params.seedPaper);
+  if (positivePaperIds.length === 0) return [];
+
+  try {
+    const recommendations = await getS2Recommendations(
+      positivePaperIds,
+      RELATED_S2_EXPANSION_LIMIT,
+    );
+    if (recommendations.length === 0) return [];
+
+    const recommendationDois = stableUnique(
+      recommendations
+        .map((recommendation) => normalizeDoi(recommendation.doi))
+        .filter((value): value is string => Boolean(value)),
+    );
+    const recommendationArxivIds = stableUnique(
+      recommendations
+        .map((recommendation) => normalizeArxivId(recommendation.arxivId))
+        .filter((value): value is string => Boolean(value)),
+    );
+    const phraseQueries = stableUnique(
+      recommendations.flatMap((recommendation) =>
+        collectSignaturePhrases(recommendation.title).slice(0, 3),
+      ),
+    ).slice(0, 12);
+
+    const localCandidates = await db.paper.findMany({
+      where: {
+        userId: params.userId,
+        duplicateState: "ACTIVE",
+        id: { notIn: [params.paperId, ...params.excludePaperIds] },
+        OR: [
+          ...(recommendationDois.length > 0
+            ? [{ doi: { in: recommendationDois } }]
+            : []),
+          ...(recommendationArxivIds.length > 0
+            ? [{ arxivId: { in: recommendationArxivIds } }]
+            : []),
+          ...phraseQueries.flatMap((phrase) => [
+            { title: { contains: phrase } },
+            { abstract: { contains: phrase } },
+          ]),
+        ],
+      },
+      select: {
+        id: true,
+        entityId: true,
+        title: true,
+        year: true,
+        authors: true,
+        abstract: true,
+        summary: true,
+        doi: true,
+        arxivId: true,
+        duplicateState: true,
+      },
+    });
+
+    if (localCandidates.length === 0) return [];
+
+    const usedPaperIds = new Set<string>();
+    const exactByDoi = new Map(
+      localCandidates
+        .map((candidate) => [normalizeDoi(candidate.doi), candidate] as const)
+        .filter((entry): entry is readonly [string, (typeof localCandidates)[number]] =>
+          Boolean(entry[0]),
+        ),
+    );
+    const exactByArxiv = new Map(
+      localCandidates
+        .map(
+          (candidate) => [normalizeArxivId(candidate.arxivId), candidate] as const,
+        )
+        .filter((entry): entry is readonly [string, (typeof localCandidates)[number]] =>
+          Boolean(entry[0]),
+        ),
+    );
+    const rows: GraphRelationRow[] = [];
+    for (let index = 0; index < recommendations.length; index += 1) {
+      const recommendation = recommendations[index];
+      const exactMatch =
+        exactByDoi.get(normalizeDoi(recommendation.doi) ?? "") ??
+        exactByArxiv.get(normalizeArxivId(recommendation.arxivId) ?? "") ??
+        null;
+
+      let candidate = exactMatch;
+      let titleSimilarity = exactMatch
+        ? computeDeterministicTitleSimilarity(
+            recommendation.title,
+            exactMatch.title,
+          )
+        : 0;
+
+      if (!candidate) {
+        const rankedTitleMatches = localCandidates
+          .map((localCandidate) => ({
+            candidate: localCandidate,
+            titleSimilarity: computeDeterministicTitleSimilarity(
+              recommendation.title,
+              localCandidate.title,
+            ),
+          }))
+          .filter(
+            (match) =>
+              match.titleSimilarity >= 0.84 &&
+              (recommendation.year == null ||
+                match.candidate.year == null ||
+                Math.abs((match.candidate.year ?? 0) - recommendation.year) <= 2),
+          )
+          .sort((left, right) => {
+            if (right.titleSimilarity !== left.titleSimilarity) {
+              return right.titleSimilarity - left.titleSimilarity;
+            }
+            return left.candidate.title.localeCompare(right.candidate.title);
+          });
+
+        candidate = rankedTitleMatches[0]?.candidate ?? null;
+        titleSimilarity = rankedTitleMatches[0]?.titleSimilarity ?? 0;
+      }
+
+      if (!candidate || usedPaperIds.has(candidate.id)) continue;
+      usedPaperIds.add(candidate.id);
+
+      const rankPrior =
+        recommendations.length > 1
+          ? 1 - index / (recommendations.length - 1)
+          : 1;
+      const exactIdentifierMatch = Boolean(exactMatch);
+      const confidence = Number(
+        Math.min(
+          0.78,
+          0.12 +
+            rankPrior * 0.18 +
+            titleSimilarity * 0.18 +
+            (exactIdentifierMatch ? 0.2 : 0.04),
+        ).toFixed(6),
+      );
+
+      rows.push({
+        id: `s2::${candidate.id}`,
+        relatedPaper: {
+          id: candidate.id,
+          entityId: candidate.entityId,
+          title: candidate.title,
+          year: candidate.year,
+          authors: candidate.authors,
+          duplicateState: candidate.duplicateState,
+        },
+        relationType: "related",
+        description:
+          "Recovered from Semantic Scholar recommendations and matched back to this library paper.",
+        confidence,
+        isAutoGenerated: true,
+      });
+    }
+
+    return rows;
+  } catch (error) {
+    console.warn(
+      "[related-ranker] Semantic Scholar expansion fell back to local-only candidates:",
+      error,
+    );
+    return [];
+  }
+}
+
 async function loadContentExpansionRows(
   params: {
     userId: string;
@@ -1399,6 +1636,16 @@ async function prepareFeatureRelatedRerankState(
     },
     db,
   );
+  const semanticScholarExpansionRows = await loadSemanticScholarExpansionRows(
+    {
+      paperId,
+      userId,
+      seedPaper,
+      baselineCount: baselineRows.length,
+      excludePaperIds: baselineRows.map((row) => row.relatedPaper.id),
+    },
+    db,
+  );
   const contentExpansionRows = await loadContentExpansionRows(
     {
       userId,
@@ -1412,6 +1659,7 @@ async function prepareFeatureRelatedRerankState(
   for (const row of [
     ...baselineRows,
     ...lexicalExpansionRows,
+    ...semanticScholarExpansionRows,
     ...contentExpansionRows,
   ]) {
     const current = candidateRowsByPaperId.get(row.relatedPaper.id);

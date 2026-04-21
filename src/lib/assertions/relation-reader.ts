@@ -101,7 +101,6 @@ async function rerankGraphRows(
   rows: GraphRelationRow[],
   db: RelationReaderDb,
 ): Promise<GraphRelationRow[]> {
-  if (rows.length <= 1) return rows;
   return rerankRelatedRelationRows(paperId, userId, rows, db);
 }
 
