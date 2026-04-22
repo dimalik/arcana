@@ -23,6 +23,7 @@ export interface ExtractedFigure {
   height: number | null;
   /** Transient: what happened at crop time. Consumed by merger for gapReason, not persisted. */
   cropOutcome?: "success" | "rejected" | "failed" | null;
+  tableHtml?: string;
 }
 
 interface EmbeddedImage {
@@ -64,6 +65,56 @@ function evaluatePdfCropAcceptance(input: PdfCropAcceptanceInput): PdfCropAccept
     return { accepted: false, rejectionReason: "crop_rejected" };
   }
   return { accepted: true };
+}
+
+export interface StructuredTableRecord {
+  page: number;
+  bbox: [number, number, number, number];
+  label: string | null;
+  html: string;
+  rowCount: number;
+  colCount: number;
+}
+
+export async function runPdfTableExtractor(
+  pdfPath: string,
+  maxPages: number,
+): Promise<StructuredTableRecord[]> {
+  const scriptPath = path.join(process.cwd(), "src/lib/figures/pdf-table-extractor.py");
+  const { stdout } = await execFileAsync(
+    "python3",
+    [scriptPath, pdfPath, "--max-pages", String(maxPages)],
+    { maxBuffer: 50 * 1024 * 1024, timeout: 60_000 },
+  );
+  const parsed = JSON.parse(stdout) as { tables?: StructuredTableRecord[] };
+  return parsed.tables ?? [];
+}
+
+async function extractStructuredTables(
+  pdfPath: string,
+  maxPages: number,
+): Promise<ExtractedFigure[]> {
+  try {
+    const tables = await pdfFigurePipelineInternals.runPdfTableExtractor(pdfPath, maxPages);
+    return tables.map((t): ExtractedFigure => ({
+      figureLabel: t.label,
+      captionText: null,
+      captionSource: "none",
+      sourceMethod: "pdf_structural",
+      confidence: "medium",
+      imagePath: null,
+      assetHash: null,
+      pdfPage: t.page,
+      bbox: JSON.stringify(t.bbox),
+      type: "table",
+      width: null,
+      height: null,
+      tableHtml: t.html,
+    }));
+  } catch (err) {
+    console.warn(`[pdf-table-extractor] failed: ${(err as Error).message}`);
+    return [];
+  }
 }
 
 export async function extractFiguresFromPdf(
@@ -328,9 +379,23 @@ json.dump(pages, sys.stdout)`,
     }
   }
 
+  const structuredTables = await extractStructuredTables(absolutePdfPath, maxPages);
+  for (const table of structuredTables) {
+    if (
+      table.figureLabel &&
+      coveredLabels.has(
+        table.figureLabel.toLowerCase().replace(/^fig\.?\s*/i, "figure ").trim(),
+      )
+    ) {
+      continue;
+    }
+    results.push(table);
+  }
+
   return results;
 }
 
 export const pdfFigurePipelineInternals = {
   evaluatePdfCropAcceptance,
+  runPdfTableExtractor,
 };
