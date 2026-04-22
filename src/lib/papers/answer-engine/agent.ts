@@ -37,29 +37,51 @@ import type {
 
 const NON_ASSERTIVE_EVIDENCE_TYPES = new Set<PaperClaimEvidenceType>(["CITING"]);
 const STOP_WORDS = new Set([
+  "a",
   "about",
+  "am",
+  "an",
+  "are",
   "after",
+  "be",
+  "been",
+  "being",
   "before",
+  "can",
+  "could",
   "does",
   "from",
+  "give",
   "have",
+  "how",
+  "i",
+  "is",
   "into",
   "just",
   "like",
+  "me",
   "more",
   "most",
   "paper",
   "papers",
+  "please",
+  "show",
   "that",
+  "the",
   "their",
   "them",
   "this",
+  "to",
+  "us",
+  "was",
+  "were",
   "what",
   "when",
   "where",
   "which",
   "with",
   "would",
+  "you",
 ]);
 const RESULT_TABLE_FOCUS_TERMS = [
   "rai",
@@ -322,10 +344,11 @@ function buildContextSnippet(
   text: string,
   start: number,
   end: number,
-  radius = 140,
+  leftRadius = 20,
+  rightRadius = 420,
 ): string {
-  const leftBound = Math.max(0, start - radius);
-  const rightBound = Math.min(text.length, end + radius);
+  const leftBound = Math.max(0, start - leftRadius);
+  const rightBound = Math.min(text.length, end + rightRadius);
   let left = leftBound;
   let right = rightBound;
 
@@ -408,6 +431,31 @@ function citationForMatchedText(
     sectionPath,
     sourceKind: "artifact",
   };
+}
+
+function textMatchesAnalysis(
+  value: string | null | undefined,
+  analysis: QueryAnalysis,
+): boolean {
+  if (!value) return false;
+  const haystack = normalizeAnalysisText(value);
+  if (analysis.targetTerms.length === 0) {
+    return analysis.expandedTerms.length === 0
+      ? haystack.length > 0
+      : analysis.expandedTerms.some((term) => haystack.includes(term));
+  }
+  return analysis.targetTerms.some((term) => haystack.includes(term))
+    || analysis.expandedTerms.some((term) => haystack.includes(term));
+}
+
+function citationMatchesAnalysis(
+  citation: AnswerCitation,
+  analysis: QueryAnalysis,
+): boolean {
+  return textMatchesAnalysis(
+    [citation.snippet, citation.sectionPath].filter(Boolean).join(" "),
+    analysis,
+  );
 }
 
 function hasExactEvidence(
@@ -721,11 +769,11 @@ function extractFigureReferences(
   if (!value) return [];
   const seen = new Set<string>();
   const matches = Array.from(
-    value.matchAll(/\b(Figure|Table)\s+([A-Za-z0-9][A-Za-z0-9.-]*)\b/g),
+    value.matchAll(/\b(Figure|Fig(?:ure)?\.?|Table)\s+([A-Za-z0-9][A-Za-z0-9.-]*)\b/gi),
   );
   return matches
     .map((match) => {
-      const kind = match[1]?.toLowerCase() === "table" ? "table" as const : "figure" as const;
+      const kind = match[1]?.toLowerCase().startsWith("table") ? "table" as const : "figure" as const;
       const ordinal = match[2] ?? "";
       const label = `${kind === "table" ? "Table" : "Figure"} ${ordinal}`;
       return { kind, ordinal, label };
@@ -850,6 +898,65 @@ function collectObservedFigureKeys(observations: AgentObservation[]): Set<string
   return keys;
 }
 
+function collectReferencedFiguresFromCitations(
+  figures: PaperFigureView[],
+  citations: AnswerCitation[],
+  kind?: "figure" | "table",
+): PaperFigureView[] {
+  const seen = new Set<string>();
+  const resolved: PaperFigureView[] = [];
+
+  for (const citation of citations) {
+    for (const reference of extractFigureReferences(citation.snippet)) {
+      const figure = resolveFigureTarget(figures, reference.label);
+      if (!figure) continue;
+      if (kind === "figure" && figure.type === "table") continue;
+      if (kind === "table" && figure.type !== "table") continue;
+      if (seen.has(figure.id)) continue;
+      seen.add(figure.id);
+      resolved.push(figure);
+    }
+  }
+
+  return resolved;
+}
+
+function collectReferencedFiguresFromObservations(
+  figures: PaperFigureView[],
+  observations: AgentObservation[],
+  analysis: QueryAnalysis,
+  kind?: "figure" | "table",
+): PaperFigureView[] {
+  const seen = new Set<string>();
+  const resolved: PaperFigureView[] = [];
+
+  for (const observation of observations) {
+    const evidenceText = [
+      observation.detail,
+      observation.outputPreview ?? null,
+      observation.input ?? null,
+      observation.action,
+    ]
+      .filter(Boolean)
+      .join("\n");
+    if (!textMatchesAnalysis(evidenceText, analysis)) {
+      continue;
+    }
+
+    for (const reference of extractFigureReferences(evidenceText)) {
+      const figure = resolveFigureTarget(figures, reference.label);
+      if (!figure) continue;
+      if (kind === "figure" && figure.type === "table") continue;
+      if (kind === "table" && figure.type !== "table") continue;
+      if (seen.has(figure.id)) continue;
+      seen.add(figure.id);
+      resolved.push(figure);
+    }
+  }
+
+  return resolved;
+}
+
 function hasObservedFigure(
   figure: PaperFigureView,
   observedFigureKeys: Set<string>,
@@ -885,7 +992,7 @@ function buildFocusedEvidenceQuery(
 ): string | null {
   const domainFocus = extractResultTableFocusQuery(question);
   return uniqueStrings([
-    analysis.focusQuery,
+    ...analysis.targetTerms,
     domainFocus,
   ]).join(" ") || null;
 }
@@ -990,10 +1097,18 @@ function chooseDeterministicAction(params: {
     (observation) =>
       observation.tool === "search_passages" && observation.input === "full_text",
   );
+  const wantsVisualArtifact = /\btable\b|\bfigure\b|\bchart\b|\bplot\b|\bgraph\b/i.test(
+    params.question,
+  );
   const focusQuery = buildFocusedEvidenceQuery(params.question, params.analysis);
   const observedFigureKeys = collectObservedFigureKeys(params.observations);
+  const resultsReferences = extractFigureReferences(params.sections.results);
   const tableFigures = params.figures.filter((figure) => figure.type === "table");
   const nonTableFigures = params.figures.filter((figure) => figure.type !== "table");
+  const matchingFocusedTables =
+    focusQuery
+      ? tableFigures.filter((figure) => scoreFigureQuery(figure, "table", focusQuery) > 0)
+      : [];
   const inspectedTables = tableFigures.filter((figure) =>
     hasObservedFigure(figure, observedFigureKeys),
   );
@@ -1003,6 +1118,89 @@ function chooseDeterministicAction(params: {
   const alreadyInspectedTable = inspectedTables.length > 0;
   const alreadyOpenedFigure = openedFigures.length > 0;
   const exactEvidenceSatisfied = hasExactEvidence(params.citations, params.analysis);
+  const exactEvidenceCitations = exactEvidenceSatisfied
+    ? params.citations.filter((citation) => citationMatchesAnalysis(citation, params.analysis))
+    : [];
+  const sectionReferencedFigures = !alreadySearchedFullText
+    ? collectReferencedFiguresFromObservations(
+        params.figures,
+        params.observations.filter((observation) => observation.tool === "read_section"),
+        params.analysis,
+        "figure",
+      )
+    : [];
+  const sectionReferencedTables = !alreadySearchedFullText
+    ? [
+        ...collectReferencedFiguresFromObservations(
+          params.figures,
+          params.observations.filter((observation) => observation.tool === "read_section"),
+          params.analysis,
+          "table",
+        ),
+        ...resultsReferences
+          .filter((reference) => reference.kind === "table")
+          .map((reference) => resolveFigureTarget(params.figures, reference.label))
+          .filter((figure): figure is PaperFigureView => Boolean(figure)),
+      ]
+    : [];
+  const groundedReferencedFigures = exactEvidenceSatisfied
+    ? [
+        ...collectReferencedFiguresFromCitations(
+          params.figures,
+          exactEvidenceCitations,
+          "figure",
+        ),
+        ...collectReferencedFiguresFromObservations(
+          params.figures,
+          params.observations,
+          params.analysis,
+          "figure",
+        ),
+        ...sectionReferencedFigures,
+      ].filter((figure, index, figures) =>
+        figures.findIndex((candidate) => candidate.id === figure.id) === index
+        && !hasObservedFigure(figure, observedFigureKeys),
+      )
+    : [];
+  const groundedReferencedTables = exactEvidenceSatisfied
+    ? [
+        ...collectReferencedFiguresFromCitations(
+          params.figures,
+          exactEvidenceCitations,
+          "table",
+        ),
+        ...collectReferencedFiguresFromObservations(
+          params.figures,
+          params.observations,
+          params.analysis,
+          "table",
+        ),
+        ...sectionReferencedTables,
+      ].filter((figure, index, figures) =>
+        figures.findIndex((candidate) => candidate.id === figure.id) === index
+        && !hasObservedFigure(figure, observedFigureKeys),
+      )
+    : [];
+  const prioritizedGroundedFigure = groundedReferencedFigures
+    .map((figure) => ({
+      figure,
+      score: scoreFigureQuery(
+        figure,
+        "figure",
+        focusQuery ?? params.analysis.focusQuery ?? params.question,
+      ),
+    }))
+    .sort((left, right) => right.score - left.score || left.figure.figureIndex - right.figure.figureIndex)[0]?.figure;
+  const prioritizedGroundedTable = groundedReferencedTables
+    .map((figure) => ({
+      figure,
+      score: scoreFigureQuery(
+        figure,
+        "table",
+        focusQuery ?? params.analysis.focusQuery ?? params.question,
+      ),
+    }))
+    .sort((left, right) => right.score - left.score || left.figure.figureIndex - right.figure.figureIndex)[0]?.figure;
   const visibleArtifacts = params.artifacts.filter((artifact) =>
     artifact.kind === "TABLE_CARD" || artifact.kind === "FIGURE_CARD" || artifact.kind === "RESULT_SUMMARY",
   );
@@ -1024,7 +1222,57 @@ function chooseDeterministicAction(params: {
     };
   }
 
-  if (params.intent === "results" && focusQuery && !alreadyInspectedTable) {
+  if (
+    params.intent === "results"
+    && exactEvidenceSatisfied
+    && groundedReferencedFigures.length > 0
+    && !alreadyOpenedFigure
+  ) {
+    const nextFigure = prioritizedGroundedFigure;
+    if (nextFigure) {
+      return {
+        type: "open_figure",
+        target: nextFigure.figureLabel ?? nextFigure.id,
+      };
+    }
+  }
+
+  if (
+    params.intent === "results"
+    && exactEvidenceSatisfied
+    && groundedReferencedTables.length > 0
+    && !alreadyInspectedTable
+  ) {
+    const nextTable = prioritizedGroundedTable;
+    if (nextTable) {
+      return {
+        type: "inspect_table",
+        target: nextTable.figureLabel ?? nextTable.id,
+        query: focusQuery ?? params.question.slice(0, 160),
+      };
+    }
+  }
+
+  if (
+    params.intent === "results"
+    && exactEvidenceSatisfied
+    && groundedReferencedFigures.length === 0
+    && groundedReferencedTables.length === 0
+    && !wantsVisualArtifact
+  ) {
+    return {
+      type: "finish",
+      answerPlan:
+        "Answer from the exact matched evidence already gathered. Do not infer beyond the matched spans.",
+    };
+  }
+
+  if (
+    params.intent === "results"
+    && (!exactEvidenceSatisfied || wantsVisualArtifact)
+    && focusQuery
+    && !alreadyInspectedTable
+  ) {
     const bestTable = tableFigures
       .map((figure) => ({
         figure,
@@ -1064,19 +1312,24 @@ function chooseDeterministicAction(params: {
     return null;
   }
 
-  const resultsReferences = extractFigureReferences(params.sections.results);
   const referencedTables = resultsReferences
     .filter((reference) => reference.kind === "table")
     .map((reference) => resolveFigureTarget(params.figures, reference.label))
     .filter((figure): figure is PaperFigureView => Boolean(figure))
     .filter((figure) => figure.type === "table" && !hasObservedFigure(figure, observedFigureKeys));
 
-  if (focusQuery && inspectedTables.length < 2 && referencedTables.length > 0) {
+  if (
+    (!exactEvidenceSatisfied || wantsVisualArtifact)
+    && focusQuery
+    && inspectedTables.length < 2
+    && referencedTables.length > 0
+  ) {
     const nextReferencedTable = referencedTables
       .map((figure) => ({
         figure,
         score: scoreFigureQuery(figure, "table", focusQuery),
       }))
+      .filter((entry) => entry.score > 0)
       .sort(
         (left, right) =>
           right.score - left.score || left.figure.figureIndex - right.figure.figureIndex,
@@ -1091,7 +1344,7 @@ function chooseDeterministicAction(params: {
     }
   }
 
-  if (!focusQuery && inspectedTables.length < 2) {
+  if ((!exactEvidenceSatisfied || wantsVisualArtifact) && !focusQuery && inspectedTables.length < 2) {
     const remainingTables = tableFigures.filter((figure) =>
       !hasObservedFigure(figure, observedFigureKeys),
     );
@@ -1130,7 +1383,7 @@ function chooseDeterministicAction(params: {
     }
   }
 
-  if (!alreadyOpenedFigure) {
+  if ((!exactEvidenceSatisfied || wantsVisualArtifact) && !alreadyOpenedFigure) {
     const figureQuery = buildFocusedFigureQuery(params.question, focusQuery, params.analysis);
     const referencedFigures = resultsReferences
       .filter((reference) => reference.kind === "figure")
@@ -2230,7 +2483,18 @@ export async function preparePaperAgentEvidence(params: {
         sections,
         scope: action.scope,
       });
-      const matches = findTextMatches(searchText, searchAnalysis, 3);
+      const exactTargetAnalysis =
+        searchAnalysis.targetTerms.length > 0
+          ? {
+              ...searchAnalysis,
+              expandedTerms: [],
+              searchTerms: searchAnalysis.targetTerms,
+            }
+          : searchAnalysis;
+      const matches =
+        findTextMatches(searchText, exactTargetAnalysis, 3).length > 0
+          ? findTextMatches(searchText, exactTargetAnalysis, 3)
+          : findTextMatches(searchText, searchAnalysis, 3);
       if (matches.length === 0) {
         observations.push({
           step,
