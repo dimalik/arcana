@@ -402,7 +402,34 @@ json.dump(pages, sys.stdout)`,
     results.push(table);
   }
 
-  return results;
+  // Dedup by (sourceMethod, figureLabel): DB enforces that unique tuple, and
+  // papers occasionally repeat a caption (e.g., "Figure 1" in main text and
+  // again in an appendix). Prefer the record with richer payload (tableHtml >
+  // imagePath > neither), tiebroken by first occurrence.
+  const seen = new Map<string, ExtractedFigure>();
+  const score = (f: ExtractedFigure) =>
+    (f.tableHtml ? 2 : 0) + (f.imagePath ? 1 : 0);
+  const dedupKey = (f: ExtractedFigure) =>
+    f.figureLabel ? `${f.sourceMethod}|${f.figureLabel.toLowerCase().trim()}` : "";
+  const deduped: ExtractedFigure[] = [];
+  for (const f of results) {
+    const key = dedupKey(f);
+    if (!key) {
+      deduped.push(f);
+      continue;
+    }
+    const existing = seen.get(key);
+    if (!existing) {
+      seen.set(key, f);
+      deduped.push(f);
+    } else if (score(f) > score(existing)) {
+      // Replace lower-quality earlier occurrence in-place
+      const idx = deduped.indexOf(existing);
+      if (idx >= 0) deduped[idx] = f;
+      seen.set(key, f);
+    }
+  }
+  return deduped;
 }
 
 export const pdfFigurePipelineInternals = {
