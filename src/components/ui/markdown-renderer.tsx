@@ -1,16 +1,52 @@
 "use client";
 
-import type { MouseEvent } from "react";
+import type { MouseEvent, ReactNode } from "react";
+import { isValidElement, Children } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import type { Components } from "react-markdown";
+import { CodeBlock } from "@/components/chat/code-block";
 
 interface PaperArtifactNavigationDetail {
   paperId: string;
   view?: "results" | "review" | "methodology" | "connections" | "analyze";
   pdfPage?: number | null;
+}
+
+/**
+ * Extract the raw source + language from a <pre> whose only child is a <code>.
+ * Returns { source: null } for anything else so the caller can fall back.
+ */
+function stringifyChildren(children: ReactNode): string {
+  let out = "";
+  Children.forEach(children, (child) => {
+    if (typeof child === "string") out += child;
+    else if (typeof child === "number") out += String(child);
+    else if (isValidElement(child)) {
+      out += stringifyChildren((child.props as { children?: ReactNode }).children);
+    }
+  });
+  return out;
+}
+
+function extractCodeFromPre(children: ReactNode): {
+  source: string | null;
+  language: string | null;
+} {
+  let codeEl: React.ReactElement<{ className?: string; children?: ReactNode }> | null = null;
+  Children.forEach(children, (child) => {
+    if (isValidElement(child) && child.type === "code") {
+      codeEl = child as typeof codeEl;
+    }
+  });
+  if (!codeEl) return { source: null, language: null };
+  const props = (codeEl as React.ReactElement<{ className?: string; children?: ReactNode }>).props;
+  const langMatch = /language-([\w+-]+)/.exec(props.className ?? "");
+  const language = langMatch?.[1] ?? null;
+  const source = stringifyChildren(props.children).replace(/\n$/, "");
+  return { source, language };
 }
 
 /**
@@ -84,18 +120,21 @@ const components: Components = {
     const isInline = !className;
     if (isInline) {
       return (
-        <code className="rounded bg-muted px-1.5 py-0.5 text-sm font-mono">
+        <code className="rounded border border-border/50 bg-muted/60 px-1 py-[1px] text-[0.9em] font-mono text-foreground/90">
           {children}
         </code>
       );
     }
-    return (
-      <code className="block rounded-md bg-muted p-3 text-sm font-mono overflow-x-auto my-2">
-        {children}
-      </code>
-    );
+    // Fenced code — handled by the <pre> renderer below which extracts the raw source.
+    return <code className={className}>{children}</code>;
   },
-  pre: ({ children }) => <pre className="my-2">{children}</pre>,
+  pre: ({ children }) => {
+    const { source, language } = extractCodeFromPre(children);
+    if (source == null) {
+      return <pre className="my-2">{children}</pre>;
+    }
+    return <CodeBlock code={source} language={language} />;
+  },
   a: ({ href, children }) => (
     <a
       href={href}

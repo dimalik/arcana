@@ -9,7 +9,6 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   ArrowLeft,
   ArrowUp,
-  Loader2,
   Minimize2,
   Maximize2,
   X,
@@ -290,7 +289,7 @@ export function ConversationView({
 
       {/* Messages */}
       <div className="flex-1 overflow-y-auto px-4" ref={scrollRef}>
-        <div className="flex min-h-full flex-col space-y-3 py-3">
+        <div className="flex min-h-full flex-col gap-6 py-4">
           {messages.length === 0 && !initialMessage && !selectedContext && (
             <div className="flex flex-1 flex-col items-center justify-end gap-2 pb-4 text-center">
               <p className="text-sm text-muted-foreground">
@@ -331,7 +330,7 @@ export function ConversationView({
                     artifacts: message.metadata?.artifacts,
                   })
                 : messageText;
-            const inlineArtifacts =
+            const codeArtifacts =
               message.metadata?.artifacts?.filter(
                 (artifact) => artifact.kind === "CODE_SNIPPET",
               ) ?? [];
@@ -340,65 +339,85 @@ export function ConversationView({
                 (artifact) => artifact.kind !== "CODE_SNIPPET",
               ) ?? [];
             const hasAssistantText = linkedMessageText.trim().length > 0;
-            return (
-              <div
-                key={message.id}
-                className={`flex ${
-                  message.role === "user" ? "justify-end" : "justify-start"
-                }`}
-              >
-                <div
-                  className={`relative max-w-[85%] rounded-lg px-3 py-2 group ${
-                    message.role === "user"
-                      ? "bg-primary text-primary-foreground"
-                      : "bg-muted"
-                  }`}
+            // If the model inlined the code as a fenced markdown block, the
+            // MarkdownRenderer will already render it as a CodeBlock at the
+            // right narrative position. Suppress the duplicate artifact card.
+            const hasInlineFencedCode = /```[\w+-]*\s*\n[\s\S]*?```/.test(
+              linkedMessageText,
+            );
+            const trailingCodeArtifacts = hasInlineFencedCode
+              ? []
+              : codeArtifacts;
+
+            if (message.role === "assistant") {
+              return (
+                <article
+                  key={message.id}
+                  className="group/message relative"
                 >
-                  {message.role === "assistant" ? (
-                    <>
-                      <ChatArtifactsInline artifacts={inlineArtifacts} />
-                      {hasAssistantText ? (
-                        <MarkdownRenderer
-                          content={linkedMessageText}
-                          className="text-sm"
-                        />
-                      ) : null}
-                      <ChatMessageSupport
-                        citations={message.metadata?.citations}
-                        agentActions={message.metadata?.agentActions}
-                        artifacts={supportArtifacts}
-                      />
-                      <button
-                        onClick={() =>
-                          saveToNotebook({
-                            paperId,
-                            type: "chat",
-                            content: messageText,
-                            conversationId,
-                            messageId: message.id,
-                          })
-                        }
-                        className="absolute -top-2 -right-2 h-6 w-6 rounded-full bg-green-500/10 border border-green-500/20 text-green-600 dark:text-green-400 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-green-500/20"
-                        title="Save to notebook"
-                      >
-                        <BookmarkPlus className="h-3 w-3" />
-                      </button>
-                    </>
-                  ) : (
-                    <p className="text-sm whitespace-pre-wrap">
-                      {messageText}
-                    </p>
-                  )}
+                  {hasAssistantText ? (
+                    <MarkdownRenderer
+                      content={linkedMessageText}
+                      className="text-[13.5px] leading-[1.65] text-foreground/95"
+                    />
+                  ) : null}
+                  {trailingCodeArtifacts.length > 0 ? (
+                    <div className={hasAssistantText ? "mt-3" : undefined}>
+                      <ChatArtifactsInline artifacts={trailingCodeArtifacts} />
+                    </div>
+                  ) : null}
+                  <ChatMessageSupport
+                    citations={message.metadata?.citations}
+                    agentActions={message.metadata?.agentActions}
+                    artifacts={supportArtifacts}
+                  />
+                  <div className="mt-2.5 flex items-center gap-2 opacity-0 transition-opacity duration-200 group-hover/message:opacity-100 focus-within:opacity-100">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        saveToNotebook({
+                          paperId,
+                          type: "chat",
+                          content: messageText,
+                          conversationId,
+                          messageId: message.id,
+                        })
+                      }
+                      className="inline-flex items-center gap-1 rounded-full border border-border/50 bg-background/60 px-2 py-0.5 text-[10.5px] text-muted-foreground transition-colors hover:border-emerald-400/40 hover:bg-emerald-400/[0.06] hover:text-emerald-700 dark:hover:text-emerald-300"
+                      title="Save to notebook"
+                    >
+                      <BookmarkPlus className="h-3 w-3" />
+                      Save
+                    </button>
+                  </div>
+                </article>
+              );
+            }
+
+            return (
+              <div key={message.id} className="flex justify-end">
+                <div className="max-w-[85%] rounded-2xl rounded-br-md bg-primary/95 px-3.5 py-2 text-[13px] text-primary-foreground shadow-[0_1px_0_rgba(0,0,0,0.04),0_4px_14px_-8px_rgba(0,0,0,0.25)]">
+                  <p className="whitespace-pre-wrap leading-[1.55]">
+                    {messageText}
+                  </p>
                 </div>
               </div>
             );
           })}
           {isLoading &&
             messages[messages.length - 1]?.role !== "assistant" && (
-              <div className="flex justify-start">
-                <div className="rounded-lg bg-muted px-3 py-2">
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                </div>
+              <div className="flex items-center gap-1.5 text-muted-foreground/70">
+                <span className="inline-flex items-center gap-1">
+                  <span className="h-1.5 w-1.5 animate-[pulse_1.4s_ease-in-out_infinite] rounded-full bg-foreground/40 [animation-delay:-0.32s]" />
+                  <span className="h-1.5 w-1.5 animate-[pulse_1.4s_ease-in-out_infinite] rounded-full bg-foreground/40 [animation-delay:-0.16s]" />
+                  <span className="h-1.5 w-1.5 animate-[pulse_1.4s_ease-in-out_infinite] rounded-full bg-foreground/40" />
+                </span>
+                <span
+                  className="text-[10.5px] font-medium tracking-wide text-muted-foreground/70"
+                  style={{ fontVariant: "small-caps" }}
+                >
+                  thinking
+                </span>
               </div>
             )}
         </div>
