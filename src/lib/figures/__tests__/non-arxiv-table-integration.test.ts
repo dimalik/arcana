@@ -138,4 +138,35 @@ describe("non-arXiv table HTML routing through merger", () => {
     expect(canonical[0].description).toContain("<td>A</td>");
     expect(canonical[0].sourceMethod).toBe("pdf_structural");
   });
+
+  it("short pdf_structural HTML (between 20 and 100 chars) still wins over pdf_render_crop", () => {
+    // A minimal real pymupdf 2x2 table: ~72 chars, above the 20-char gate
+    // but BELOW the old 100-char gate that would have dropped it.
+    const shortStructuralHtml = "<table><tr><td>1</td><td>2</td></tr><tr><td>3</td><td>4</td></tr></table>";
+    expect(shortStructuralHtml.length).toBeGreaterThan(20);
+    expect(shortStructuralHtml.length).toBeLessThan(100);
+
+    const structuralTable = makeTable({
+      figureLabel: "Table 6",
+      sourceMethod: "pdf_structural",
+      confidence: "medium",
+      description: shortStructuralHtml,
+      pdfPage: 4,
+    });
+    const screenshotTable = makeTable({
+      figureLabel: "Table 6",
+      sourceMethod: "pdf_render_crop",
+      confidence: "low",
+      description: null,
+      imagePath: "uploads/figures/x/table-6.png",
+      assetHash: "cafebabe",
+      pdfPage: 4,
+    });
+
+    const merged = mergeFigureSources([structuralTable], [screenshotTable]);
+    const canonical = merged.filter((m) => m.isPrimaryExtraction);
+    expect(canonical).toHaveLength(1);
+    expect(canonical[0].sourceMethod).toBe("pdf_structural");
+    expect(canonical[0].description).toContain("<td>1</td>");
+  });
 });

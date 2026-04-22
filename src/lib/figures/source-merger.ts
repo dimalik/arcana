@@ -23,9 +23,9 @@ const SOURCE_PRIORITY: Record<string, number> = {
   arxiv_html: 2,
   publisher_html: 3,
   grobid_tei: 4,
-  pdf_embedded: 5,
-  pdf_render_crop: 6,
-  pdf_structural: 7,
+  pdf_structural: 5,
+  pdf_embedded: 6,
+  pdf_render_crop: 7,
   vision_llm: 8,
   html_download: 9, // legacy
 };
@@ -79,7 +79,8 @@ interface IdentityGroup {
 
 function selectCanonicalMember(members: AnnotatedFigure[], isTable: boolean): AnnotatedFigure {
   if (isTable) {
-    return members.find((member) => member.description && member.description.length > 100)
+    // Any present table description is real HTML markup (extractors filter layout tables); 20 is the minimum plausible <table>...</table>.
+    return members.find((member) => member.description && member.description.length > 20)
       || members.find((member) => member.normalizedLabel || member.captionText)
       || members.find((member) => member.imagePath)
       || members[0];
@@ -145,9 +146,10 @@ export function mergeIdentityMembers(membersInput: MergeableFigure[]): IdentityM
 
   const bestCaptionMember = members.find(m => m.captionText);
   const finalDescription = canonicalMember.description ?? members.find(m => m.description)?.description ?? null;
+  // Any present table description is real HTML markup (extractors filter layout tables); 20 is the minimum plausible <table>...</table>.
   const isStructuredTable = isTable
     && finalDescription != null
-    && finalDescription.length > 100;
+    && finalDescription.length > 20;
 
   let bestImageMember: AnnotatedFigure | null = null;
   if (canonicalMember.imagePath) {
