@@ -263,7 +263,8 @@ function isUnlabeledPdfOnlyGroup(candidates: ProjectableCandidate[]): boolean {
       && (candidate.sourceMethod === "pdf_embedded"
         || candidate.sourceMethod === "grobid_tei"
         || candidate.sourceMethod === "pdf_render_crop"
-        || candidate.sourceMethod === "pdf_structural"),
+        || candidate.sourceMethod === "pdf_structural"
+        || candidate.sourceMethod === "pdf_table_rows"),
   );
 }
 
@@ -311,7 +312,7 @@ function buildProjectionFigureDraft(
   } else if (!isStructuredTable) {
     bestImageMember = sorted.find((member) => member.imagePath) ?? null;
   } else {
-    const unsafeSources = new Set(["grobid_tei", "pdf_embedded", "pdf_render_crop", "pdf_structural"]);
+    const unsafeSources = new Set(["grobid_tei", "pdf_embedded", "pdf_render_crop", "pdf_structural", "pdf_table_rows"]);
     bestImageMember = sorted.find(
       (member) => member.imagePath && !unsafeSources.has(member.sourceMethod),
     ) ?? null;

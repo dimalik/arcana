@@ -60,7 +60,7 @@ describe("extractStructuredTables (via extractFiguresFromPdf)", () => {
     });
 
     const tableRec = figures.find(
-      (f) => f.type === "table" && f.sourceMethod === "pdf_structural",
+      (f) => f.type === "table" && f.sourceMethod === "pdf_table_rows",
     );
     expect(tableRec).toBeDefined();
     expect(tableRec!.tableHtml).toContain("<td>A</td>");
@@ -89,7 +89,7 @@ describe("extractStructuredTables (via extractFiguresFromPdf)", () => {
       coveredLabels: new Set(["table 1"]),
     });
 
-    const structural = figures.filter((f) => f.sourceMethod === "pdf_structural");
+    const structural = figures.filter((f) => f.sourceMethod === "pdf_table_rows");
     expect(structural).toHaveLength(0);
   });
 });

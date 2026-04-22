@@ -81,7 +81,7 @@ describe("buildProjectionFigureDraft", () => {
     expect(draft?.pageSourceMethod).toBe("pdf_render_crop");
   });
 
-  it("treats short (>20, <100 char) pdf_structural HTML as structured on the projection path", () => {
+  it("treats short (>20, <100 char) pdf_table_rows HTML as structured on the projection path", () => {
     const shortStructuralHtml = "<table><tr><td>1</td><td>2</td></tr><tr><td>3</td><td>4</td></tr></table>";
     expect(shortStructuralHtml.length).toBeGreaterThan(20);
     expect(shortStructuralHtml.length).toBeLessThan(100);
@@ -90,7 +90,7 @@ describe("buildProjectionFigureDraft", () => {
       projectionPublicationInternals.candidateToProjectable(
         makeCandidate({
           id: "pdf-structural-short",
-          sourceMethod: "pdf_structural",
+          sourceMethod: "pdf_table_rows",
           type: "table",
           figureLabelRaw: "Table 6",
           structuredContentRaw: shortStructuralHtml,
@@ -127,7 +127,7 @@ describe("buildProjectionFigureDraft", () => {
     ]);
 
     expect(draft).not.toBeNull();
-    expect(draft?.sourceMethod).toBe("pdf_structural");
+    expect(draft?.sourceMethod).toBe("pdf_table_rows");
     expect(draft?.contentCandidateId).toBe("pdf-structural-short");
     expect(draft?.structuredContent).toContain("<td>1</td>");
     // isStructuredTable should be true, so the unsafe pdf_render_crop screenshot must be rejected as preview.

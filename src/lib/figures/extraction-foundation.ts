@@ -34,6 +34,7 @@ function inferNativePreviewTrust(fig: MergeableFigure): string {
     fig.sourceMethod === "grobid_tei"
     || fig.sourceMethod === "pdf_render_crop"
     || fig.sourceMethod === "pdf_structural"
+    || fig.sourceMethod === "pdf_table_rows"
   ) {
     return "untrusted_native";
   }

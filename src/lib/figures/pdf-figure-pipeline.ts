@@ -12,7 +12,7 @@ export interface ExtractedFigure {
   figureLabel: string | null;
   captionText: string | null;
   captionSource: "pdf_ocr" | "none";
-  sourceMethod: "pdf_embedded" | "pdf_render_crop" | "pdf_structural";
+  sourceMethod: "pdf_embedded" | "pdf_render_crop" | "pdf_structural" | "pdf_table_rows";
   confidence: "high" | "medium" | "low";
   imagePath: string | null;
   assetHash: string | null;
@@ -108,7 +108,7 @@ async function extractStructuredTables(
       figureLabel: t.label,
       captionText: null,
       captionSource: "none",
-      sourceMethod: "pdf_structural",
+      sourceMethod: "pdf_table_rows",
       confidence: "medium",
       imagePath: null,
       assetHash: null,

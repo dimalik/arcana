@@ -55,12 +55,12 @@ describe("non-arXiv table HTML routing through merger", () => {
     expect(merged[0].description).toContain("<td>QA</td>");
   });
 
-  it("pdf_structural tableHtml lands in description after merge", () => {
+  it("pdf_table_rows tableHtml lands in description after merge", () => {
     const pdfStructuralTable = makeTable({
       figureLabel: "Table 3",
       captionText: null,
       captionSource: "none",
-      sourceMethod: "pdf_structural",
+      sourceMethod: "pdf_table_rows",
       sourceUrl: null,
       confidence: "medium",
       description: "<table><thead><tr><th>Model</th></tr></thead><tbody><tr><td>A</td></tr></tbody></table>",
@@ -107,13 +107,13 @@ describe("non-arXiv table HTML routing through merger", () => {
     expect(canonical[0].sourceMethod).toBe("publisher_html");
   });
 
-  it("pdf_structural HTML wins over pdf_render_crop screenshot on merge", () => {
+  it("pdf_table_rows HTML wins over pdf_render_crop screenshot on merge", () => {
     // HTML must clear the structured-table gate; otherwise the
     // higher-priority pdf_render_crop would win the canonical slot even
     // though the HTML description still flows through.
     const structuralTable = makeTable({
       figureLabel: "Table 5",
-      sourceMethod: "pdf_structural",
+      sourceMethod: "pdf_table_rows",
       confidence: "medium",
       description:
         "<table><thead><tr><th>Model</th><th>Score</th></tr></thead>"
@@ -136,10 +136,10 @@ describe("non-arXiv table HTML routing through merger", () => {
     expect(canonical).toHaveLength(1);
     expect(canonical[0].description).toContain("<th>Model</th>");
     expect(canonical[0].description).toContain("<td>A</td>");
-    expect(canonical[0].sourceMethod).toBe("pdf_structural");
+    expect(canonical[0].sourceMethod).toBe("pdf_table_rows");
   });
 
-  it("short pdf_structural HTML (between 20 and 100 chars) still wins over pdf_render_crop", () => {
+  it("short pdf_table_rows HTML (between 20 and 100 chars) still wins over pdf_render_crop", () => {
     // A minimal real pymupdf 2x2 table: ~72 chars, above the 20-char gate
     // but BELOW the old 100-char gate that would have dropped it.
     const shortStructuralHtml = "<table><tr><td>1</td><td>2</td></tr><tr><td>3</td><td>4</td></tr></table>";
@@ -148,7 +148,7 @@ describe("non-arXiv table HTML routing through merger", () => {
 
     const structuralTable = makeTable({
       figureLabel: "Table 6",
-      sourceMethod: "pdf_structural",
+      sourceMethod: "pdf_table_rows",
       confidence: "medium",
       description: shortStructuralHtml,
       pdfPage: 4,
@@ -166,7 +166,7 @@ describe("non-arXiv table HTML routing through merger", () => {
     const merged = mergeFigureSources([structuralTable], [screenshotTable]);
     const canonical = merged.filter((m) => m.isPrimaryExtraction);
     expect(canonical).toHaveLength(1);
-    expect(canonical[0].sourceMethod).toBe("pdf_structural");
+    expect(canonical[0].sourceMethod).toBe("pdf_table_rows");
     expect(canonical[0].description).toContain("<td>1</td>");
   });
 });

@@ -105,6 +105,7 @@ function inferLegacyNativePreviewTrust(figure: LegacyPaperFigureRow): string {
   if (
     previewSource === "pdf_render_crop"
     || previewSource === "pdf_structural"
+    || previewSource === "pdf_table_rows"
     || previewSource === "pdf_embedded"
   ) {
     return "untrusted_native";

@@ -20,24 +20,23 @@ import { normalizeLabel } from "./label-utils";
 /**
  * Source priority (lower number = higher priority).
  *
- * Note: `pdf_structural` is dual-purpose — it's used both by the structural
- * table extractor (real rows from PyMuPDF find_tables()) and by the PDF
- * figure pipeline as a gap placeholder for figures covered by HTML or
- * rejected by crop. For tables, structured rows still win canonical because
- * `selectCanonicalMember` checks `description.length > 20` before priority.
- * For figures, we want the placeholder to stay below image-bearing sources,
- * so `pdf_structural` is kept at the bottom of the PDF tier.
+ * `pdf_table_rows` is PyMuPDF's structured table output (real rows). It sits
+ * above image-bearing PDF sources because structured rows beat any image for
+ * tables. `pdf_structural` is a gap-placeholder slot used by the PDF figure
+ * pipeline for figures whose crop failed or was covered by HTML — kept at
+ * the bottom of the PDF tier so placeholders never beat image sources.
  */
 const SOURCE_PRIORITY: Record<string, number> = {
   pmc_jats: 1,
   arxiv_html: 2,
   publisher_html: 3,
   grobid_tei: 4,
-  pdf_embedded: 5,
-  pdf_render_crop: 6,
-  pdf_structural: 7,
-  vision_llm: 8,
-  html_download: 9, // legacy
+  pdf_table_rows: 5,
+  pdf_embedded: 6,
+  pdf_render_crop: 7,
+  pdf_structural: 8,
+  vision_llm: 9,
+  html_download: 10, // legacy
 };
 
 export interface MergeableFigure {
@@ -142,7 +141,8 @@ export function mergeIdentityMembers(membersInput: MergeableFigure[]): IdentityM
       && (m.sourceMethod === "pdf_embedded"
         || m.sourceMethod === "grobid_tei"
         || m.sourceMethod === "pdf_render_crop"
-        || m.sourceMethod === "pdf_structural"),
+        || m.sourceMethod === "pdf_structural"
+        || m.sourceMethod === "pdf_table_rows"),
   );
 
   if (isUnlabeledPdfOnlyGroup) {
@@ -167,7 +167,7 @@ export function mergeIdentityMembers(membersInput: MergeableFigure[]): IdentityM
   } else if (!isStructuredTable) {
     bestImageMember = members.find(m => m.imagePath) || null;
   } else {
-    const unsafeSources = new Set(["grobid_tei", "pdf_embedded", "pdf_render_crop", "pdf_structural"]);
+    const unsafeSources = new Set(["grobid_tei", "pdf_embedded", "pdf_render_crop", "pdf_structural", "pdf_table_rows"]);
     bestImageMember = members.find(m => m.imagePath && !unsafeSources.has(m.sourceMethod)) || null;
   }
 
