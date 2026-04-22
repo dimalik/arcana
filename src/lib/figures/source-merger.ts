@@ -17,15 +17,25 @@
 
 import { normalizeLabel } from "./label-utils";
 
-/** Source priority (lower number = higher priority) */
+/**
+ * Source priority (lower number = higher priority).
+ *
+ * Note: `pdf_structural` is dual-purpose — it's used both by the structural
+ * table extractor (real rows from PyMuPDF find_tables()) and by the PDF
+ * figure pipeline as a gap placeholder for figures covered by HTML or
+ * rejected by crop. For tables, structured rows still win canonical because
+ * `selectCanonicalMember` checks `description.length > 20` before priority.
+ * For figures, we want the placeholder to stay below image-bearing sources,
+ * so `pdf_structural` is kept at the bottom of the PDF tier.
+ */
 const SOURCE_PRIORITY: Record<string, number> = {
   pmc_jats: 1,
   arxiv_html: 2,
   publisher_html: 3,
   grobid_tei: 4,
-  pdf_structural: 5,
-  pdf_embedded: 6,
-  pdf_render_crop: 7,
+  pdf_embedded: 5,
+  pdf_render_crop: 6,
+  pdf_structural: 7,
   vision_llm: 8,
   html_download: 9, // legacy
 };
