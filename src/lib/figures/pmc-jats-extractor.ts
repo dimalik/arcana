@@ -28,6 +28,19 @@ export interface JatsFigure {
   imageFilename: string;
   imageData: Buffer;
   assetHash: string;
+  tableHtml?: string;
+}
+
+export interface ParsedJatsEntry {
+  figureLabel: string;
+  captionText: string;
+  graphicHref: string;
+  type: "figure" | "table";
+  tableHtml?: string;
+}
+
+export interface ParsedJatsXml {
+  figures: ParsedJatsEntry[];
 }
 
 export interface PmcExtractionResult {
@@ -91,10 +104,14 @@ function parseTarEntries(tarData: Buffer): { name: string; data: Buffer }[] {
 
 /**
  * Parse JATS XML to extract figure metadata.
- * Returns: { label, caption, graphicHref, type }[]
+ *
+ * For <fig> blocks: emits one entry per figure with a resolvable <graphic> href.
+ * For <table-wrap> blocks: emits one entry with the raw <table>...</table> HTML
+ * (if present) and the <graphic> href (if present). Tables without an embedded
+ * image are still emitted so that the table HTML can be persisted.
  */
-function parseJatsXml(xml: string): { label: string; caption: string; graphicHref: string; type: "figure" | "table" }[] {
-  const results: { label: string; caption: string; graphicHref: string; type: "figure" | "table" }[] = [];
+export function parseJatsXml(xml: string): ParsedJatsXml {
+  const results: ParsedJatsEntry[] = [];
 
   // Extract <fig> elements (figures)
   const figRegex = /<fig\b[^>]*>([\s\S]*?)<\/fig>/gi;
@@ -108,33 +125,38 @@ function parseJatsXml(xml: string): { label: string; caption: string; graphicHre
 
     if (graphicHref) {
       results.push({
-        label: label || "Figure",
-        caption: caption ? `${label}: ${caption}` : label,
+        figureLabel: label || "Figure",
+        captionText: caption ? `${label}: ${caption}` : label,
         graphicHref,
         type: "figure",
       });
     }
   }
 
-  // Extract <table-wrap> elements (tables with images)
+  // Extract <table-wrap> elements (tables, possibly with images)
   const tableRegex = /<table-wrap\b[^>]*>([\s\S]*?)<\/table-wrap>/gi;
   while ((match = tableRegex.exec(xml)) !== null) {
     const block = match[1];
     const label = block.match(/<label>([\s\S]*?)<\/label>/i)?.[1]?.replace(/<[^>]+>/g, "").trim() || "";
     const caption = block.match(/<caption>([\s\S]*?)<\/caption>/i)?.[1]?.replace(/<[^>]+>/g, "").trim() || "";
     const graphicHref = block.match(/<graphic[^>]+(?:xlink:href|href)=["']([^"']+)["']/i)?.[1] || "";
+    const tableMatch = block.match(/<table\b[^>]*>[\s\S]*?<\/table>/i);
+    const tableHtml = tableMatch ? tableMatch[0] : undefined;
 
-    if (graphicHref) {
+    // Emit the entry if we have EITHER a graphic (image-backed table) OR
+    // inline <table> HTML. Skip only if both are missing.
+    if (graphicHref || tableHtml) {
       results.push({
-        label: label || "Table",
-        caption: caption ? `${label}: ${caption}` : label,
+        figureLabel: label || "Table",
+        captionText: caption ? `${label}: ${caption}` : label,
         graphicHref,
         type: "table",
+        tableHtml,
       });
     }
   }
 
-  return results;
+  return { figures: results };
 }
 
 /**
@@ -246,14 +268,29 @@ export async function extractPmcFigures(doi: string): Promise<PmcExtractionResul
 
   // Step 6: Parse JATS XML for figures
   const jatsXml = jatsEntry.data.toString("utf-8");
-  const jatsFigures = parseJatsXml(jatsXml);
+  const { figures: jatsFigures } = parseJatsXml(jatsXml);
 
-  // Step 7: Match graphic references to image files and build results
+  // Step 7: Match graphic references to image files and build results.
+  // For <table-wrap> entries with inline <table> HTML but no image, emit an
+  // image-less JatsFigure so the HTML still reaches downstream persistence.
   const figures: JatsFigure[] = [];
   for (const jf of jatsFigures) {
-    const imageEntry = findImageFile(jf.graphicHref, entries);
+    const imageEntry = jf.graphicHref ? findImageFile(jf.graphicHref, entries) : null;
+
     if (!imageEntry) {
-      console.warn(`[pmc-jats] Image not found for ${jf.label}: ${jf.graphicHref}`);
+      if (jf.type === "table" && jf.tableHtml) {
+        figures.push({
+          figureLabel: jf.figureLabel,
+          captionText: jf.captionText,
+          type: jf.type,
+          imageFilename: "",
+          imageData: Buffer.alloc(0),
+          assetHash: "",
+          tableHtml: jf.tableHtml,
+        });
+        continue;
+      }
+      console.warn(`[pmc-jats] Image not found for ${jf.figureLabel}: ${jf.graphicHref}`);
       continue;
     }
 
@@ -270,12 +307,13 @@ export async function extractPmcFigures(doi: string): Promise<PmcExtractionResul
       : imageEntry.name.split(".").pop() || "jpg";
 
     figures.push({
-      figureLabel: jf.label,
-      captionText: jf.caption,
+      figureLabel: jf.figureLabel,
+      captionText: jf.captionText,
       type: jf.type,
-      imageFilename: `pmc-${jf.label.replace(/[^a-zA-Z0-9]/g, "_").toLowerCase()}.${ext}`,
+      imageFilename: `pmc-${jf.figureLabel.replace(/[^a-zA-Z0-9]/g, "_").toLowerCase()}.${ext}`,
       imageData,
       assetHash,
+      tableHtml: jf.tableHtml,
     });
   }
 
@@ -293,6 +331,7 @@ export interface PmcFigureRecord {
   imagePath: string;
   assetHash: string;
   type: "figure" | "table";
+  tableHtml?: string;
 }
 
 /**
@@ -314,10 +353,15 @@ export async function downloadPmcFigures(
   for (let i = 0; i < result.figures.length; i++) {
     const fig = result.figures[i];
     try {
-      const fullPath = path.join(figDir, fig.imageFilename);
-      await writeFile(fullPath, fig.imageData);
+      let imagePath = "";
+      let assetHash = "";
 
-      const imagePath = `uploads/figures/${paperId}/${fig.imageFilename}`;
+      if (fig.imageData.length > 0 && fig.imageFilename) {
+        const fullPath = path.join(figDir, fig.imageFilename);
+        await writeFile(fullPath, fig.imageData);
+        imagePath = `uploads/figures/${paperId}/${fig.imageFilename}`;
+        assetHash = fig.assetHash;
+      }
 
       written.push({
         figureLabel: fig.figureLabel,
@@ -327,8 +371,9 @@ export async function downloadPmcFigures(
         sourceUrl: result.sourceUrl,
         confidence: "high",
         imagePath,
-        assetHash: fig.assetHash,
+        assetHash,
         type: fig.type,
+        tableHtml: fig.tableHtml,
       });
     } catch (err) {
       console.warn(`[pmc-jats] Failed to save ${fig.figureLabel}:`, (err as Error).message);
