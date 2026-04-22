@@ -79,7 +79,7 @@ function makePaper(overrides: Partial<Parameters<typeof preparePaperAgentEvidenc
 
 describe("preparePaperAgentEvidence", () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
     hoisted.withPaperLlmContext.mockImplementation(async (_context, callback) => callback());
   });
 
@@ -140,7 +140,7 @@ describe("preparePaperAgentEvidence", () => {
     expect(result.actions[0]).toMatchObject({
       phase: "retrieve",
       tool: "read_section",
-      source: "planner",
+      source: "fallback",
     });
     expect(result.actions[1]).toMatchObject({
       phase: "inspect",
@@ -442,9 +442,6 @@ describe("preparePaperAgentEvidence", () => {
         object: { type: "read_section", section: "methodology" },
       })
       .mockResolvedValueOnce({
-        object: { type: "search_claims", query: "training recipe", limit: 2 },
-      })
-      .mockResolvedValueOnce({
         object: { type: "finish", answerPlan: "Provide a derived implementation sketch." },
       })
       .mockResolvedValueOnce({
@@ -478,5 +475,80 @@ describe("preparePaperAgentEvidence", () => {
         }),
       ]),
     );
+  });
+
+  it("hunts exact result evidence across results text and figures for named targets", async () => {
+    hoisted.paperFigureFindMany.mockResolvedValue([
+      {
+        id: "fig-4",
+        paperId: "paper-1",
+        publishedFigureHandleId: null,
+        figureLabel: "Figure 4",
+        captionText: "Figure 4: MMLU-Multilingual performance across supported languages.",
+        captionSource: "html",
+        description:
+          "MMLU-Multilingual results. Arabic 71.2. Ukrainian 68.4. Hindi 70.1. The phi-3.5 models remain competitive across languages.",
+        sourceMethod: "html",
+        sourceUrl: null,
+        sourceVersion: null,
+        confidence: "high",
+        imagePath: "uploads/figures/paper-1/figure-4.png",
+        assetHash: null,
+        pdfPage: 9,
+        sourcePage: 9,
+        figureIndex: 4,
+        bbox: null,
+        type: "figure",
+        parentFigureId: null,
+        isPrimaryExtraction: true,
+        width: 1200,
+        height: 800,
+        gapReason: null,
+        imageSourceMethod: "html",
+        createdAt: new Date("2026-04-21T00:00:00Z"),
+      },
+    ]);
+
+    const result = await preparePaperAgentEvidence({
+      paper: makePaper({
+        summary: [
+          "## Summary",
+          "Short overview.",
+          "",
+          "## Results",
+          "Figure 4 reports the MMLU-Multilingual breakdown. Ukrainian remains one of the stronger supported languages, with phi-3-mini reaching 68.4 on the multilingual benchmark.",
+        ].join("\n"),
+      }),
+      question: "What were the results on Ukrainian?",
+      intent: "results",
+      selectedText: null,
+      provider: "openai",
+      modelId: "gpt-test",
+    });
+
+    expect(result.actions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          tool: "read_section",
+          source: "fallback",
+          outputPreview: expect.stringContaining("exact span"),
+        }),
+        expect.objectContaining({
+          tool: "open_figure",
+          source: "fallback",
+          input: "Figure 4",
+          outputPreview: expect.stringContaining("exact figure match"),
+        }),
+      ]),
+    );
+    expect(result.citations.some((citation) => /ukrainian/i.test(citation.snippet))).toBe(true);
+    expect(result.artifacts.map((artifact) => artifact.kind)).toEqual(
+      expect.arrayContaining(["RESULT_SUMMARY", "FIGURE_CARD"]),
+    );
+    const figureArtifact = result.artifacts.find((artifact) => artifact.kind === "FIGURE_CARD");
+    const payload = JSON.parse(figureArtifact!.payloadJson) as {
+      matches?: Array<{ text: string }>;
+    };
+    expect(payload.matches?.[0]?.text).toMatch(/Ukrainian 68\.4/i);
   });
 });

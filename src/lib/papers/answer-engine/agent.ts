@@ -182,6 +182,48 @@ interface TableQueryMatch {
   values: string[];
 }
 
+interface QueryAnalysis {
+  targetTerms: string[];
+  expandedTerms: string[];
+  searchTerms: string[];
+  focusQuery: string | null;
+  requiresExactEvidence: boolean;
+}
+
+interface QueryTextMatch {
+  text: string;
+  score: number;
+  matchedTerms: string[];
+}
+
+const QUERY_STRUCTURAL_TERMS = new Set([
+  "result",
+  "results",
+  "metric",
+  "metrics",
+  "score",
+  "scores",
+  "benchmark",
+  "benchmarks",
+  "table",
+  "tables",
+  "figure",
+  "figures",
+  "show",
+  "tell",
+  "about",
+  "paper",
+  "performance",
+]);
+
+const QUERY_EXPANSION_MAP: Record<string, string[]> = {
+  rai: ["responsible ai", "safety"],
+  "responsible ai": ["rai", "safety"],
+  multilingual: ["mmlu multilingual", "language"],
+  latex: ["tex"],
+  tex: ["latex"],
+};
+
 function tokenize(value: string): string[] {
   return normalizeAnalysisText(value)
     .split(" ")
@@ -189,9 +231,171 @@ function tokenize(value: string): string[] {
     .filter((token) => token.length > 2 && !STOP_WORDS.has(token));
 }
 
+function uniqueStrings(values: Array<string | null | undefined>): string[] {
+  return Array.from(
+    new Set(
+      values
+        .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+        .map((value) => value.trim()),
+    ),
+  );
+}
+
+function expandQueryTerm(term: string): string[] {
+  const normalized = normalizeAnalysisText(term);
+  const expansions = [
+    normalized,
+    ...(QUERY_EXPANSION_MAP[normalized] ?? []),
+  ];
+  if (normalized.includes("-")) {
+    expansions.push(normalized.replace(/-/g, " "));
+  }
+  if (
+    /^[a-z]+ian$/.test(normalized)
+    || /^[a-z]+ese$/.test(normalized)
+    || /^[a-z]+ish$/.test(normalized)
+  ) {
+    expansions.push(`${normalized} language`);
+  }
+  return uniqueStrings(expansions);
+}
+
+function analyzeQuery(question: string, intent: PaperAnswerIntent): QueryAnalysis {
+  const normalizedQuestion = normalizeAnalysisText(question);
+  const quotedPhrases = Array.from(question.matchAll(/"([^"]+)"/g), (match) =>
+    normalizeAnalysisText(match[1] ?? ""),
+  ).filter(Boolean);
+  const contentTokens = tokenize(question).filter(
+    (token) => !QUERY_STRUCTURAL_TERMS.has(token),
+  );
+  const targetTerms = uniqueStrings([...quotedPhrases, ...contentTokens]).slice(0, 6);
+  const expandedTerms = uniqueStrings(targetTerms.flatMap((term) => expandQueryTerm(term)));
+  const searchTerms = uniqueStrings([...expandedTerms, ...tokenize(question)]);
+  const requiresExactEvidence =
+    targetTerms.length > 0
+    && (
+      intent === "results"
+      || /\bwhat\b|\bwhich\b|\bhow\b|\bscore\b|\bmetric\b|\bresult\b/.test(normalizedQuestion)
+    );
+
+  return {
+    targetTerms,
+    expandedTerms,
+    searchTerms,
+    focusQuery: expandedTerms.length > 0 ? expandedTerms.join(" ") : null,
+    requiresExactEvidence,
+  };
+}
+
 function truncate(value: string | null | undefined, maxChars: number): string {
   if (!value) return "";
   return value.length <= maxChars ? value : `${value.slice(0, maxChars - 1).trimEnd()}…`;
+}
+
+function buildContextSnippet(
+  text: string,
+  start: number,
+  end: number,
+  radius = 140,
+): string {
+  const leftBound = Math.max(0, start - radius);
+  const rightBound = Math.min(text.length, end + radius);
+  let left = leftBound;
+  let right = rightBound;
+
+  while (left > leftBound && !/[\n.!?]/.test(text[left - 1] ?? "")) {
+    left -= 1;
+  }
+  while (right < rightBound && !/[\n.!?]/.test(text[right] ?? "")) {
+    right += 1;
+  }
+
+  return text.slice(left, right).replace(/\s+/g, " ").trim();
+}
+
+function scoreTextMatch(text: string, analysis: QueryAnalysis): number {
+  const haystack = normalizeAnalysisText(text);
+  let score = 0;
+  for (const term of analysis.targetTerms) {
+    if (haystack.includes(term)) score += 4;
+  }
+  for (const term of analysis.expandedTerms) {
+    if (!analysis.targetTerms.includes(term) && haystack.includes(term)) score += 2;
+  }
+  if (analysis.requiresExactEvidence && /\d/.test(text)) score += 1;
+  return score;
+}
+
+function findTextMatches(
+  text: string | null | undefined,
+  analysis: QueryAnalysis,
+  limit = 3,
+): QueryTextMatch[] {
+  const cleanText = decodeHtmlEntities(stripHtml(text ?? "")).replace(/\s+/g, " ").trim();
+  if (!cleanText || analysis.searchTerms.length === 0) return [];
+
+  const lowerText = cleanText.toLowerCase();
+  const matches: QueryTextMatch[] = [];
+
+  for (const term of analysis.searchTerms) {
+    const lowerTerm = term.toLowerCase();
+    if (!lowerTerm) continue;
+    let cursor = 0;
+    while (cursor < lowerText.length) {
+      const index = lowerText.indexOf(lowerTerm, cursor);
+      if (index < 0) break;
+      const snippet = buildContextSnippet(cleanText, index, index + lowerTerm.length);
+      const matchedTerms = analysis.searchTerms.filter((candidate) =>
+        normalizeAnalysisText(snippet).includes(candidate),
+      );
+      matches.push({
+        text: snippet,
+        score: scoreTextMatch(snippet, analysis),
+        matchedTerms,
+      });
+      cursor = index + lowerTerm.length;
+    }
+  }
+
+  const deduped = new Map<string, QueryTextMatch>();
+  for (const match of matches) {
+    const existing = deduped.get(match.text);
+    if (!existing || existing.score < match.score) {
+      deduped.set(match.text, match);
+    }
+  }
+
+  return Array.from(deduped.values())
+    .sort((left, right) => right.score - left.score || right.text.length - left.text.length)
+    .slice(0, limit);
+}
+
+function citationForMatchedText(
+  paper: PaperAgentPaperContext,
+  sectionPath: string | null,
+  match: QueryTextMatch,
+): AnswerCitation {
+  return {
+    paperId: paper.id,
+    paperTitle: paper.title,
+    snippet: truncate(match.text, MAX_CITATION_SNIPPET_CHARS),
+    sectionPath,
+    sourceKind: "artifact",
+  };
+}
+
+function hasExactEvidence(
+  citations: AnswerCitation[],
+  analysis: QueryAnalysis,
+): boolean {
+  if (!analysis.requiresExactEvidence || analysis.targetTerms.length === 0) {
+    return citations.length > 0;
+  }
+  return citations.some((citation) => {
+    const haystack = normalizeAnalysisText(citation.snippet);
+    return analysis.targetTerms.some((term) => haystack.includes(term))
+      || analysis.expandedTerms.some((term) => haystack.includes(term));
+  });
 }
 
 function parseKeyFindings(value: string | null): string[] {
@@ -473,6 +677,7 @@ function scoreFigureQuery(
 function buildFocusedFigureQuery(
   question: string,
   focusQuery: string | null,
+  analysis: QueryAnalysis,
 ): string {
   const normalizedQuestion = normalizeAnalysisText(question);
   const extraTerms = new Set<string>();
@@ -495,6 +700,7 @@ function buildFocusedFigureQuery(
 
   return Array.from(
     new Set([
+      ...analysis.searchTerms,
       ...tokenize(focusQuery ?? ""),
       ...tokenize(question),
       ...Array.from(extraTerms),
@@ -560,6 +766,17 @@ function extractResultTableFocusQuery(question: string): string | null {
   const focusTerms = Array.from(new Set([...matchedTerms, ...acronymTerms]));
   if (focusTerms.length === 0) return null;
   return focusTerms.join(" ");
+}
+
+function buildFocusedEvidenceQuery(
+  question: string,
+  analysis: QueryAnalysis,
+): string | null {
+  const domainFocus = extractResultTableFocusQuery(question);
+  return uniqueStrings([
+    analysis.focusQuery,
+    domainFocus,
+  ]).join(" ") || null;
 }
 
 type ResultTableCategory = "core" | "multimodal" | "safety" | "other";
@@ -649,12 +866,15 @@ function chooseDeterministicAction(params: {
   sections: Record<SummarySectionName, string>;
   figures: PaperFigureView[];
   observations: AgentObservation[];
+  citations: AnswerCitation[];
+  artifacts: PaperAgentArtifactDraft[];
+  analysis: QueryAnalysis;
 }): PaperAgentAction | null {
   const alreadyReadResults = params.observations.some(
     (observation) =>
       observation.tool === "read_section" && observation.input === "results",
   );
-  const focusQuery = extractResultTableFocusQuery(params.question);
+  const focusQuery = buildFocusedEvidenceQuery(params.question, params.analysis);
   const observedFigureKeys = collectObservedFigureKeys(params.observations);
   const tableFigures = params.figures.filter((figure) => figure.type === "table");
   const nonTableFigures = params.figures.filter((figure) => figure.type !== "table");
@@ -666,12 +886,16 @@ function chooseDeterministicAction(params: {
   );
   const alreadyInspectedTable = inspectedTables.length > 0;
   const alreadyOpenedFigure = openedFigures.length > 0;
+  const exactEvidenceSatisfied = hasExactEvidence(params.citations, params.analysis);
+  const visibleArtifacts = params.artifacts.filter((artifact) =>
+    artifact.kind === "TABLE_CARD" || artifact.kind === "FIGURE_CARD" || artifact.kind === "RESULT_SUMMARY",
+  );
+
+  if (params.intent === "results" && !alreadyReadResults) {
+    return { type: "read_section", section: "results" };
+  }
 
   if (params.intent === "results" && focusQuery && !alreadyInspectedTable) {
-    if (!alreadyReadResults) {
-      return { type: "read_section", section: "results" };
-    }
-
     const bestTable = tableFigures
       .map((figure) => ({
         figure,
@@ -778,7 +1002,7 @@ function chooseDeterministicAction(params: {
   }
 
   if (!alreadyOpenedFigure) {
-    const figureQuery = buildFocusedFigureQuery(params.question, focusQuery);
+    const figureQuery = buildFocusedFigureQuery(params.question, focusQuery, params.analysis);
     const referencedFigures = resultsReferences
       .filter((reference) => reference.kind === "figure")
       .map((reference) => resolveFigureTarget(params.figures, reference.label))
@@ -817,6 +1041,21 @@ function chooseDeterministicAction(params: {
         target: fallbackFigure.figureLabel ?? fallbackFigure.id,
       };
     }
+  }
+
+  if (
+    params.intent === "results"
+    && exactEvidenceSatisfied
+    && (
+      visibleArtifacts.length > 0
+      || (tableFigures.length === 0 && nonTableFigures.length === 0)
+    )
+  ) {
+    return {
+      type: "finish",
+      answerPlan:
+        "Answer from the exact matched evidence already gathered, citing the query-specific spans and attached artifacts.",
+    };
   }
 
   return null;
@@ -1090,6 +1329,10 @@ function buildResultArtifact(
   paper: PaperAgentPaperContext,
   resultsText: string,
   supportingClaims: PaperClaimView[],
+  options?: {
+    query?: string | null;
+    matches?: QueryTextMatch[];
+  },
 ): PaperAgentArtifactDraft {
   return {
     kind: "RESULT_SUMMARY",
@@ -1097,7 +1340,13 @@ function buildResultArtifact(
     payloadJson: JSON.stringify({
       paperId: paper.id,
       paperTitle: paper.title,
-      excerpt: truncate(resultsText, 1200),
+      excerpt: truncate(options?.matches?.[0]?.text ?? resultsText, 1200),
+      query: options?.query ?? null,
+      matches: (options?.matches ?? []).map((match) => ({
+        text: match.text,
+        score: match.score,
+        matchedTerms: match.matchedTerms,
+      })),
       claims: supportingClaims.slice(0, 3).map((claim) => ({
         text: claim.text,
         sectionPath: claim.sectionPath,
@@ -1110,6 +1359,8 @@ function buildFigureArtifact(
   figure: PaperFigureView,
   options?: {
     tableQuery?: string;
+    figureQuery?: string;
+    textMatches?: QueryTextMatch[];
   },
 ): PaperAgentArtifactDraft {
   const parsedTable =
@@ -1144,6 +1395,18 @@ function buildFigureArtifact(
               ].join("\n"),
             }
           : null,
+      matches:
+        figure.type !== "table"
+          ? (options?.textMatches ?? []).map((match) => ({
+              text: match.text,
+              score: match.score,
+              matchedTerms: match.matchedTerms,
+            }))
+          : null,
+      query:
+        figure.type === "table"
+          ? options?.tableQuery ?? null
+          : options?.figureQuery ?? null,
       imagePath: figure.imagePath,
       pdfPage: figure.pdfPage,
       sourceUrl: figure.sourceUrl,
@@ -1191,6 +1454,7 @@ function buildPlannerPrompt(params: {
   sections: Record<SummarySectionName, string>;
   figures: PaperFigureView[];
   observations: AgentObservation[];
+  analysis: QueryAnalysis;
 }): string {
   const sectionAvailability = (["overview", "methodology", "results"] as const)
     .map((section) => `${section}: ${params.sections[section] ? "available" : "missing"}`)
@@ -1208,18 +1472,22 @@ Paper: ${params.paper.title}${params.paper.year ? ` (${params.paper.year})` : ""
 Intent: ${params.intent}
 Question: ${params.question}
 ${params.selectedText ? `Selected text:\n${truncate(params.selectedText, 800)}\n` : ""}
+Target terms: ${params.analysis.targetTerms.join(", ") || "none"}
+Expanded search terms: ${params.analysis.searchTerms.join(", ") || "none"}
+Requires exact evidence: ${params.analysis.requiresExactEvidence ? "yes" : "no"}
 
 Available tools:
-- read_section(section): use for overview, methodology, or results
+- read_section(section): use for overview, methodology, or results; when the query has a concrete target, hunt for exact matched spans inside the section instead of only summarizing it
 - search_claims(query, limit): use to recover grounded claim excerpts
 - list_figures(kind, query, limit): use to inspect available figures or tables
 - inspect_table(query, target): use to extract structured rows from a specific or inferred table
-- open_figure(target): use to open one figure/table by label, id, or descriptive target
+- open_figure(target): use to open one figure/table by label, id, or descriptive target; for concrete targets, recover matching caption/description evidence if available
 - finish(answerPlan): use only after enough evidence is gathered
 
 Tool-use policy:
 - Prefer results and tables for metric/performance questions.
 - Prefer inspect_table when the question asks for a specific number, row, column, metric, or ablation detail.
+- Prefer exact query matches over generic summaries. If the question names a concrete target, do not finish until you have either found that target in the evidence or exhausted the relevant section/table/figure searches.
 - Prefer methodology and claims for implementation or snippet questions.
 - Prefer figures when the user asks to show, inspect, or explain a figure/diagram/table.
 - Do not loop. Gather the minimum evidence required, then finish.
@@ -1255,6 +1523,7 @@ function fallbackAgentAction(params: {
   intent: PaperAnswerIntent;
   observations: AgentObservation[];
   question: string;
+  analysis: QueryAnalysis;
 }): PaperAgentAction {
   if (params.observations.length > 0) {
     return {
@@ -1269,7 +1538,10 @@ function fallbackAgentAction(params: {
     case "figures":
       return { type: "list_figures", kind: "figure", limit: 4 };
     case "tables":
-      return { type: "inspect_table", query: params.question.slice(0, 160) };
+      return {
+        type: "inspect_table",
+        query: (params.analysis.focusQuery ?? params.question).slice(0, 160),
+      };
     case "generated_artifact":
       return { type: "read_section", section: "methodology" };
     case "claims":
@@ -1289,6 +1561,7 @@ function normalizePlannerAction(
     intent: PaperAnswerIntent;
     observations: AgentObservation[];
     question: string;
+    analysis: QueryAnalysis;
   },
 ): PaperAgentAction {
   switch (raw.type) {
@@ -1355,6 +1628,9 @@ async function chooseNextAgentAction(params: {
   sections: Record<SummarySectionName, string>;
   figures: PaperFigureView[];
   observations: AgentObservation[];
+  citations: AnswerCitation[];
+  artifacts: PaperAgentArtifactDraft[];
+  analysis: QueryAnalysis;
   provider: LLMProvider;
   modelId: string;
   proxyConfig?: ProxyConfig | null;
@@ -1366,6 +1642,9 @@ async function chooseNextAgentAction(params: {
     sections: params.sections,
     figures: params.figures,
     observations: params.observations,
+    citations: params.citations,
+    artifacts: params.artifacts,
+    analysis: params.analysis,
   });
   if (deterministicAction) {
     return { action: deterministicAction, source: "fallback" };
@@ -1400,6 +1679,7 @@ async function chooseNextAgentAction(params: {
         intent: params.intent,
         observations: params.observations,
         question: params.question,
+        analysis: params.analysis,
       });
     },
   );
@@ -1411,6 +1691,7 @@ async function chooseNextAgentAction(params: {
         intent: params.intent,
         observations: params.observations,
         question: params.question,
+        analysis: params.analysis,
       }),
       source: "fallback",
     };
@@ -1548,6 +1829,7 @@ export async function preparePaperAgentEvidence(params: {
 }): Promise<PreparedPaperAgentEvidence> {
   const sections = buildSectionSnapshots(params.paper);
   const figures = await loadPaperFigures(params.paper.id);
+  const queryAnalysis = analyzeQuery(params.question, params.intent);
   const citations: AnswerCitation[] = [];
   const artifacts: PaperAgentArtifactDraft[] = [];
   const observations: AgentObservation[] = [];
@@ -1561,6 +1843,9 @@ export async function preparePaperAgentEvidence(params: {
       sections,
       figures,
       observations,
+      citations,
+      artifacts,
+      analysis: queryAnalysis,
       provider: params.provider,
       modelId: params.modelId,
       proxyConfig: params.proxyConfig,
@@ -1601,7 +1886,19 @@ export async function preparePaperAgentEvidence(params: {
         continue;
       }
 
-      citations.push(citationForSection(params.paper, action.section, sectionText));
+      const sectionMatches =
+        action.section === "results"
+          ? findTextMatches(sectionText, queryAnalysis, 2)
+          : [];
+      if (sectionMatches.length > 0) {
+        citations.push(
+          ...sectionMatches.map((match) =>
+            citationForMatchedText(params.paper, action.section, match),
+          ),
+        );
+      } else {
+        citations.push(citationForSection(params.paper, action.section, sectionText));
+      }
       const supportingClaims = rankClaimsForQuery(
         params.paper.claims,
         `${params.question} ${action.section}`,
@@ -1609,19 +1906,30 @@ export async function preparePaperAgentEvidence(params: {
       );
 
       if (action.section === "results") {
-        artifacts.push(buildResultArtifact(params.paper, sectionText, supportingClaims));
+        artifacts.push(
+          buildResultArtifact(params.paper, sectionText, supportingClaims, {
+            query: queryAnalysis.focusQuery,
+            matches: sectionMatches,
+          }),
+        );
       }
 
       observations.push({
         step,
         action: `Read ${action.section} section`,
-        detail: truncate(sectionText, 600),
+        detail:
+          sectionMatches.length > 0
+            ? sectionMatches.map((match) => `- ${match.text}`).join("\n")
+            : truncate(sectionText, 600),
         phase: "retrieve",
         status: "completed",
         source: chosen.source,
         tool: "read_section",
         input: action.section,
-        outputPreview: `Loaded ${action.section} evidence.`,
+        outputPreview:
+          sectionMatches.length > 0
+            ? `${sectionMatches.length} exact span${sectionMatches.length === 1 ? "" : "s"} matched in ${action.section}.`
+            : `Loaded ${action.section} evidence.`,
         citationsAdded: citations.length - citationsBefore,
         artifactsAdded: artifacts.length - artifactsBefore,
       });
@@ -1723,7 +2031,10 @@ export async function preparePaperAgentEvidence(params: {
 
       const parsedTable = parseHtmlTable(figure.description);
       const matches = parsedTable
-        ? queryParsedTable(parsedTable, action.query ?? params.question)
+        ? queryParsedTable(
+            parsedTable,
+            action.query ?? queryAnalysis.focusQuery ?? params.question,
+          )
         : [];
 
       citations.push(citationForFigure(params.paper, figure));
@@ -1738,7 +2049,7 @@ export async function preparePaperAgentEvidence(params: {
       }
       artifacts.push(
         buildFigureArtifact(figure, {
-          tableQuery: action.query ?? params.question,
+          tableQuery: action.query ?? queryAnalysis.focusQuery ?? params.question,
         }),
       );
       observations.push({
@@ -1780,22 +2091,52 @@ export async function preparePaperAgentEvidence(params: {
         continue;
       }
 
+      const figureMatches = findTextMatches(
+        [figure.captionText, figure.description].filter(Boolean).join("\n"),
+        queryAnalysis,
+        2,
+      );
       citations.push(citationForFigure(params.paper, figure));
+      if (figureMatches.length > 0) {
+        citations.push(
+          ...figureMatches.map((match) =>
+            citationForMatchedText(
+              params.paper,
+              figure.figureLabel ?? null,
+              match,
+            ),
+          ),
+        );
+      }
       artifacts.push(
         buildFigureArtifact(figure, {
-          tableQuery: figure.type === "table" ? params.question : undefined,
+          tableQuery:
+            figure.type === "table"
+              ? queryAnalysis.focusQuery ?? params.question
+              : undefined,
+          figureQuery:
+            figure.type !== "table"
+              ? queryAnalysis.focusQuery ?? params.question
+              : undefined,
+          textMatches: figure.type !== "table" ? figureMatches : undefined,
         }),
       );
       observations.push({
         step,
         action: `Open ${figure.figureLabel || figure.id}`,
-        detail: `${figure.figureLabel || figure.id}: ${figure.captionText || figure.description || "Opened without caption."}`,
+        detail:
+          figureMatches.length > 0
+            ? figureMatches.map((match) => `- ${match.text}`).join("\n")
+            : `${figure.figureLabel || figure.id}: ${figure.captionText || figure.description || "Opened without caption."}`,
         phase: "inspect",
         status: "completed",
         source: chosen.source,
         tool: "open_figure",
         input: action.target,
-        outputPreview: `${figure.figureLabel || figure.id} opened for inspection.`,
+        outputPreview:
+          figureMatches.length > 0
+            ? `${figureMatches.length} exact figure match${figureMatches.length === 1 ? "" : "es"} recovered from ${figure.figureLabel || figure.id}.`
+            : `${figure.figureLabel || figure.id} opened for inspection.`,
         citationsAdded: citations.length - citationsBefore,
         artifactsAdded: artifacts.length - artifactsBefore,
       });
