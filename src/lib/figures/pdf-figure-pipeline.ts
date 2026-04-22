@@ -76,6 +76,15 @@ export interface StructuredTableRecord {
   colCount: number;
 }
 
+// PyMuPDF 1.27+ prints advisories like "Consider using the pymupdf_layout package..."
+// to stdout before our JSON. Extract the last line that parses as a JSON object.
+export function parsePdfTableExtractorStdout(stdout: string): StructuredTableRecord[] {
+  const line = stdout.trim().split(/\r?\n/).reverse().find((l) => l.startsWith("{"));
+  if (!line) return [];
+  const parsed = JSON.parse(line) as { tables?: StructuredTableRecord[] };
+  return parsed.tables ?? [];
+}
+
 export async function runPdfTableExtractor(
   pdfPath: string,
   maxPages: number,
@@ -86,8 +95,7 @@ export async function runPdfTableExtractor(
     [scriptPath, pdfPath, "--max-pages", String(maxPages)],
     { maxBuffer: 50 * 1024 * 1024, timeout: 60_000 },
   );
-  const parsed = JSON.parse(stdout) as { tables?: StructuredTableRecord[] };
-  return parsed.tables ?? [];
+  return parsePdfTableExtractorStdout(stdout);
 }
 
 async function extractStructuredTables(

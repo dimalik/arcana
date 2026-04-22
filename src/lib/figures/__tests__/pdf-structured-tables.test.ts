@@ -2,9 +2,31 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 
 import {
   extractFiguresFromPdf,
+  parsePdfTableExtractorStdout,
   pdfFigurePipelineInternals,
   type StructuredTableRecord,
 } from "../pdf-figure-pipeline";
+
+describe("parsePdfTableExtractorStdout", () => {
+  it("parses clean JSON", () => {
+    const stdout = '{"tables":[{"page":1,"bbox":[0,0,1,1],"label":"Table 1","html":"<table></table>","rowCount":2,"colCount":2}]}';
+    const out = parsePdfTableExtractorStdout(stdout);
+    expect(out).toHaveLength(1);
+    expect(out[0].label).toBe("Table 1");
+  });
+
+  it("skips advisory lines printed by PyMuPDF before the JSON", () => {
+    const stdout = 'Consider using the pymupdf_layout package for a greatly improved page layout analysis.\n{"tables":[{"page":2,"bbox":[0,0,1,1],"label":null,"html":"<table><tr><td>x</td></tr></table>","rowCount":1,"colCount":1}]}';
+    const out = parsePdfTableExtractorStdout(stdout);
+    expect(out).toHaveLength(1);
+    expect(out[0].page).toBe(2);
+  });
+
+  it("returns empty array when no JSON line is present", () => {
+    expect(parsePdfTableExtractorStdout("")).toEqual([]);
+    expect(parsePdfTableExtractorStdout("some text\nmore text\n")).toEqual([]);
+  });
+});
 
 // The pipeline also invokes two other Python subprocesses (text extraction
 // and embedded-image extraction). Neither runs in this unit test because we
