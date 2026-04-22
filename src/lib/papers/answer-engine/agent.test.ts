@@ -4,7 +4,9 @@ import type { PaperClaimView } from "../analysis/store";
 const hoisted = vi.hoisted(() => ({
   paperFigureFindMany: vi.fn(),
   generateStructuredObject: vi.fn(),
+  streamLLMResponse: vi.fn(),
   withPaperLlmContext: vi.fn(),
+  readFile: vi.fn(),
 }));
 
 vi.mock("@/lib/prisma", () => ({
@@ -17,13 +19,20 @@ vi.mock("@/lib/prisma", () => ({
 
 vi.mock("@/lib/llm/provider", () => ({
   generateStructuredObject: hoisted.generateStructuredObject,
+  streamLLMResponse: hoisted.streamLLMResponse,
 }));
 
 vi.mock("@/lib/llm/paper-llm-context", () => ({
   PAPER_INTERACTIVE_LLM_OPERATIONS: {
     CHAT_AGENT_PLAN: "paper_chat_agent_plan",
+    CHAT_AGENT_CODE: "paper_chat_agent_code",
+    CHAT_AGENT_FIGURE: "paper_chat_agent_figure",
   },
   withPaperLlmContext: hoisted.withPaperLlmContext,
+}));
+
+vi.mock("fs/promises", () => ({
+  readFile: hoisted.readFile,
 }));
 
 import { preparePaperAgentEvidence } from "./agent";
@@ -81,6 +90,10 @@ describe("preparePaperAgentEvidence", () => {
   beforeEach(() => {
     vi.resetAllMocks();
     hoisted.withPaperLlmContext.mockImplementation(async (_context, callback) => callback());
+    hoisted.streamLLMResponse.mockResolvedValue({
+      text: Promise.resolve("{\"found\":false,\"matches\":[],\"note\":null}"),
+    });
+    hoisted.readFile.mockResolvedValue(Buffer.from("image-bytes"));
   });
 
   it("reads results and opens a matching table artifact", async () => {
@@ -486,8 +499,7 @@ describe("preparePaperAgentEvidence", () => {
         figureLabel: "Figure 4",
         captionText: "Figure 4: MMLU-Multilingual performance across supported languages.",
         captionSource: "html",
-        description:
-          "MMLU-Multilingual results. Arabic 71.2. Ukrainian 68.4. Hindi 70.1. The phi-3.5 models remain competitive across languages.",
+        description: "",
         sourceMethod: "html",
         sourceUrl: null,
         sourceVersion: null,
@@ -508,6 +520,18 @@ describe("preparePaperAgentEvidence", () => {
         createdAt: new Date("2026-04-21T00:00:00Z"),
       },
     ]);
+    hoisted.streamLLMResponse.mockResolvedValue({
+      text: Promise.resolve(JSON.stringify({
+        found: true,
+        matches: [
+          {
+            text: "Figure 4 shows Ukrainian at 68.4 on the multilingual benchmark.",
+            matchedTerms: ["ukrainian", "multilingual"],
+          },
+        ],
+        note: "Recovered exact language-level evidence from the plotted figure.",
+      })),
+    });
 
     const result = await preparePaperAgentEvidence({
       paper: makePaper({
@@ -516,7 +540,13 @@ describe("preparePaperAgentEvidence", () => {
           "Short overview.",
           "",
           "## Results",
-          "Figure 4 reports the MMLU-Multilingual breakdown. Ukrainian remains one of the stronger supported languages, with phi-3-mini reaching 68.4 on the multilingual benchmark.",
+          "Figure 4 reports the MMLU-Multilingual breakdown for supported languages.",
+        ].join("\n"),
+        fullText: [
+          "Evaluation details",
+          "We evaluate the multilingual setting on languages such as Arabic, Chinese, Russian, Ukrainian, and Vietnamese, with average MMLU-multilingual scores of 55.4 and 47.3, respectively.",
+          "Due to its larger model capacity, phi-3.5-MoE achieves a significantly higher average score of 69.9, outperforming phi-3.5-mini.",
+          "Figure 4 compares phi-3-mini, phi-3.5-mini and phi-3.5-MoE on MMLU-Multilingual tasks.",
         ].join("\n"),
       }),
       question: "What were the results on Ukrainian?",
@@ -531,7 +561,12 @@ describe("preparePaperAgentEvidence", () => {
         expect.objectContaining({
           tool: "read_section",
           source: "fallback",
-          outputPreview: expect.stringContaining("exact span"),
+        }),
+        expect.objectContaining({
+          tool: "search_passages",
+          source: "fallback",
+          input: "full_text",
+          outputPreview: expect.stringContaining("exact passage"),
         }),
         expect.objectContaining({
           tool: "open_figure",
@@ -549,6 +584,6 @@ describe("preparePaperAgentEvidence", () => {
     const payload = JSON.parse(figureArtifact!.payloadJson) as {
       matches?: Array<{ text: string }>;
     };
-    expect(payload.matches?.[0]?.text).toMatch(/Ukrainian 68\.4/i);
+    expect(payload.matches?.[0]?.text).toMatch(/Ukrainian.*68\.4/i);
   });
 });

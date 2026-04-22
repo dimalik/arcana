@@ -183,6 +183,7 @@ export const paperAnswerAgentActionRuntimeOutputSchema = z
   .object({
     type: z.enum([
       "read_section",
+      "search_passages",
       "search_claims",
       "list_figures",
       "inspect_table",
@@ -190,6 +191,7 @@ export const paperAnswerAgentActionRuntimeOutputSchema = z
       "finish",
     ]),
     section: z.enum(["overview", "methodology", "results"]).optional(),
+    scope: z.enum(["results", "full_text", "all"]).optional(),
     query: z.string().optional(),
     limit: z.number().optional(),
     kind: z.enum(["figure", "table", "any"]).optional(),

@@ -1,3 +1,6 @@
+import { readFile } from "fs/promises";
+import path from "path";
+
 import type {
   ConversationArtifactKind,
   PaperClaimEvidenceType,
@@ -9,6 +12,7 @@ import {
 } from "@/lib/llm/paper-llm-context";
 import {
   generateStructuredObject,
+  streamLLMResponse,
 } from "@/lib/llm/provider";
 import {
   paperAnswerAgentActionRuntimeOutputSchema,
@@ -21,6 +25,7 @@ import type { ProxyConfig } from "@/lib/llm/proxy-settings";
 import { normalizeAnalysisText } from "@/lib/papers/analysis/normalization/text";
 import { parseSummarySections } from "@/lib/papers/parse-sections";
 import { prisma } from "@/lib/prisma";
+import { resolveStorageCandidates } from "@/lib/storage-paths";
 
 import type { PaperClaimView } from "../analysis/store";
 
@@ -83,6 +88,7 @@ const MAX_CITATION_SNIPPET_CHARS = 320;
 const MAX_TABLE_ROWS = 60;
 const MAX_TABLE_COLUMNS = 12;
 const MAX_TABLE_CELL_CHARS = 120;
+const MAX_VISUAL_MATCHES = 3;
 
 export interface PaperAgentPaperContext {
   id: string;
@@ -108,11 +114,17 @@ export interface PreparedPaperAgentEvidence {
 }
 
 type SummarySectionName = "overview" | "methodology" | "results";
+type PassageSearchScope = "results" | "full_text" | "all";
 
 type PaperAgentAction =
   | {
       type: "read_section";
       section: SummarySectionName;
+    }
+  | {
+      type: "search_passages";
+      scope: PassageSearchScope;
+      query: string;
     }
   | {
       type: "search_claims";
@@ -196,6 +208,15 @@ interface QueryTextMatch {
   matchedTerms: string[];
 }
 
+interface FigureVisualInspectionPayload {
+  found: boolean;
+  matches: Array<{
+    text?: string | null;
+    matchedTerms?: unknown;
+  }>;
+  note?: string | null;
+}
+
 const QUERY_STRUCTURAL_TERMS = new Set([
   "result",
   "results",
@@ -241,6 +262,11 @@ function uniqueStrings(values: Array<string | null | undefined>): string[] {
   );
 }
 
+function mergeEvidenceBlocks(...values: Array<string | null | undefined>): string {
+  const merged = uniqueStrings(values).join("\n\n").trim();
+  return merged ? truncate(merged, MAX_SECTION_CHARS) : "";
+}
+
 function expandQueryTerm(term: string): string[] {
   const normalized = normalizeAnalysisText(term);
   const expansions = [
@@ -270,7 +296,7 @@ function analyzeQuery(question: string, intent: PaperAnswerIntent): QueryAnalysi
   );
   const targetTerms = uniqueStrings([...quotedPhrases, ...contentTokens]).slice(0, 6);
   const expandedTerms = uniqueStrings(targetTerms.flatMap((term) => expandQueryTerm(term)));
-  const searchTerms = uniqueStrings([...expandedTerms, ...tokenize(question)]);
+  const searchTerms = uniqueStrings([...expandedTerms, ...contentTokens]);
   const requiresExactEvidence =
     targetTerms.length > 0
     && (
@@ -398,6 +424,84 @@ function hasExactEvidence(
   });
 }
 
+function matchesContainExactEvidence(
+  matches: QueryTextMatch[],
+  analysis: QueryAnalysis,
+): boolean {
+  if (!analysis.requiresExactEvidence || analysis.targetTerms.length === 0) {
+    return matches.length > 0;
+  }
+  return matches.some((match) => {
+    const haystack = normalizeAnalysisText(match.text);
+    return analysis.targetTerms.some((term) => haystack.includes(term))
+      || analysis.expandedTerms.some((term) => haystack.includes(term));
+  });
+}
+
+function mergeQueryAnalysis(
+  base: QueryAnalysis,
+  query: string | null | undefined,
+): QueryAnalysis {
+  const normalizedQuery = query?.trim();
+  if (!normalizedQuery) {
+    return base;
+  }
+  const extra = analyzeQuery(normalizedQuery, "results");
+  return {
+    targetTerms: uniqueStrings([...base.targetTerms, ...extra.targetTerms]),
+    expandedTerms: uniqueStrings([...base.expandedTerms, ...extra.expandedTerms]),
+    searchTerms: uniqueStrings([...base.searchTerms, ...extra.searchTerms]),
+    focusQuery: extra.focusQuery ?? base.focusQuery,
+    requiresExactEvidence: base.requiresExactEvidence || extra.requiresExactEvidence,
+  };
+}
+
+function inferImageMimeType(filePath: string): string {
+  const ext = path.extname(filePath).toLowerCase();
+  if (ext === ".jpg" || ext === ".jpeg") return "image/jpeg";
+  if (ext === ".webp") return "image/webp";
+  return "image/png";
+}
+
+function extractJsonObject(rawText: string): string | null {
+  const fenced = rawText.match(/```(?:json)?\s*([\s\S]*?)```/i)?.[1];
+  const source = (fenced ?? rawText).trim();
+  const start = source.indexOf("{");
+  if (start < 0) return null;
+
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+
+  for (let index = start; index < source.length; index += 1) {
+    const char = source[index];
+    if (!char) continue;
+
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (char === "\\") {
+      escaped = true;
+      continue;
+    }
+    if (char === "\"") {
+      inString = !inString;
+      continue;
+    }
+    if (inString) continue;
+    if (char === "{") depth += 1;
+    if (char === "}") {
+      depth -= 1;
+      if (depth === 0) {
+        return source.slice(start, index + 1);
+      }
+    }
+  }
+
+  return null;
+}
+
 function parseKeyFindings(value: string | null): string[] {
   if (!value) return [];
   try {
@@ -417,34 +521,41 @@ function buildSectionSnapshots(paper: PaperAgentPaperContext): Record<SummarySec
     results: "",
   };
 
+  const overviewFromFullText = extractFullTextSection(paper.fullText, [
+    "abstract",
+    "introduction",
+    "overview",
+  ]);
+  const methodologyFromFullText = extractFullTextSection(paper.fullText, [
+    "method",
+    "methods",
+    "methodology",
+    "approach",
+    "implementation",
+  ]);
+  const resultsFromFullText = extractFullTextSection(paper.fullText, [
+    "results",
+    "experiments",
+    "evaluation",
+    "analysis",
+    "ablation",
+  ]);
+
   return {
-    overview:
-      fromSummary.overview
-      || paper.abstract
-      || parseKeyFindings(paper.keyFindings).join("\n")
-      || extractFullTextSection(paper.fullText, [
-        "abstract",
-        "introduction",
-        "overview",
-      ]),
-    methodology:
-      fromSummary.methodology
-      || extractFullTextSection(paper.fullText, [
-        "method",
-        "methods",
-        "methodology",
-        "approach",
-        "implementation",
-      ]),
-    results:
-      fromSummary.results
-      || extractFullTextSection(paper.fullText, [
-        "results",
-        "experiments",
-        "evaluation",
-        "analysis",
-        "ablation",
-      ]),
+    overview: mergeEvidenceBlocks(
+      fromSummary.overview,
+      paper.abstract,
+      parseKeyFindings(paper.keyFindings).join("\n"),
+      overviewFromFullText,
+    ),
+    methodology: mergeEvidenceBlocks(
+      fromSummary.methodology,
+      methodologyFromFullText,
+    ),
+    results: mergeEvidenceBlocks(
+      resultsFromFullText,
+      fromSummary.results,
+    ),
   };
 }
 
@@ -861,6 +972,7 @@ function chooseGenericResultsTable(
 }
 
 function chooseDeterministicAction(params: {
+  paper: PaperAgentPaperContext;
   question: string;
   intent: PaperAnswerIntent;
   sections: Record<SummarySectionName, string>;
@@ -873,6 +985,10 @@ function chooseDeterministicAction(params: {
   const alreadyReadResults = params.observations.some(
     (observation) =>
       observation.tool === "read_section" && observation.input === "results",
+  );
+  const alreadySearchedFullText = params.observations.some(
+    (observation) =>
+      observation.tool === "search_passages" && observation.input === "full_text",
   );
   const focusQuery = buildFocusedEvidenceQuery(params.question, params.analysis);
   const observedFigureKeys = collectObservedFigureKeys(params.observations);
@@ -893,6 +1009,19 @@ function chooseDeterministicAction(params: {
 
   if (params.intent === "results" && !alreadyReadResults) {
     return { type: "read_section", section: "results" };
+  }
+
+  if (
+    params.intent === "results"
+    && params.analysis.requiresExactEvidence
+    && !alreadySearchedFullText
+    && Boolean(params.paper.fullText?.trim())
+  ) {
+    return {
+      type: "search_passages",
+      scope: "full_text",
+      query: focusQuery ?? params.question.slice(0, 180),
+    };
   }
 
   if (params.intent === "results" && focusQuery && !alreadyInspectedTable) {
@@ -1478,10 +1607,11 @@ Requires exact evidence: ${params.analysis.requiresExactEvidence ? "yes" : "no"}
 
 Available tools:
 - read_section(section): use for overview, methodology, or results; when the query has a concrete target, hunt for exact matched spans inside the section instead of only summarizing it
+- search_passages(scope, query): search query-matched spans across results/full text when section summaries are insufficient
 - search_claims(query, limit): use to recover grounded claim excerpts
 - list_figures(kind, query, limit): use to inspect available figures or tables
 - inspect_table(query, target): use to extract structured rows from a specific or inferred table
-- open_figure(target): use to open one figure/table by label, id, or descriptive target; for concrete targets, recover matching caption/description evidence if available
+- open_figure(target): use to open one figure/table by label, id, or descriptive target; for concrete targets, recover matching caption/description evidence, and visually inspect the figure only if text evidence is still insufficient
 - finish(answerPlan): use only after enough evidence is gathered
 
 Tool-use policy:
@@ -1574,6 +1704,20 @@ function normalizePlannerAction(
         return { type: "read_section", section: raw.section };
       }
       break;
+    case "search_passages": {
+      const query = normalizeOptionalText(raw.query, 180);
+      if (query) {
+        return {
+          type: "search_passages",
+          scope:
+            raw.scope === "results" || raw.scope === "full_text" || raw.scope === "all"
+              ? raw.scope
+              : "full_text",
+          query,
+        };
+      }
+      break;
+    }
     case "search_claims": {
       const query = normalizeOptionalText(raw.query, 160);
       if (query) {
@@ -1637,6 +1781,7 @@ async function chooseNextAgentAction(params: {
   userId?: string;
 }): Promise<ChosenPaperAgentAction> {
   const deterministicAction = chooseDeterministicAction({
+    paper: params.paper,
     question: params.question,
     intent: params.intent,
     sections: params.sections,
@@ -1708,6 +1853,147 @@ async function loadPaperFigures(paperId: string): Promise<PaperFigureView[]> {
     orderBy: [{ pdfPage: "asc" }, { figureIndex: "asc" }],
   });
   return mapPaperFiguresToView(figures);
+}
+
+function getPassageSearchText(params: {
+  paper: PaperAgentPaperContext;
+  sections: Record<SummarySectionName, string>;
+  scope: PassageSearchScope;
+}): string {
+  switch (params.scope) {
+    case "results":
+      return params.sections.results;
+    case "all":
+      return mergeEvidenceBlocks(
+        params.sections.results,
+        params.sections.overview,
+        params.paper.fullText,
+      );
+    case "full_text":
+    default:
+      return params.paper.fullText ?? "";
+  }
+}
+
+async function inspectFigureWithVision(params: {
+  figure: PaperFigureView;
+  question: string;
+  analysis: QueryAnalysis;
+  provider: LLMProvider;
+  modelId: string;
+  proxyConfig?: ProxyConfig | null;
+  userId?: string;
+}): Promise<{ matches: QueryTextMatch[]; note: string | null }> {
+  if (!params.figure.imagePath) {
+    return { matches: [], note: null };
+  }
+
+  let imageBuffer: Buffer | null = null;
+  let imagePathUsed: string | null = null;
+  for (const candidate of resolveStorageCandidates(params.figure.imagePath)) {
+    try {
+      imageBuffer = await readFile(candidate);
+      imagePathUsed = candidate;
+      break;
+    } catch {
+      continue;
+    }
+  }
+
+  if (!imageBuffer || !imagePathUsed) {
+    return { matches: [], note: "Figure image was unavailable on disk." };
+  }
+
+  try {
+    return await withPaperLlmContext(
+      {
+        operation: PAPER_INTERACTIVE_LLM_OPERATIONS.CHAT_AGENT_FIGURE,
+        paperId: params.figure.paperId,
+        userId: params.userId,
+        runtime: "interactive",
+        source: "papers.answer_engine.figure_inspection",
+        metadata: {
+          figureId: params.figure.id,
+          figureLabel: params.figure.figureLabel,
+        },
+      },
+      async () => {
+        const result = await streamLLMResponse({
+          provider: params.provider,
+          modelId: params.modelId,
+          proxyConfig: params.proxyConfig ?? undefined,
+          system: [
+            "You are inspecting one paper figure image to recover exact evidence for a user question.",
+            "Return JSON only.",
+            "Do not infer unseen values or generalize from the caption.",
+            "Use only text or values visible in the image or explicitly present in the caption.",
+            "Schema:",
+            '{"found": boolean, "matches": [{"text": string, "matchedTerms": string[]}], "note": string | null}',
+          ].join("\n"),
+          messages: [
+            {
+              role: "user",
+              content: [
+                {
+                  type: "text",
+                  text: [
+                    `Question: ${params.question}`,
+                    `Target terms: ${params.analysis.targetTerms.join(", ") || "none"}`,
+                    `Expanded terms: ${params.analysis.searchTerms.join(", ") || "none"}`,
+                    `Figure label: ${params.figure.figureLabel ?? params.figure.id}`,
+                    `Caption: ${params.figure.captionText ?? "none"}`,
+                    "Task: recover up to three short exact evidence snippets from the figure that answer the question.",
+                    "If the figure only supports a weaker statement, return that exact visible statement instead of inventing a number.",
+                  ].join("\n"),
+                },
+                {
+                  type: "image",
+                  image: new Uint8Array(imageBuffer),
+                  mimeType: inferImageMimeType(imagePathUsed),
+                },
+              ],
+            },
+          ],
+        });
+
+        const rawText = await result.text;
+        const jsonText = extractJsonObject(rawText);
+        if (!jsonText) {
+          return { matches: [], note: "Figure analysis did not return JSON." };
+        }
+
+        const parsed = JSON.parse(jsonText) as FigureVisualInspectionPayload;
+        const matches = Array.isArray(parsed.matches)
+          ? parsed.matches
+              .map((match) => {
+                const text = typeof match?.text === "string" ? match.text.trim() : "";
+                if (!text) return null;
+                const matchedTerms = Array.isArray(match.matchedTerms)
+                  ? match.matchedTerms.filter((term): term is string => typeof term === "string")
+                  : params.analysis.searchTerms.filter((term) =>
+                      normalizeAnalysisText(text).includes(term),
+                    );
+                return {
+                  text,
+                  matchedTerms,
+                  score: scoreTextMatch(text, params.analysis),
+                } satisfies QueryTextMatch;
+              })
+              .filter((match): match is QueryTextMatch => Boolean(match))
+              .sort((left, right) => right.score - left.score || right.text.length - left.text.length)
+              .slice(0, MAX_VISUAL_MATCHES)
+          : [];
+
+        return {
+          matches,
+          note: typeof parsed.note === "string" ? parsed.note.trim() || null : null,
+        };
+      },
+    );
+  } catch (error) {
+    console.warn("[answer-engine] figure vision fallback failed:", error);
+    return { matches: [], note: "Lazy figure analysis failed." };
+  }
 }
 
 function buildCodeArtifactPrompt(params: {
@@ -1936,6 +2222,54 @@ export async function preparePaperAgentEvidence(params: {
       continue;
     }
 
+    if (action.type === "search_passages") {
+      const citationsBefore = citations.length;
+      const searchAnalysis = mergeQueryAnalysis(queryAnalysis, action.query);
+      const searchText = getPassageSearchText({
+        paper: params.paper,
+        sections,
+        scope: action.scope,
+      });
+      const matches = findTextMatches(searchText, searchAnalysis, 3);
+      if (matches.length === 0) {
+        observations.push({
+          step,
+          action: "Search passages",
+          detail: "No exact passage matches were found.",
+          phase: "retrieve",
+          status: "missing",
+          source: chosen.source,
+          tool: "search_passages",
+          input: action.scope,
+          outputPreview: "No query-matched passages were found in the requested scope.",
+        });
+        continue;
+      }
+
+      citations.push(
+        ...matches.map((match) =>
+          citationForMatchedText(
+            params.paper,
+            action.scope === "full_text" ? "full_text" : action.scope,
+            match,
+          ),
+        ),
+      );
+      observations.push({
+        step,
+        action: "Search passages",
+        detail: matches.map((match) => `- ${match.text}`).join("\n"),
+        phase: "retrieve",
+        status: "completed",
+        source: chosen.source,
+        tool: "search_passages",
+        input: action.scope,
+        outputPreview: `${matches.length} exact passage match${matches.length === 1 ? "" : "es"} found in ${action.scope}.`,
+        citationsAdded: citations.length - citationsBefore,
+      });
+      continue;
+    }
+
     if (action.type === "search_claims") {
       const citationsBefore = citations.length;
       const rankedClaims = rankClaimsForQuery(
@@ -2091,11 +2425,43 @@ export async function preparePaperAgentEvidence(params: {
         continue;
       }
 
-      const figureMatches = findTextMatches(
+      const figureSearchAnalysis = mergeQueryAnalysis(queryAnalysis, queryAnalysis.focusQuery ?? params.question);
+      let figureMatches = findTextMatches(
         [figure.captionText, figure.description].filter(Boolean).join("\n"),
-        queryAnalysis,
+        figureSearchAnalysis,
         2,
       );
+      let visionNote: string | null = null;
+      if (
+        figure.type !== "table"
+        && params.intent === "results"
+        && figure.imagePath
+        && figureSearchAnalysis.requiresExactEvidence
+      ) {
+        const visualInspection = await inspectFigureWithVision({
+          figure,
+          question: params.question,
+          analysis: figureSearchAnalysis,
+          provider: params.provider,
+          modelId: params.modelId,
+          proxyConfig: params.proxyConfig,
+          userId: params.userId,
+        });
+        if (visualInspection.matches.length > 0) {
+          const combinedMatches = Array.from(
+            new Map(
+              [...figureMatches, ...visualInspection.matches].map((match) => [match.text, match]),
+            ).values(),
+          )
+            .sort((left, right) => right.score - left.score || right.text.length - left.text.length)
+            .slice(0, MAX_VISUAL_MATCHES);
+          const exactMatches = combinedMatches.filter((match) =>
+            matchesContainExactEvidence([match], figureSearchAnalysis),
+          );
+          figureMatches = exactMatches.length > 0 ? exactMatches : combinedMatches;
+        }
+        visionNote = visualInspection.note;
+      }
       citations.push(citationForFigure(params.paper, figure));
       if (figureMatches.length > 0) {
         citations.push(
@@ -2127,7 +2493,7 @@ export async function preparePaperAgentEvidence(params: {
         detail:
           figureMatches.length > 0
             ? figureMatches.map((match) => `- ${match.text}`).join("\n")
-            : `${figure.figureLabel || figure.id}: ${figure.captionText || figure.description || "Opened without caption."}`,
+            : `${figure.figureLabel || figure.id}: ${visionNote ?? figure.captionText ?? figure.description ?? "Opened without caption."}`,
         phase: "inspect",
         status: "completed",
         source: chosen.source,

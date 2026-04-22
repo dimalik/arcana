@@ -549,7 +549,17 @@ export async function generateStructuredObject<TSchema extends ZodTypeAny>(param
   throw lastErr;
 }
 
-type MessageContent = string | Array<{ type: string; text?: string; image?: string; mediaType?: string }>;
+type MessageContent =
+  | string
+  | Array<
+      | { type: "text"; text: string }
+      | {
+          type: "image";
+          image: string | Uint8Array;
+          mediaType?: string;
+          mimeType?: string;
+        }
+    >;
 
 export async function streamLLMResponse(params: {
   provider: LLMProvider;
