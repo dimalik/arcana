@@ -638,6 +638,7 @@ function looksLikeHeading(line: string): boolean {
 function extractFullTextSection(
   fullText: string | null,
   headings: string[],
+  maxChars = MAX_SECTION_CHARS,
 ): string {
   if (!fullText) return "";
   const lines = fullText.split(/\r?\n/);
@@ -665,7 +666,7 @@ function extractFullTextSection(
   }
 
   const section = lines.slice(startIndex, endIndex).join("\n").trim();
-  return truncate(section, MAX_SECTION_CHARS);
+  return truncate(section, maxChars);
 }
 
 function rankClaimsForQuery(
@@ -1102,7 +1103,23 @@ function chooseDeterministicAction(params: {
   );
   const focusQuery = buildFocusedEvidenceQuery(params.question, params.analysis);
   const observedFigureKeys = collectObservedFigureKeys(params.observations);
-  const resultsReferences = extractFigureReferences(params.sections.results);
+  const summarySections = params.paper.summary
+    ? parseSummarySections(params.paper.summary)
+    : {
+        overview: "",
+        methodology: "",
+        results: "",
+      };
+  const extendedResultsSection = extractFullTextSection(
+    params.paper.fullText,
+    ["results", "experiments", "evaluation", "analysis", "ablation"],
+    12000,
+  );
+  const resultsReferences = extractFigureReferences(
+    [params.sections.results, summarySections.results, extendedResultsSection]
+      .filter(Boolean)
+      .join("\n"),
+  );
   const tableFigures = params.figures.filter((figure) => figure.type === "table");
   const nonTableFigures = params.figures.filter((figure) => figure.type !== "table");
   const matchingFocusedTables =
@@ -1121,28 +1138,30 @@ function chooseDeterministicAction(params: {
   const exactEvidenceCitations = exactEvidenceSatisfied
     ? params.citations.filter((citation) => citationMatchesAnalysis(citation, params.analysis))
     : [];
-  const sectionReferencedFigures = !alreadySearchedFullText
-    ? collectReferencedFiguresFromObservations(
-        params.figures,
-        params.observations.filter((observation) => observation.tool === "read_section"),
-        params.analysis,
-        "figure",
-      )
-    : [];
-  const sectionReferencedTables = !alreadySearchedFullText
-    ? [
-        ...collectReferencedFiguresFromObservations(
-          params.figures,
-          params.observations.filter((observation) => observation.tool === "read_section"),
-          params.analysis,
-          "table",
-        ),
-        ...resultsReferences
-          .filter((reference) => reference.kind === "table")
-          .map((reference) => resolveFigureTarget(params.figures, reference.label))
-          .filter((figure): figure is PaperFigureView => Boolean(figure)),
-      ]
-    : [];
+  const sectionReferencedFigures = [
+    ...collectReferencedFiguresFromObservations(
+      params.figures,
+      params.observations.filter((observation) => observation.tool === "read_section"),
+      params.analysis,
+      "figure",
+    ),
+    ...resultsReferences
+      .filter((reference) => reference.kind === "figure")
+      .map((reference) => resolveFigureTarget(params.figures, reference.label))
+      .filter((figure): figure is PaperFigureView => Boolean(figure)),
+  ];
+  const sectionReferencedTables = [
+    ...collectReferencedFiguresFromObservations(
+      params.figures,
+      params.observations.filter((observation) => observation.tool === "read_section"),
+      params.analysis,
+      "table",
+    ),
+    ...resultsReferences
+      .filter((reference) => reference.kind === "table")
+      .map((reference) => resolveFigureTarget(params.figures, reference.label))
+      .filter((figure): figure is PaperFigureView => Boolean(figure)),
+  ];
   const groundedReferencedFigures = exactEvidenceSatisfied
     ? [
         ...collectReferencedFiguresFromCitations(
@@ -1187,7 +1206,11 @@ function chooseDeterministicAction(params: {
       score: scoreFigureQuery(
         figure,
         "figure",
-        focusQuery ?? params.analysis.focusQuery ?? params.question,
+        buildFocusedFigureQuery(
+          params.question,
+          focusQuery ?? params.analysis.focusQuery,
+          params.analysis,
+        ),
       ),
     }))
     .sort((left, right) => right.score - left.score || left.figure.figureIndex - right.figure.figureIndex)[0]?.figure;
@@ -1249,6 +1272,39 @@ function chooseDeterministicAction(params: {
         type: "inspect_table",
         target: nextTable.figureLabel ?? nextTable.id,
         query: focusQuery ?? params.question.slice(0, 160),
+      };
+    }
+  }
+
+  if (
+    params.intent === "results"
+    && exactEvidenceSatisfied
+    && alreadyInspectedTable
+    && !alreadyOpenedFigure
+  ) {
+    const figureQuery = buildFocusedFigureQuery(
+      params.question,
+      focusQuery ?? params.analysis.focusQuery,
+      params.analysis,
+    );
+    const complementaryFigure =
+      prioritizedGroundedFigure
+      ?? nonTableFigures
+        .filter((figure) => !hasObservedFigure(figure, observedFigureKeys))
+        .map((figure) => ({
+          figure,
+          score: scoreFigureQuery(figure, "figure", figureQuery),
+        }))
+        .filter((entry) => entry.score > 0)
+        .sort(
+          (left, right) =>
+            right.score - left.score || left.figure.figureIndex - right.figure.figureIndex,
+        )[0]?.figure;
+
+    if (complementaryFigure) {
+      return {
+        type: "open_figure",
+        target: complementaryFigure.figureLabel ?? complementaryFigure.id,
       };
     }
   }
