@@ -3,6 +3,8 @@ import type { PaperClaimView } from "../analysis/store";
 
 const hoisted = vi.hoisted(() => ({
   paperFigureFindMany: vi.fn(),
+  resolverCacheEntryFindUnique: vi.fn(),
+  resolverCacheEntryUpsert: vi.fn(),
   generateStructuredObject: vi.fn(),
   streamLLMResponse: vi.fn(),
   withPaperLlmContext: vi.fn(),
@@ -13,6 +15,10 @@ vi.mock("@/lib/prisma", () => ({
   prisma: {
     paperFigure: {
       findMany: hoisted.paperFigureFindMany,
+    },
+    resolverCacheEntry: {
+      findUnique: hoisted.resolverCacheEntryFindUnique,
+      upsert: hoisted.resolverCacheEntryUpsert,
     },
   },
 }));
@@ -89,6 +95,25 @@ function makePaper(overrides: Partial<Parameters<typeof preparePaperAgentEvidenc
 describe("preparePaperAgentEvidence", () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    const cache = new Map<string, {
+      responsePayload: string | null;
+      resolvedEntityId: string | null;
+      httpStatus: number;
+      cachedAt: Date;
+      expiresAt: Date;
+    }>();
+    hoisted.resolverCacheEntryFindUnique.mockImplementation(async ({ where }) => {
+      const key = JSON.stringify(where.lookupKey_lookupType_provider);
+      return cache.get(key) ?? null;
+    });
+    hoisted.resolverCacheEntryUpsert.mockImplementation(async ({ where, create, update }) => {
+      const key = JSON.stringify(where.lookupKey_lookupType_provider);
+      const next = cache.has(key)
+        ? { ...cache.get(key)!, ...update }
+        : create;
+      cache.set(key, next);
+      return next;
+    });
     hoisted.withPaperLlmContext.mockImplementation(async (_context, callback) => callback());
     hoisted.streamLLMResponse.mockResolvedValue({
       text: Promise.resolve("{\"found\":false,\"matches\":[],\"note\":null}"),
@@ -661,5 +686,87 @@ describe("preparePaperAgentEvidence", () => {
       matches?: Array<{ text: string }>;
     };
     expect(Array.isArray(payload.matches)).toBe(true);
+  });
+
+  it("reuses cached evidence for repeated exact-result questions", async () => {
+    hoisted.paperFigureFindMany.mockResolvedValue([
+      {
+        id: "fig-4",
+        paperId: "paper-1",
+        publishedFigureHandleId: null,
+        figureLabel: "Figure 4",
+        captionText: "Figure 4: MMLU-Multilingual performance across supported languages.",
+        captionSource: "html",
+        description: "",
+        sourceMethod: "html",
+        sourceUrl: null,
+        sourceVersion: null,
+        confidence: "high",
+        imagePath: "uploads/figures/paper-1/figure-4.png",
+        assetHash: null,
+        pdfPage: 9,
+        sourcePage: 9,
+        figureIndex: 4,
+        bbox: null,
+        type: "figure",
+        parentFigureId: null,
+        isPrimaryExtraction: true,
+        width: 1200,
+        height: 800,
+        gapReason: null,
+        imageSourceMethod: "html",
+        createdAt: new Date("2026-04-21T00:00:00Z"),
+      },
+    ]);
+    hoisted.streamLLMResponse.mockResolvedValue({
+      text: Promise.resolve(JSON.stringify({
+        found: true,
+        matches: [
+          {
+            text: "Figure 4 shows Ukrainian at 68.4 on the multilingual benchmark.",
+            matchedTerms: ["ukrainian", "multilingual"],
+          },
+        ],
+        note: "Recovered exact language-level evidence from the plotted figure.",
+      })),
+    });
+
+    const paper = makePaper({
+      summary: [
+        "## Summary",
+        "Short overview.",
+        "",
+        "## Results",
+        "Figure 4 reports the MMLU-Multilingual breakdown for supported languages.",
+      ].join("\n"),
+      fullText: [
+        "Evaluation details",
+        "We evaluate the multilingual setting on languages such as Arabic, Chinese, Russian, Ukrainian, and Vietnamese, with average MMLU-multilingual scores of 55.4 and 47.3, respectively.",
+        "Due to its larger model capacity, phi-3.5-MoE achieves a significantly higher average score of 69.9, outperforming phi-3.5-mini.",
+        "Figure 4 compares phi-3-mini, phi-3.5-mini and phi-3.5-MoE on MMLU-Multilingual tasks.",
+      ].join("\n"),
+    });
+
+    const first = await preparePaperAgentEvidence({
+      paper,
+      question: "What were the results on Ukrainian?",
+      intent: "results",
+      selectedText: null,
+      provider: "openai",
+      modelId: "gpt-test",
+    });
+
+    const second = await preparePaperAgentEvidence({
+      paper,
+      question: "What were the results on Ukrainian?",
+      intent: "results",
+      selectedText: null,
+      provider: "openai",
+      modelId: "gpt-test",
+    });
+
+    expect(hoisted.streamLLMResponse).toHaveBeenCalledTimes(1);
+    expect(hoisted.resolverCacheEntryUpsert).toHaveBeenCalledTimes(1);
+    expect(second).toEqual(first);
   });
 });

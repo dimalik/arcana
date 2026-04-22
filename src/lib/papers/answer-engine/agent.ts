@@ -1,3 +1,4 @@
+import { createHash } from "crypto";
 import { readFile } from "fs/promises";
 import path from "path";
 
@@ -25,6 +26,7 @@ import type { ProxyConfig } from "@/lib/llm/proxy-settings";
 import { normalizeAnalysisText } from "@/lib/papers/analysis/normalization/text";
 import { parseSummarySections } from "@/lib/papers/parse-sections";
 import { prisma } from "@/lib/prisma";
+import { withCachedLookup } from "@/lib/references/resolver-cache";
 import { resolveStorageCandidates } from "@/lib/storage-paths";
 
 import type { PaperClaimView } from "../analysis/store";
@@ -111,6 +113,8 @@ const MAX_TABLE_ROWS = 60;
 const MAX_TABLE_COLUMNS = 12;
 const MAX_TABLE_CELL_CHARS = 120;
 const MAX_VISUAL_MATCHES = 3;
+const PAPER_AGENT_EVIDENCE_CACHE_VERSION = "v1";
+const PAPER_AGENT_EVIDENCE_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 export interface PaperAgentPaperContext {
   id: string;
@@ -2412,7 +2416,78 @@ function dedupeArtifacts(artifacts: PaperAgentArtifactDraft[]): PaperAgentArtifa
   });
 }
 
-export async function preparePaperAgentEvidence(params: {
+function updateHash(hash: ReturnType<typeof createHash>, value: string | number | null | undefined): void {
+  hash.update(String(value ?? ""));
+  hash.update("\u001f");
+}
+
+function buildPaperAgentEvidenceCacheKey(params: {
+  paper: PaperAgentPaperContext;
+  question: string;
+  intent: PaperAnswerIntent;
+  selectedText: string | null;
+  provider: LLMProvider;
+  modelId: string;
+  analysis: QueryAnalysis;
+  figures: PaperFigureView[];
+}): string {
+  const hash = createHash("sha1");
+  updateHash(hash, PAPER_AGENT_EVIDENCE_CACHE_VERSION);
+  updateHash(hash, params.paper.id);
+  updateHash(hash, params.intent);
+  updateHash(hash, params.provider);
+  updateHash(hash, params.modelId);
+
+  const queryFingerprint = uniqueStrings([
+    params.analysis.focusQuery,
+    ...params.analysis.targetTerms,
+    ...params.analysis.expandedTerms,
+  ]).join("|") || normalizeAnalysisText(params.question);
+  updateHash(hash, queryFingerprint);
+  updateHash(hash, normalizeAnalysisText(params.selectedText ?? ""));
+
+  updateHash(hash, params.paper.title);
+  updateHash(hash, params.paper.year ?? "");
+  updateHash(hash, params.paper.abstract ?? "");
+  updateHash(hash, params.paper.summary ?? "");
+  updateHash(hash, params.paper.keyFindings ?? "");
+  updateHash(hash, params.paper.fullText ?? "");
+
+  for (const figure of params.figures) {
+    updateHash(hash, figure.id);
+    updateHash(hash, figure.figureLabel ?? "");
+    updateHash(hash, figure.captionText ?? "");
+    updateHash(hash, figure.description ?? "");
+    updateHash(hash, figure.type);
+    updateHash(hash, figure.figureIndex);
+    updateHash(hash, figure.pdfPage ?? "");
+    updateHash(hash, figure.imagePath ?? "");
+  }
+
+  return `${params.paper.id}:${hash.digest("hex")}`;
+}
+
+function parsePreparedPaperAgentEvidence(
+  responsePayload: string | null,
+): PreparedPaperAgentEvidence | null {
+  if (!responsePayload) return null;
+  try {
+    const parsed = JSON.parse(responsePayload) as PreparedPaperAgentEvidence;
+    if (
+      !parsed
+      || !Array.isArray(parsed.citations)
+      || !Array.isArray(parsed.artifacts)
+      || !Array.isArray(parsed.actions)
+    ) {
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+async function preparePaperAgentEvidenceUncached(params: {
   paper: PaperAgentPaperContext;
   question: string;
   intent: PaperAnswerIntent;
@@ -2421,10 +2496,13 @@ export async function preparePaperAgentEvidence(params: {
   modelId: string;
   proxyConfig?: ProxyConfig | null;
   userId?: string;
+  sections: Record<SummarySectionName, string>;
+  figures: PaperFigureView[];
+  queryAnalysis: QueryAnalysis;
 }): Promise<PreparedPaperAgentEvidence> {
-  const sections = buildSectionSnapshots(params.paper);
-  const figures = await loadPaperFigures(params.paper.id);
-  const queryAnalysis = analyzeQuery(params.question, params.intent);
+  const sections = params.sections;
+  const figures = params.figures;
+  const queryAnalysis = params.queryAnalysis;
   const citations: AnswerCitation[] = [];
   const artifacts: PaperAgentArtifactDraft[] = [];
   const observations: AgentObservation[] = [];
@@ -2896,4 +2974,73 @@ export async function preparePaperAgentEvidence(params: {
       artifactsAdded: observation.artifactsAdded,
     })),
   };
+}
+
+export async function preparePaperAgentEvidence(params: {
+  paper: PaperAgentPaperContext;
+  question: string;
+  intent: PaperAnswerIntent;
+  selectedText: string | null;
+  provider: LLMProvider;
+  modelId: string;
+  proxyConfig?: ProxyConfig | null;
+  userId?: string;
+}): Promise<PreparedPaperAgentEvidence> {
+  const sections = buildSectionSnapshots(params.paper);
+  const figures = await loadPaperFigures(params.paper.id);
+  const queryAnalysis = analyzeQuery(params.question, params.intent);
+
+  if (params.intent === "generated_artifact") {
+    return preparePaperAgentEvidenceUncached({
+      ...params,
+      sections,
+      figures,
+      queryAnalysis,
+    });
+  }
+
+  const lookupKey = buildPaperAgentEvidenceCacheKey({
+    paper: params.paper,
+    question: params.question,
+    intent: params.intent,
+    selectedText: params.selectedText,
+    provider: params.provider,
+    modelId: params.modelId,
+    analysis: queryAnalysis,
+    figures,
+  });
+
+  const cached = await withCachedLookup(
+    {
+      lookupKey,
+      lookupType: "paper_agent_evidence",
+      provider: "paper_agent",
+    },
+    async () => {
+      const prepared = await preparePaperAgentEvidenceUncached({
+        ...params,
+        sections,
+        figures,
+        queryAnalysis,
+      });
+      return {
+        responsePayload: JSON.stringify(prepared),
+        resolvedEntityId: params.paper.id,
+        httpStatus: 200,
+      };
+    },
+    PAPER_AGENT_EVIDENCE_CACHE_TTL_MS,
+  );
+
+  const parsed = parsePreparedPaperAgentEvidence(cached.responsePayload);
+  if (parsed) {
+    return parsed;
+  }
+
+  return preparePaperAgentEvidenceUncached({
+    ...params,
+    sections,
+    figures,
+    queryAnalysis,
+  });
 }
