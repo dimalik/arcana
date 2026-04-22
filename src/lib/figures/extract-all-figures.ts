@@ -459,6 +459,7 @@ interface PublisherFigureRecord {
   imagePath: string;
   assetHash: string;
   type: string;
+  tableHtml?: string;
 }
 
 async function tryPublisherFigures(
@@ -492,6 +493,24 @@ async function tryPublisherFigures(
   const written: PublisherFigureRecord[] = [];
   for (let i = 0; i < pubResult.figures.length; i++) {
     const fig = pubResult.figures[i];
+
+    if (fig.imgUrl === null) {
+      if (!fig.tableHtml) continue;
+      written.push({
+        figureLabel: fig.figureLabel || `pub-table-${i}`,
+        captionText: fig.caption || null,
+        captionSource: fig.caption ? "html_caption" : "none",
+        sourceMethod: "publisher_html",
+        sourceUrl: doiUrl,
+        confidence: "medium",
+        imagePath: "",
+        assetHash: "",
+        type: "table",
+        tableHtml: fig.tableHtml,
+      });
+      continue;
+    }
+
     try {
       const imgRes = await fetch(fig.imgUrl, {
         headers: { ...BROWSER_HEADERS, Accept: "image/*,*/*" },
@@ -528,6 +547,7 @@ async function tryPublisherFigures(
         imagePath,
         assetHash,
         type: fig.type,
+        tableHtml: fig.tableHtml,
       });
     } catch {
       // Skip individual figure failures

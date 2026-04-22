@@ -9,10 +9,11 @@
  */
 
 export interface PublisherFigure {
-  imgUrl: string;
+  imgUrl: string | null;
   caption: string;
   figureLabel: string | null;
   type: "figure" | "table";
+  tableHtml?: string;
 }
 
 interface PublisherParser {
@@ -40,6 +41,62 @@ function parseFigureLabel(text: string): string | null {
   return m ? m[1] : null;
 }
 
+/**
+ * Find structured <table> blocks in a publisher HTML page and return
+ * one PublisherFigure per table with tableHtml populated. Skips layout
+ * tables (role="presentation") and tables inside <nav> or <header>.
+ *
+ * Label resolution: <caption> inside the table → a preceding <h2/3/4>
+ * containing "Table N" → null (skip).
+ */
+function extractHtmlTables(html: string): PublisherFigure[] {
+  const out: PublisherFigure[] = [];
+  const cleaned = html
+    .replace(/<nav\b[^>]*>[\s\S]*?<\/nav>/gi, "")
+    .replace(/<header\b[^>]*>[\s\S]*?<\/header>/gi, "");
+
+  const tableRegex = /<table\b([^>]*)>([\s\S]*?)<\/table>/gi;
+  let m: RegExpExecArray | null;
+  while ((m = tableRegex.exec(cleaned)) !== null) {
+    const attrs = m[1] || "";
+    if (/\brole\s*=\s*["']presentation["']/i.test(attrs)) continue;
+
+    const full = m[0];
+    const inner = m[2];
+
+    let captionText = "";
+    const innerCaption = inner.match(/<caption[^>]*>([\s\S]*?)<\/caption>/i)?.[1];
+    if (innerCaption) captionText = stripTags(innerCaption).slice(0, 500);
+
+    let figureLabel: string | null = parseFigureLabel(captionText);
+    if (!figureLabel) {
+      const windowStart = Math.max(0, m.index - 400);
+      const before = cleaned.slice(windowStart, m.index);
+      const headingMatches = before.match(/<h[1-6][^>]*>([\s\S]*?)<\/h[1-6]>/gi);
+      if (headingMatches && headingMatches.length > 0) {
+        const lastHeading = headingMatches[headingMatches.length - 1];
+        const headingText = stripTags(lastHeading);
+        const lbl = parseFigureLabel(headingText);
+        if (lbl) {
+          figureLabel = lbl;
+          if (!captionText) captionText = headingText.slice(0, 500);
+        }
+      }
+    }
+
+    if (!figureLabel) continue;
+
+    out.push({
+      imgUrl: null,
+      caption: captionText,
+      figureLabel,
+      type: "table",
+      tableHtml: full,
+    });
+  }
+  return out;
+}
+
 // ── PLoS ────────────────────────────────────────────────────────────
 
 const plosParser: PublisherParser = {
@@ -64,6 +121,7 @@ const plosParser: PublisherParser = {
 
       figures.push({ imgUrl: resolved, caption: captionText, figureLabel: label, type });
     }
+    figures.push(...extractHtmlTables(html));
     return figures;
   },
 };
@@ -101,6 +159,7 @@ const natureParser: PublisherParser = {
 
       figures.push({ imgUrl: resolved, caption: captionText, figureLabel: label, type });
     }
+    figures.push(...extractHtmlTables(html));
     return figures;
   },
 };
@@ -137,6 +196,7 @@ const mdpiParser: PublisherParser = {
 
       figures.push({ imgUrl: resolved, caption: captionText, figureLabel: label, type });
     }
+    figures.push(...extractHtmlTables(html));
     return figures;
   },
 };
@@ -165,6 +225,7 @@ const scienceParser: PublisherParser = {
 
       figures.push({ imgUrl: resolved, caption: captionText, figureLabel: label, type });
     }
+    figures.push(...extractHtmlTables(html));
     return figures;
   },
 };
