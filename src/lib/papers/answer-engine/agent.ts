@@ -113,7 +113,7 @@ const MAX_TABLE_ROWS = 60;
 const MAX_TABLE_COLUMNS = 12;
 const MAX_TABLE_CELL_CHARS = 120;
 const MAX_VISUAL_MATCHES = 3;
-const PAPER_AGENT_EVIDENCE_CACHE_VERSION = "v1";
+const PAPER_AGENT_EVIDENCE_CACHE_VERSION = "v2";
 const PAPER_AGENT_EVIDENCE_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 export interface PaperAgentPaperContext {
@@ -169,6 +169,16 @@ type PaperAgentAction =
       target?: string;
     }
   | {
+      type: "inspect_table_row";
+      query?: string;
+      target?: string;
+    }
+  | {
+      type: "inspect_table_value";
+      query?: string;
+      target?: string;
+    }
+  | {
       type: "open_figure";
       target: string;
     }
@@ -218,6 +228,16 @@ interface TableQueryMatch {
   rowIndex: number;
   score: number;
   values: string[];
+}
+
+interface TableValueMatch {
+  rowIndex: number;
+  columnIndex: number;
+  rowLabel: string;
+  columnLabel: string;
+  value: string;
+  score: number;
+  matchedTerms: string[];
 }
 
 interface QueryAnalysis {
@@ -878,6 +898,8 @@ function collectObservedFigureKeys(observations: AgentObservation[]): Set<string
   for (const observation of observations) {
     if (
       observation.tool !== "inspect_table"
+      && observation.tool !== "inspect_table_row"
+      && observation.tool !== "inspect_table_value"
       && observation.tool !== "open_figure"
     ) {
       continue;
@@ -1105,6 +1127,9 @@ function chooseDeterministicAction(params: {
   const wantsVisualArtifact = /\btable\b|\bfigure\b|\bchart\b|\bplot\b|\bgraph\b/i.test(
     params.question,
   );
+  const wantsExactRow = wantsExactTableRow(params.question);
+  const wantsExactValue = wantsExactTableValue(params.question);
+  const tableInspectionActionType = chooseTableInspectionActionType(params.question);
   const focusQuery = buildFocusedEvidenceQuery(params.question, params.analysis);
   const observedFigureKeys = collectObservedFigureKeys(params.observations);
   const summarySections = params.paper.summary
@@ -1252,14 +1277,15 @@ function chooseDeterministicAction(params: {
   if (
     params.intent === "results"
     && exactEvidenceSatisfied
-    && groundedReferencedFigures.length > 0
-    && !alreadyOpenedFigure
+    && groundedReferencedTables.length > 0
+    && !alreadyInspectedTable
   ) {
-    const nextFigure = prioritizedGroundedFigure;
-    if (nextFigure) {
+    const nextTable = prioritizedGroundedTable;
+    if (nextTable) {
       return {
-        type: "open_figure",
-        target: nextFigure.figureLabel ?? nextFigure.id,
+        type: tableInspectionActionType,
+        target: nextTable.figureLabel ?? nextTable.id,
+        query: focusQuery ?? params.question.slice(0, 160),
       };
     }
   }
@@ -1267,15 +1293,15 @@ function chooseDeterministicAction(params: {
   if (
     params.intent === "results"
     && exactEvidenceSatisfied
-    && groundedReferencedTables.length > 0
-    && !alreadyInspectedTable
+    && groundedReferencedFigures.length > 0
+    && !alreadyOpenedFigure
+    && (!wantsExactRow && !wantsExactValue || alreadyInspectedTable || groundedReferencedTables.length === 0)
   ) {
-    const nextTable = prioritizedGroundedTable;
-    if (nextTable) {
+    const nextFigure = prioritizedGroundedFigure;
+    if (nextFigure) {
       return {
-        type: "inspect_table",
-        target: nextTable.figureLabel ?? nextTable.id,
-        query: focusQuery ?? params.question.slice(0, 160),
+        type: "open_figure",
+        target: nextFigure.figureLabel ?? nextFigure.id,
       };
     }
   }
@@ -1346,7 +1372,7 @@ function chooseDeterministicAction(params: {
 
     if (bestTable) {
       return {
-        type: "inspect_table",
+        type: tableInspectionActionType,
         target: bestTable.figure.figureLabel ?? bestTable.figure.id,
         query: focusQuery,
       };
@@ -1361,11 +1387,27 @@ function chooseDeterministicAction(params: {
       ?? null;
     if (target) {
       return {
-        type: "inspect_table",
+        type: tableInspectionActionType,
         target,
         query: params.question.slice(0, 160),
       };
     }
+  }
+
+  if (params.intent === "tables" && alreadyInspectedTable) {
+    return {
+      type: "finish",
+      answerPlan:
+        "Answer from the extracted table evidence already gathered, using any exact row or exact value when available.",
+    };
+  }
+
+  if (params.intent === "figures" && alreadyOpenedFigure) {
+    return {
+      type: "finish",
+      answerPlan:
+        "Answer from the opened figure evidence already gathered.",
+    };
   }
 
   if (params.intent !== "results" || !alreadyReadResults) {
@@ -1397,7 +1439,7 @@ function chooseDeterministicAction(params: {
 
     if (nextReferencedTable) {
       return {
-        type: "inspect_table",
+        type: tableInspectionActionType,
         target: nextReferencedTable.figureLabel ?? nextReferencedTable.id,
         query: focusQuery,
       };
@@ -1435,7 +1477,7 @@ function chooseDeterministicAction(params: {
 
       if (genericTable) {
         return {
-          type: "inspect_table",
+          type: tableInspectionActionType,
           target: genericTable.figureLabel ?? genericTable.id,
           query: params.question.slice(0, 160),
         };
@@ -1767,6 +1809,111 @@ function queryParsedTable(
   }));
 }
 
+function scoreQueryTokens(
+  haystack: string,
+  queryTokens: string[],
+): number {
+  const normalized = normalizeAnalysisText(haystack);
+  let score = 0;
+  for (const token of queryTokens) {
+    if (normalized.includes(token)) score += 1;
+  }
+  return score;
+}
+
+function queryParsedTableRow(
+  table: ParsedTableData,
+  query?: string,
+): TableQueryMatch | null {
+  const queryTokens = query ? tokenize(query) : [];
+  if (queryTokens.length === 0) return null;
+
+  const scored = table.rows
+    .map((row, rowIndex) => {
+      const rowLabel = row[0] ?? "";
+      const rowBody = row.slice(1).join(" ");
+      const score =
+        scoreQueryTokens(rowLabel, queryTokens) * 3
+        + scoreQueryTokens(rowBody, queryTokens);
+      return {
+        rowIndex,
+        score,
+        values: row,
+      } satisfies TableQueryMatch;
+    })
+    .filter((entry) => entry.score > 0)
+    .sort((left, right) => right.score - left.score || left.rowIndex - right.rowIndex);
+
+  return scored[0] ?? null;
+}
+
+function queryParsedTableValue(
+  table: ParsedTableData,
+  query?: string,
+): TableValueMatch | null {
+  const queryTokens = query ? tokenize(query) : [];
+  if (queryTokens.length === 0) return null;
+
+  const rowMatch = queryParsedTableRow(table, query);
+  if (!rowMatch) return null;
+
+  const scoredColumns = table.columns
+    .map((columnLabel, columnIndex) => {
+      if (columnIndex === 0) {
+        return { columnIndex, score: -1, columnLabel };
+      }
+      return {
+        columnIndex,
+        score: scoreQueryTokens(columnLabel, queryTokens),
+        columnLabel,
+      };
+    })
+    .filter((entry) => entry.score > 0)
+    .sort((left, right) => right.score - left.score || left.columnIndex - right.columnIndex);
+
+  const bestColumn = scoredColumns[0];
+  if (!bestColumn) return null;
+
+  const value = rowMatch.values[bestColumn.columnIndex] ?? "";
+  if (!value) return null;
+
+  return {
+    rowIndex: rowMatch.rowIndex,
+    columnIndex: bestColumn.columnIndex,
+    rowLabel: rowMatch.values[0] ?? `Row ${rowMatch.rowIndex + 1}`,
+    columnLabel: bestColumn.columnLabel,
+    value,
+    score: rowMatch.score + bestColumn.score,
+    matchedTerms: queryTokens.filter((token) =>
+      normalizeAnalysisText(`${rowMatch.values.join(" ")} ${bestColumn.columnLabel}`).includes(token),
+    ),
+  };
+}
+
+function wantsExactTableRow(question: string): boolean {
+  const normalized = normalizeAnalysisText(question);
+  return /\brow\b|\brows\b|\bmetric\b/.test(normalized)
+    || /\bshow\b.*\brow\b/.test(normalized);
+}
+
+function wantsExactTableValue(question: string): boolean {
+  const normalized = normalizeAnalysisText(question);
+  return /\bwhat is\b|\bwhat was\b|\bwhich\b|\bhow much\b|\bscore\b|\bvalue\b|\bnumber\b|\bmetric\b/.test(normalized)
+    || /\bfor\b/.test(normalized);
+}
+
+function chooseTableInspectionActionType(
+  question: string,
+): "inspect_table" | "inspect_table_row" | "inspect_table_value" {
+  if (wantsExactTableRow(question)) {
+    return "inspect_table_row";
+  }
+  if (wantsExactTableValue(question)) {
+    return "inspect_table_value";
+  }
+  return "inspect_table";
+}
+
 function buildResultArtifact(
   paper: PaperAgentPaperContext,
   resultsText: string,
@@ -1803,6 +1950,8 @@ function buildFigureArtifact(
     tableQuery?: string;
     figureQuery?: string;
     textMatches?: QueryTextMatch[];
+    exactRow?: TableQueryMatch | null;
+    exactValue?: TableValueMatch | null;
   },
 ): PaperAgentArtifactDraft {
   const parsedTable =
@@ -1831,6 +1980,22 @@ function buildFigureArtifact(
               rows: parsedTable.rows,
               query: options?.tableQuery,
               matches,
+              exactRow: options?.exactRow
+                ? {
+                    rowIndex: options.exactRow.rowIndex,
+                    values: options.exactRow.values,
+                  }
+                : null,
+              exactValue: options?.exactValue
+                ? {
+                    rowIndex: options.exactValue.rowIndex,
+                    columnIndex: options.exactValue.columnIndex,
+                    rowLabel: options.exactValue.rowLabel,
+                    columnLabel: options.exactValue.columnLabel,
+                    value: options.exactValue.value,
+                    matchedTerms: options.exactValue.matchedTerms,
+                  }
+                : null,
               csvPreview: [
                 toCsvRow(parsedTable.columns),
                 ...parsedTable.rows.map((row) => toCsvRow(row)),
@@ -1924,12 +2089,14 @@ Available tools:
 - search_claims(query, limit): use to recover grounded claim excerpts
 - list_figures(kind, query, limit): use to inspect available figures or tables
 - inspect_table(query, target): use to extract structured rows from a specific or inferred table
+- inspect_table_row(query, target): use to extract the best matching row from a specific or inferred table
+- inspect_table_value(query, target): use to extract the best matching cell value when the question names both a metric/row and a model/column
 - open_figure(target): use to open one figure/table by label, id, or descriptive target; for concrete targets, recover matching caption/description evidence, and visually inspect the figure only if text evidence is still insufficient
 - finish(answerPlan): use only after enough evidence is gathered
 
 Tool-use policy:
 - Prefer results and tables for metric/performance questions.
-- Prefer inspect_table when the question asks for a specific number, row, column, metric, or ablation detail.
+- Prefer inspect_table_value for specific numbers/cells and inspect_table_row for row-level asks. Use inspect_table for broader table previews.
 - Prefer exact query matches over generic summaries. If the question names a concrete target, do not finish until you have either found that target in the evidence or exhausted the relevant section/table/figure searches.
 - Prefer methodology and claims for implementation or snippet questions.
 - Prefer figures when the user asks to show, inspect, or explain a figure/diagram/table.
@@ -1982,7 +2149,7 @@ function fallbackAgentAction(params: {
       return { type: "list_figures", kind: "figure", limit: 4 };
     case "tables":
       return {
-        type: "inspect_table",
+        type: chooseTableInspectionActionType(params.question),
         query: (params.analysis.focusQuery ?? params.question).slice(0, 160),
       };
     case "generated_artifact":
@@ -2053,8 +2220,10 @@ function normalizePlannerAction(
         limit: clampInteger(raw.limit, 1, 8, 5),
       };
     case "inspect_table":
+    case "inspect_table_row":
+    case "inspect_table_value":
       return {
-        type: "inspect_table",
+        type: raw.type,
         query: normalizeOptionalText(raw.query, 160),
         target: normalizeOptionalText(raw.target, 120),
       };
@@ -2739,7 +2908,11 @@ async function preparePaperAgentEvidenceUncached(params: {
       continue;
     }
 
-    if (action.type === "inspect_table") {
+    if (
+      action.type === "inspect_table"
+      || action.type === "inspect_table_row"
+      || action.type === "inspect_table_value"
+    ) {
       const citationsBefore = citations.length;
       const artifactsBefore = artifacts.length;
       const tableFigures = figures.filter((figure) => figure.type === "table");
@@ -2762,15 +2935,40 @@ async function preparePaperAgentEvidenceUncached(params: {
       }
 
       const parsedTable = parseHtmlTable(figure.description);
+      const tableQuery = action.query ?? queryAnalysis.focusQuery ?? params.question;
       const matches = parsedTable
         ? queryParsedTable(
             parsedTable,
-            action.query ?? queryAnalysis.focusQuery ?? params.question,
+            tableQuery,
           )
         : [];
+      const exactRow = parsedTable && action.type !== "inspect_table_value"
+        ? queryParsedTableRow(parsedTable, tableQuery)
+        : parsedTable && action.type === "inspect_table_value"
+          ? queryParsedTableRow(parsedTable, tableQuery)
+          : null;
+      const exactValue = parsedTable && action.type === "inspect_table_value"
+        ? queryParsedTableValue(parsedTable, tableQuery)
+        : null;
 
       citations.push(citationForFigure(params.paper, figure));
-      if (matches[0]) {
+      if (exactValue) {
+        citations.push({
+          paperId: params.paper.id,
+          paperTitle: params.paper.title,
+          snippet: `${figure.figureLabel || "Table"} value [${exactValue.rowLabel} × ${exactValue.columnLabel}]: ${exactValue.value}`,
+          sectionPath: figure.figureLabel,
+          sourceKind: "artifact",
+        });
+      } else if (exactRow) {
+        citations.push({
+          paperId: params.paper.id,
+          paperTitle: params.paper.title,
+          snippet: `${figure.figureLabel || "Table"} row ${exactRow.rowIndex + 1}: ${exactRow.values.join(" | ")}`,
+          sectionPath: figure.figureLabel,
+          sourceKind: "artifact",
+        });
+      } else if (matches[0]) {
         citations.push({
           paperId: params.paper.id,
           paperTitle: params.paper.title,
@@ -2781,23 +2979,41 @@ async function preparePaperAgentEvidenceUncached(params: {
       }
       artifacts.push(
         buildFigureArtifact(figure, {
-          tableQuery: action.query ?? queryAnalysis.focusQuery ?? params.question,
+          tableQuery,
+          exactRow,
+          exactValue,
         }),
       );
+      const actionLabel =
+        action.type === "inspect_table_value"
+          ? `Extract value from ${figure.figureLabel || "table"}`
+          : action.type === "inspect_table_row"
+            ? `Extract row from ${figure.figureLabel || "table"}`
+            : `Inspect ${figure.figureLabel || "table"}`;
+      const detail = parsedTable
+        ? action.type === "inspect_table_value" && exactValue
+          ? `${figure.figureLabel || figure.id}: exact value ${exactValue.rowLabel} × ${exactValue.columnLabel} = ${exactValue.value}.`
+          : action.type === "inspect_table_row" && exactRow
+            ? `${figure.figureLabel || figure.id}: exact row ${exactRow.rowIndex + 1} matched (${exactRow.values.join(" | ")}).`
+            : `${figure.figureLabel || figure.id}: ${parsedTable.rows.length} extracted rows, ${matches.length} matched preview rows.`
+        : `${figure.figureLabel || figure.id}: table opened, but no structured rows were extracted.`;
+      const outputPreview = parsedTable
+        ? action.type === "inspect_table_value" && exactValue
+          ? `Exact table value from ${figure.figureLabel || "the table"}: ${exactValue.value}.`
+          : action.type === "inspect_table_row" && exactRow
+            ? `Exact row match from ${figure.figureLabel || "the table"}: ${exactRow.values.join(" | ")}.`
+            : `${matches.length} matched row${matches.length === 1 ? "" : "s"} from ${figure.figureLabel || "the table"}.`
+        : `Opened ${figure.figureLabel || "table"}, but structured rows were unavailable.`;
       observations.push({
         step,
-        action: `Inspect ${figure.figureLabel || "table"}`,
-        detail: parsedTable
-          ? `${figure.figureLabel || figure.id}: ${parsedTable.rows.length} extracted rows, ${matches.length} matched preview rows.`
-          : `${figure.figureLabel || figure.id}: table opened, but no structured rows were extracted.`,
+        action: actionLabel,
+        detail,
         phase: "inspect",
         status: "completed",
         source: chosen.source,
-        tool: "inspect_table",
+        tool: action.type,
         input: action.target ?? action.query ?? "table",
-        outputPreview: parsedTable
-          ? `${matches.length} matched row${matches.length === 1 ? "" : "s"} from ${figure.figureLabel || "the table"}.`
-          : `Opened ${figure.figureLabel || "table"}, but structured rows were unavailable.`,
+        outputPreview,
         citationsAdded: citations.length - citationsBefore,
         artifactsAdded: artifacts.length - artifactsBefore,
       });

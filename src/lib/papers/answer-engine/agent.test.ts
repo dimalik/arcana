@@ -505,6 +505,200 @@ describe("preparePaperAgentEvidence", () => {
     );
   });
 
+  it("extracts an exact table value for metric-and-model questions", async () => {
+    hoisted.paperFigureFindMany.mockResolvedValue([
+      {
+        id: "fig-table-4",
+        paperId: "paper-1",
+        publishedFigureHandleId: null,
+        figureLabel: "Table 4",
+        captionText: "Table 4: Safety / RAI results.",
+        captionSource: "html",
+        description:
+          [
+            "<div class=\"ltx_logical-block\">",
+            "<span class=\"ltx_tabular ltx_align_middle\">",
+            "<span class=\"ltx_tr\">",
+            "<span class=\"ltx_td\">Metric</span>",
+            "<span class=\"ltx_td\">",
+            "<span class=\"ltx_tabular ltx_align_middle\">",
+            "<span class=\"ltx_tr\"><span class=\"ltx_td\">Phi-3-mini</span></span>",
+            "<span class=\"ltx_tr\"><span class=\"ltx_td\">3.8b</span></span>",
+            "</span>",
+            "</span>",
+            "<span class=\"ltx_td\">Llama-3-In 8B</span>",
+            "</span>",
+            "<span class=\"ltx_tr\">",
+            "<span class=\"ltx_td\">Ungroundedness</span>",
+            "<span class=\"ltx_td\">0.603</span>",
+            "<span class=\"ltx_td\">0.328</span>",
+            "</span>",
+            "<span class=\"ltx_tr\">",
+            "<span class=\"ltx_td\">Jailbreak DR-1</span>",
+            "<span class=\"ltx_td\">0.123</span>",
+            "<span class=\"ltx_td\">0.114</span>",
+            "</span>",
+            "</span>",
+            "</div>",
+          ].join(""),
+        sourceMethod: "html",
+        sourceUrl: null,
+        sourceVersion: null,
+        confidence: "high",
+        imagePath: null,
+        assetHash: null,
+        pdfPage: 7,
+        sourcePage: 7,
+        figureIndex: 4,
+        bbox: null,
+        type: "table",
+        parentFigureId: null,
+        isPrimaryExtraction: true,
+        width: null,
+        height: null,
+        gapReason: null,
+        imageSourceMethod: null,
+        createdAt: new Date("2026-04-21T00:00:00Z"),
+      },
+    ]);
+
+    const result = await preparePaperAgentEvidence({
+      paper: makePaper({
+        summary: [
+          "## Summary",
+          "Short overview.",
+          "",
+          "## Results",
+          "Table 4 reports the in-house RAI benchmark results.",
+        ].join("\n"),
+      }),
+      question: "What is the Jailbreak DR-1 value for Phi-3-mini?",
+      intent: "results",
+      selectedText: null,
+      provider: "openai",
+      modelId: "gpt-test",
+    });
+
+    expect(result.actions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          tool: "inspect_table_value",
+          source: "fallback",
+          input: "Table 4",
+        }),
+      ]),
+    );
+    expect(
+      result.citations.some((citation) =>
+        citation.snippet.includes("Jailbreak DR-1")
+        && citation.snippet.includes("Phi-3-mini 3.8b")
+        && citation.snippet.includes("0.123"),
+      ),
+    ).toBe(true);
+    const tableArtifact = result.artifacts.find((artifact) => artifact.kind === "TABLE_CARD");
+    expect(tableArtifact).toBeDefined();
+    const payload = JSON.parse(tableArtifact!.payloadJson) as {
+      table?: {
+        exactValue?: {
+          rowLabel: string;
+          columnLabel: string;
+          value: string;
+        } | null;
+      } | null;
+    };
+    expect(payload.table?.exactValue).toMatchObject({
+      rowLabel: "Jailbreak DR-1",
+      columnLabel: "Phi-3-mini 3.8b",
+      value: "0.123",
+    });
+  });
+
+  it("extracts an exact table row for row-level asks", async () => {
+    hoisted.paperFigureFindMany.mockResolvedValue([
+      {
+        id: "fig-table-4",
+        paperId: "paper-1",
+        publishedFigureHandleId: null,
+        figureLabel: "Table 4",
+        captionText: "Table 4: Safety / RAI results.",
+        captionSource: "html",
+        description:
+          [
+            "<div class=\"ltx_logical-block\">",
+            "<span class=\"ltx_tabular ltx_align_middle\">",
+            "<span class=\"ltx_tr\">",
+            "<span class=\"ltx_td\">Metric</span>",
+            "<span class=\"ltx_td\">Phi-3-mini</span>",
+            "<span class=\"ltx_td\">Llama-3-In 8B</span>",
+            "</span>",
+            "<span class=\"ltx_tr\">",
+            "<span class=\"ltx_td\">Ungroundedness</span>",
+            "<span class=\"ltx_td\">0.603</span>",
+            "<span class=\"ltx_td\">0.328</span>",
+            "</span>",
+            "<span class=\"ltx_tr\">",
+            "<span class=\"ltx_td\">Jailbreak DR-1</span>",
+            "<span class=\"ltx_td\">0.123</span>",
+            "<span class=\"ltx_td\">0.114</span>",
+            "</span>",
+            "</span>",
+            "</div>",
+          ].join(""),
+        sourceMethod: "html",
+        sourceUrl: null,
+        sourceVersion: null,
+        confidence: "high",
+        imagePath: null,
+        assetHash: null,
+        pdfPage: 7,
+        sourcePage: 7,
+        figureIndex: 4,
+        bbox: null,
+        type: "table",
+        parentFigureId: null,
+        isPrimaryExtraction: true,
+        width: null,
+        height: null,
+        gapReason: null,
+        imageSourceMethod: null,
+        createdAt: new Date("2026-04-21T00:00:00Z"),
+      },
+    ]);
+
+    const result = await preparePaperAgentEvidence({
+      paper: makePaper(),
+      question: "Show me the Ungroundedness row.",
+      intent: "tables",
+      selectedText: null,
+      provider: "openai",
+      modelId: "gpt-test",
+    });
+
+    expect(result.actions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          tool: "inspect_table_row",
+          source: "fallback",
+          input: "Table 4",
+        }),
+      ]),
+    );
+    const tableArtifact = result.artifacts.find((artifact) => artifact.kind === "TABLE_CARD");
+    expect(tableArtifact).toBeDefined();
+    const payload = JSON.parse(tableArtifact!.payloadJson) as {
+      table?: {
+        exactRow?: {
+          rowIndex: number;
+          values: string[];
+        } | null;
+      } | null;
+    };
+    expect(payload.table?.exactRow).toEqual({
+      rowIndex: 0,
+      values: ["Ungroundedness", "0.603", "0.328"],
+    });
+  });
+
   it("hunts exact result evidence across results text and figures for named targets", async () => {
     hoisted.paperFigureFindMany.mockResolvedValue([
       {

@@ -486,7 +486,7 @@ function buildPrompt(params: {
       : params.intent === "figures" || params.intent === "tables"
         ? "- If a relevant figure or table artifact is attached, anchor the answer in that artifact before generalizing.\n"
         : params.intent === "results"
-          ? `- Prioritize numeric outcomes, ablations, and result tables over broad summary language.\n${hasTableArtifact ? "- A matching table artifact is attached. Answer from its matched rows and visible columns before using summary text.\n" : ""}`
+          ? `- Prioritize numeric outcomes, ablations, and result tables over broad summary language.\n${hasTableArtifact ? "- A matching table artifact is attached. If it contains exactRow or exactValue, answer from that structured fact first; otherwise answer from its matched rows and visible columns before using summary text.\n" : ""}`
           : "";
 
   return `${SYSTEM_PROMPTS.chat}
