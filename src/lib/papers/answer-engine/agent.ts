@@ -2246,6 +2246,83 @@ function normalizePlannerAction(
   return fallbackAgentAction(params);
 }
 
+function buildActionRepeatSignature(action: PaperAgentAction): string | null {
+  switch (action.type) {
+    case "read_section":
+      return `read_section:${action.section}`;
+    case "search_passages":
+      return `search_passages:${action.scope}:${normalizeAnalysisText(action.query)}`;
+    case "search_claims":
+      return `search_claims:${normalizeAnalysisText(action.query)}`;
+    case "list_figures":
+      return `list_figures:${action.kind}:${normalizeAnalysisText(action.query ?? "")}:${action.limit}`;
+    case "inspect_table":
+    case "inspect_table_row":
+    case "inspect_table_value":
+      return `${action.type}:${normalizeFigureTarget(action.target ?? action.query ?? "")}:${normalizeAnalysisText(action.query ?? "")}`;
+    case "open_figure":
+      return `open_figure:${normalizeFigureTarget(action.target)}`;
+    case "finish":
+      return null;
+  }
+}
+
+function observationRepeatSignature(observation: AgentObservation): string | null {
+  if (observation.status !== "completed" || !observation.tool) {
+    return null;
+  }
+
+  switch (observation.tool) {
+    case "read_section":
+      return observation.input ? `read_section:${observation.input}` : null;
+    case "search_passages":
+      return observation.input
+        ? `search_passages:${observation.input}:${normalizeAnalysisText(observation.detail)}`
+        : null;
+    case "search_claims":
+      return observation.input ? `search_claims:${normalizeAnalysisText(observation.input)}` : null;
+    case "list_figures":
+      return observation.input ? `list_figures:${normalizeAnalysisText(observation.input)}` : null;
+    case "inspect_table":
+    case "inspect_table_row":
+    case "inspect_table_value":
+      return observation.input
+        ? `${observation.tool}:${normalizeFigureTarget(observation.input)}:${normalizeAnalysisText(observation.input)}`
+        : null;
+    case "open_figure":
+      return observation.input ? `open_figure:${normalizeFigureTarget(observation.input)}` : null;
+    default:
+      return null;
+  }
+}
+
+function isRepeatedCompletedAction(
+  action: PaperAgentAction,
+  observations: AgentObservation[],
+): boolean {
+  const actionSignature = buildActionRepeatSignature(action);
+  if (!actionSignature) return false;
+
+  return observations.some((observation) => {
+    const observationSignature = observationRepeatSignature(observation);
+    if (!observationSignature) return false;
+    if (observationSignature === actionSignature) return true;
+
+    if (
+      (action.type === "inspect_table"
+        || action.type === "inspect_table_row"
+        || action.type === "inspect_table_value")
+      && observation.tool === action.type
+      && observation.input
+    ) {
+      return normalizeFigureTarget(observation.input)
+        === normalizeFigureTarget(action.target ?? action.query ?? "");
+    }
+
+    return false;
+  });
+}
+
 async function chooseNextAgentAction(params: {
   paper: PaperAgentPaperContext;
   question: string;
@@ -2274,6 +2351,16 @@ async function chooseNextAgentAction(params: {
     analysis: params.analysis,
   });
   if (deterministicAction) {
+    if (isRepeatedCompletedAction(deterministicAction, params.observations)) {
+      return {
+        action: {
+          type: "finish",
+          answerPlan:
+            "Answer from the evidence already gathered instead of repeating the same inspection step.",
+        },
+        source: "fallback",
+      };
+    }
     return { action: deterministicAction, source: "fallback" };
   }
 
@@ -2310,6 +2397,16 @@ async function chooseNextAgentAction(params: {
       });
     },
   );
+    if (isRepeatedCompletedAction(action, params.observations)) {
+      return {
+        action: {
+          type: "finish",
+          answerPlan:
+            "Answer from the evidence already gathered instead of repeating the same inspection step.",
+        },
+        source: "fallback",
+      };
+    }
     return { action, source: "planner" };
   } catch (error) {
     console.warn("[answer-engine] planner fallback:", error);

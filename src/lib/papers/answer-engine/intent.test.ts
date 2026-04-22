@@ -36,6 +36,22 @@ describe("classifyPaperAnswerIntent", () => {
     ).toBe("generated_artifact");
   });
 
+  it("routes exact value questions to results", () => {
+    expect(
+      classifyPaperAnswerIntent({
+        question: "What is the Jailbreak DR-1 value for Phi-3-mini?",
+      }),
+    ).toBe("results");
+  });
+
+  it("routes row-level table questions to results-aware handling", () => {
+    expect(
+      classifyPaperAnswerIntent({
+        question: "Show me the Ungroundedness row.",
+      }),
+    ).toBe("results");
+  });
+
   it("falls back to direct qa for ordinary paper questions", () => {
     expect(
       classifyPaperAnswerIntent({

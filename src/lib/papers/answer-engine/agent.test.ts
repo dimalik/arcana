@@ -963,4 +963,61 @@ describe("preparePaperAgentEvidence", () => {
     expect(hoisted.resolverCacheEntryUpsert).toHaveBeenCalledTimes(1);
     expect(second).toEqual(first);
   });
+
+  it("stops planner loops after repeating the same exact table inspection", async () => {
+    hoisted.paperFigureFindMany.mockResolvedValue([
+      {
+        id: "fig-table-4",
+        paperId: "paper-1",
+        publishedFigureHandleId: null,
+        figureLabel: "Table 4",
+        captionText: "Table 4: Safety / RAI results.",
+        captionSource: "html",
+        description:
+          "<table><tr><th>Metric</th><th>Phi-3-mini</th></tr><tr><td>Jailbreak DR-1</td><td>0.123</td></tr></table>",
+        sourceMethod: "html",
+        sourceUrl: null,
+        sourceVersion: null,
+        confidence: "high",
+        imagePath: null,
+        assetHash: null,
+        pdfPage: 7,
+        sourcePage: 7,
+        figureIndex: 4,
+        bbox: null,
+        type: "table",
+        parentFigureId: null,
+        isPrimaryExtraction: true,
+        width: null,
+        height: null,
+        gapReason: null,
+        imageSourceMethod: null,
+        createdAt: new Date("2026-04-21T00:00:00Z"),
+      },
+    ]);
+    hoisted.generateStructuredObject.mockResolvedValue({
+      object: {
+        type: "inspect_table_value",
+        target: "Table 4",
+        query: "jailbreak phi-3-mini",
+      },
+    });
+
+    const result = await preparePaperAgentEvidence({
+      paper: makePaper(),
+      question: "What is the Jailbreak DR-1 value for Phi-3-mini?",
+      intent: "direct_qa",
+      selectedText: null,
+      provider: "openai",
+      modelId: "gpt-test",
+    });
+
+    expect(
+      result.actions.filter((action) => action.tool === "inspect_table_value"),
+    ).toHaveLength(1);
+    expect(result.actions.at(-1)).toMatchObject({
+      tool: "finish",
+      source: "fallback",
+    });
+  });
 });

@@ -62,6 +62,12 @@ export function classifyPaperAnswerIntent(params: {
       "result",
       "results",
       "performance",
+      "value",
+      "values",
+      "row",
+      "rows",
+      "column",
+      "columns",
       "metric",
       "metrics",
       "benchmark",
@@ -95,6 +101,9 @@ export function classifyPaperAnswerIntent(params: {
     hasAnyToken(normalizedQuestion, [
       "table",
       "tab.",
+      "show me the row",
+      "which row",
+      "which column",
       "ablation table",
       "results table",
     ])
