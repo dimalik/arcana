@@ -28,7 +28,13 @@ import sys
 import fitz  # PyMuPDF
 
 
-LABEL_PATTERN = re.compile(r"Table\s+(\d+[A-Za-z]?)", re.IGNORECASE)
+# Require "Table N" at the start of a line (typical caption/heading format) and
+# followed by a caption-like separator — avoids matching body-text mentions
+# like "as shown in Table 4".
+LABEL_PATTERN = re.compile(
+    r"^\s*Table\s+(\d+[A-Za-z]?)\s*[:.—–-]",
+    re.IGNORECASE | re.MULTILINE,
+)
 
 
 def cell_to_html(cell):
@@ -106,6 +112,22 @@ def extract_tables(pdf_path, max_pages):
                     "rowCount": len(rows),
                     "colCount": len(rows[0]),
                 })
+    # DB enforces unique (paperId, sourceMethod, figureLabel). If multiple
+    # tables resolved to the same label (caption bled across regions), keep
+    # the label on the largest table and null the others — SQLite treats
+    # NULL labels as distinct, so they persist without collision.
+    by_label = {}
+    for i, tab in enumerate(out):
+        if tab["label"] is None:
+            continue
+        size = tab["rowCount"] * tab["colCount"]
+        prev = by_label.get(tab["label"])
+        if prev is None or size > prev[1]:
+            by_label[tab["label"]] = (i, size)
+    keepers = {idx for idx, _ in by_label.values()}
+    for i, tab in enumerate(out):
+        if tab["label"] is not None and i not in keepers:
+            tab["label"] = None
     return out
 
 
