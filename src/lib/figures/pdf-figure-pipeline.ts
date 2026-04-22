@@ -93,7 +93,9 @@ export async function runPdfTableExtractor(
   const { stdout } = await execFileAsync(
     "python3",
     [scriptPath, pdfPath, "--max-pages", String(maxPages)],
-    { maxBuffer: 50 * 1024 * 1024, timeout: 60_000 },
+    // Table Transformer inference + PDF rendering can take 30–60s per 10 pages
+    // on CPU; allow up to 15 min for a long paper.
+    { maxBuffer: 50 * 1024 * 1024, timeout: 900_000 },
   );
   return parsePdfTableExtractorStdout(stdout);
 }
