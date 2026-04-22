@@ -75,7 +75,7 @@ describe("non-arXiv table HTML routing through merger", () => {
   });
 
   it("structured-HTML table wins over PDF-rendered screenshot on merge", () => {
-    // HTML must exceed the 100-char "structured" threshold in
+    // HTML must be long enough to clear the structured-table gate in
     // selectCanonicalMember for the structured-wins path to trigger.
     const publisherTable = makeTable({
       figureLabel: "Table 4",
@@ -108,7 +108,7 @@ describe("non-arXiv table HTML routing through merger", () => {
   });
 
   it("pdf_structural HTML wins over pdf_render_crop screenshot on merge", () => {
-    // HTML must exceed the 100-char "structured" threshold; otherwise the
+    // HTML must clear the structured-table gate; otherwise the
     // higher-priority pdf_render_crop would win the canonical slot even
     // though the HTML description still flows through.
     const structuralTable = makeTable({

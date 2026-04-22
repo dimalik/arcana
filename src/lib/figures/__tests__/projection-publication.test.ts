@@ -81,6 +81,61 @@ describe("buildProjectionFigureDraft", () => {
     expect(draft?.pageSourceMethod).toBe("pdf_render_crop");
   });
 
+  it("treats short (>20, <100 char) pdf_structural HTML as structured on the projection path", () => {
+    const shortStructuralHtml = "<table><tr><td>1</td><td>2</td></tr><tr><td>3</td><td>4</td></tr></table>";
+    expect(shortStructuralHtml.length).toBeGreaterThan(20);
+    expect(shortStructuralHtml.length).toBeLessThan(100);
+
+    const draft = projectionPublicationInternals.buildProjectionFigureDraft("identity-short", "table:main:label:table 6", [
+      projectionPublicationInternals.candidateToProjectable(
+        makeCandidate({
+          id: "pdf-structural-short",
+          sourceMethod: "pdf_structural",
+          type: "table",
+          figureLabelRaw: "Table 6",
+          structuredContentRaw: shortStructuralHtml,
+          structuredContentType: "html_table",
+          pageAnchorCandidate: JSON.stringify({ pdfPage: 4, bbox: "10,10,50,50" }),
+          diagnostics: JSON.stringify({
+            captionSource: "none",
+            sourceUrl: null,
+            cropOutcome: null,
+          }),
+        }),
+      ),
+      projectionPublicationInternals.candidateToProjectable(
+        makeCandidate({
+          id: "pdf-crop-short",
+          sourceMethod: "pdf_render_crop",
+          type: "table",
+          figureLabelRaw: "Table 6",
+          diagnostics: JSON.stringify({
+            captionSource: "pdf_caption",
+            cropOutcome: "success",
+            imagePath: "uploads/figures/paper/crop-p4-table6.png",
+            width: 800,
+            height: 600,
+          }),
+          nativeAsset: {
+            storagePath: "uploads/figures/paper/crop-p4-table6.png",
+            contentHash: "pdf-crop-short-asset",
+            width: 800,
+            height: 600,
+          },
+        }),
+      ),
+    ]);
+
+    expect(draft).not.toBeNull();
+    expect(draft?.sourceMethod).toBe("pdf_structural");
+    expect(draft?.contentCandidateId).toBe("pdf-structural-short");
+    expect(draft?.structuredContent).toContain("<td>1</td>");
+    // isStructuredTable should be true, so the unsafe pdf_render_crop screenshot must be rejected as preview.
+    expect(draft?.imagePath).toBeNull();
+    expect(draft?.basePreviewCandidateId).toBeNull();
+    expect(draft?.gapReason).toBe("structured_content_no_preview");
+  });
+
   it("suppresses unlabeled PDF-only identities from canonical projection", () => {
     const draft = projectionPublicationInternals.buildProjectionFigureDraft("identity-2", "figure:default:asset:pdf-1", [
       projectionPublicationInternals.candidateToProjectable(

@@ -272,7 +272,8 @@ function selectProjectionCanonicalMember(
   isTable: boolean,
 ): ProjectableCandidate {
   if (isTable) {
-    return candidates.find((member) => member.description && member.description.length > 100)
+    // Any present table description is real HTML markup (extractors filter layout tables); 20 is the minimum plausible <table>...</table>.
+    return candidates.find((member) => member.description && member.description.length > 20)
       || candidates.find((member) => normalizeLabel(member.figureLabel) || member.captionText)
       || candidates.find((member) => member.imagePath)
       || candidates[0];
@@ -301,7 +302,8 @@ function buildProjectionFigureDraft(
     ? canonicalMember
     : (sorted.find((member) => member.description) ?? null);
   const finalDescription = descriptionContributor?.description ?? null;
-  const isStructuredTable = isTable && finalDescription != null && finalDescription.length > 100;
+  // Any present table description is real HTML markup (extractors filter layout tables); 20 is the minimum plausible <table>...</table>.
+  const isStructuredTable = isTable && finalDescription != null && finalDescription.length > 20;
 
   let bestImageMember: ProjectableCandidate | null = null;
   if (canonicalMember.imagePath) {
