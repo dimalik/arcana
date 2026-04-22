@@ -65,3 +65,7 @@ prisma/backups/
 
 # Private internal planning docs
 docs/superpowers/
+
+# Large training artifacts and handoff bundles (not code)
+benchmark/training/
+handoff/
