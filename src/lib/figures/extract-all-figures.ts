@@ -554,5 +554,20 @@ async function tryPublisherFigures(
     }
   }
 
-  return { downloaded: written.length, figures: written };
+  // Dedup by figureLabel: some publishers (notably MDPI) render the same
+  // figure in both a gallery card and full inline view. Both hit the same
+  // (paperId, sourceMethod, figureLabel) unique constraint if kept. Prefer
+  // the record with a richer payload (tableHtml > imagePath > neither) and
+  // fall back to the first occurrence.
+  const byLabel = new Map<string, PublisherFigureRecord>();
+  const score = (r: PublisherFigureRecord) =>
+    (r.tableHtml ? 2 : 0) + (r.imagePath ? 1 : 0);
+  for (const rec of written) {
+    const existing = byLabel.get(rec.figureLabel);
+    if (!existing || score(rec) > score(existing)) {
+      byLabel.set(rec.figureLabel, rec);
+    }
+  }
+  const deduped = Array.from(byLabel.values());
+  return { downloaded: deduped.length, figures: deduped };
 }
